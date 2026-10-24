@@ -1,0 +1,82 @@
+# xenxo-world
+
+El mundo de **xenxo.io**: un panel 2D con soluciones, repos y agentes, y detrás una plaza 3D viva que se puede recorrer desde el navegador en **escritorio, móvil y VR** (Meta Quest 3 vía WebXR), y que construyen tanto personas como **agentes de IA**.
+
+Se está construyendo en público. Esto es la v0.
+
+## Arquitectura
+
+```
+ Clientes (reemplazables)          Núcleo (lo que dura)
+ ┌─────────────┐
+ │ Web / WebXR │──┐
+ ├─────────────┤  │   ┌──────────────────────┐   ┌───────────────────────────┐
+ │  Headless   │──┼──▶│ Protocolo v0 (Zod)   │──▶│ Durable Object por chunk  │
+ ├─────────────┤  │   │ packages/protocol    │   │ autoridad + SQLite + log  │
+ │ Agentes IA  │──┘   └──────────────────────┘   └───────────────────────────┘
+ └─────────────┘
+```
+
+- **Cloudflare Pages** sirve el cliente web (panel + 3D).
+- **Cloudflare Workers + Durable Objects** (`apps/realtime`): un objeto por chunk de 64 × 64 m. Valida cada mutación, guarda el estado en su SQLite, reparte las poses a 10 Hz y duerme cuando no hay mensajes (WebSocket Hibernation).
+- **GitHub Actions** despierta al agente constructor de ejemplo cada 6 horas.
+- Más adelante: **R2** para los assets glTF por hash y **Supabase** para el log global y las cuentas.
+
+El contrato completo está en [`docs/PROTOCOL.md`](docs/PROTOCOL.md). Las reglas para trabajar en el repo, en [`CLAUDE.md`](CLAUDE.md).
+
+## Arrancar en local
+
+Requisitos: Node 22+.
+
+```bash
+npm install
+cp apps/realtime/.dev.vars.example apps/realtime/.dev.vars
+cp apps/web/.env.example apps/web/.env
+
+npm run dev:realtime   # terminal 1 → http://localhost:8787
+npm run dev:web        # terminal 2 → http://localhost:5173
+```
+
+Abre `http://localhost:5173` en dos pestañas y pulsa **Enter world** en ambas: os veréis moveros.
+
+Para probar en las Quest 3 en la misma red, abre `http://<IP-de-tu-PC>:5173` en el navegador de las gafas. WebXR exige HTTPS fuera de `localhost`, así que para la VR real usa el despliegue en Cloudflare o un túnel (por ejemplo `cloudflared tunnel --url http://localhost:5173`).
+
+### Banco de conformidad y agente
+
+```bash
+export XENXO_URL=http://localhost:8787
+export XENXO_AGENT_KEY=dev-agent-key-change-me   # la clave de ejemplo de .dev.vars.example
+
+npm run conformance    # 9 escenarios del protocolo
+npm run agent:build    # el agente coloca un bloque en la plaza
+```
+
+## Desplegar (gratis para empezar)
+
+1. **Servidor de tiempo real**
+   ```bash
+   cd apps/realtime
+   npx wrangler login
+   npx wrangler secret put TOKEN_SECRET      # cadena larga aleatoria
+   npm run hash-key -w @xenxo/headless       # genera una clave de agente y su hash
+   npx wrangler secret put AGENT_KEYS        # builder-01:<hash>
+   npm run deploy
+   ```
+   Añade tu dominio a `ALLOWED_ORIGINS` en `wrangler.toml` si usas otro distinto de xenxo.io.
+2. **Web en Cloudflare Pages**: conecta este repo, directorio raíz del repositorio, comando `npm run build`, salida `apps/web/dist`, y la variable `VITE_REALTIME_URL` con la URL del Worker.
+3. **Agente en GitHub Actions**: en *Settings → Secrets and variables → Actions*, crea la variable `XENXO_URL` y el secreto `XENXO_AGENT_KEY`.
+
+**Antes de publicar un vídeo invitando a entrar**, pasa la cuenta de Cloudflare al plan Workers Paid (5 $/mes): en el gratuito, al superar los límites diarios el multijugador se corta hasta las 00:00 UTC.
+
+## Estado
+
+- [x] Protocolo v0 con esquemas y códigos de error
+- [x] Durable Object por chunk: autoridad, presupuestos, propiedad, `base_rev`, idempotencia, log
+- [x] Panel 2D (Solutions, Repos en vivo de GitHub, Agents en vivo, Customize)
+- [x] Plaza 3D como datos, avatares con interpolación, escritorio + móvil + WebXR
+- [x] Cliente headless con banco de conformidad y agente de ejemplo
+- [ ] Panel dentro de la VR con `@react-three/uikit`
+- [ ] Manos en VR y teletransporte
+- [ ] Assets glTF en R2 con validación de presupuesto
+- [ ] Agente con LLM y servidor MCP del mundo ("trae tu propio agente")
+- [ ] Varios chunks y paso de uno a otro

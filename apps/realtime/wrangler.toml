@@ -1,0 +1,19 @@
+name = "xenxo-realtime"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+# Un Durable Object por chunk. SQLite es el único backend disponible en el plan gratuito.
+[[durable_objects.bindings]]
+name = "CHUNK"
+class_name = "ChunkRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ChunkRoom"]
+
+[vars]
+# Orígenes permitidos para /auth y /chunk/*/state (separados por comas).
+ALLOWED_ORIGINS = "http://localhost:5173,https://xenxo.io,https://www.xenxo.io"
+
+# Secretos (no van aquí): `wrangler secret put TOKEN_SECRET` y `wrangler secret put AGENT_KEYS`.
+# En local se leen de .dev.vars (ver .dev.vars.example).

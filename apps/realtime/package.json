@@ -1,0 +1,20 @@
+{
+  "name": "@xenxo/realtime",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Servidor autoritativo: un Durable Object por chunk del mundo",
+  "scripts": {
+    "dev": "wrangler dev --port 8787",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@xenxo/protocol": "*",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261024.1",
+    "wrangler": "^4.152.0"
+  }
+}

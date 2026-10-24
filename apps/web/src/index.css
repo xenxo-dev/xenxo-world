@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: #0b0d1f;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  overscroll-behavior: none;
+}

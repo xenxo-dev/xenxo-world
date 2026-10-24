@@ -1,0 +1,27 @@
+name: Agente constructor
+
+# Despierta al agente de ejemplo para que construya algo en la plaza.
+# Requiere: variable de repo XENXO_URL (URL del Worker) y secreto XENXO_AGENT_KEY.
+on:
+  schedule:
+    - cron: "17 */6 * * *" # cada 6 horas (el cron de Actions puede retrasarse)
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  build-something:
+    runs-on: ubuntu-latest
+    if: ${{ vars.XENXO_URL != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run agent:build
+        env:
+          XENXO_URL: ${{ vars.XENXO_URL }}
+          XENXO_AGENT_KEY: ${{ secrets.XENXO_AGENT_KEY }}

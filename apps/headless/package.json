@@ -1,0 +1,21 @@
+{
+  "name": "@xenxo/headless",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Cliente sin render: pruebas de conformidad del protocolo y agentes constructores",
+  "scripts": {
+    "conformance": "tsx src/conformance.ts",
+    "agent": "tsx src/agent.ts",
+    "hash-key": "tsx src/hash-key.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@xenxo/protocol": "*",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.20.0"
+  }
+}

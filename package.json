@@ -1,0 +1,25 @@
+{
+  "name": "xenxo-world",
+  "private": true,
+  "version": "0.0.1",
+  "description": "xenxo.io — metaverso web (desktop, móvil y VR) construido también por agentes de IA",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:realtime": "npm run dev -w @xenxo/realtime",
+    "dev:web": "npm run dev -w @xenxo/web",
+    "build": "npm run build -w @xenxo/web",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "conformance": "npm run conformance -w @xenxo/headless",
+    "agent:build": "npm run agent -w @xenxo/headless"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

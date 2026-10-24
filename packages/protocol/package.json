@@ -1,0 +1,16 @@
+{
+  "name": "@xenxo/protocol",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Contrato del mundo xenxo.io: esquema ECS v0 y mensajes del protocolo v0",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "zod": "^4.1.0"
+  }
+}

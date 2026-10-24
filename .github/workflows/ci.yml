@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request: {}
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+
+      # Conformidad del protocolo contra el servidor real en local (wrangler dev).
+      - name: Arrancar el servidor de tiempo real
+        working-directory: apps/realtime
+        run: |
+          KEY=ci-agent-key-$(openssl rand -hex 12)
+          HASH=$(printf '%s' "$KEY" | sha256sum | cut -d' ' -f1)
+          printf 'TOKEN_SECRET=%s\nAGENT_KEYS=ci:%s\n' "$(openssl rand -hex 32)" "$HASH" > .dev.vars
+          echo "XENXO_AGENT_KEY=$KEY" >> "$GITHUB_ENV"
+          npx wrangler dev --port 8787 > wrangler.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf http://localhost:8787/health && break; sleep 1; done
+      - run: npm run conformance
+        env:
+          XENXO_URL: http://localhost:8787
+      - if: failure()
+        run: cat apps/realtime/wrangler.log
