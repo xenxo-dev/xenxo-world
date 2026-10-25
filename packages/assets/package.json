@@ -1,0 +1,20 @@
+{
+  "name": "@xenxo/assets",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Tubería de assets 3D: validación GLB sin dependencias (servidor) y optimización con gltf-transform (navegador y Node)",
+  "exports": {
+    ".": "./src/index.ts",
+    "./optimize": "./src/optimize.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@gltf-transform/core": "^4.5.1",
+    "@gltf-transform/extensions": "^4.5.1",
+    "@gltf-transform/functions": "^4.5.1",
+    "meshoptimizer": "^1.3.0"
+  }
+}

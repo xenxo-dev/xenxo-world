@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { loadPref, savePref } from "./config";
 import { t, useLang } from "./i18n";
-import { startSession } from "./net/session";
+import { setGuestName as setSessionGuestName, startSession } from "./net/session";
 import { useWorldVersion, world } from "./net/world-store";
 import { Panel } from "./panel/Panel";
 import { TouchJoystick } from "./world/TouchJoystick";
@@ -41,6 +41,7 @@ export function App() {
   const setName = (n: string) => {
     setNameState(n);
     savePref("name", n);
+    setSessionGuestName(n);
   };
   const setQuality = (q: "low" | "high") => {
     setQualityState(q);
@@ -55,8 +56,8 @@ export function App() {
         <Panel
           onEnter={() => setInWorld(true)}
           onEnterVR={vr ? () => void xrStore.enterVR() : null}
-          name={name}
-          setName={setName}
+          guestName={name}
+          setGuestName={setName}
           quality={quality}
           setQuality={setQuality}
         />

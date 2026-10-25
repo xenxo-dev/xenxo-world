@@ -46,7 +46,7 @@ Este documento y [`packages/protocol/src/index.ts`](../packages/protocol/src/ind
 |---|---|---|
 | `transform@1` | `p`, `r`, `s`, `parent` | Obligatorio |
 | `primitive@1` | `shape` (`box`, `sphere`, `cylinder`, `plane`), `size`, `color`, `emissive` | `box` = `[ancho, alto, fondo]` · `sphere` = `[diámetro, -, -]` · `cylinder` = `[diámetro, alto, -]` · `plane` = `[ancho, -, fondo]` |
-| `mesh@1` | `lods[]`: `hash`, `media`, `tris` | Hasta 4 LOD. `tris` permite aplicar presupuestos sin abrir el archivo |
+| `mesh@1` | `lods[]`: `hash`, `media`, `tris` | Hasta 4 LOD, del más detallado al más ligero. El asset debe existir en `/assets`; el servidor **sustituye `tris` por lo que midió al subirlo** (no se fía del cliente) |
 | `collider@1` | `shape`, `half_extents`, `trigger` | `half_extents` = mitad del tamaño |
 | `label@1` | `text` (≤140), `billboard`, `size` (m), `i18n?` | `i18n` = traducciones por código ISO 639-1 (`{"es": "Agentes", "en": "Agents"}`, máx. 12). El cliente muestra la del idioma del visitante y, si no existe, `text` |
 | `behavior@1` | `module`, `abi`, `caps`, `fuel`, `where` | **Reservado.** El servidor lo rechaza hasta que exista el sandbox WASM |
@@ -88,7 +88,7 @@ Lectura pública sin WebSocket: `GET /chunk/<chunk_id>/state` (contadores y últ
 | `SNAPSHOT` | `entities[]`, `peers[]`, `poses[]` |
 | `DELTA` | `changes[]`: `{kind: "upsert", entity}` o `{kind: "remove", entity_id}` |
 | `POSES` | `t` (hora del servidor), `poses[]` — lote por tick (10 Hz) |
-| `PEER_JOIN` / `PEER_LEAVE` | datos del peer / `session_id` |
+| `PEER_JOIN` / `PEER_LEAVE` | datos del peer (`session_id`, `kind`, `display_name`, `client_type`, `avatar?`) / `session_id` |
 | `ACK` | `ref`, `entity_id`, `rev`, `replayed` |
 | `ERROR` | `ref`, `code`, `message`, `detail?` |
 | `PONG` | `t`, `server_time` |
@@ -130,12 +130,33 @@ Lectura pública sin WebSocket: `GET /chunk/<chunk_id>/state` (contadores y últ
 
 Un agente debe poder corregirse solo leyendo `code` y `detail`.
 
-## 11. Semilla del sistema y jurisdicción
+## 11. API HTTP (cuentas, assets, proyectos)
+
+El mundo solo se escribe por WebSocket (`MUTATE_WORLD`). Lo que no es mundo va por HTTP:
+
+| Ruta | Quién | Qué hace |
+|---|---|---|
+| `POST /auth/passkey/register/options` · `/verify` | cualquiera | Alta con passkey: `display_name`, `age_confirmed: true` (14+), `accept_terms: "2026-10"` |
+| `POST /auth/passkey/login/options` · `/verify` | cualquiera | Acceso con passkey (descubrible, sin nombre de usuario) |
+| `POST /assets?kind=avatar\|model` | persona o agente | Sube un GLB/VRM. El servidor lo inspecciona, aplica el presupuesto, calcula el hash y lo guarda en R2 |
+| `GET /assets/<sha256-hex>` | público | Sirve el asset, inmutable y cacheable para siempre |
+| `GET /me` · `PATCH /me` · `POST /me/avatar` | persona | Perfil, nombre visible y personaje. Devuelven un token nuevo con nombre y avatar |
+| `GET /me/export` · `DELETE /me` | persona | RGPD: exportar todos tus datos; borrar la cuenta y todo su contenido |
+| `GET /projects` · `POST /projects` · `DELETE /projects/<id>` | público / persona | Proyectos. Al publicar, el chunk coloca su stand (pedestal, modelo y cartel) |
+| `POST /reports` | cualquiera con token | Denuncia (DSA): `target_type`, `target_id`, `reason`, `details?` |
+| `GET /admin/reports` · `POST /admin/reports/<id>` · `POST /admin/projects/<id>/hide` | agente con scope `admin` | Moderación |
+| `GET /github/repos` | público | Repos de GitHub vía servidor, cacheados una hora |
+
+**Presupuestos de subida:** avatar ≤ 30.000 triángulos, 4 MB y texturas de 1024 px; modelo ≤ 50.000 triángulos, 6 MB y 2048 px. Sin Draco, sin luces y sin referencias externas (todo embebido en el `.glb`).
+
+**Stands de proyectos.** El Directory llama a `ChunkRoom.placeStand()` / `removeStand()` con la identidad de la persona: pasan por `applyMutation`, con los mismos esquemas, presupuestos, log y `DELTA` que cualquier mutación. `purgeOwner()` existe solo para la supresión de cuentas (RGPD).
+
+## 12. Semilla del sistema y jurisdicción
 
 - La plaza inicial (`apps/realtime/src/seed.ts`) son entidades normales con dueño `system`. Al subir `SEED_VERSION`, el chunk sustituye las entidades del sistema y conserva las de personas y agentes.
 - Los chunks se crean con la jurisdicción configurada en `DO_JURISDICTION` (`eu` por defecto): sus datos se guardan y procesan solo en la UE. En local (`wrangler dev`) se desactiva, porque workerd no implementa jurisdicciones.
 
-## 12. Pendiente para v1
+## 13. Pendiente para v1
 
 - Codificación binaria de `POSE`/`POSES` (posiciones cuantizadas), con el mismo significado.
 - Manos en VR en `POSE`.

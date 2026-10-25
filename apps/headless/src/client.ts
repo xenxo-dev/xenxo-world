@@ -18,6 +18,8 @@ export interface ConnectOptions {
   chunkId?: string;
   /** Si se indica, se autentica como agente; si no, como invitado. */
   agentKey?: string;
+  /** Token ya emitido (p. ej. de una persona registrada con passkey). Tiene prioridad. */
+  token?: string;
   displayName?: string;
 }
 
@@ -35,13 +37,16 @@ export class XenxoClient {
   }
 
   private async open(o: ConnectOptions) {
-    const path = o.agentKey ? "/auth/agent" : "/auth/guest";
-    const res = await fetch(new URL(path, o.baseUrl), {
-      method: "POST",
-      headers: o.agentKey ? { Authorization: `Bearer ${o.agentKey}` } : {},
-    });
-    if (!res.ok) throw new Error(`auth ${path} → HTTP ${res.status}`);
-    const { token } = (await res.json()) as { token: string };
+    let token = o.token;
+    if (!token) {
+      const path = o.agentKey ? "/auth/agent" : "/auth/guest";
+      const res = await fetch(new URL(path, o.baseUrl), {
+        method: "POST",
+        headers: o.agentKey ? { Authorization: `Bearer ${o.agentKey}` } : {},
+      });
+      if (!res.ok) throw new Error(`auth ${path} → HTTP ${res.status}`);
+      token = ((await res.json()) as { token: string }).token;
+    }
 
     const url = new URL(`/chunk/${o.chunkId ?? "c_0_0"}/ws`, o.baseUrl);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";

@@ -5,6 +5,9 @@ import * as THREE from "three";
 import { CHUNK_SIZE, msg, type ClientMessage } from "@xenxo/protocol";
 import { net } from "../net/session";
 import { world } from "../net/world-store";
+import type { AvatarRef } from "@xenxo/protocol";
+import { useAccount } from "../net/account";
+import { AvatarBody } from "./Avatars";
 import { input } from "./input";
 
 const SPEED = 4.5; // m/s
@@ -24,6 +27,10 @@ const _lastP = new THREE.Vector3(Infinity, 0, 0);
 const _lastQ = new THREE.Quaternion();
 
 export function Player({ active }: { active: boolean }) {
+  const user = useAccount();
+  const myAvatar: AvatarRef | undefined = user?.avatar_hash
+    ? { hash: user.avatar_hash, format: user.avatar_format ?? "glb" }
+    : undefined;
   const origin = useRef<THREE.Group>(null!);
   const avatar = useRef<THREE.Group>(null!);
   const pos = useRef(SPAWN.clone());
@@ -104,18 +111,7 @@ export function Player({ active }: { active: boolean }) {
     <>
       <XROrigin ref={origin} />
       <group ref={avatar}>
-        <mesh position={[0, 0.75, 0]}>
-          <capsuleGeometry args={[0.28, 0.9, 4, 12]} />
-          <meshLambertMaterial color="#e5e7ff" />
-        </mesh>
-        <mesh position={[0, 1.6, 0]}>
-          <sphereGeometry args={[0.2, 16, 12]} />
-          <meshLambertMaterial color="#e5e7ff" />
-        </mesh>
-        <mesh position={[0, 1.62, -0.19]}>
-          <boxGeometry args={[0.24, 0.07, 0.04]} />
-          <meshBasicMaterial color="#22d3ee" />
-        </mesh>
+        <AvatarBody avatar={myAvatar} color="#f6f1e7" />
       </group>
     </>
   );

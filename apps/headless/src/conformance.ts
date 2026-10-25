@@ -8,9 +8,12 @@
  */
 import { randomUUID } from "node:crypto";
 import { XenxoClient } from "./client";
+import { makeBoxGlb, withExternalImage } from "./fixtures";
+import { Api } from "./http";
 
 const baseUrl = process.env.XENXO_URL ?? "http://localhost:8787";
 const agentKey = process.env.XENXO_AGENT_KEY;
+const adminKey = process.env.XENXO_ADMIN_KEY;
 
 let failed = 0;
 async function scenario(name: string, fn: () => Promise<void>) {
@@ -142,6 +145,148 @@ if (!agentKey) {
     const c = await XenxoClient.connect({ baseUrl, agentKey });
     const r = await c.mutate({ op: "DESPAWN", entity_id: "tower_body", base_rev: 1 });
     assert(r.type === "ERROR" && r.payload.code === "forbidden", "esperaba forbidden");
+    c.close();
+  });
+}
+
+
+/* ------------------------------------------------------------------ */
+/* Cuentas, assets y proyectos                                          */
+/* ------------------------------------------------------------------ */
+
+await scenario("alta con passkey y acceso de nuevo con la misma passkey", async () => {
+  const api = new Api(baseUrl);
+  const { passkey, user } = await api.register(`conf ${randomUUID().slice(0, 6)}`);
+  assert(user.id, "el alta no devolvió usuario");
+  const again = new Api(baseUrl);
+  await again.login(passkey);
+  const me = await again.call<{ id: string }>("GET", "/me");
+  assert(me.ok && me.data.id === user.id, "el acceso no recuperó la misma cuenta");
+});
+
+await scenario("el alta exige 14 años y aceptar las condiciones vigentes", async () => {
+  const api = new Api(baseUrl);
+  const noAge = await api.call("POST", "/auth/passkey/register/options", { display_name: "Menor", age_confirmed: false, accept_terms: "2026-10" });
+  assert(!noAge.ok && noAge.error === "age_required", "debería exigir la edad");
+  const noTerms = await api.call("POST", "/auth/passkey/register/options", { display_name: "Alguien", age_confirmed: true });
+  assert(!noTerms.ok && noTerms.error === "terms_required", "debería exigir las condiciones");
+});
+
+await scenario("assets: un invitado no puede subir; un GLB con referencias externas se rechaza", async () => {
+  const guest = new Api(baseUrl, ((await (await fetch(new URL("/auth/guest", baseUrl), { method: "POST" })).json()) as { token: string }).token);
+  const g = await guest.upload(await makeBoxGlb(), "model");
+  assert(!g.ok && g.status === 403, `esperaba 403, llegó ${g.ok ? 200 : g.status}`);
+  const user = new Api(baseUrl);
+  await user.register(`conf ${randomUUID().slice(0, 6)}`);
+  const bad = await user.upload(withExternalImage(await makeBoxGlb()), "model");
+  assert(!bad.ok && bad.error === "external_reference", `esperaba external_reference, llegó ${bad.ok ? "ok" : bad.error}`);
+  const big = await user.upload(await makeBoxGlb({ segments: 75 }), "avatar");
+  assert(!big.ok && big.error === "budget_exceeded", "un avatar de 67k triángulos debería superar el presupuesto");
+  const okUp = await user.upload(await makeBoxGlb(), "model");
+  assert(okUp.ok && okUp.data.hash.startsWith("sha256:"), "un GLB válido debería aceptarse");
+  const get = await fetch(new URL(`/assets/${okUp.data.hash.slice(7)}`, baseUrl));
+  assert(get.ok && get.headers.get("cache-control")?.includes("immutable"), "el asset debería servirse como inmutable");
+});
+
+await scenario("avatar propio: los demás lo ven en el peer de la persona registrada", async () => {
+  const api = new Api(baseUrl);
+  await api.register(`conf ${randomUUID().slice(0, 6)}`);
+  const up = await api.upload(await makeBoxGlb({ height: 1.8 }), "avatar");
+  assert(up.ok, "subida del avatar");
+  const set = await api.call<{ token: string }>("POST", "/me/avatar", { hash: up.data.hash });
+  assert(set.ok, "fijar el avatar");
+  const watcher = await XenxoClient.connect({ baseUrl });
+  const join = watcher.next("PEER_JOIN", (m) => m.payload.avatar?.hash === up.data.hash, 4000);
+  const me = await XenxoClient.connect({ baseUrl, token: set.data.token });
+  assert(me.welcome.principal.kind === "user", "debería entrar como persona registrada");
+  await join;
+  me.close();
+  watcher.close();
+});
+
+await scenario("proyecto: crea su stand en la plaza y al borrarlo desaparece", async () => {
+  const api = new Api(baseUrl);
+  await api.register(`conf ${randomUUID().slice(0, 6)}`);
+  const model = await api.upload(await makeBoxGlb({ segments: 3 }), "model");
+  assert(model.ok, "subida del modelo");
+  const watcher = await XenxoClient.connect({ baseUrl });
+  const delta = watcher.next("DELTA", (m) => m.payload.changes.some((c) => c.kind === "upsert" && c.entity.entity_id.startsWith("standm_")), 4000);
+  const created = await api.call<{ project: { id: string; in_world: boolean } }>("POST", "/projects", {
+    title: "Proyecto de prueba",
+    summary: "Creado por el banco de conformidad",
+    url: "https://github.com/xenxo-dev/xenxo-world",
+    mesh_hash: model.data.hash,
+  });
+  assert(created.ok && created.data.project.in_world, `el proyecto debería tener stand: ${JSON.stringify(created)}`);
+  const d = await delta;
+  const meshEntity = d.payload.changes.find((c) => c.kind === "upsert" && c.entity.entity_id.startsWith("standm_"));
+  const lods = meshEntity && meshEntity.kind === "upsert" ? (meshEntity.entity.components["mesh@1"] as { lods: { tris: number }[] }).lods : [];
+  assert(lods[0]?.tris === 108, `los triángulos deberían venir medidos por el servidor (108), llegaron ${lods[0]?.tris}`);
+  const id = created.data.project.id;
+  const removed = watcher.next("DELTA", (m) => m.payload.changes.some((c) => c.kind === "remove" && c.entity_id === `stand_${id}`), 4000);
+  const del = await api.call("DELETE", `/projects/${id}`);
+  assert(del.ok, "borrar el proyecto");
+  await removed;
+  watcher.close();
+});
+
+await scenario("RGPD: exportar mis datos y borrar la cuenta retira su contenido", async () => {
+  const api = new Api(baseUrl);
+  const { passkey } = await api.register(`conf ${randomUUID().slice(0, 6)}`);
+  const model = await api.upload(await makeBoxGlb({ segments: 2, color: [0.1, 0.6, 0.3, 1] }), "model");
+  assert(model.ok, "subida");
+  const created = await api.call<{ project: { id: string } }>("POST", "/projects", { title: "Para borrar", summary: "", mesh_hash: model.data.hash });
+  assert(created.ok, "proyecto");
+  const exp = await api.call<{ user: { id: string }; projects: unknown[] }>("GET", "/me/export");
+  assert(exp.ok && exp.data.projects.length === 1, "la exportación debería incluir el proyecto");
+  const gone = await api.call("DELETE", "/me");
+  assert(gone.ok, "borrar la cuenta");
+  const asset = await fetch(new URL(`/assets/${model.data.hash.slice(7)}`, baseUrl));
+  assert(asset.status === 404, "el modelo que solo subió esa persona debería borrarse");
+  let loginFailed = false;
+  try {
+    await new Api(baseUrl).login(passkey);
+  } catch {
+    loginFailed = true;
+  }
+  assert(loginFailed, "la passkey de una cuenta borrada no debería servir");
+  const c = await XenxoClient.connect({ baseUrl });
+  assert(!c.snapshot.entities.some((e) => e.entity_id === `stand_${created.data.project.id}`), "el stand debería haber desaparecido");
+  c.close();
+});
+
+await scenario("DSA: cualquiera puede denunciar un contenido", async () => {
+  const guest = new Api(baseUrl, ((await (await fetch(new URL("/auth/guest", baseUrl), { method: "POST" })).json()) as { token: string }).token);
+  const r = await guest.call<{ id: number }>("POST", "/reports", { target_type: "project", target_id: "p_prueba", reason: "spam", details: "prueba" });
+  assert(r.ok && r.data.id > 0, "la denuncia debería registrarse");
+  const bad = await guest.call("POST", "/reports", { target_type: "project", target_id: "p_prueba", reason: "no-existe" });
+  assert(!bad.ok && bad.status === 400, "un motivo inválido debería rechazarse");
+  if (adminKey) {
+    const admin = new Api(baseUrl);
+    await admin.agentToken(adminKey);
+    const list = await admin.call<{ reports: { id: number }[] }>("GET", "/admin/reports");
+    assert(list.ok && list.data.reports.some((x) => x.id === r.data.id), "moderación debería ver la denuncia");
+  }
+});
+
+if (agentKey) {
+  await scenario("agente: mesh@1 con un hash inexistente → not_found; con uno subido, los triángulos los pone el servidor", async () => {
+    const api = new Api(baseUrl);
+    await api.agentToken(agentKey);
+    const c = await XenxoClient.connect({ baseUrl, agentKey });
+    const fake = await c.mutate({
+      op: "SPAWN",
+      components: { "transform@1": { p: [30, 0, 50] }, "mesh@1": { lods: [{ hash: "sha256:" + "0".repeat(64), media: "model/gltf-binary", tris: 1 }] } },
+    });
+    assert(fake.type === "ERROR" && fake.payload.code === "not_found", "esperaba not_found");
+    const up = await api.upload(await makeBoxGlb({ segments: 2 }), "model");
+    assert(up.ok, "el agente debería poder subir");
+    const real = await c.mutate({
+      op: "SPAWN",
+      components: { "transform@1": { p: [30, 0, 50] }, "mesh@1": { lods: [{ hash: up.data.hash, media: "model/gltf-binary", tris: 1 }] } },
+    });
+    assert(real.type === "ACK", "SPAWN con un asset real");
+    await c.mutate({ op: "DESPAWN", entity_id: real.payload.entity_id, base_rev: 1 });
     c.close();
   });
 }

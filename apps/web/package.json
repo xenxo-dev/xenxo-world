@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "description": "Cliente web: panel 2D + plaza 3D (desktop, móvil y WebXR)",
+  "description": "Cliente web: panel 2D + plaza 3D (desktop, m\u00f3vil y WebXR)",
   "scripts": {
     "dev": "vite",
     "build": "tsc -p tsconfig.json && vite build",
@@ -12,14 +12,17 @@
   },
   "dependencies": {
     "@fontsource/inter": "^5.3.0",
+    "@pixiv/three-vrm": "^3.5.5",
     "@react-three/drei": "^10.7.0",
     "@react-three/fiber": "^9.3.0",
     "@react-three/xr": "^6.6.0",
+    "@simplewebauthn/browser": "^14.0.0",
     "@xenxo/protocol": "*",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "three": "^0.186.0",
-    "zod": "^4.1.0"
+    "zod": "^4.1.0",
+    "@xenxo/assets": "*"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.0",

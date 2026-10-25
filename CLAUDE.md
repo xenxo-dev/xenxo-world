@@ -14,7 +14,8 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 | Ruta | Qué es |
 |---|---|
 | `packages/protocol` | Contrato (Zod + tipos) |
-| `apps/realtime` | Worker + Durable Object por chunk (autoridad, SQLite, WebSocket Hibernation) |
+| `packages/assets` | Validación GLB sin dependencias (servidor) y optimización con gltf-transform (navegador y Node) |
+| `apps/realtime` | Worker + Durable Object por chunk (autoridad, SQLite, WebSocket Hibernation) + `Directory` (cuentas con passkey, proyectos, denuncias) + R2 (assets) |
 | `apps/web` | Panel 2D (HTML) + plaza 3D (React Three Fiber, WebXR) |
 | `apps/headless` | Cliente sin render: banco de conformidad y agente de ejemplo |
 | `docs/PROTOCOL.md` | Explicación del contrato |
@@ -40,6 +41,13 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 - Sin post-procesado, sin sombras dinámicas. Emisivos con `meshBasicMaterial`, resto `meshLambertMaterial`.
 - Textos 3D con la fuente empaquetada (`world/font.ts`) y siempre dentro de `<Suspense>`: si suspenden fuera, congelan toda la app.
 - Mide en las gafas, no en el escritorio.
+
+## Cuentas, assets y privacidad
+
+- Datos mínimos: sin email, sin contraseña, sin IP guardada. Cualquier dato nuevo de una persona necesita actualizar las páginas legales (`apps/web/public/legal/`) y `exportData()`/`deleteAccount()` en `directory.ts`.
+- El servidor nunca se fía de lo que dice el cliente sobre un modelo: vuelve a inspeccionarlo (`inspectGlb`) y usa sus propias medidas.
+- Nada externo en los GLB (sin URIs, sin Draco): los clientes no descargan nada de terceros.
+- El navegador del visitante no habla con terceros (GitHub va por `/github/repos`; las fuentes van empaquetadas).
 
 ## Seguridad
 

@@ -258,11 +258,20 @@ export const AvatarPose = z.object({
 });
 export type AvatarPose = z.infer<typeof AvatarPose>;
 
+/** Avatar propio de una persona registrada (GLB o VRM subido a /assets). */
+export const AvatarRef = z.object({
+  hash: Hash,
+  format: z.enum(["glb", "vrm"]),
+});
+export type AvatarRef = z.infer<typeof AvatarRef>;
+
 export const Peer = z.object({
   session_id: z.string(),
   kind: PrincipalKind,
   display_name: z.string(),
   client_type: ClientType,
+  /** Opcional: si falta, el cliente dibuja el avatar por defecto. */
+  avatar: AvatarRef.optional(),
 });
 export type Peer = z.infer<typeof Peer>;
 
@@ -337,6 +346,11 @@ export function parseServerMessage(raw: string): ServerMessage | null {
   } catch {
     return null;
   }
+}
+
+/** Ruta pública de un asset: "sha256:<hex>" → "/assets/<hex>". */
+export function assetPath(hash: string): string {
+  return `/assets/${hash.replace(/^sha256:/, "")}`;
 }
 
 /** Chunk que contiene una posición global (x, z). */

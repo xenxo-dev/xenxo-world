@@ -7,9 +7,25 @@ compatibility_date = "2026-10-01"
 name = "CHUNK"
 class_name = "ChunkRoom"
 
+# Cuentas, passkeys, proyectos y denuncias (un único objeto).
+[[durable_objects.bindings]]
+name = "DIRECTORY"
+class_name = "Directory"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ChunkRoom"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["Directory"]
+
+# Modelos 3D direccionados por hash. Crea el bucket en la UE antes de desplegar:
+#   npx wrangler r2 bucket create xenxo-assets --jurisdiction eu
+[[r2_buckets]]
+binding = "ASSETS"
+bucket_name = "xenxo-assets"
+jurisdiction = "eu"
 
 [vars]
 # Los datos de cada chunk se guardan y procesan solo en la UE (RGPD).
@@ -17,6 +33,10 @@ new_sqlite_classes = ["ChunkRoom"]
 DO_JURISDICTION = "eu"
 # Orígenes permitidos para /auth y /chunk/*/state (separados por comas).
 ALLOWED_ORIGINS = "http://localhost:5173,https://xenxo.io,https://www.xenxo.io"
+# Dominio de las passkeys. Debe coincidir con el dominio de la web (o ser su dominio padre).
+RP_ID = "xenxo.io"
+# Cuenta de GitHub cuyos repos públicos aparecen en el panel.
+GITHUB_OWNER = "xenxo-dev"
 
 # Secretos (no van aquí): `wrangler secret put TOKEN_SECRET` y `wrangler secret put AGENT_KEYS`.
 # En local se leen de .dev.vars (ver .dev.vars.example).

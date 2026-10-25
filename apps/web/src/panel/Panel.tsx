@@ -1,18 +1,12 @@
 import { useEffect, useState } from "react";
-import { GITHUB_OWNER, REALTIME_URL } from "../config";
+import { REALTIME_URL } from "../config";
 import { ACCENTS, SOLUTIONS } from "../content";
-import { LANGS, setLang, t, useLang, type Key } from "../i18n";
+import { LANGS, legalPath, setLang, t, useLang, type Key } from "../i18n";
+import { CustomizeSection, type CustomizeProps } from "./Account";
+import { ProjectsSection } from "./Projects";
+import { Block, card, Stat } from "./ui";
 
-type Section = "solutions" | "repos" | "agents" | "customize";
-
-interface Repo {
-  name: string;
-  description: string | null;
-  html_url: string;
-  stargazers_count: number;
-  language: string | null;
-  fork: boolean;
-}
+type Section = "solutions" | "projects" | "agents" | "customize";
 
 interface LiveState {
   online: number;
@@ -23,18 +17,14 @@ interface LiveState {
 
 const SECTIONS: { id: Section; label: Key; icon: string }[] = [
   { id: "solutions", label: "nav.solutions", icon: "◇" },
-  { id: "repos", label: "nav.repos", icon: "⌥" },
+  { id: "projects", label: "nav.projects", icon: "⌥" },
   { id: "agents", label: "nav.agents", icon: "◉" },
   { id: "customize", label: "nav.customize", icon: "✎" },
 ];
 
-export interface PanelProps {
+export interface PanelProps extends CustomizeProps {
   onEnter: () => void;
   onEnterVR: (() => void) | null;
-  name: string;
-  setName: (n: string) => void;
-  quality: "low" | "high";
-  setQuality: (q: "low" | "high") => void;
 }
 
 function useLiveState() {
@@ -56,17 +46,6 @@ function useLiveState() {
   return state;
 }
 
-function useRepos() {
-  const [repos, setRepos] = useState<Repo[] | null>(null);
-  useEffect(() => {
-    fetch(`https://api.github.com/users/${GITHUB_OWNER}/repos?sort=updated&per_page=12`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((list: Repo[]) => setRepos(list.filter((r) => !r.fork)))
-      .catch(() => setRepos([]));
-  }, []);
-  return repos;
-}
-
 function ago(ts: number) {
   const s = Math.round((Date.now() - ts) / 1000);
   if (s < 60) return t("ago.s", { n: s });
@@ -75,17 +54,14 @@ function ago(ts: number) {
   return t("ago.d", { n: Math.round(s / 86400) });
 }
 
-const card = "rounded-2xl border border-cal/10 bg-cal/[0.04]";
-
 export function Panel(props: PanelProps) {
   const [section, setSection] = useState<Section>("solutions");
   const lang = useLang();
   const live = useLiveState();
-  const repos = useRepos();
 
   return (
     <div className="pointer-events-auto absolute inset-0 flex items-end justify-center bg-noche/30 backdrop-blur-md sm:items-center sm:p-6">
-      <div className="flex h-[min(88dvh,720px)] w-full max-w-5xl flex-col overflow-hidden rounded-t-3xl border border-cal/10 bg-noche/85 shadow-2xl sm:h-[min(80dvh,640px)] sm:flex-row sm:rounded-3xl">
+      <div className="flex h-[min(90dvh,760px)] w-full max-w-5xl flex-col overflow-hidden rounded-t-3xl border border-cal/10 bg-noche/85 shadow-2xl sm:h-[min(84dvh,700px)] sm:flex-row sm:rounded-3xl">
         {/* Barra lateral (escritorio) */}
         <aside className="hidden w-56 shrink-0 flex-col gap-1 border-r border-cal/10 p-5 sm:flex">
           <Brand live={live} />
@@ -94,6 +70,7 @@ export function Panel(props: PanelProps) {
               <button
                 key={s.id}
                 onClick={() => setSection(s.id)}
+                aria-current={section === s.id ? "page" : undefined}
                 className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition ${
                   section === s.id ? "bg-terracota/25 text-cal" : "text-cal/60 hover:bg-cal/5 hover:text-cal"
                 }`}
@@ -106,6 +83,7 @@ export function Panel(props: PanelProps) {
           <div className="mt-auto flex flex-col gap-3">
             <LangSwitch />
             <EnterButtons {...props} />
+            <LegalLinks />
           </div>
         </aside>
 
@@ -130,31 +108,7 @@ export function Panel(props: PanelProps) {
             </Block>
           )}
 
-          {section === "repos" && (
-            <Block title={t("nav.repos")}>
-              {repos === null && <p className="text-sm text-cal/50">{t("repos.loading")}</p>}
-              {repos?.length === 0 && (
-                <p className="text-sm text-cal/50">
-                  {t("repos.empty")}{" "}
-                  <a className="text-azulejo-claro underline" href={`https://github.com/${GITHUB_OWNER}`}>github.com/{GITHUB_OWNER}</a>.
-                </p>
-              )}
-              <ul className="flex flex-col gap-2">
-                {repos?.map((r) => (
-                  <li key={r.name}>
-                    <a href={r.html_url} target="_blank" rel="noreferrer" className={`${card} flex items-center gap-4 p-4 transition hover:border-cal/25`}>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate font-medium text-cal">{r.name}</p>
-                        <p className="truncate text-sm text-cal/55">{r.description ?? t("repos.noDescription")}</p>
-                      </div>
-                      <span className="shrink-0 text-xs text-cal/50">{r.language ?? ""}</span>
-                      <span className="shrink-0 text-xs text-ocre">★ {r.stargazers_count}</span>
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </Block>
-          )}
+          {section === "projects" && <ProjectsSection onGoToAccount={() => setSection("customize")} />}
 
           {section === "agents" && (
             <Block title={t("nav.agents")}>
@@ -170,7 +124,9 @@ export function Panel(props: PanelProps) {
                 {live?.recent_events.map((e, i) => (
                   <li key={i} className={`${card} flex items-center gap-3 px-4 py-3 text-sm`}>
                     <span className="h-2 w-2 shrink-0 rounded-full bg-huerta" />
-                    <span className="text-cal">{e.actor.replace(/^agt_/, `${t("agents.agentPrefix")} `)}</span>
+                    <span className="truncate text-cal">
+                      {e.actor.startsWith("agt_") ? e.actor.replace(/^agt_/, `${t("agents.agentPrefix")} `) : e.actor.startsWith("usr_") ? "👤" : e.actor}
+                    </span>
                     <span className="truncate text-cal/60">{e.op.toLowerCase()} {e.entity_id}</span>
                     <span className="ml-auto shrink-0 text-cal/40">{ago(e.ts)}</span>
                   </li>
@@ -179,32 +135,11 @@ export function Panel(props: PanelProps) {
             </Block>
           )}
 
-          {section === "customize" && (
-            <Block title={t("nav.customize")}>
-              <label className="block text-sm text-cal/70" htmlFor="name">{t("customize.name")}</label>
-              <input
-                id="name"
-                value={props.name}
-                maxLength={32}
-                onChange={(e) => props.setName(e.target.value)}
-                className="mt-2 w-full max-w-sm rounded-xl border border-cal/10 bg-cal/5 px-3 py-2 text-cal outline-none focus:border-terracota"
-              />
-              <p className="mt-2 text-xs text-cal/40">{t("customize.nameNote")}</p>
+          {section === "customize" && <CustomizeSection {...props} />}
 
-              <p className="mt-6 text-sm text-cal/70">{t("customize.quality")}</p>
-              <Segmented
-                value={props.quality}
-                onChange={props.setQuality}
-                options={[
-                  { id: "low", label: t("customize.low") },
-                  { id: "high", label: t("customize.high") },
-                ]}
-              />
-
-              <p className="mt-6 text-sm text-cal/70">{t("customize.language")}</p>
-              <Segmented value={lang} onChange={setLang} options={LANGS} />
-            </Block>
-          )}
+          <div className="mt-8 sm:hidden">
+            <LegalLinks />
+          </div>
         </main>
 
         {/* Pie (móvil): botón principal + pestañas */}
@@ -215,6 +150,7 @@ export function Panel(props: PanelProps) {
               <button
                 key={s.id}
                 onClick={() => setSection(s.id)}
+                aria-current={section === s.id ? "page" : undefined}
                 className={`flex flex-col items-center gap-0.5 rounded-lg py-1.5 text-[11px] ${section === s.id ? "text-terracota-claro" : "text-cal/50"}`}
               >
                 <span aria-hidden className="text-base">{s.icon}</span>
@@ -243,7 +179,7 @@ function Brand({ live }: { live: LiveState | null }) {
 function LangSwitch() {
   const lang = useLang();
   return (
-    <div className="flex shrink-0 rounded-lg border border-cal/10 p-0.5 text-xs" role="group" aria-label={t("customize.language")}>
+    <div className="flex w-fit shrink-0 rounded-lg border border-cal/10 p-0.5 text-xs" role="group" aria-label={t("customize.language")}>
       {LANGS.map((l) => (
         <button
           key={l.id}
@@ -258,6 +194,19 @@ function LangSwitch() {
   );
 }
 
+function LegalLinks() {
+  return (
+    <p className="flex gap-3 text-xs text-cal/40">
+      <a href={legalPath("privacy")} target="_blank" rel="noreferrer" className="hover:text-cal/70">
+        {t("legal.privacy")}
+      </a>
+      <a href={legalPath("terms")} target="_blank" rel="noreferrer" className="hover:text-cal/70">
+        {t("legal.terms")}
+      </a>
+    </p>
+  );
+}
+
 function EnterButtons({ onEnter, onEnterVR }: PanelProps) {
   return (
     <div className="flex flex-col gap-2">
@@ -269,48 +218,6 @@ function EnterButtons({ onEnter, onEnterVR }: PanelProps) {
           {t("enter.vr")}
         </button>
       )}
-    </div>
-  );
-}
-
-function Segmented<T extends string>({
-  value,
-  onChange,
-  options,
-}: {
-  value: T;
-  onChange: (v: T) => void;
-  options: { id: T; label: string }[];
-}) {
-  return (
-    <div className="mt-2 inline-flex rounded-xl border border-cal/10 p-1">
-      {options.map((o) => (
-        <button
-          key={o.id}
-          onClick={() => onChange(o.id)}
-          className={`rounded-lg px-4 py-1.5 text-sm ${value === o.id ? "bg-terracota/30 text-cal" : "text-cal/60"}`}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function Block({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section>
-      <h2 className="mb-4 text-lg font-medium text-cal">{title}</h2>
-      {children}
-    </section>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: number | undefined }) {
-  return (
-    <div className={`${card} p-4`}>
-      <p className="text-2xl font-semibold text-cal">{value ?? "–"}</p>
-      <p className="text-xs text-cal/50">{label}</p>
     </div>
   );
 }

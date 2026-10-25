@@ -27,6 +27,12 @@ import {
 import type { Env } from "./index";
 import { randomId, type Principal } from "./auth";
 import { plazaSeed, SEED_VERSION } from "./seed";
+import { assetKey } from "./assets";
+
+/** Ranuras de la exposición de proyectos, delante del edificio «Proyectos» (oeste de la plaza). */
+const EXPO_SLOTS: [number, number][] = [
+  [16, 38.5], [19.5, 38.5], [16, 41.5], [19.5, 41.5], [23, 41.5], [16, 44.8], [19.5, 44.8], [23, 44.8],
+];
 
 const TICK_HZ = 10;
 const MAX_MESSAGE_BYTES = 64 * 1024;
@@ -71,6 +77,7 @@ export class ChunkRoom extends DurableObject<Env> {
         seq INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, actor TEXT NOT NULL,
         op TEXT NOT NULL, entity_id TEXT NOT NULL, rev INTEGER NOT NULL, data TEXT);
       CREATE TABLE IF NOT EXISTS idem (key TEXT PRIMARY KEY, result TEXT NOT NULL, ts INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS stands (project_id TEXT PRIMARY KEY, slot INTEGER NOT NULL UNIQUE);
     `);
   }
 
@@ -96,7 +103,8 @@ export class ChunkRoom extends DurableObject<Env> {
         principal,
         hello: false,
         client_type: "headless",
-        display_name: principal.kind === "agent" ? principal.sub.replace(/^agt_/, "") : "guest",
+        display_name:
+          principal.kind === "agent" ? principal.sub.replace(/^agt_/, "") : principal.kind === "user" ? principal.name ?? "user" : "guest",
       };
       server.serializeAttachment(att);
       return new Response(null, { status: 101, webSocket: client });
@@ -161,7 +169,8 @@ export class ChunkRoom extends DurableObject<Env> {
       case "HELLO": {
         att.hello = true;
         att.client_type = m.payload.client_type;
-        if (m.payload.display_name && att.principal.kind !== "agent") att.display_name = m.payload.display_name;
+        // Solo los invitados eligen nombre en HELLO; el de personas registradas y agentes lo fija el servidor.
+        if (m.payload.display_name && att.principal.kind === "guest") att.display_name = m.payload.display_name.trim() || "guest";
         ws.serializeAttachment(att);
         this.send(ws, msg("WELCOME", {
           session_id: att.session_id,
@@ -189,7 +198,7 @@ export class ChunkRoom extends DurableObject<Env> {
       case "PING":
         return this.send(ws, msg("PONG", { t: m.payload.t, server_time: Date.now() }));
       case "MUTATE_WORLD":
-        return this.handleMutation(ws, att, m.id, m.payload);
+        return await this.handleMutation(ws, att, m.id, m.payload);
     }
   }
 
@@ -229,7 +238,7 @@ export class ChunkRoom extends DurableObject<Env> {
   /* Mutaciones del mundo                                               */
   /* ---------------------------------------------------------------- */
 
-  private handleMutation(
+  private async handleMutation(
     ws: WebSocket,
     att: Attachment,
     ref: string | undefined,
@@ -237,6 +246,8 @@ export class ChunkRoom extends DurableObject<Env> {
   ) {
     const actor = att.principal.sub;
     try {
+      // Los triángulos de un modelo NO se creen al cliente: se leen de lo que midió el servidor al subirlo.
+      p.mutation = await this.resolveAssets(p.mutation);
       if (!att.principal.scopes.includes("build")) throw new MutationError("forbidden", "esta sesión no tiene permiso de construcción");
       if (p.target === "proposal") throw new MutationError("bad_message", "las propuestas (ramas) llegan en una versión futura; usa target: commit");
 
@@ -302,6 +313,129 @@ export class ChunkRoom extends DurableObject<Env> {
     this.sql.exec("UPDATE entities SET rev = ?, tris = ?, data = ? WHERE entity_id = ?", rev, tris, JSON.stringify(entity), mu.entity_id);
     this.logEvent(actor, "PATCH", mu.entity_id, rev, mu.components);
     return { entity_id: mu.entity_id, rev, change: { kind: "upsert" as const, entity } };
+  }
+
+  /** Sustituye los datos de cada LOD de mesh@1 por los medidos al subirlo; falla si el asset no existe. */
+  private async resolveAssets(mu: MutationOp): Promise<MutationOp> {
+    if (mu.op === "DESPAWN") return mu;
+    const mesh = mu.components["mesh@1"] as { lods?: { hash?: unknown }[] } | null | undefined;
+    if (!mesh || !Array.isArray(mesh.lods)) return mu;
+    const lods = [];
+    for (const lod of mesh.lods) {
+      if (typeof lod?.hash !== "string") throw new MutationError("bad_message", "cada LOD necesita un hash");
+      const meta = await this.env.ASSETS.head(assetKey(lod.hash));
+      if (!meta) throw new MutationError("not_found", `el asset ${lod.hash} no existe; súbelo antes a /assets`);
+      lods.push({ hash: lod.hash, media: "model/gltf-binary", tris: Number(meta.customMetadata?.tris ?? 0) });
+    }
+    return { ...mu, components: { ...mu.components, "mesh@1": { ...mesh, lods } } };
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Stands de proyectos (los coloca el Directory con la misma puerta)  */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Coloca el stand de un proyecto en la exposición, con el proyecto de su dueño.
+   * Pasa por applyMutation: mismos esquemas, presupuestos, log y DELTA que cualquier otra escritura.
+   */
+  async placeStand(input: {
+    projectId: string;
+    owner: string;
+    title: string;
+    mesh?: { hash: string; bounds: { min: number[]; max: number[] } | null };
+  }): Promise<{ ok: true; slot: number } | { ok: false; code: string; message: string }> {
+    this.ensureChunk(null);
+    const used = new Set(this.sql.exec<{ slot: number }>("SELECT slot FROM stands").toArray().map((r) => r.slot));
+    const slot = EXPO_SLOTS.findIndex((_, i) => !used.has(i));
+    if (slot < 0) return { ok: false, code: "budget_exceeded", message: "la exposición de este chunk está llena" };
+    const [x, z] = EXPO_SLOTS[slot]!;
+
+    const ops: MutationOp[] = [
+      {
+        op: "SPAWN",
+        entity_id: `stand_${input.projectId}`,
+        components: {
+          "transform@1": { p: [x, 0.45, z] },
+          "primitive@1": { shape: "box", size: [1.4, 0.9, 1.4], color: "#e6dccb" },
+        },
+      },
+    ];
+    // El cartel flota por encima del modelo (o del pedestal si no hay modelo).
+    let labelY = 1.4;
+    if (input.mesh) {
+      const b = input.mesh.bounds;
+      const dims = b ? [b.max[0]! - b.min[0]!, b.max[1]! - b.min[1]!, b.max[2]! - b.min[2]!] : [1, 1, 1];
+      const scale = Math.min(4, 1.3 / Math.max(0.01, ...dims));
+      const lift = b ? -b.min[1]! * scale : 0;
+      const cx = b ? -((b.max[0]! + b.min[0]!) / 2) * scale : 0;
+      const cz = b ? -((b.max[2]! + b.min[2]!) / 2) * scale : 0;
+      labelY = 0.9 + dims[1]! * scale + 0.35;
+      ops.push({
+        op: "SPAWN",
+        entity_id: `standm_${input.projectId}`,
+        components: {
+          "transform@1": { p: [x + cx, 0.9 + lift, z + cz], s: [scale, scale, scale] },
+          "mesh@1": { lods: [{ hash: input.mesh.hash, media: "model/gltf-binary", tris: 0 }] },
+        },
+      });
+    }
+
+    ops.push({
+      op: "SPAWN",
+      entity_id: `standl_${input.projectId}`,
+      components: {
+        "transform@1": { p: [x, labelY, z] },
+        "label@1": { text: input.title, billboard: true, size: 0.32 },
+      },
+    });
+
+    try {
+      const resolved: MutationOp[] = [];
+      for (const op of ops) resolved.push(await this.resolveAssets(op));
+      const changes = this.ctx.storage.transactionSync(() => {
+        const out = resolved.map((op) => this.applyMutation(input.owner, false, op).change);
+        this.sql.exec("INSERT INTO stands (project_id, slot) VALUES (?, ?)", input.projectId, slot);
+        return out;
+      });
+      this.broadcast(msg("DELTA", { changes }));
+      return { ok: true, slot };
+    } catch (e) {
+      if (e instanceof MutationError) return { ok: false, code: e.code, message: e.message };
+      throw e;
+    }
+  }
+
+  /** Retira el stand de un proyecto (borrado por su dueño, moderación o baja de la cuenta). */
+  async removeStand(projectId: string): Promise<void> {
+    this.ensureChunk(null);
+    const ids = [`stand_${projectId}`, `standm_${projectId}`, `standl_${projectId}`];
+    const changes = this.ctx.storage.transactionSync(() => {
+      const out: { kind: "remove"; entity_id: string }[] = [];
+      for (const id of ids) {
+        const row = this.getRow(id);
+        if (!row) continue;
+        this.sql.exec("DELETE FROM entities WHERE entity_id = ?", id);
+        this.logEvent("system", "DESPAWN", id, row.rev + 1, { reason: "stand_removed" });
+        out.push({ kind: "remove", entity_id: id });
+      }
+      this.sql.exec("DELETE FROM stands WHERE project_id = ?", projectId);
+      return out;
+    });
+    if (changes.length) this.broadcast(msg("DELTA", { changes }));
+  }
+
+  /** Supresión (RGPD): elimina todo lo que pertenece a un actor en este chunk. */
+  async purgeOwner(owner: string): Promise<number> {
+    this.ensureChunk(null);
+    const ids = this.sql.exec<{ entity_id: string }>("SELECT entity_id FROM entities WHERE owner = ?", owner).toArray().map((r) => r.entity_id);
+    if (!ids.length) return 0;
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec("DELETE FROM entities WHERE owner = ?", owner);
+      this.sql.exec("UPDATE events SET actor = 'deleted' WHERE actor = ?", owner);
+      this.logEvent("system", "PURGE", "owner", ids.length, null);
+    });
+    this.broadcast(msg("DELTA", { changes: ids.map((entity_id) => ({ kind: "remove" as const, entity_id })) }));
+    return ids.length;
   }
 
   private validateComponents(input: Record<string, unknown>): Components {
@@ -408,7 +542,13 @@ export class ChunkRoom extends DurableObject<Env> {
   }
 
   private peerOf(att: Attachment): Peer {
-    return { session_id: att.session_id, kind: att.principal.kind, display_name: att.display_name, client_type: att.client_type };
+    return {
+      session_id: att.session_id,
+      kind: att.principal.kind,
+      display_name: att.display_name,
+      client_type: att.client_type,
+      ...(att.principal.avatar ? { avatar: att.principal.avatar as Peer["avatar"] } : {}),
+    };
   }
 
   private peers(): Peer[] {

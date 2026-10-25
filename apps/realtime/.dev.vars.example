@@ -6,9 +6,13 @@ TOKEN_SECRET=cambia-esto-por-algo-largo-y-aleatorio
 # Agentes autorizados: id:sha256(clave)[:scope1|scope2], separados por comas.
 # Scope por defecto: build. "admin" permite modificar entidades de otros (p. ej. la plaza).
 # Genera el hash con:  npm run hash-key -w @xenxo/headless -- <clave>
-# Este ejemplo corresponde a la clave "dev-agent-key-change-me":
-AGENT_KEYS=builder-01:43ededc683aa722f872465f15374bdad75c553f7ae9cb0adbc6139d9ba3c51b1
+# Estos ejemplos corresponden a las claves "dev-agent-key-change-me" (constructor)
+# y "dev-admin-key-change-me" (moderación: scope admin).
+AGENT_KEYS=builder-01:43ededc683aa722f872465f15374bdad75c553f7ae9cb0adbc6139d9ba3c51b1,admin-01:29b401073038b82dd8106b36b0e4105cb0fcf084a083efccb6f525c8973bd2d2:build|upload|admin
 
 # workerd (wrangler dev) no implementa jurisdicciones: en local se desactiva.
 # En Cloudflare se usa el valor de wrangler.toml (eu).
 DO_JURISDICTION=
+
+# Las passkeys en local funcionan con el dominio localhost.
+RP_ID=localhost

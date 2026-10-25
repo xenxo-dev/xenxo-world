@@ -14,6 +14,9 @@ export interface Principal {
   kind: PrincipalKind;
   scopes: string[];
   exp: number; // epoch ms
+  /** Personas registradas: nombre visible y avatar, fijados por el servidor. */
+  name?: string;
+  avatar?: { hash: string; format: "glb" | "vrm" };
 }
 
 const enc = new TextEncoder();
@@ -78,7 +81,7 @@ export async function resolveAgent(
   for (const entry of agentKeys.split(",")) {
     const [id, h, scopes] = entry.trim().split(":");
     if (id && h && timingSafeEqual(h.toLowerCase(), hash)) {
-      return { id, scopes: scopes ? scopes.split("|") : ["build"] };
+      return { id, scopes: scopes ? scopes.split("|") : ["build", "upload"] };
     }
   }
   return null;

@@ -1,5 +1,11 @@
+import { assetPath } from "@xenxo/protocol";
+
 export const REALTIME_URL: string = import.meta.env.VITE_REALTIME_URL ?? "http://localhost:8787";
-export const GITHUB_OWNER: string = import.meta.env.VITE_GITHUB_OWNER ?? "xenxo-dev";
+
+/** URL pública e inmutable de un asset ("sha256:…"). */
+export function assetUrl(hash: string): string {
+  return new URL(assetPath(hash), REALTIME_URL).toString();
+}
 
 /** Preferencias del visitante. localStorage puede fallar (modo privado): siempre con try/catch. */
 export function loadPref<T>(key: string, fallback: T): T {

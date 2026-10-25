@@ -1,0 +1,250 @@
+import { useState } from "react";
+import { LANGS, legalPath, setLang, t, useLang } from "../i18n";
+import {
+  deleteAccount,
+  exportData,
+  login,
+  logout,
+  passkeysSupported,
+  register,
+  rename,
+  setAvatar,
+  uploadModel,
+  useAccount,
+  type PreparedModel,
+} from "../net/account";
+import { ModelPicker } from "./ModelPicker";
+import { Block, Button, card, input, Label, Notice, Segmented } from "./ui";
+
+export interface CustomizeProps {
+  guestName: string;
+  setGuestName: (n: string) => void;
+  quality: "low" | "high";
+  setQuality: (q: "low" | "high") => void;
+}
+
+/** Personalizar: cuenta, personaje propio, nombre, calidad e idioma. */
+export function CustomizeSection(props: CustomizeProps) {
+  const lang = useLang();
+  const user = useAccount();
+
+  return (
+    <>
+      <Block title={t("account.title")}>{user ? <SignedIn /> : <SignedOut />}</Block>
+
+      <Block title={t("avatar.title")}>
+        <AvatarUploader />
+      </Block>
+
+      {!user && (
+        <Block title={t("customize.name")}>
+          <input
+            id="guest-name"
+            aria-label={t("customize.name")}
+            value={props.guestName}
+            maxLength={32}
+            onChange={(e) => props.setGuestName(e.target.value)}
+            className={`${input} max-w-sm`}
+          />
+          <p className="mt-2 text-xs text-cal/40">{t("customize.nameNote")}</p>
+        </Block>
+      )}
+
+      <Block title={t("customize.quality")}>
+        <Segmented
+          value={props.quality}
+          onChange={props.setQuality}
+          options={[
+            { id: "low", label: t("customize.low") },
+            { id: "high", label: t("customize.high") },
+          ]}
+        />
+        <p className="mb-1 mt-6 text-sm text-cal/70">{t("customize.language")}</p>
+        <Segmented value={lang} onChange={setLang} options={LANGS} />
+      </Block>
+    </>
+  );
+}
+
+function SignedOut() {
+  const [name, setName] = useState("");
+  const [age, setAge] = useState(false);
+  const [terms, setTerms] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  if (!passkeysSupported()) return <Notice tone="error">{t("account.noPasskeys")}</Notice>;
+
+  const run = async (fn: () => Promise<void>) => {
+    setBusy(true);
+    setError("");
+    try {
+      await fn();
+    } catch (e) {
+      // Cancelar el diálogo de la passkey no es un error que haya que enseñar.
+      if ((e as Error).name !== "NotAllowedError") setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className={`${card} p-4`}>
+      <p className="text-sm text-cal/70">{t("account.intro")}</p>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void run(() => register(name, age, terms));
+        }}
+      >
+        <Label htmlFor="acc-name">{t("customize.name")}</Label>
+        <input id="acc-name" required minLength={2} maxLength={32} value={name} onChange={(e) => setName(e.target.value)} className={`${input} max-w-sm`} />
+        <label className="mt-4 flex items-start gap-2 text-sm text-cal/80">
+          <input type="checkbox" checked={age} onChange={(e) => setAge(e.target.checked)} className="mt-1 accent-terracota" />
+          {t("account.age")}
+        </label>
+        <label className="mt-2 flex items-start gap-2 text-sm text-cal/80">
+          <input type="checkbox" checked={terms} onChange={(e) => setTerms(e.target.checked)} className="mt-1 accent-terracota" />
+          <span>
+            {t("account.termsPrefix")}{" "}
+            <a href={legalPath("terms")} target="_blank" rel="noreferrer" className="text-azulejo-claro underline">
+              {t("account.termsLink")}
+            </a>{" "}
+            {t("account.and")}{" "}
+            <a href={legalPath("privacy")} target="_blank" rel="noreferrer" className="text-azulejo-claro underline">
+              {t("account.privacyLink")}
+            </a>
+          </span>
+        </label>
+        <Button type="submit" variant="primary" className="mt-4" disabled={busy || !age || !terms || name.trim().length < 2}>
+          {t("account.create")}
+        </Button>
+      </form>
+      <div className="mt-5 border-t border-cal/10 pt-4">
+        <p className="text-sm text-cal/60">{t("account.haveOne")}</p>
+        <Button className="mt-2" disabled={busy} onClick={() => void run(login)}>
+          {t("account.login")}
+        </Button>
+      </div>
+      {error && <Notice tone="error">{error}</Notice>}
+    </div>
+  );
+}
+
+function SignedIn() {
+  const user = useAccount()!;
+  const [name, setName] = useState(user.display_name);
+  const [note, setNote] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+  const [confirming, setConfirming] = useState(false);
+
+  const act = async (fn: () => Promise<void>, ok?: string) => {
+    setNote(null);
+    try {
+      await fn();
+      if (ok) setNote({ tone: "ok", text: ok });
+    } catch (e) {
+      setNote({ tone: "error", text: (e as Error).message });
+    }
+  };
+
+  return (
+    <div className={`${card} p-4`}>
+      <p className="text-sm text-cal/80">{t("account.signedAs", { name: user.display_name })}</p>
+      <form
+        className="mt-3 flex max-w-md gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void act(() => rename(name), t("account.saved"));
+        }}
+      >
+        <input aria-label={t("customize.name")} value={name} maxLength={32} onChange={(e) => setName(e.target.value)} className={input} />
+        <Button type="submit" disabled={name.trim() === user.display_name || name.trim().length < 2}>
+          {t("account.save")}
+        </Button>
+      </form>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Button onClick={() => void act(exportData)}>{t("account.export")}</Button>
+        <Button variant="ghost" onClick={logout}>
+          {t("account.logout")}
+        </Button>
+        {!confirming ? (
+          <Button variant="danger" onClick={() => setConfirming(true)}>
+            {t("account.delete")}
+          </Button>
+        ) : null}
+      </div>
+      {confirming && (
+        <div className="mt-3 rounded-xl border border-red-400/30 bg-red-500/10 p-3 text-sm text-red-100">
+          <p>{t("account.deleteConfirm")}</p>
+          <div className="mt-2 flex gap-2">
+            <Button variant="danger" onClick={() => void act(deleteAccount)}>
+              {t("account.delete")}
+            </Button>
+            <Button variant="ghost" onClick={() => setConfirming(false)}>
+              {t("common.cancel")}
+            </Button>
+          </div>
+        </div>
+      )}
+      {note && <Notice tone={note.tone}>{note.text}</Notice>}
+    </div>
+  );
+}
+
+function AvatarUploader() {
+  const user = useAccount();
+  const [model, setModel] = useState<PreparedModel | null>(null);
+  const [state, setState] = useState<"idle" | "uploading" | "done" | "error">("idle");
+  const [error, setError] = useState("");
+
+  return (
+    <div className={`${card} p-4`}>
+      <p className="text-sm text-cal/70">{t("avatar.intro")}</p>
+      <ul className="mt-2 list-inside list-disc space-y-1 text-sm text-cal/60">
+        <li>{t("avatar.blender")}</li>
+        <li>{t("avatar.vroid")}</li>
+        <li>{t("avatar.other")}</li>
+      </ul>
+      <p className="mt-2 text-xs text-cal/40">{t("avatar.budget")}</p>
+
+      {!user ? (
+        <Notice>{t("avatar.needAccount")}</Notice>
+      ) : (
+        <div className="mt-4">
+          {user.avatar_hash && state !== "done" && (
+            <div className="mb-3 flex flex-wrap items-center gap-3 text-sm text-cal/70">
+              {t("avatar.current")}
+              <Button variant="ghost" onClick={() => void setAvatar(null)}>
+                {t("avatar.remove")}
+              </Button>
+            </div>
+          )}
+          <ModelPicker kind="avatar" accept=".glb,.vrm" onReady={setModel} />
+          {model && (
+            <Button
+              variant="primary"
+              className="mt-3"
+              disabled={state === "uploading"}
+              onClick={async () => {
+                setState("uploading");
+                try {
+                  const up = await uploadModel(model, "avatar");
+                  await setAvatar(up.hash);
+                  setState("done");
+                  setModel(null);
+                } catch (e) {
+                  setState("error");
+                  setError((e as Error).message);
+                }
+              }}
+            >
+              {state === "uploading" ? t("avatar.uploading") : t("avatar.upload")}
+            </Button>
+          )}
+          {state === "done" && <Notice tone="ok">{t("avatar.done")}</Notice>}
+          {state === "error" && <Notice tone="error">{error}</Notice>}
+        </div>
+      )}
+    </div>
+  );
+}
