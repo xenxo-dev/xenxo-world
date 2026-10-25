@@ -416,13 +416,19 @@ export class Directory extends DurableObject<Env> {
   /* Denuncias (DSA, art. 16: mecanismo de notificación y acción)        */
   /* ---------------------------------------------------------------- */
 
-  report(reporter: string, body: { target_type?: unknown; target_id?: unknown; reason?: unknown; details?: unknown }): Result<{ id: number }> {
-    const types = ["project", "avatar", "entity", "user"];
+  report(
+    reporter: string,
+    body: { target_type?: unknown; target_id?: unknown; reason?: unknown; details?: unknown },
+    evidence?: unknown,
+  ): Result<{ id: number }> {
+    const types = ["project", "avatar", "entity", "user", "chat"];
     const reasons = ["illegal", "hate", "harassment", "sexual", "minors", "violence", "spam", "ip", "other"];
     if (typeof body.target_type !== "string" || !types.includes(body.target_type)) return fail(400, "bad_message", "tipo de contenido no válido");
     if (typeof body.target_id !== "string" || body.target_id.length > 80) return fail(400, "bad_message", "identificador no válido");
     if (typeof body.reason !== "string" || !reasons.includes(body.reason)) return fail(400, "bad_message", "motivo no válido", { reasons });
-    const details = typeof body.details === "string" ? body.details.slice(0, 1000) : null;
+    const written = typeof body.details === "string" ? body.details.slice(0, 1000) : "";
+    // Copia del contenido denunciado (p. ej. un mensaje de chat, que caduca a los 7 días).
+    const details = evidence ? JSON.stringify({ details: written, evidence }) : written || null;
     const n = this.sql
       .exec<{ n: number }>("SELECT COUNT(*) AS n FROM reports WHERE reporter = ? AND ts > ?", reporter, Date.now() - 86_400_000)
       .one().n;

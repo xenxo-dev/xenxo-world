@@ -84,6 +84,12 @@ export function reconnect() {
   void connect();
 }
 
+export function sendChat(text: string) {
+  const clean = text.trim();
+  if (!clean) return;
+  net.send(msg("CHAT", { text: clean.slice(0, 280) }) as ClientMessage);
+}
+
 export function setGuestName(name: string) {
   guestName = name;
 }

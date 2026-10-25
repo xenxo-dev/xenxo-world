@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { REALTIME_URL } from "../config";
-import { t, useLang } from "../i18n";
+import { errorText, t, useLang } from "../i18n";
 import {
   createProject,
   currentUser,
@@ -173,7 +173,7 @@ function PublishForm({ onDone }: { onDone: () => void }) {
           setState("idle");
         } catch (err) {
           setState("error");
-          setMessage((err as Error).message);
+          setMessage(errorText(err));
         }
       }}
     >

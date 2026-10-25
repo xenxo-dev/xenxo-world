@@ -206,14 +206,17 @@ export async function myProjects(): Promise<Project[]> {
 
 export const REPORT_REASONS = ["illegal", "hate", "harassment", "sexual", "minors", "violence", "spam", "ip", "other"] as const;
 
-export async function report(targetType: "project" | "avatar" | "user", targetId: string, reason: (typeof REPORT_REASONS)[number], details: string) {
+export async function report(targetType: "project" | "avatar" | "user" | "chat", targetId: string, reason: (typeof REPORT_REASONS)[number], details: string) {
   const token = accountToken() ?? (await guestToken());
   const res = await fetch(new URL("/reports", REALTIME_URL), {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify({ target_type: targetType, target_id: targetId, reason, details }),
   });
-  if (!res.ok) throw new ApiError("report_failed", "no se pudo enviar la denuncia");
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+    throw new ApiError(data.error ?? "unknown", data.message ?? "report failed");
+  }
 }
 
 async function guestToken(): Promise<string> {

@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { Suspense, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { XROrigin, useXR, useXRControllerLocomotion } from "@react-three/xr";
 import * as THREE from "three";
@@ -7,7 +7,8 @@ import { net } from "../net/session";
 import { world } from "../net/world-store";
 import type { AvatarRef } from "@xenxo/protocol";
 import { useAccount } from "../net/account";
-import { AvatarBody } from "./Avatars";
+import { AvatarBody, ChatBubble } from "./Avatars";
+import { createMotion, smoothSpeed } from "./motion";
 import { input } from "./input";
 
 const SPEED = 4.5; // m/s
@@ -35,6 +36,7 @@ export function Player({ active }: { active: boolean }) {
   const avatar = useRef<THREE.Group>(null!);
   const pos = useRef(SPAWN.clone());
   const look = useRef({ yaw: 0, pitch: -0.12 });
+  const motion = useRef(createMotion()).current;
   const lastSend = useRef(0);
   const inXR = useXR((s) => s.session != null);
 
@@ -62,6 +64,7 @@ export function Player({ active }: { active: boolean }) {
         _fwd.set(-Math.sin(l.yaw), 0, -Math.cos(l.yaw));
         _right.set(-_fwd.z, 0, _fwd.x);
         const step = SPEED * Math.min(dt, 0.05);
+        smoothSpeed(motion, Math.min(1, Math.hypot(input.move.x, input.move.y)) * SPEED, dt);
         pos.current.addScaledVector(_fwd, input.move.y * step).addScaledVector(_right, input.move.x * step);
         pos.current.x = THREE.MathUtils.clamp(pos.current.x, 1, CHUNK_SIZE - 1);
         pos.current.z = THREE.MathUtils.clamp(pos.current.z, 1, CHUNK_SIZE - 1);
@@ -111,7 +114,10 @@ export function Player({ active }: { active: boolean }) {
     <>
       <XROrigin ref={origin} />
       <group ref={avatar}>
-        <AvatarBody avatar={myAvatar} color="#f6f1e7" />
+        <AvatarBody avatar={myAvatar} color="#e07a5f" motion={motion} />
+        <Suspense fallback={null}>
+          <ChatBubble self />
+        </Suspense>
       </group>
     </>
   );

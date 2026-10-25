@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { AssetKind, BudgetProblem } from "@xenxo/assets";
-import { t, type Key } from "../i18n";
+import { errorText, t, type Key } from "../i18n";
 import { prepareModel, type PreparedModel } from "../net/account";
 import { Notice } from "./ui";
 
@@ -51,7 +51,7 @@ export function ModelPicker({
               setState("ready");
               onReady(m.problems.length ? null : m);
             } catch (err) {
-              setError((err as Error).message);
+              setError(errorText(err));
               setState("error");
             }
           }}

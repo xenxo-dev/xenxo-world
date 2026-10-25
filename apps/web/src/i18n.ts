@@ -114,6 +114,42 @@ const es = {
   "common.error": "Algo ha fallado: {msg}",
   "legal.privacy": "Privacidad",
   "legal.terms": "Condiciones",
+  "chat.title": "Chat de la plaza",
+  "chat.placeholder": "Escribe en la plaza…",
+  "chat.send": "Enviar",
+  "chat.guest": "Crea una cuenta para escribir.",
+  "chat.signup": "Crear cuenta",
+  "chat.empty": "Nadie ha dicho nada todavía.",
+  "chat.hint": "Enter para escribir · Esc para salir",
+  "chat.open": "Chat",
+  "chat.close": "Cerrar chat",
+  "chat.report": "Denunciar este mensaje",
+  "chat.notice.rate_limited": "Vas muy rápido; espera unos segundos.",
+  "chat.notice.forbidden": "Necesitas una cuenta para escribir.",
+  "err.bad_name": "Nombre no válido: de 2 a 32 letras, números, espacios, «.», «_» o «-».",
+  "err.age_required": "Hace falta tener 14 años o más para crear una cuenta.",
+  "err.terms_required": "Acepta las condiciones y la política de privacidad.",
+  "err.flow_expired": "Ha caducado; vuelve a intentarlo.",
+  "err.passkey_invalid": "No se pudo verificar la passkey.",
+  "err.unknown_passkey": "Esta passkey no pertenece a ninguna cuenta.",
+  "err.unknown_user": "La cuenta ya no existe.",
+  "err.unauthorized": "Tienes que iniciar sesión.",
+  "err.forbidden": "No tienes permiso para hacer esto.",
+  "err.rate_limited": "Has hecho demasiadas peticiones; espera un poco.",
+  "err.too_large": "El archivo es demasiado grande.",
+  "err.budget_exceeded": "El modelo supera el presupuesto permitido.",
+  "err.bad_kind": "Los VRM solo valen como personaje.",
+  "err.not_found": "No existe o ya se ha borrado.",
+  "err.too_many_projects": "Has llegado al máximo de 3 proyectos.",
+  "err.bad_title": "El título debe tener entre 3 y 60 caracteres.",
+  "err.bad_summary": "La descripción admite hasta 280 caracteres.",
+  "err.bad_url": "El enlace debe empezar por https://",
+  "err.not_glb": "No es un modelo válido: exporta como glTF binario (.glb) o .vrm.",
+  "err.bad_structure": "El archivo está dañado o incompleto.",
+  "err.external_reference": "El modelo usa archivos externos; exporta todo embebido en un único .glb.",
+  "err.forbidden_extension": "El modelo usa funciones no admitidas: {list}.",
+  "err.network": "No hay conexión con el servidor.",
+  "err.unknown": "Algo ha fallado. Inténtalo de nuevo.",
 } as const;
 
 export type Key = keyof typeof es;
@@ -227,6 +263,42 @@ const en: Record<Key, string> = {
   "common.error": "Something went wrong: {msg}",
   "legal.privacy": "Privacy",
   "legal.terms": "Terms",
+  "chat.title": "Plaza chat",
+  "chat.placeholder": "Say something to the plaza…",
+  "chat.send": "Send",
+  "chat.guest": "Create an account to write.",
+  "chat.signup": "Create account",
+  "chat.empty": "Nobody has said anything yet.",
+  "chat.hint": "Enter to type · Esc to leave",
+  "chat.open": "Chat",
+  "chat.close": "Close chat",
+  "chat.report": "Report this message",
+  "chat.notice.rate_limited": "You're going too fast; wait a few seconds.",
+  "chat.notice.forbidden": "You need an account to write.",
+  "err.bad_name": "Invalid name: 2 to 32 letters, numbers, spaces, '.', '_' or '-'.",
+  "err.age_required": "You must be 14 or older to create an account.",
+  "err.terms_required": "Please accept the terms and the privacy policy.",
+  "err.flow_expired": "It expired; please try again.",
+  "err.passkey_invalid": "The passkey couldn't be verified.",
+  "err.unknown_passkey": "This passkey doesn't belong to any account.",
+  "err.unknown_user": "The account no longer exists.",
+  "err.unauthorized": "You need to sign in.",
+  "err.forbidden": "You're not allowed to do this.",
+  "err.rate_limited": "Too many requests; please wait a bit.",
+  "err.too_large": "The file is too large.",
+  "err.budget_exceeded": "The model is over the allowed budget.",
+  "err.bad_kind": "VRM files can only be used as characters.",
+  "err.not_found": "It doesn't exist or has been deleted.",
+  "err.too_many_projects": "You've reached the limit of 3 projects.",
+  "err.bad_title": "The title must be 3 to 60 characters long.",
+  "err.bad_summary": "The description can be up to 280 characters.",
+  "err.bad_url": "The link must start with https://",
+  "err.not_glb": "Not a valid model: export as binary glTF (.glb) or .vrm.",
+  "err.bad_structure": "The file is damaged or incomplete.",
+  "err.external_reference": "The model uses external files; export everything embedded in a single .glb.",
+  "err.forbidden_extension": "The model uses unsupported features: {list}.",
+  "err.network": "Can't reach the server.",
+  "err.unknown": "Something went wrong. Please try again.",
 };
 
 const DICTS = { es, en } satisfies Record<string, Record<Key, string>>;
@@ -264,6 +336,20 @@ export function t(key: Key, vars: Record<string, string | number> = {}): string 
     s = s.replace(`{${k}}`, typeof v === "number" ? v.toLocaleString(lang === "es" ? "es-ES" : "en-GB") : v);
   }
   return s;
+}
+
+/**
+ * Mensaje legible para un error del servidor o de la validación de modelos.
+ * Los errores llevan un código estable; el texto lo pone el cliente en su idioma.
+ */
+export function errorText(e: unknown): string {
+  const err = e as { code?: string; name?: string; detail?: { forbidden?: string[] } } | null;
+  if (err?.name === "TypeError") return t("err.network");
+  const key = `err.${err?.code ?? ""}`;
+  if (key in DICTS[lang]) {
+    return t(key as Key, { list: err?.detail?.forbidden?.join(", ") ?? "" });
+  }
+  return t("err.unknown");
 }
 
 /** Ruta de las páginas legales en el idioma actual. */

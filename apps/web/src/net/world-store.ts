@@ -6,7 +6,7 @@
  * una entidad o un avatar), nunca de cada pose.
  */
 import { useSyncExternalStore } from "react";
-import type { AvatarPose, Entity, Peer, ServerMessage } from "@xenxo/protocol";
+import type { AvatarPose, ChatMessage, Entity, Peer, ServerMessage } from "@xenxo/protocol";
 import type { ConnectionStatus } from "./NetworkAdapter";
 
 export interface PoseSample {
@@ -64,6 +64,7 @@ class WorldStore {
         this.bump();
         break;
       case "SNAPSHOT":
+        chat.reset(m.payload.chat ?? []);
         this.entities = new Map(m.payload.entities.map((e) => [e.entity_id, e]));
         this.peers = new Map(m.payload.peers.filter((p) => p.session_id !== this.sessionId).map((p) => [p.session_id, p]));
         for (const p of m.payload.poses) this.pushPose(p.session_id, this.serverNow(), p.head);
@@ -94,9 +95,16 @@ class WorldStore {
         this.poseBuffers.delete(m.payload.session_id);
         this.bump();
         break;
+      case "CHAT_MSG":
+        chat.add(m.payload);
+        break;
+      case "CHAT_REMOVED":
+        chat.remove(m.payload.id);
+        break;
       case "ERROR":
         this.lastError = `${m.payload.code}: ${m.payload.message}`;
         console.warn("[xenxo]", this.lastError, m.payload.detail ?? "");
+        if (m.payload.code === "rate_limited" || m.payload.code === "forbidden") chat.notice(m.payload.code);
         this.bump();
         break;
       default:
@@ -113,6 +121,65 @@ class WorldStore {
 }
 
 export const world = new WorldStore();
+
+/* ------------------------------------------------------------------ */
+/* Chat: suscripción propia para no re-renderizar la escena por cada mensaje */
+/* ------------------------------------------------------------------ */
+
+const CHAT_KEEP = 60;
+/** Segundos que un bocadillo sigue sobre la cabeza de quien habla. */
+export const BUBBLE_MS = 7000;
+
+class ChatStore {
+  messages: ChatMessage[] = [];
+  /** Último aviso del servidor (límite de frecuencia, sin permiso). */
+  lastNotice: { code: string; at: number } | null = null;
+  private version = 0;
+  private listeners = new Set<() => void>();
+
+  subscribe = (fn: () => void) => {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  };
+  getVersion = () => this.version;
+  private bump() {
+    this.version++;
+    for (const fn of this.listeners) fn();
+  }
+
+  reset(list: ChatMessage[]) {
+    this.messages = list.slice(-CHAT_KEEP);
+    this.bump();
+  }
+  add(m: ChatMessage) {
+    if (this.messages.some((x) => x.id === m.id)) return;
+    this.messages = [...this.messages, m].slice(-CHAT_KEEP);
+    this.bump();
+  }
+  remove(id: string) {
+    this.messages = this.messages.filter((m) => m.id !== id);
+    this.bump();
+  }
+  notice(code: string) {
+    this.lastNotice = { code, at: Date.now() };
+    this.bump();
+  }
+  /** Último mensaje reciente de una sesión (para el bocadillo). */
+  bubbleFor(sessionId: string, now = world.serverNow()): ChatMessage | null {
+    for (let i = this.messages.length - 1; i >= 0; i--) {
+      const m = this.messages[i]!;
+      if (now - m.t > BUBBLE_MS) return null;
+      if (m.session_id === sessionId) return m;
+    }
+    return null;
+  }
+}
+
+export const chat = new ChatStore();
+
+export function useChatVersion() {
+  return useSyncExternalStore(chat.subscribe, chat.getVersion);
+}
 
 /** Re-renderiza solo ante cambios estructurales. */
 export function useWorldVersion() {

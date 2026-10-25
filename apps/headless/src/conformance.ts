@@ -8,7 +8,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { XenxoClient } from "./client";
-import { makeBoxGlb, withExternalImage } from "./fixtures";
+import { makeBoxGlb, makeVrmMannequin, withExternalImage } from "./fixtures";
 import { Api } from "./http";
 
 const baseUrl = process.env.XENXO_URL ?? "http://localhost:8787";
@@ -204,6 +204,18 @@ await scenario("avatar propio: los demás lo ven en el peer de la persona regist
   watcher.close();
 });
 
+await scenario("avatar VRM: se acepta tal cual, como VRM, y no como modelo de proyecto", async () => {
+  const api = new Api(baseUrl);
+  await api.register(`conf ${randomUUID().slice(0, 6)}`);
+  const vrm = await makeVrmMannequin();
+  const asModel = await api.upload(vrm, "model");
+  assert(!asModel.ok && asModel.error === "bad_kind", "un VRM no debería aceptarse como modelo de proyecto");
+  const up = await api.upload(vrm, "avatar");
+  assert(up.ok && up.data.format === "vrm", `el VRM debería aceptarse como avatar: ${JSON.stringify(up)}`);
+  const set = await api.call<{ user: { avatar_format: string } }>("POST", "/me/avatar", { hash: up.data.hash });
+  assert(set.ok && set.data.user.avatar_format === "vrm", "el perfil debería guardar el formato VRM");
+});
+
 await scenario("proyecto: crea su stand en la plaza y al borrarlo desaparece", async () => {
   const api = new Api(baseUrl);
   await api.register(`conf ${randomUUID().slice(0, 6)}`);
@@ -290,6 +302,73 @@ if (agentKey) {
     c.close();
   });
 }
+
+/* ------------------------------------------------------------------ */
+/* Chat                                                                 */
+/* ------------------------------------------------------------------ */
+
+await scenario("chat: un invitado lee pero no escribe", async () => {
+  const c = await XenxoClient.connect({ baseUrl });
+  const r = await c.chat("hola");
+  assert(r.type === "ERROR" && r.payload.code === "forbidden", "un invitado no debería poder escribir");
+  c.close();
+});
+
+await scenario("chat: lo que escribe una persona registrada llega a todos y queda en el SNAPSHOT", async () => {
+  const api = new Api(baseUrl);
+  const { user } = await api.register(`conf ${randomUUID().slice(0, 6)}`);
+  const listener = await XenxoClient.connect({ baseUrl });
+  const me = await XenxoClient.connect({ baseUrl, token: api.token });
+  const text = `hola plaza ${randomUUID().slice(0, 6)}`;
+  const heard = listener.next("CHAT_MSG", (m) => m.payload.text === text, 4000);
+  const sent = await me.chat(`  hola\u0007   plaza ${text.slice(-6)}  `);
+  assert(sent.type === "CHAT_MSG" && sent.payload.text === text, `el servidor debería limpiar el texto: ${JSON.stringify(sent.payload)}`);
+  const h = await heard;
+  assert(h.payload.sender.display_name === user.display_name && h.payload.sender.kind === "user", "remitente incorrecto");
+  const late = await XenxoClient.connect({ baseUrl });
+  assert(late.snapshot.chat?.some((m) => m.text === text), "quien llega después debería ver el mensaje reciente");
+  late.close();
+  me.close();
+  listener.close();
+});
+
+await scenario("chat: límite de 5 mensajes cada 10 s y de 280 caracteres", async () => {
+  const api = new Api(baseUrl);
+  await api.register(`conf ${randomUUID().slice(0, 6)}`);
+  const me = await XenxoClient.connect({ baseUrl, token: api.token });
+  const long = await me.chat("a".repeat(281));
+  assert(long.type === "ERROR" && long.payload.code === "bad_message", "más de 280 caracteres debería rechazarse");
+  let limited = false;
+  for (let i = 0; i < 7 && !limited; i++) {
+    const r = await me.chat(`mensaje ${i}`);
+    if (r.type === "ERROR" && r.payload.code === "rate_limited") limited = true;
+  }
+  assert(limited, "debería aplicarse el límite de frecuencia");
+  me.close();
+});
+
+await scenario("chat: denunciar un mensaje guarda una copia y moderación puede retirarlo", async () => {
+  const api = new Api(baseUrl);
+  await api.register(`conf ${randomUUID().slice(0, 6)}`);
+  const me = await XenxoClient.connect({ baseUrl, token: api.token });
+  const sent = await me.chat("mensaje para denunciar");
+  assert(sent.type === "CHAT_MSG", "envío");
+  const guest = new Api(baseUrl, ((await (await fetch(new URL("/auth/guest", baseUrl), { method: "POST" })).json()) as { token: string }).token);
+  const rep = await guest.call<{ id: number }>("POST", "/reports", { target_type: "chat", target_id: sent.payload.id, reason: "harassment" });
+  assert(rep.ok, "la denuncia de un mensaje debería registrarse");
+  if (adminKey) {
+    const admin = new Api(baseUrl);
+    await admin.agentToken(adminKey);
+    const list = await admin.call<{ reports: { id: number; details: string }[] }>("GET", "/admin/reports");
+    const mine = list.ok ? list.data.reports.find((r) => r.id === rep.data.id) : undefined;
+    assert(mine?.details.includes("mensaje para denunciar"), "la denuncia debería conservar el texto del mensaje");
+    const removed = me.next("CHAT_REMOVED", (m) => m.payload.id === sent.payload.id, 4000);
+    const hide = await admin.call<{ hidden: boolean }>("POST", `/admin/chat/${sent.payload.id}/hide`);
+    assert(hide.ok && hide.data.hidden, "moderación debería poder retirarlo");
+    await removed;
+  }
+  me.close();
+});
 
 console.log(failed ? `\n${failed} escenario(s) fallaron.` : "\nTodo conforme.");
 process.exit(failed ? 1 : 0);

@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { loadAvatar, type LoadedAvatar } from "./avatar-model";
+import type { Motion } from "./motion";
 
 /**
  * Personaje propio. Mientras carga (o si falla), devuelve `fallback`:
  * el avatar por defecto nunca deja de verse.
  */
-export function CustomAvatar({ url, fallback }: { url: string | null; fallback: React.ReactNode }) {
+export function CustomAvatar({ url, fallback, motion }: { url: string | null; fallback: React.ReactNode; motion: Motion }) {
   const [avatar, setAvatar] = useState<LoadedAvatar | null>(null);
 
   useEffect(() => {
@@ -28,7 +29,7 @@ export function CustomAvatar({ url, fallback }: { url: string | null; fallback: 
     };
   }, [url]);
 
-  useFrame((_, dt) => avatar?.update(Math.min(dt, 0.1)));
+  useFrame((_, dt) => avatar?.update(Math.min(dt, 0.1), motion.speed, motion.phase));
 
   if (!url || !avatar) return <>{fallback}</>;
   return <primitive object={avatar.object} />;

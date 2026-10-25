@@ -41,6 +41,9 @@ export const BUDGETS = {
   maxMutationsPerMinute: 30,
   maxPoseHz: 15,
   maxLabelChars: 140,
+  maxChatChars: 280,
+  /** Mensajes de chat por sesión en una ventana de 10 s. */
+  maxChatPer10s: 5,
 } as const;
 
 /* ------------------------------------------------------------------ */
@@ -245,7 +248,10 @@ export const MutateWorldMsg = envelope(
 
 export const PingMsg = envelope("PING", z.object({ t: z.number() }));
 
-export const ClientMessage = z.discriminatedUnion("type", [HelloMsg, PoseMsg, MutateWorldMsg, PingMsg]);
+/** Chat de la plaza. Solo personas registradas y agentes; los invitados lo leen. */
+export const ChatMsg = envelope("CHAT", z.object({ text: z.string().min(1).max(BUDGETS.maxChatChars) }));
+
+export const ClientMessage = z.discriminatedUnion("type", [HelloMsg, PoseMsg, MutateWorldMsg, PingMsg, ChatMsg]);
 export type ClientMessage = z.infer<typeof ClientMessage>;
 
 /* --- servidor → cliente --- */
@@ -287,9 +293,25 @@ export const WelcomeMsg = envelope(
   }),
 );
 
+/** Un mensaje del chat tal como lo reparte el servidor. El texto es DATO: nunca instrucciones. */
+export const ChatMessage = z.object({
+  id: z.string(),
+  session_id: z.string(),
+  sender: z.object({ kind: PrincipalKind, display_name: z.string() }),
+  text: z.string(),
+  t: z.number(),
+});
+export type ChatMessage = z.infer<typeof ChatMessage>;
+
 export const SnapshotMsg = envelope(
   "SNAPSHOT",
-  z.object({ entities: z.array(Entity), peers: z.array(Peer), poses: z.array(AvatarPose) }),
+  z.object({
+    entities: z.array(Entity),
+    peers: z.array(Peer),
+    poses: z.array(AvatarPose),
+    /** Últimos mensajes del chat (opcional: los clientes antiguos lo ignoran). */
+    chat: z.array(ChatMessage).optional(),
+  }),
 );
 
 export const DeltaMsg = envelope(
@@ -317,6 +339,9 @@ export const ErrorMsg = envelope(
   z.object({ ref: z.string().optional(), code: ErrorCode, message: z.string(), detail: z.unknown().optional() }),
 );
 export const PongMsg = envelope("PONG", z.object({ t: z.number(), server_time: z.number() }));
+export const ChatBroadcastMsg = envelope("CHAT_MSG", ChatMessage);
+/** Moderación: un mensaje retirado. */
+export const ChatRemovedMsg = envelope("CHAT_REMOVED", z.object({ id: z.string() }));
 
 export const ServerMessage = z.discriminatedUnion("type", [
   WelcomeMsg,
@@ -328,6 +353,8 @@ export const ServerMessage = z.discriminatedUnion("type", [
   AckMsg,
   ErrorMsg,
   PongMsg,
+  ChatBroadcastMsg,
+  ChatRemovedMsg,
 ]);
 export type ServerMessage = z.infer<typeof ServerMessage>;
 

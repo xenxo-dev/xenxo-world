@@ -100,6 +100,15 @@ function Primitive({ shape, size, color, emissive }: PrimitiveV1Type) {
 type PrimitiveV1Type = ReturnType<typeof PrimitiveV1.parse>;
 
 function Label({ text, size }: { text: string; size: number }) {
+  // Cada texto en su propio Suspense: mientras carga la fuente, la geometría ya se ve.
+  return (
+    <Suspense fallback={null}>
+      <LabelText text={text} size={size} />
+    </Suspense>
+  );
+}
+
+function LabelText({ text, size }: { text: string; size: number }) {
   return (
     <Text font={FONT_URL} fontSize={size} color="#f6f1e7" anchorX="center" anchorY="middle" outlineWidth={size * 0.04} outlineColor="#2a211c">
       {text}

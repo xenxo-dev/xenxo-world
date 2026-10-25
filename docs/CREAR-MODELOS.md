@@ -26,11 +26,11 @@ Si te pasas en triángulos, el navegador intenta simplificar la malla para que q
    - Malla: aplica modificadores.
    - **No actives la compresión Draco**: la plaza usa meshopt y la aplica sola.
    - Sin luces ni cámaras.
-6. Si tu personaje tiene una animación llamada `idle` (o es la primera), se reproduce en bucle.
+6. Animaciones (opcional): si incluyes una acción llamada `idle` (en reposo) y otra llamada `walk` (andar), la plaza las mezcla según la velocidad. Sin ellas, tu personaje se mueve con un pequeño rebote. En Blender, crea las acciones en el *Action Editor* y expórtalas con *Animation → Actions*.
 
 ## Con VRoid Studio u otras apps de avatares
 
-Exporta en **VRM** (0.x o 1.0). Se respetan huesos, expresiones y física de pelo y ropa (los muelles). Si VRoid te da un archivo de más de 30.000 triángulos o 4 MB, en la exportación baja el número de polígonos y el tamaño de las texturas.
+Exporta en **VRM** (0.x o 1.0). Se respetan huesos, expresiones y física de pelo y ropa (los muelles). La plaza baja los brazos de la pose en T, anima el paso con los huesos humanoides y hace que parpadee si el VRM trae la expresión `blink`. Si VRoid te da un archivo de más de 30.000 triángulos o 4 MB, en la exportación baja el número de polígonos y el tamaño de las texturas.
 
 ## Otras opciones
 

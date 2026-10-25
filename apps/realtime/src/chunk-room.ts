@@ -35,6 +35,7 @@ const EXPO_SLOTS: [number, number][] = [
 ];
 
 const TICK_HZ = 10;
+const CHAT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_MESSAGE_BYTES = 64 * 1024;
 const MIN_POSE_INTERVAL_MS = 1000 / BUDGETS.maxPoseHz - 5;
 
@@ -63,6 +64,7 @@ export class ChunkRoom extends DurableObject<Env> {
   private dirty = new Set<string>();
   private lastPoseAt = new Map<string, number>();
   private mutationLog = new Map<string, number[]>();
+  private chatLog = new Map<string, number[]>();
   private tickTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -78,6 +80,10 @@ export class ChunkRoom extends DurableObject<Env> {
         op TEXT NOT NULL, entity_id TEXT NOT NULL, rev INTEGER NOT NULL, data TEXT);
       CREATE TABLE IF NOT EXISTS idem (key TEXT PRIMARY KEY, result TEXT NOT NULL, ts INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS stands (project_id TEXT PRIMARY KEY, slot INTEGER NOT NULL UNIQUE);
+      CREATE TABLE IF NOT EXISTS chat (
+        id TEXT PRIMARY KEY, ts INTEGER NOT NULL, sender TEXT NOT NULL, kind TEXT NOT NULL,
+        display_name TEXT NOT NULL, session_id TEXT NOT NULL, text TEXT NOT NULL, hidden INTEGER NOT NULL DEFAULT 0);
+      CREATE INDEX IF NOT EXISTS chat_ts ON chat (ts);
     `);
   }
 
@@ -180,7 +186,10 @@ export class ChunkRoom extends DurableObject<Env> {
           tick_hz: TICK_HZ,
           budgets: { ...BUDGETS },
         }));
-        this.send(ws, msg("SNAPSHOT", { entities: this.allEntities(), peers: this.peers(), poses: [...this.poses.values()] }));
+        this.send(
+          ws,
+          msg("SNAPSHOT", { entities: this.allEntities(), peers: this.peers(), poses: [...this.poses.values()], chat: this.recentChat() }),
+        );
         this.broadcast(msg("PEER_JOIN", this.peerOf(att)), ws);
         return;
       }
@@ -195,6 +204,8 @@ export class ChunkRoom extends DurableObject<Env> {
         this.scheduleTick();
         return;
       }
+      case "CHAT":
+        return this.handleChat(ws, att, m.id, m.payload.text);
       case "PING":
         return this.send(ws, msg("PONG", { t: m.payload.t, server_time: Date.now() }));
       case "MUTATE_WORLD":
@@ -424,18 +435,105 @@ export class ChunkRoom extends DurableObject<Env> {
     if (changes.length) this.broadcast(msg("DELTA", { changes }));
   }
 
-  /** Supresión (RGPD): elimina todo lo que pertenece a un actor en este chunk. */
+  /** Supresión (RGPD): elimina todo lo que pertenece a un actor en este chunk (entidades y chat). */
   async purgeOwner(owner: string): Promise<number> {
     this.ensureChunk(null);
     const ids = this.sql.exec<{ entity_id: string }>("SELECT entity_id FROM entities WHERE owner = ?", owner).toArray().map((r) => r.entity_id);
-    if (!ids.length) return 0;
+    const chatIds = this.sql.exec<{ id: string }>("SELECT id FROM chat WHERE sender = ?", owner).toArray().map((r) => r.id);
     this.ctx.storage.transactionSync(() => {
       this.sql.exec("DELETE FROM entities WHERE owner = ?", owner);
+      this.sql.exec("DELETE FROM chat WHERE sender = ?", owner);
       this.sql.exec("UPDATE events SET actor = 'deleted' WHERE actor = ?", owner);
-      this.logEvent("system", "PURGE", "owner", ids.length, null);
+      if (ids.length) this.logEvent("system", "PURGE", "owner", ids.length, null);
     });
-    this.broadcast(msg("DELTA", { changes: ids.map((entity_id) => ({ kind: "remove" as const, entity_id })) }));
-    return ids.length;
+    if (ids.length) this.broadcast(msg("DELTA", { changes: ids.map((entity_id) => ({ kind: "remove" as const, entity_id })) }));
+    for (const id of chatIds) this.broadcast(msg("CHAT_REMOVED", { id }));
+    return ids.length + chatIds.length;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Chat                                                               */
+  /* ---------------------------------------------------------------- */
+
+  private handleChat(ws: WebSocket, att: Attachment, ref: string | undefined, raw: string) {
+    const kind = att.principal.kind;
+    if (kind === "guest") return this.sendError(ws, ref, "forbidden", "crea una cuenta para escribir en el chat");
+    // Sin caracteres de control ni espacios de más. Los enlaces se muestran como texto, nunca clicables.
+    const text = raw.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, " ").replace(/\s+/g, " ").trim();
+    if (!text) return this.sendError(ws, ref, "bad_message", "mensaje vacío");
+
+    const sub = att.principal.sub;
+    const now = Date.now();
+    const recent = (this.chatLog.get(sub) ?? []).filter((t) => now - t < 10_000);
+    if (recent.length >= BUDGETS.maxChatPer10s) return this.sendError(ws, ref, "rate_limited", "vas muy rápido; espera unos segundos");
+    recent.push(now);
+    this.chatLog.set(sub, recent);
+
+    const message = {
+      id: randomId("m_", 8),
+      session_id: att.session_id,
+      sender: { kind, display_name: att.display_name },
+      text,
+      t: now,
+    };
+    this.sql.exec(
+      "INSERT INTO chat (id, ts, sender, kind, display_name, session_id, text) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      message.id,
+      now,
+      sub,
+      kind,
+      att.display_name,
+      att.session_id,
+      text,
+    );
+    // Retención: 7 días y como mucho 2.000 mensajes por chunk.
+    this.sql.exec("DELETE FROM chat WHERE ts < ?", now - CHAT_RETENTION_MS);
+    this.sql.exec("DELETE FROM chat WHERE id IN (SELECT id FROM chat ORDER BY ts DESC LIMIT -1 OFFSET 2000)");
+    this.broadcast(msg("CHAT_MSG", message));
+  }
+
+  private recentChat() {
+    return this.sql
+      .exec<{ id: string; ts: number; kind: string; display_name: string; session_id: string; text: string }>(
+        "SELECT id, ts, kind, display_name, session_id, text FROM chat WHERE hidden = 0 AND ts > ? ORDER BY ts DESC LIMIT 30",
+        Date.now() - CHAT_RETENTION_MS,
+      )
+      .toArray()
+      .reverse()
+      .map((r) => ({
+        id: r.id,
+        session_id: r.session_id,
+        sender: { kind: r.kind as "guest" | "user" | "agent", display_name: r.display_name },
+        text: r.text,
+        t: r.ts,
+      }));
+  }
+
+  /** Copia de un mensaje para adjuntarla a una denuncia (el chat caduca; la denuncia no). */
+  async chatMessage(id: string) {
+    this.ensureChunk(null);
+    return (
+      this.sql
+        .exec<{ id: string; ts: number; sender: string; display_name: string; text: string }>(
+          "SELECT id, ts, sender, display_name, text FROM chat WHERE id = ?",
+          id,
+        )
+        .toArray()[0] ?? null
+    );
+  }
+
+  /** Moderación: retira un mensaje para todos. */
+  async hideChat(id: string): Promise<boolean> {
+    this.ensureChunk(null);
+    const changed = this.sql.exec("UPDATE chat SET hidden = 1 WHERE id = ?", id).rowsWritten > 0;
+    if (changed) this.broadcast(msg("CHAT_REMOVED", { id }));
+    return changed;
+  }
+
+  /** Para la exportación de datos (RGPD). */
+  async chatOf(sender: string) {
+    this.ensureChunk(null);
+    return this.sql.exec("SELECT id, ts, display_name, text, hidden FROM chat WHERE sender = ? ORDER BY ts", sender).toArray();
   }
 
   private validateComponents(input: Record<string, unknown>): Components {

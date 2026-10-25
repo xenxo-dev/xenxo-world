@@ -13,9 +13,17 @@ export const AVATAR_HEIGHT = 1.75;
 
 export interface LoadedAvatar {
   object: THREE.Object3D;
-  /** Llamar en cada frame (muelles del pelo y la ropa de los VRM). */
-  update(dt: number): void;
+  /**
+   * Llamar en cada frame. `speed` en m/s y `phase` (radianes) del ciclo de paso,
+   * para que todos los personajes caminen al mismo ritmo que se mueven.
+   */
+  update(dt: number, speed: number, phase: number): void;
   dispose(): void;
+}
+
+/** 0 parado → 1 andando a paso normal. */
+export function walkAmount(speed: number) {
+  return Math.min(1, Math.max(0, (speed - 0.15) / 2.5));
 }
 
 let loader: GLTFLoader | null = null;
@@ -57,35 +65,133 @@ function tune(root: THREE.Object3D) {
 export async function loadAvatar(url: string): Promise<LoadedAvatar> {
   const gltf = await getLoader().loadAsync(url);
   const vrm = gltf.userData.vrm as VRM | undefined;
+  return vrm ? fromVrm(vrm, gltf.scene) : fromGltf(gltf.scene, gltf.animations);
+}
 
-  if (vrm) {
-    VRMUtils.removeUnnecessaryVertices(gltf.scene);
-    VRMUtils.combineSkeletons(gltf.scene);
-    VRMUtils.rotateVRM0(vrm); // los VRM 0.x miran hacia el otro lado
-    tune(vrm.scene);
-    // Los VRM miran a +Z; nuestros avatares miran a -Z.
-    vrm.scene.rotation.y += Math.PI;
-    const object = normalize(vrm.scene);
-    return {
-      object,
-      update: (dt) => vrm.update(dt),
-      dispose: () => VRMUtils.deepDispose(vrm.scene),
-    };
-  }
+/* ------------------------------------------------------------------ */
+/* VRM: huesos humanoides estándar → andar procedural y parpadeo        */
+/* ------------------------------------------------------------------ */
 
-  const scene = cloneSkinned(gltf.scene);
+function fromVrm(vrm: VRM, scene: THREE.Group): LoadedAvatar {
+  VRMUtils.removeUnnecessaryVertices(scene);
+  VRMUtils.combineSkeletons(scene);
+  VRMUtils.rotateVRM0(vrm); // los VRM 0.x miran hacia el otro lado
+  tune(vrm.scene);
+
+  const bone = (name: Parameters<NonNullable<VRM["humanoid"]>["getNormalizedBoneNode"]>[0]) =>
+    vrm.humanoid?.getNormalizedBoneNode(name) ?? null;
+  const b = {
+    hips: bone("hips"),
+    spine: bone("spine"),
+    lUpperLeg: bone("leftUpperLeg"),
+    rUpperLeg: bone("rightUpperLeg"),
+    lLowerLeg: bone("leftLowerLeg"),
+    rLowerLeg: bone("rightLowerLeg"),
+    lUpperArm: bone("leftUpperArm"),
+    rUpperArm: bone("rightUpperArm"),
+    lLowerArm: bone("leftLowerArm"),
+    rLowerArm: bone("rightLowerArm"),
+  };
+  const hipsY = b.hips?.position.y ?? 0;
+
+  // Los VRM cargan en pose de T: bajamos los brazos antes de medir y normalizar.
+  // En el espacio normalizado del VRM la izquierda del personaje es +X y mira a +Z.
+  const ARMS_DOWN = 1.2;
+  if (b.lUpperArm) b.lUpperArm.rotation.z = -ARMS_DOWN;
+  if (b.rUpperArm) b.rUpperArm.rotation.z = ARMS_DOWN;
+  vrm.update(0);
+
+  // Los VRM miran a +Z; nuestros avatares miran a -Z.
+  vrm.scene.rotation.y += Math.PI;
+  const object = normalize(vrm.scene);
+
+  let blinkIn = 2 + Math.random() * 3;
+  let blinkT = -1;
+
+  return {
+    object,
+    update: (dt, speed, phase) => {
+      const k = walkAmount(speed);
+      const s = Math.sin(phase);
+      if (b.lUpperLeg) b.lUpperLeg.rotation.x = s * 0.55 * k;
+      if (b.rUpperLeg) b.rUpperLeg.rotation.x = -s * 0.55 * k;
+      // La rodilla solo se dobla hacia atrás, en la fase de recogida de cada pierna.
+      if (b.lLowerLeg) b.lLowerLeg.rotation.x = -Math.max(0, -s) * 0.8 * k;
+      if (b.rLowerLeg) b.rLowerLeg.rotation.x = -Math.max(0, s) * 0.8 * k;
+      if (b.lUpperArm) b.lUpperArm.rotation.x = -s * 0.45 * k;
+      if (b.rUpperArm) b.rUpperArm.rotation.x = s * 0.45 * k;
+      if (b.lLowerArm) b.lLowerArm.rotation.x = -0.25 * k;
+      if (b.rLowerArm) b.rLowerArm.rotation.x = -0.25 * k;
+      if (b.hips) b.hips.position.y = hipsY + Math.abs(Math.cos(phase)) * 0.025 * k;
+      if (b.spine) b.spine.rotation.y = s * 0.08 * k;
+
+      // Parpadeo cada pocos segundos (si el VRM trae la expresión).
+      const em = vrm.expressionManager;
+      if (em) {
+        blinkIn -= dt;
+        if (blinkIn <= 0 && blinkT < 0) blinkT = 0;
+        if (blinkT >= 0) {
+          blinkT += dt;
+          em.setValue("blink", Math.sin(Math.min(1, blinkT / 0.15) * Math.PI));
+          if (blinkT > 0.15) {
+            blinkT = -1;
+            blinkIn = 2 + Math.random() * 4;
+            em.setValue("blink", 0);
+          }
+        }
+      }
+      vrm.update(dt);
+    },
+    dispose: () => VRMUtils.deepDispose(vrm.scene),
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* GLB: animaciones del archivo (idle / walk) o balanceo sencillo       */
+/* ------------------------------------------------------------------ */
+
+const IDLE = /idle|reposo|breath|stand/i;
+const WALK = /walk|andar|caminar|run|correr/i;
+
+function fromGltf(source: THREE.Group, clips: THREE.AnimationClip[]): LoadedAvatar {
+  const scene = cloneSkinned(source);
   tune(scene);
   // glTF define el frente en +Z (así exporta Blender la vista frontal); nuestros avatares miran a -Z.
   scene.rotation.y += Math.PI;
   const object = normalize(scene);
-  const mixer = gltf.animations.length ? new THREE.AnimationMixer(scene) : null;
-  // Si el modelo trae una animación en reposo (idle), se reproduce en bucle.
-  const idle = gltf.animations.find((a) => /idle|reposo|breath/i.test(a.name)) ?? gltf.animations[0];
-  if (mixer && idle) mixer.clipAction(idle).play();
+
+  const mixer = clips.length ? new THREE.AnimationMixer(scene) : null;
+  const walkClip = clips.find((c) => WALK.test(c.name));
+  const idleClip = clips.find((c) => IDLE.test(c.name)) ?? clips.find((c) => c !== walkClip);
+  const idle = mixer && idleClip ? mixer.clipAction(idleClip) : null;
+  const walk = mixer && walkClip ? mixer.clipAction(walkClip) : null;
+  idle?.play();
+  if (walk) {
+    walk.play();
+    walk.setEffectiveWeight(0);
+  }
+  const baseY = scene.position.y;
+  let blend = 0;
+
   return {
     object,
-    update: (dt) => mixer?.update(dt),
+    update: (dt, speed, phase) => {
+      const k = walkAmount(speed);
+      if (walk) {
+        // Mezcla suave entre reposo y andar según la velocidad.
+        blend += (k - blend) * Math.min(1, dt * 8);
+        walk.setEffectiveWeight(blend);
+        walk.timeScale = 0.6 + speed / 3;
+        idle?.setEffectiveWeight(1 - blend);
+      } else {
+        // Sin animación de andar: un pequeño rebote y balanceo al moverse.
+        scene.position.y = baseY + Math.abs(Math.sin(phase)) * 0.06 * k;
+        scene.rotation.z = Math.sin(phase) * 0.04 * k;
+      }
+      mixer?.update(dt);
+    },
     dispose: () => {
+      mixer?.stopAllAction();
       scene.traverse((o) => {
         const m = o as THREE.Mesh;
         if (m.isMesh) {

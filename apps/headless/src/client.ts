@@ -80,20 +80,33 @@ export class XenxoClient {
 
   /** Espera el próximo mensaje de un tipo (o que cumpla una condición). */
   next<T extends ServerType>(type: T, where?: (m: MessageOf<ServerMessage, T>) => boolean, timeoutMs = 5000) {
-    const seen = this.received.find((m) => m.type === type && (!where || where(m as MessageOf<ServerMessage, T>)));
+    return this.either(
+      (m) => m.type === type && (!where || where(m as MessageOf<ServerMessage, T>)),
+      timeoutMs,
+      `timeout esperando ${type}`,
+    ) as Promise<MessageOf<ServerMessage, T>>;
+  }
+
+  /** Un único waiter para varias respuestas posibles: al resolverse no deja restos que roben mensajes. */
+  private either(match: (m: ServerMessage) => boolean, timeoutMs = 5000, why = "timeout esperando respuesta"): Promise<ServerMessage> {
+    const seen = this.received.find(match);
     if (seen) {
       this.received.splice(this.received.indexOf(seen), 1);
-      return Promise.resolve(seen as MessageOf<ServerMessage, T>);
+      return Promise.resolve(seen);
     }
-    return new Promise<MessageOf<ServerMessage, T>>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`timeout esperando ${type}`)), timeoutMs);
-      this.waiters.push({
-        match: (m) => m.type === type && (!where || where(m as MessageOf<ServerMessage, T>)),
-        resolve: (m) => {
+    return new Promise((resolve, reject) => {
+      const waiter = {
+        match,
+        resolve: (m: ServerMessage) => {
           clearTimeout(timer);
-          resolve(m as MessageOf<ServerMessage, T>);
+          resolve(m);
         },
-      });
+      };
+      const timer = setTimeout(() => {
+        this.waiters.splice(this.waiters.indexOf(waiter), 1);
+        reject(new Error(why));
+      }, timeoutMs);
+      this.waiters.push(waiter);
     });
   }
 
@@ -108,11 +121,21 @@ export class XenxoClient {
   /** Envía una mutación y resuelve con su ACK o su ERROR. */
   async mutate(mutation: MutationOp, idempotency_key: string = randomUUID()) {
     const id = randomUUID();
-    const reply = Promise.race([
-      this.next("ACK", (m) => m.payload.ref === id),
-      this.next("ERROR", (m) => m.payload.ref === id),
-    ]);
+    const reply = this.either(
+      (m) => (m.type === "ACK" || m.type === "ERROR") && m.payload.ref === id,
+    ) as Promise<MessageOf<ServerMessage, "ACK"> | MessageOf<ServerMessage, "ERROR">>;
     this.sendRaw(msg("MUTATE_WORLD", { idempotency_key, target: "commit", mutation }, { id }));
+    return reply;
+  }
+
+  /** Envía un mensaje de chat y resuelve con el CHAT_MSG propio o con el ERROR. */
+  async chat(text: string) {
+    const id = randomUUID();
+    // El eco propio se reconoce por la sesión y el texto ya limpio no se conoce: vale el primero propio.
+    const reply = this.either(
+      (m) => (m.type === "CHAT_MSG" && m.payload.session_id === this.welcome.session_id) || (m.type === "ERROR" && m.payload.ref === id),
+    ) as Promise<MessageOf<ServerMessage, "CHAT_MSG"> | MessageOf<ServerMessage, "ERROR">>;
+    this.sendRaw(msg("CHAT", { text }, { id }));
     return reply;
   }
 

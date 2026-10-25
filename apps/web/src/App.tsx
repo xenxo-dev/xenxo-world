@@ -1,11 +1,19 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
+import type { XRStore } from "@react-three/xr";
 import { loadPref, savePref } from "./config";
+import { Chat } from "./hud/Chat";
 import { t, useLang } from "./i18n";
 import { setGuestName as setSessionGuestName, startSession } from "./net/session";
 import { useWorldVersion, world } from "./net/world-store";
-import { Panel } from "./panel/Panel";
+import { Panel, type Section } from "./panel/Panel";
 import { TouchJoystick } from "./world/TouchJoystick";
-import { World, xrStore } from "./world/World";
+
+/**
+ * La escena 3D (Three.js, WebXR, cargadores de modelos) se descarga aparte:
+ * el panel aparece al instante y la plaza se monta detrás en cuanto llega.
+ */
+const worldModule = import("./world/World");
+const World = lazy(() => worldModule.then((m) => ({ default: m.World })));
 
 function randomName() {
   return `${t("guest")}-${Math.floor(Math.random() * 9000 + 1000)}`;
@@ -19,15 +27,31 @@ function useVRSupported() {
   return ok;
 }
 
+/** La tienda XR existe cuando ha llegado el módulo 3D; hasta entonces no se ofrece la VR. */
+function useXRStore() {
+  const [store, setStore] = useState<XRStore | null>(null);
+  useEffect(() => {
+    let alive = true;
+    worldModule.then((m) => alive && setStore(m.xrStore)).catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return store;
+}
+
 const hudBox = "rounded-xl border border-cal/10 bg-noche/70 backdrop-blur";
 
 export function App() {
   const [inWorld, setInWorld] = useState(false);
+  const [panelSection, setPanelSection] = useState<Section>("solutions");
   const [name, setNameState] = useState(() => loadPref("name", randomName()));
   const [quality, setQualityState] = useState<"low" | "high">(() =>
     loadPref("quality", matchMedia("(pointer: coarse)").matches ? "low" : "high"),
   );
   const vr = useVRSupported();
+  const xrStore = useXRStore();
+  const enterVR = vr && xrStore ? () => void xrStore.enterVR() : null;
   const touch = matchMedia("(pointer: coarse)").matches;
   useWorldVersion();
   useLang();
@@ -50,12 +74,16 @@ export function App() {
 
   return (
     <div className="relative h-dvh w-full overflow-hidden bg-noche text-cal">
-      <World active={inWorld} quality={quality} />
+      <Suspense fallback={null}>
+        <World active={inWorld} quality={quality} />
+      </Suspense>
 
       {!inWorld && (
         <Panel
+          section={panelSection}
+          onSection={setPanelSection}
           onEnter={() => setInWorld(true)}
-          onEnterVR={vr ? () => void xrStore.enterVR() : null}
+          onEnterVR={enterVR}
           guestName={name}
           setGuestName={setName}
           quality={quality}
@@ -75,14 +103,21 @@ export function App() {
               {world.status === "open" ? t("hud.inPlaza", { n: world.peers.size + 1 }) : t("hud.connecting")}
             </span>
           </div>
-          {vr && (
+          {enterVR && (
             <button
-              onClick={() => void xrStore.enterVR()}
+              onClick={enterVR}
               className={`pointer-events-auto absolute right-4 top-[max(1rem,env(safe-area-inset-top))] px-3 py-2 text-sm text-azulejo-claro ${hudBox}`}
             >
               VR
             </button>
           )}
+          <Chat
+            touch={touch}
+            onSignup={() => {
+              setPanelSection("customize");
+              setInWorld(false);
+            }}
+          />
           {touch ? (
             <TouchJoystick />
           ) : (

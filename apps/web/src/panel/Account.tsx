@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { LANGS, legalPath, setLang, t, useLang } from "../i18n";
+import { errorText, LANGS, legalPath, setLang, t, useLang } from "../i18n";
 import {
   deleteAccount,
   exportData,
@@ -82,7 +82,7 @@ function SignedOut() {
       await fn();
     } catch (e) {
       // Cancelar el diálogo de la passkey no es un error que haya que enseñar.
-      if ((e as Error).name !== "NotAllowedError") setError((e as Error).message);
+      if ((e as Error).name !== "NotAllowedError") setError(errorText(e));
     } finally {
       setBusy(false);
     }
@@ -143,7 +143,7 @@ function SignedIn() {
       await fn();
       if (ok) setNote({ tone: "ok", text: ok });
     } catch (e) {
-      setNote({ tone: "error", text: (e as Error).message });
+      setNote({ tone: "error", text: errorText(e) });
     }
   };
 
@@ -234,7 +234,7 @@ function AvatarUploader() {
                   setModel(null);
                 } catch (e) {
                   setState("error");
-                  setError((e as Error).message);
+                  setError(errorText(e));
                 }
               }}
             >

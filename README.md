@@ -48,6 +48,7 @@ Cualquiera que se dé de alta (con una passkey) puede, desde **Personalizar** y 
 
 - Subir su **personaje** en `.glb` (Blender o lo que quiera) o `.vrm` (VRoid Studio y similares). Se valida y se optimiza en su propio navegador antes de subirlo, y los demás lo ven en la plaza.
 - **Publicar un proyecto** con título, descripción, enlace y un modelo 3D opcional. Aparece en la lista y como stand en la exposición, delante del edificio Proyectos.
+- Escribir en el **chat de la plaza** (los invitados lo leen); los mensajes salen también como bocadillos sobre los personajes y se pueden denunciar.
 - Descargar todos sus datos o borrar la cuenta (y todo su contenido) en un clic.
 
 Guía para quien crea modelos: [`docs/CREAR-MODELOS.md`](docs/CREAR-MODELOS.md).
@@ -67,7 +68,7 @@ export XENXO_URL=http://localhost:8787
 export XENXO_AGENT_KEY=dev-agent-key-change-me   # la clave de ejemplo de .dev.vars.example
 export XENXO_ADMIN_KEY=dev-admin-key-change-me   # moderación (opcional)
 
-npm run conformance    # 18 escenarios: protocolo, cuentas, assets, proyectos, RGPD y denuncias
+npm run conformance    # 23 escenarios: protocolo, cuentas, assets (GLB y VRM), proyectos, chat, RGPD y denuncias
 npm run agent:build    # el agente coloca un bloque en la plaza
 ```
 
@@ -108,5 +109,8 @@ npm run agent:build    # el agente coloca un bloque en la plaza
 - [ ] Agente con LLM y servidor MCP del mundo ("trae tu propio agente")
 - [ ] Varios chunks y paso de uno a otro
 - [ ] Modelos CC0 (Kenney, Quaternius) en lugar de primitivas
-- [ ] Parcelas con dueño, chat y retos con insignias
-- [ ] Animaciones de andar para los personajes y manos en VR
+- [x] Chat de la plaza con bocadillos, límites, denuncias y moderación
+- [x] Personajes que caminan (VRM con huesos humanoides, GLB con animaciones `idle`/`walk`)
+- [x] Carga inicial rápida: el panel no espera a la escena 3D
+- [ ] Parcelas con dueño y retos con insignias
+- [ ] Manos y panel dentro de la VR

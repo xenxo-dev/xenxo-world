@@ -198,7 +198,13 @@ export default {
       if (path === "/reports" && req.method === "POST") {
         const p = await bearer(req, env);
         if (!p) return json({ error: "unauthorized" }, 401, h);
-        const r = await dir.report(p.sub, await readJson(req));
+        const body = await readJson(req);
+        let evidence: unknown;
+        if (body.target_type === "chat" && typeof body.target_id === "string") {
+          evidence = await chunk(env, EXPO_CHUNK).chatMessage(body.target_id);
+          if (!evidence) return json({ error: "not_found", message: "ese mensaje ya no existe" }, 404, h);
+        }
+        const r = await dir.report(p.sub, body, evidence);
         return r.ok ? json(r.data, 201, h) : failure(r, h);
       }
 
@@ -230,9 +236,12 @@ export default {
         }
         if (path === "/me/export" && req.method === "GET") {
           const r = await dir.exportData(uid);
-          return r.ok
-            ? json(r.data, 200, { ...h, "Content-Disposition": 'attachment; filename="xenxo-mis-datos.json"' })
-            : failure(r, h);
+          if (!r.ok) return failure(r, h);
+          const chat = await chunk(env, EXPO_CHUNK).chatOf(`usr_${uid}`);
+          return json({ ...r.data, chat_messages: chat }, 200, {
+            ...h,
+            "Content-Disposition": 'attachment; filename="xenxo-mis-datos.json"',
+          });
         }
         if (path === "/me" && req.method === "DELETE") {
           const r = await dir.deleteAccount(uid);
@@ -284,6 +293,10 @@ export default {
           if (status !== "actioned" && status !== "dismissed") return json({ error: "bad_message" }, 400, h);
           await dir.resolveReport(Number(rep[1]), status);
           return json({ ok: true }, 200, h);
+        }
+        const hideChat = path.match(/^\/admin\/chat\/([a-zA-Z0-9_-]{4,40})\/hide$/);
+        if (hideChat && req.method === "POST") {
+          return json({ hidden: await chunk(env, EXPO_CHUNK).hideChat(hideChat[1]!) }, 200, h);
         }
         const hide = path.match(/^\/admin\/projects\/([a-zA-Z0-9_-]{4,40})\/hide$/);
         if (hide && req.method === "POST") {

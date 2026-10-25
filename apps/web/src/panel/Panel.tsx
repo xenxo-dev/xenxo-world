@@ -6,7 +6,7 @@ import { CustomizeSection, type CustomizeProps } from "./Account";
 import { ProjectsSection } from "./Projects";
 import { Block, card, Stat } from "./ui";
 
-type Section = "solutions" | "projects" | "agents" | "customize";
+export type Section = "solutions" | "projects" | "agents" | "customize";
 
 interface LiveState {
   online: number;
@@ -23,6 +23,8 @@ const SECTIONS: { id: Section; label: Key; icon: string }[] = [
 ];
 
 export interface PanelProps extends CustomizeProps {
+  section: Section;
+  onSection: (s: Section) => void;
   onEnter: () => void;
   onEnterVR: (() => void) | null;
 }
@@ -55,7 +57,7 @@ function ago(ts: number) {
 }
 
 export function Panel(props: PanelProps) {
-  const [section, setSection] = useState<Section>("solutions");
+  const { section, onSection: setSection } = props;
   const lang = useLang();
   const live = useLiveState();
 
