@@ -15,7 +15,10 @@ const agentKey = process.env.XENXO_AGENT_KEY;
 let failed = 0;
 async function scenario(name: string, fn: () => Promise<void>) {
   try {
-    await fn();
+    await Promise.race([
+      fn(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("timeout de 15 s")), 15_000)),
+    ]);
     console.log(`  ✓ ${name}`);
   } catch (e) {
     failed++;
@@ -31,7 +34,8 @@ console.log(`Conformidad xenxo protocolo v0 contra ${baseUrl}\n`);
 await scenario("un invitado entra y recibe WELCOME + SNAPSHOT con la plaza", async () => {
   const c = await XenxoClient.connect({ baseUrl, displayName: "conf-guest" });
   assert(c.welcome.principal.kind === "guest", "debería ser invitado");
-  assert(c.snapshot.entities.some((e) => e.entity_id === "plaza_tower"), "falta la torre de la plaza");
+  assert(c.snapshot.entities.some((e) => e.entity_id === "tower_body"), "falta el campanario de la plaza");
+  assert(c.snapshot.entities.some((e) => e.entity_id === "fountain_basin"), "falta la fuente de la plaza");
   c.close();
 });
 
@@ -104,6 +108,22 @@ if (!agentKey) {
     c.close();
   });
 
+  await scenario("agente: label@1 con traducciones se acepta; un código de idioma inválido no", async () => {
+    const c = await XenxoClient.connect({ baseUrl, agentKey });
+    const ok = await c.mutate({
+      op: "SPAWN",
+      components: {
+        "transform@1": { p: [24, 2, 24] },
+        "label@1": { text: "Hello", i18n: { es: "Hola", en: "Hello" }, size: 0.5 },
+      },
+    });
+    assert(ok.type === "ACK", `esperaba ACK: ${JSON.stringify(ok.payload)}`);
+    const delta = await c.mutate({ op: "PATCH", entity_id: ok.payload.entity_id, base_rev: 1, components: { "label@1": { text: "x", i18n: { espanol: "y" } } } });
+    assert(delta.type === "ERROR" && delta.payload.code === "bad_message", "esperaba bad_message por idioma inválido");
+    await c.mutate({ op: "DESPAWN", entity_id: ok.payload.entity_id, base_rev: 1 });
+    c.close();
+  });
+
   await scenario("agente: componente desconocido → unknown_component", async () => {
     const c = await XenxoClient.connect({ baseUrl, agentKey });
     const r = await c.mutate({ op: "SPAWN", components: { "transform@1": { p: [5, 0, 5] }, "laser@1": { power: 9000 } } });
@@ -120,7 +140,7 @@ if (!agentKey) {
 
   await scenario("agente: no puede tocar la plaza del sistema → forbidden", async () => {
     const c = await XenxoClient.connect({ baseUrl, agentKey });
-    const r = await c.mutate({ op: "DESPAWN", entity_id: "plaza_tower", base_rev: 1 });
+    const r = await c.mutate({ op: "DESPAWN", entity_id: "tower_body", base_rev: 1 });
     assert(r.type === "ERROR" && r.payload.code === "forbidden", "esperaba forbidden");
     c.close();
   });

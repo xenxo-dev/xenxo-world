@@ -17,10 +17,10 @@ if (!agentKey) {
   process.exit(1);
 }
 
-const PALETTE = ["#34d399", "#22d3ee", "#a78bfa", "#f472b6", "#fbbf24"];
+const PALETTE = ["#c8553d", "#2f6fb0", "#d9a441", "#5b8f3a", "#b2456e"];
 
 function decide(existingAgentBlocks: number): MutationOp {
-  // Zona Sandbox: banda junto al distrito (lado derecho de la plaza vista desde el spawn).
+  // Zona del Taller (Sandbox): delante de su edificio, en el lado este de la plaza.
   const i = existingAgentBlocks;
   const x = CHUNK_SIZE / 2 + 12 + (i % 6) * 1.6;
   const z = CHUNK_SIZE / 2 + 2 + Math.floor(i / 6) * 1.6;
@@ -30,7 +30,7 @@ function decide(existingAgentBlocks: number): MutationOp {
     components: {
       "transform@1": { p: [x, h / 2, z] },
       "primitive@1": { shape: "box", size: [1.2, h, 1.2], color: PALETTE[i % PALETTE.length]!, emissive: i % 3 === 0 },
-      "label@1": { text: new Date().toISOString().slice(0, 16).replace("T", " "), billboard: true, size: 0.3 },
+      "label@1": { text: `#${i + 1}`, billboard: true, size: 0.3 },
     },
   };
 }

@@ -1,9 +1,22 @@
 @import "tailwindcss";
 
+/* Paleta mediterránea: la misma en el panel y en la plaza. */
+@theme {
+  --color-noche: #1d1714;
+  --color-noche-2: #2a211c;
+  --color-cal: #f6f1e7;
+  --color-terracota: #c8553d;
+  --color-terracota-claro: #e07a5f;
+  --color-azulejo: #2f6fb0;
+  --color-azulejo-claro: #7fb0e0;
+  --color-huerta: #5b8f3a;
+  --color-ocre: #d9a441;
+}
+
 :root {
   color-scheme: dark;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  background: #0b0d1f;
+  background: var(--color-noche);
 }
 
 html,

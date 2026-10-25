@@ -87,7 +87,20 @@ export const LabelV1 = z.object({
   billboard: z.boolean().default(true),
   /** Altura de letra en metros. */
   size: z.number().min(0.05).max(4).default(0.6),
+  /**
+   * Traducciones opcionales por código de idioma ISO 639-1 ("es", "en", "ca"…).
+   * Si no hay traducción para el idioma del visitante, se muestra `text`.
+   */
+  i18n: z
+    .record(z.string().regex(/^[a-z]{2}$/), z.string().min(1).max(BUDGETS.maxLabelChars))
+    .refine((o) => Object.keys(o).length <= 12, "máximo 12 idiomas por label")
+    .optional(),
 });
+
+/** Texto de un label en el idioma pedido, con `text` como respaldo. */
+export function labelText(label: { text: string; i18n?: Record<string, string> }, lang: string): string {
+  return label.i18n?.[lang] ?? label.text;
+}
 
 /** Reservado en v0: el servidor lo rechaza hasta que exista el sandbox WASM. */
 export const BehaviorV1 = z.object({

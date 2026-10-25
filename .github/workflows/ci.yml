@@ -27,7 +27,7 @@ jobs:
         run: |
           KEY=ci-agent-key-$(openssl rand -hex 12)
           HASH=$(printf '%s' "$KEY" | sha256sum | cut -d' ' -f1)
-          printf 'TOKEN_SECRET=%s\nAGENT_KEYS=ci:%s\n' "$(openssl rand -hex 32)" "$HASH" > .dev.vars
+          printf 'TOKEN_SECRET=%s\nAGENT_KEYS=ci:%s\nDO_JURISDICTION=\n' "$(openssl rand -hex 32)" "$HASH" > .dev.vars
           echo "XENXO_AGENT_KEY=$KEY" >> "$GITHUB_ENV"
           npx wrangler dev --port 8787 > wrangler.log 2>&1 &
           for i in $(seq 1 60); do curl -sf http://localhost:8787/health && break; sleep 1; done

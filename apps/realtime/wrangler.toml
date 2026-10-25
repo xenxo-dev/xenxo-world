@@ -12,6 +12,9 @@ tag = "v1"
 new_sqlite_classes = ["ChunkRoom"]
 
 [vars]
+# Los datos de cada chunk se guardan y procesan solo en la UE (RGPD).
+# Cambiarlo después de desplegar crea objetos nuevos y vacíos: decídelo antes del primer despliegue.
+DO_JURISDICTION = "eu"
 # Orígenes permitidos para /auth y /chunk/*/state (separados por comas).
 ALLOWED_ORIGINS = "http://localhost:5173,https://xenxo.io,https://www.xenxo.io"
 

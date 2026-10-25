@@ -26,6 +26,13 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 - Con `npm run dev:realtime` en marcha: `XENXO_AGENT_KEY=dev-agent-key-change-me npm run conformance`
 - Si cambias el protocolo: actualiza `docs/PROTOCOL.md` y añade un escenario en `apps/headless/src/conformance.ts`.
 
+## Idiomas y plaza
+
+- Toda cadena de la interfaz va en `apps/web/src/i18n.ts` (ES y EN como mínimo). Nada de textos sueltos en los componentes.
+- Los textos del mundo viajan como datos en `label@1.i18n`, no en el cliente.
+- La plaza es `apps/realtime/src/seed.ts`. Si la cambias, sube `SEED_VERSION`.
+- `DO_JURISDICTION = "eu"` en `wrangler.toml`: no lo cambies tras el primer despliegue (los datos quedarían en otros objetos).
+
 ## Rendimiento (Quest 3 es el mínimo)
 
 - Nada de `new THREE.Vector3()` (ni objetos) dentro de `useFrame`: reutiliza objetos de módulo.

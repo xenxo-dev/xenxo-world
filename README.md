@@ -1,6 +1,6 @@
 # xenxo-world
 
-El mundo de **xenxo.io**: un panel 2D con soluciones, repos y agentes, y detrás una plaza 3D viva que se puede recorrer desde el navegador en **escritorio, móvil y VR** (Meta Quest 3 vía WebXR), y que construyen tanto personas como **agentes de IA**.
+El mundo de **xenxo.io**: un panel 2D con soluciones, repos y agentes, y detrás una plaza mayor mediterránea en 3D, viva, que se puede recorrer desde el navegador en **escritorio, móvil y VR** (Meta Quest 3 vía WebXR), y que construyen tanto personas como **agentes de IA**.
 
 Se está construyendo en público. Esto es la v0.
 
@@ -18,7 +18,7 @@ Se está construyendo en público. Esto es la v0.
 ```
 
 - **Cloudflare Pages** sirve el cliente web (panel + 3D).
-- **Cloudflare Workers + Durable Objects** (`apps/realtime`): un objeto por chunk de 64 × 64 m. Valida cada mutación, guarda el estado en su SQLite, reparte las poses a 10 Hz y duerme cuando no hay mensajes (WebSocket Hibernation).
+- **Cloudflare Workers + Durable Objects** (`apps/realtime`): un objeto por chunk de 64 × 64 m, con jurisdicción de la UE (los datos se guardan y procesan solo en Europa). Valida cada mutación, guarda el estado en su SQLite, reparte las poses a 10 Hz y duerme cuando no hay mensajes (WebSocket Hibernation).
 - **GitHub Actions** despierta al agente constructor de ejemplo cada 6 horas.
 - Más adelante: **R2** para los assets glTF por hash y **Supabase** para el log global y las cuentas.
 
@@ -47,7 +47,7 @@ Para probar en las Quest 3 en la misma red, abre `http://<IP-de-tu-PC>:5173` en 
 export XENXO_URL=http://localhost:8787
 export XENXO_AGENT_KEY=dev-agent-key-change-me   # la clave de ejemplo de .dev.vars.example
 
-npm run conformance    # 9 escenarios del protocolo
+npm run conformance    # 10 escenarios del protocolo
 npm run agent:build    # el agente coloca un bloque en la plaza
 ```
 
@@ -74,9 +74,14 @@ npm run agent:build    # el agente coloca un bloque en la plaza
 - [x] Durable Object por chunk: autoridad, presupuestos, propiedad, `base_rev`, idempotencia, log
 - [x] Panel 2D (Solutions, Repos en vivo de GitHub, Agents en vivo, Customize)
 - [x] Plaza 3D como datos, avatares con interpolación, escritorio + móvil + WebXR
+- [x] Plaza mayor mediterránea (cal, terracota, azulejo, fuente, campanario, naranjos) con primitivas
+- [x] Español e inglés en el panel, el HUD y los carteles del mundo
+- [x] Datos de los chunks en la UE
 - [x] Cliente headless con banco de conformidad y agente de ejemplo
 - [ ] Panel dentro de la VR con `@react-three/uikit`
 - [ ] Manos en VR y teletransporte
 - [ ] Assets glTF en R2 con validación de presupuesto
 - [ ] Agente con LLM y servidor MCP del mundo ("trae tu propio agente")
 - [ ] Varios chunks y paso de uno a otro
+- [ ] Modelos CC0 (Kenney, Quaternius) en lugar de primitivas
+- [ ] Parcelas con dueño, chat con denuncias (DSA) y retos con insignias

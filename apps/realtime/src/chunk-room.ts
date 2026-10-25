@@ -26,7 +26,7 @@ import {
 } from "@xenxo/protocol";
 import type { Env } from "./index";
 import { randomId, type Principal } from "./auth";
-import { plazaSeed } from "./seed";
+import { plazaSeed, SEED_VERSION } from "./seed";
 
 const TICK_HZ = 10;
 const MAX_MESSAGE_BYTES = 64 * 1024;
@@ -110,11 +110,25 @@ export class ChunkRoom extends DurableObject<Env> {
     this.chunkId = stored ?? id ?? "c_0_0";
     if (!stored) this.sql.exec("INSERT INTO meta (k, v) VALUES ('chunk_id', ?)", this.chunkId);
 
-    const seeded = this.sql.exec("SELECT v FROM meta WHERE k = 'seeded'").toArray().length > 0;
-    if (!seeded && this.chunkId === "c_0_0") {
-      for (const { id, components } of plazaSeed()) this.insertEntity(id, "system", components);
-      this.sql.exec("INSERT INTO meta (k, v) VALUES ('seeded', ?)", String(Date.now()));
-    }
+    if (this.chunkId === "c_0_0") this.applySeed();
+  }
+
+  /**
+   * Siembra o actualiza la plaza del sistema. Si SEED_VERSION cambió, sustituye
+   * las entidades con dueño "system" y conserva las de personas y agentes.
+   */
+  private applySeed() {
+    const current = this.sql.exec<{ v: string }>("SELECT v FROM meta WHERE k = 'seed_version'").toArray()[0]?.v;
+    if (current === String(SEED_VERSION)) return;
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec("DELETE FROM entities WHERE owner = 'system'");
+      for (const { id, components } of plazaSeed()) {
+        // Si alguien ya usó ese id, la semilla no lo pisa.
+        if (!this.getRow(id)) this.insertEntity(id, "system", components);
+      }
+      this.logEvent("system", "SEED", "plaza", SEED_VERSION, null);
+      this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('seed_version', ?)", String(SEED_VERSION));
+    });
   }
 
   /* ---------------------------------------------------------------- */
@@ -370,7 +384,7 @@ export class ChunkRoom extends DurableObject<Env> {
   private publicState() {
     const events = this.sql
       .exec<{ ts: number; actor: string; op: string; entity_id: string }>(
-        "SELECT ts, actor, op, entity_id FROM events ORDER BY seq DESC LIMIT 10",
+        "SELECT ts, actor, op, entity_id FROM events WHERE actor != 'system' ORDER BY seq DESC LIMIT 10",
       )
       .toArray();
     const entities = this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM entities").one().n;

@@ -9,6 +9,15 @@ export interface Env {
   TOKEN_SECRET: string;
   AGENT_KEYS?: string;
   ALLOWED_ORIGINS?: string;
+  /** "eu" para que los datos de los chunks se guarden y procesen solo en la UE. Vacío = sin restricción. */
+  DO_JURISDICTION?: string;
+}
+
+/** Espacio de nombres de chunks, restringido a la jurisdicción configurada. */
+function chunks(env: Env): DurableObjectNamespace<ChunkRoom> {
+  return env.DO_JURISDICTION === "eu" || env.DO_JURISDICTION === "fedramp"
+    ? env.CHUNK.jurisdiction(env.DO_JURISDICTION)
+    : env.CHUNK;
 }
 
 const GUEST_TTL_MS = 60 * 60 * 1000;
@@ -63,7 +72,8 @@ export default {
     if (m) {
       const chunkId = m[1]!;
       if (!ChunkId.safeParse(chunkId).success) return json({ error: "chunk inválido" }, 400, h);
-      const stub = env.CHUNK.get(env.CHUNK.idFromName(chunkId));
+      const ns = chunks(env);
+      const stub = ns.get(ns.idFromName(chunkId));
       const headers = new Headers({ "X-Chunk-Id": chunkId });
 
       if (m[2] === "state") {

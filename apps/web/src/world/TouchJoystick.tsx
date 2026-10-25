@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { t } from "../i18n";
 import { input } from "./input";
 
 /** Joystick virtual para móvil. Escribe en `input.move`; el giro se hace arrastrando en el resto de la pantalla. */
@@ -32,7 +33,7 @@ export function TouchJoystick() {
   return (
     <div
       ref={base}
-      className="pointer-events-auto absolute bottom-[max(1.5rem,env(safe-area-inset-bottom))] left-6 h-32 w-32 touch-none rounded-full border border-white/15 bg-white/5 backdrop-blur-sm"
+      className="pointer-events-auto absolute bottom-[max(1.5rem,env(safe-area-inset-bottom))] left-6 h-32 w-32 touch-none rounded-full border border-cal/20 bg-noche/30 backdrop-blur-sm"
       onPointerDown={(e) => {
         e.stopPropagation();
         pointer.current = e.pointerId;
@@ -42,10 +43,10 @@ export function TouchJoystick() {
       onPointerMove={(e) => e.pointerId === pointer.current && update(e)}
       onPointerUp={end}
       onPointerCancel={end}
-      aria-label="Joystick de movimiento"
+      aria-label={t("hud.joystick")}
     >
       <div
-        className="absolute left-1/2 top-1/2 h-14 w-14 rounded-full border border-cyan-300/40 bg-cyan-300/20"
+        className="absolute left-1/2 top-1/2 h-14 w-14 rounded-full border border-terracota-claro/60 bg-terracota/40"
         style={{ transform: `translate(calc(-50% + ${knob.x}px), calc(-50% + ${knob.y}px))` }}
       />
     </div>

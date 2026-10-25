@@ -4,6 +4,7 @@ import { XR, createXRStore } from "@react-three/xr";
 import { Entities } from "./Entities";
 import { Avatars } from "./Avatars";
 import { Player } from "./Player";
+import { HORIZON, Sky } from "./Sky";
 import { attachDesktopInput, input } from "./input";
 
 /** Una sola tienda XR para toda la app. Activa foveation para ganar rendimiento en Quest. */
@@ -31,11 +32,12 @@ export function World({ active, quality }: { active: boolean; quality: "low" | "
       camera={{ fov: 70, near: 0.1, far: 400, position: [32, 14, 66] }}
     >
       <XR store={xrStore}>
-        <color attach="background" args={["#0b0d1f"]} />
-        <fog attach="fog" args={["#0b0d1f", 45, 140]} />
-        {/* Iluminación barata: ambiente + una direccional, sin sombras. */}
-        <hemisphereLight args={["#b9baff", "#2a2f63", 1.8]} />
-        <directionalLight position={[20, 40, 10]} intensity={1.6} />
+        <color attach="background" args={[HORIZON]} />
+        <fog attach="fog" args={[HORIZON, 60, 220]} />
+        <Sky />
+        {/* Atardecer cálido y barato: ambiente + una direccional baja desde el oeste, sin sombras. */}
+        <hemisphereLight args={["#ffe9cc", "#9c7a55", 1.5]} />
+        <directionalLight position={[-30, 22, 18]} intensity={1.7} color="#ffd6a8" />
         {/* Los textos cargan su fuente de forma asíncrona: que nunca bloqueen la escena ni el panel. */}
         <Suspense fallback={null}>
           <Entities />

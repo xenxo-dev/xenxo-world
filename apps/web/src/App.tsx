@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { loadPref, savePref } from "./config";
+import { t, useLang } from "./i18n";
 import { startSession } from "./net/session";
 import { useWorldVersion, world } from "./net/world-store";
 import { Panel } from "./panel/Panel";
@@ -7,7 +8,7 @@ import { TouchJoystick } from "./world/TouchJoystick";
 import { World, xrStore } from "./world/World";
 
 function randomName() {
-  return `visitante-${Math.floor(Math.random() * 9000 + 1000)}`;
+  return `${t("guest")}-${Math.floor(Math.random() * 9000 + 1000)}`;
 }
 
 function useVRSupported() {
@@ -18,6 +19,8 @@ function useVRSupported() {
   return ok;
 }
 
+const hudBox = "rounded-xl border border-cal/10 bg-noche/70 backdrop-blur";
+
 export function App() {
   const [inWorld, setInWorld] = useState(false);
   const [name, setNameState] = useState(() => loadPref("name", randomName()));
@@ -27,6 +30,7 @@ export function App() {
   const vr = useVRSupported();
   const touch = matchMedia("(pointer: coarse)").matches;
   useWorldVersion();
+  useLang();
 
   // La plaza se ve viva detrás del panel desde el primer segundo.
   useEffect(() => {
@@ -44,7 +48,7 @@ export function App() {
   };
 
   return (
-    <div className="relative h-dvh w-full overflow-hidden bg-[#0b0d1f] text-white">
+    <div className="relative h-dvh w-full overflow-hidden bg-noche text-cal">
       <World active={inWorld} quality={quality} />
 
       {!inWorld && (
@@ -60,20 +64,20 @@ export function App() {
 
       {inWorld && (
         <div className="pointer-events-none absolute inset-0">
-          <div className="pointer-events-auto absolute left-4 top-[max(1rem,env(safe-area-inset-top))] flex items-center gap-3 rounded-xl border border-white/10 bg-[#11142b]/70 px-3 py-2 text-sm backdrop-blur">
-            <button onClick={() => setInWorld(false)} className="text-white/80 hover:text-white" aria-label="Volver al panel">
-              ← Panel
+          <div className={`pointer-events-auto absolute left-4 top-[max(1rem,env(safe-area-inset-top))] flex items-center gap-3 px-3 py-2 text-sm ${hudBox}`}>
+            <button onClick={() => setInWorld(false)} className="text-cal/80 hover:text-cal" aria-label={t("hud.backLabel")}>
+              {t("hud.back")}
             </button>
-            <span className="h-4 w-px bg-white/15" />
-            <span className="flex items-center gap-1.5 text-white/70">
-              <span className={`h-2 w-2 rounded-full ${world.status === "open" ? "bg-emerald-400" : "bg-amber-400"}`} />
-              {world.status === "open" ? `${world.peers.size + 1} en la plaza` : "conectando…"}
+            <span className="h-4 w-px bg-cal/15" />
+            <span className="flex items-center gap-1.5 text-cal/70">
+              <span className={`h-2 w-2 rounded-full ${world.status === "open" ? "bg-huerta" : "bg-ocre"}`} />
+              {world.status === "open" ? t("hud.inPlaza", { n: world.peers.size + 1 }) : t("hud.connecting")}
             </span>
           </div>
           {vr && (
             <button
               onClick={() => void xrStore.enterVR()}
-              className="pointer-events-auto absolute right-4 top-[max(1rem,env(safe-area-inset-top))] rounded-xl border border-cyan-300/30 bg-[#11142b]/70 px-3 py-2 text-sm text-cyan-200 backdrop-blur"
+              className={`pointer-events-auto absolute right-4 top-[max(1rem,env(safe-area-inset-top))] px-3 py-2 text-sm text-azulejo-claro ${hudBox}`}
             >
               VR
             </button>
@@ -81,8 +85,8 @@ export function App() {
           {touch ? (
             <TouchJoystick />
           ) : (
-            <p className="absolute bottom-5 left-1/2 -translate-x-1/2 rounded-lg bg-[#11142b]/70 px-3 py-1.5 text-xs text-white/60">
-              WASD para moverte · arrastra para mirar
+            <p className={`absolute bottom-5 left-1/2 -translate-x-1/2 px-3 py-1.5 text-xs text-cal/70 ${hudBox}`}>
+              {t("hud.desktopHint")}
             </p>
           )}
         </div>

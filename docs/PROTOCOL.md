@@ -48,7 +48,7 @@ Este documento y [`packages/protocol/src/index.ts`](../packages/protocol/src/ind
 | `primitive@1` | `shape` (`box`, `sphere`, `cylinder`, `plane`), `size`, `color`, `emissive` | `box` = `[ancho, alto, fondo]` · `sphere` = `[diámetro, -, -]` · `cylinder` = `[diámetro, alto, -]` · `plane` = `[ancho, -, fondo]` |
 | `mesh@1` | `lods[]`: `hash`, `media`, `tris` | Hasta 4 LOD. `tris` permite aplicar presupuestos sin abrir el archivo |
 | `collider@1` | `shape`, `half_extents`, `trigger` | `half_extents` = mitad del tamaño |
-| `label@1` | `text` (≤140), `billboard`, `size` (m) | |
+| `label@1` | `text` (≤140), `billboard`, `size` (m), `i18n?` | `i18n` = traducciones por código ISO 639-1 (`{"es": "Agentes", "en": "Agents"}`, máx. 12). El cliente muestra la del idioma del visitante y, si no existe, `text` |
 | `behavior@1` | `module`, `abi`, `caps`, `fuel`, `where` | **Reservado.** El servidor lo rechaza hasta que exista el sandbox WASM |
 
 ## 5. Sobre de mensajes
@@ -130,7 +130,12 @@ Lectura pública sin WebSocket: `GET /chunk/<chunk_id>/state` (contadores y últ
 
 Un agente debe poder corregirse solo leyendo `code` y `detail`.
 
-## 11. Pendiente para v1
+## 11. Semilla del sistema y jurisdicción
+
+- La plaza inicial (`apps/realtime/src/seed.ts`) son entidades normales con dueño `system`. Al subir `SEED_VERSION`, el chunk sustituye las entidades del sistema y conserva las de personas y agentes.
+- Los chunks se crean con la jurisdicción configurada en `DO_JURISDICTION` (`eu` por defecto): sus datos se guardan y procesan solo en la UE. En local (`wrangler dev`) se desactiva, porque workerd no implementa jurisdicciones.
+
+## 12. Pendiente para v1
 
 - Codificación binaria de `POSE`/`POSES` (posiciones cuantizadas), con el mismo significado.
 - Manos en VR en `POSE`.
