@@ -1,6 +1,9 @@
 name = "xenxo-realtime"
 main = "src/index.ts"
 compatibility_date = "2026-10-01"
+# Solo en el dominio propio: sin URL pública *.workers.dev ni URLs de vista previa.
+workers_dev = false
+preview_urls = false
 
 # Un Durable Object por chunk. SQLite es el único backend disponible en el plan gratuito.
 [[durable_objects.bindings]]
