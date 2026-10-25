@@ -2,7 +2,7 @@
 
 /** Avatares de serie (VRM servidos como recursos estáticos, por hash). */
 export const AVATAR_PRESETS: { id: string; name: string; hash: string; format: "vrm" }[] = [
-  { id: "alba", name: "Alba", hash: "sha256:00cf519fc0e88a1a51c1ecb53ef5be9773fd6c43902d406f93f6f41b75b3a212", format: "vrm" },
+  { id: "alba", name: "Alba", hash: "sha256:927ec08956aae9186f4b0585645d2124d3586ab9f05ed0bf63848e439a0e2cf4", format: "vrm" },
   { id: "dani", name: "Dani", hash: "sha256:e4be79037d9833ae758f0f05a706dabe0b138c02644da63e6d08838894968d9c", format: "vrm" },
   { id: "nora", name: "Nora", hash: "sha256:157dcdf2818576b9d0f5a167e00e8844cd96eeedc2b6e179f2d9c4a2ea9b9b0b", format: "vrm" },
   { id: "kai", name: "Kai", hash: "sha256:0fa4a0fd85a943827ae7517bc57823ca96a7ef807ecc0b475aefe2424c01c70a", format: "vrm" },

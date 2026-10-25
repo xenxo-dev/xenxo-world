@@ -2,10 +2,10 @@
  {
   "id": "alba",
   "name": "Alba",
-  "hash": "sha256:00cf519fc0e88a1a51c1ecb53ef5be9773fd6c43902d406f93f6f41b75b3a212",
+  "hash": "sha256:927ec08956aae9186f4b0585645d2124d3586ab9f05ed0bf63848e439a0e2cf4",
   "format": "vrm",
-  "tris": 27753,
-  "bytes": 1323752
+  "tris": 27241,
+  "bytes": 1269400
  },
  {
   "id": "dani",
