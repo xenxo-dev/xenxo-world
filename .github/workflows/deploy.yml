@@ -1,0 +1,81 @@
+name: Desplegar
+
+# Publica en Cloudflare cada vez que el CI pasa en main (o a mano desde la pestaña Actions).
+# Configuración (una vez), en Settings → Secrets and variables → Actions:
+#   Secretos:  CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, TOKEN_SECRET, AGENT_KEYS (opcional)
+#   Variable:  WEB_DOMAIN (opcional, por defecto xenxo.io; el servidor va en api.<WEB_DOMAIN>)
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WEB_DOMAIN: ${{ vars.WEB_DOMAIN || 'xenxo.io' }}
+    steps:
+      - name: ¿Está configurado?
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ] || [ -z "${{ secrets.TOKEN_SECRET }}" ]; then
+            echo "::notice::Faltan CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID o TOKEN_SECRET: no se despliega."
+            echo "SKIP=1" >> "$GITHUB_ENV"
+          fi
+      - uses: actions/checkout@v4
+        if: env.SKIP != '1'
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: actions/setup-node@v4
+        if: env.SKIP != '1'
+        with:
+          node-version: 22
+          cache: npm
+      - if: env.SKIP != '1'
+        run: npm ci
+
+      - name: Bucket de modelos en la UE (solo la primera vez)
+        if: env.SKIP != '1'
+        working-directory: apps/realtime
+        run: npx wrangler r2 bucket create xenxo-assets --jurisdiction eu || echo "ya existe"
+
+      - name: Servidor de tiempo real → api.${{ env.WEB_DOMAIN }}
+        if: env.SKIP != '1'
+        working-directory: apps/realtime
+        env:
+          TOKEN_SECRET: ${{ secrets.TOKEN_SECRET }}
+          AGENT_KEYS: ${{ secrets.AGENT_KEYS }}
+        run: |
+          umask 077
+          printf 'TOKEN_SECRET=%s\n' "$TOKEN_SECRET" > "$RUNNER_TEMP/secrets.env"
+          if [ -n "$AGENT_KEYS" ]; then printf 'AGENT_KEYS=%s\n' "$AGENT_KEYS" >> "$RUNNER_TEMP/secrets.env"; fi
+          npx wrangler deploy \
+            --domain "api.$WEB_DOMAIN" \
+            --var "RP_ID:$WEB_DOMAIN" \
+            --var "ALLOWED_ORIGINS:https://$WEB_DOMAIN,https://www.$WEB_DOMAIN" \
+            --secrets-file "$RUNNER_TEMP/secrets.env"
+          rm -f "$RUNNER_TEMP/secrets.env"
+
+      - name: Web → ${{ env.WEB_DOMAIN }}
+        if: env.SKIP != '1'
+        run: |
+          VITE_REALTIME_URL="https://api.$WEB_DOMAIN" npm run build -w @xenxo/web
+          cd apps/web && npx wrangler deploy --domain "$WEB_DOMAIN" --domain "www.$WEB_DOMAIN"
+
+      - name: Comprobación
+        if: env.SKIP != '1'
+        run: |
+          sleep 10
+          curl -sf "https://api.$WEB_DOMAIN/health" && echo " ← servidor OK"
+          curl -sfI "https://$WEB_DOMAIN/" | head -1

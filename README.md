@@ -96,20 +96,19 @@ Si los FPS caen, baja un nivel solo. Se puede fijar a mano en *Personalizar → 
 
 ## Desplegar (gratis para empezar)
 
-1. **Servidor de tiempo real**
-   ```bash
-   cd apps/realtime
-   npx wrangler login
-   npx wrangler secret put TOKEN_SECRET      # cadena larga aleatoria
-   npm run hash-key -w @xenxo/headless       # genera una clave de agente y su hash
-   npx wrangler secret put AGENT_KEYS        # builder-01:<hash>,admin-01:<hash>:build|upload|admin
-   npx wrangler r2 bucket create xenxo-assets --jurisdiction eu
-   npm run deploy
-   ```
-   Añade tu dominio a `ALLOWED_ORIGINS` en `wrangler.toml` si usas otro distinto de xenxo.io, y ajusta `RP_ID` (el dominio de las passkeys).
-   Antes de abrir cuentas, completa los datos entre corchetes de `apps/web/public/legal/` y haz que los revise un profesional.
-2. **Web en Cloudflare Pages**: conecta este repo, directorio raíz del repositorio, comando `npm run build`, salida `apps/web/dist`, y la variable `VITE_REALTIME_URL` con la URL del Worker.
-3. **Agente en GitHub Actions**: en *Settings → Secrets and variables → Actions*, crea la variable `XENXO_URL` y el secreto `XENXO_AGENT_KEY`.
+Se publica solo: cada vez que el CI pasa en `main`, el flujo **Desplegar** (`.github/workflows/deploy.yml`) sube el servidor a `api.xenxo.io` y la web a `xenxo.io` (Cloudflare Workers, datos en la UE). Configuración, una vez:
+
+1. **Cloudflare**: crea la cuenta (gratis), añade el dominio `xenxo.io` (si lo compraste en otro sitio, cambia sus DNS a los de Cloudflare) y activa **R2** en el panel.
+2. **Token de API**: *My Profile → API Tokens → Create Token → «Edit Cloudflare Workers»*, limitado a tu cuenta y a la zona `xenxo.io`. Copia también el *Account ID* (columna derecha de la página del dominio).
+3. **GitHub** (*Settings → Secrets and variables → Actions*), secretos:
+   - `CLOUDFLARE_API_TOKEN` y `CLOUDFLARE_ACCOUNT_ID`,
+   - `TOKEN_SECRET`: una cadena larga aleatoria (p. ej. `openssl rand -hex 32`); no la cambies después o se cerrarán todas las sesiones,
+   - `AGENT_KEYS` (opcional): `npm run hash-key -w @xenxo/headless -- <tu-clave>` → `builder-01:<hash>` (y `admin-01:<hash>:build|upload|admin` para moderar).
+   - Variable opcional `WEB_DOMAIN` si usas otro dominio.
+4. **Antes de abrir cuentas**: completa los datos entre corchetes de `apps/web/public/legal/` (titular, NIF, dirección y email de contacto) y haz que los revise un profesional.
+5. *Actions → Desplegar → Run workflow* (o empuja a `main`).
+
+El agente de ejemplo usa la variable `XENXO_URL=https://api.xenxo.io` y el secreto `XENXO_AGENT_KEY`.
 
 **Antes de publicar un vídeo invitando a entrar**, pasa la cuenta de Cloudflare al plan Workers Paid (5 $/mes): en el gratuito, al superar los límites diarios el multijugador se corta hasta las 00:00 UTC.
 
