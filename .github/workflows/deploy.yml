@@ -45,6 +45,21 @@ jobs:
       - if: env.SKIP != '1'
         run: npm ci
 
+      - name: Subdominio workers.dev de la cuenta (lo exige Cloudflare; no publicamos nada en él)
+        if: env.SKIP != '1'
+        run: |
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          current=$(curl -s -H "$AUTH" "$API" | python3 -c "import json,sys; d=json.load(sys.stdin); print((d.get('result') or {}).get('subdomain') or '')")
+          if [ -n "$current" ]; then echo "ya existe: $current.workers.dev"; exit 0; fi
+          for name in xenxo xenxo-io xenxo-world "xenxo-$(date +%s)"; do
+            r=$(curl -s -X PUT -H "$AUTH" -H "Content-Type: application/json" --data "{\"subdomain\":\"$name\"}" "$API")
+            if echo "$r" | grep -q '"success":true'; then echo "creado: $name.workers.dev"; exit 0; fi
+            echo "$name no disponible: $(echo "$r" | head -c 300)"
+          done
+          echo "::error::No se pudo crear el subdominio workers.dev: abre una vez Workers & Pages en el panel de Cloudflare."
+          exit 1
+
       - name: Bucket de modelos en la UE (solo la primera vez)
         if: env.SKIP != '1'
         working-directory: apps/realtime
