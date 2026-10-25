@@ -14,7 +14,9 @@
     "build": "npm run build -w @xenxo/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "conformance": "npm run conformance -w @xenxo/headless",
-    "agent:build": "npm run agent -w @xenxo/headless"
+    "agent:build": "npm run agent -w @xenxo/headless",
+    "forge": "python3 tools/forge/forge.py && npm run forge:pack",
+    "forge:pack": "tsx tools/forge/pack.mjs"
   },
   "engines": {
     "node": ">=22"

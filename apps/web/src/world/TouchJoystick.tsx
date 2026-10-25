@@ -46,7 +46,7 @@ export function TouchJoystick() {
       aria-label={t("hud.joystick")}
     >
       <div
-        className="absolute left-1/2 top-1/2 h-14 w-14 rounded-full border border-terracota-claro/60 bg-terracota/40"
+        className="absolute left-1/2 top-1/2 h-14 w-14 rounded-full border border-neon-suave/60 bg-neon/25"
         style={{ transform: `translate(calc(-50% + ${knob.x}px), calc(-50% + ${knob.y}px))` }}
       />
     </div>

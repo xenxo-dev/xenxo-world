@@ -1,5 +1,6 @@
 import { ChunkId } from "@xenxo/protocol";
 import { assetMeta, assetKey, handleGet, handleUpload } from "./assets";
+import { isAvatarPreset } from "./avatar-presets-check";
 import { randomId, resolveAgent, signToken, verifyToken, type Principal } from "./auth";
 import type { ChunkRoom } from "./chunk-room";
 import type { Directory, UserRow } from "./directory";
@@ -11,6 +12,8 @@ export interface Env {
   CHUNK: DurableObjectNamespace<ChunkRoom>;
   DIRECTORY: DurableObjectNamespace<Directory>;
   ASSETS: R2Bucket;
+  /** Recursos estáticos: modelos de la plaza generados por la forja (por hash). */
+  STATIC?: Fetcher;
   TOKEN_SECRET: string;
   AGENT_KEYS?: string;
   ALLOWED_ORIGINS?: string;
@@ -177,7 +180,7 @@ export default {
 
       /* --- Assets --- */
       const asset = path.match(/^\/assets\/([0-9a-f]{64})$/);
-      if (asset && (req.method === "GET" || req.method === "HEAD")) return handleGet(asset[1]!, env.ASSETS, req);
+      if (asset && (req.method === "GET" || req.method === "HEAD")) return handleGet(asset[1]!, env.ASSETS, req, env.STATIC);
       if (path === "/assets" && req.method === "POST") {
         const p = await bearer(req, env);
         if (!p) return json({ error: "unauthorized", message: "inicia sesión para subir modelos" }, 401, h);
@@ -226,7 +229,9 @@ export default {
         if (path === "/me/avatar" && req.method === "POST") {
           const { hash } = await readJson(req);
           let format: "glb" | "vrm" = "glb";
-          if (hash !== null) {
+          if (hash !== null && typeof hash === "string" && isAvatarPreset(hash)) {
+            format = "vrm"; // avatar de serie
+          } else if (hash !== null) {
             const meta = typeof hash === "string" ? await assetMeta(env.ASSETS, hash) : null;
             if (!meta || meta.kind !== "avatar") return json({ error: "not_found", message: "ese avatar no existe" }, 404, h);
             format = meta.format;

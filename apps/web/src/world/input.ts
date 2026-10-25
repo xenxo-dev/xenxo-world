@@ -9,7 +9,16 @@ export const input = {
   yawDelta: 0,
   pitchDelta: 0,
   enabled: false,
+  /** Correr (Mayús en escritorio). */
+  run: false,
+  /** Salto pedido (se consume al aplicarlo). */
+  jump: false,
+  /** Gesto pedido desde el teclado o el HUD (se consume al aplicarlo). */
+  emote: null as string | null,
 };
+
+/** Teclas de gestos: 1 saludar, 2 bailar, 3 sentarse, 4 animar. */
+const EMOTE_KEYS: Record<string, string> = { Digit1: "wave", Digit2: "dance", Digit3: "sit", Digit4: "cheer" };
 
 const keys = new Set<string>();
 
@@ -18,6 +27,7 @@ function updateFromKeys() {
   const r = (keys.has("KeyD") || keys.has("ArrowRight") ? 1 : 0) - (keys.has("KeyA") || keys.has("ArrowLeft") ? 1 : 0);
   input.move.x = r;
   input.move.y = f;
+  input.run = keys.has("ShiftLeft") || keys.has("ShiftRight");
 }
 
 let attached = false;
@@ -29,6 +39,12 @@ export function attachDesktopInput(el: HTMLElement) {
   const down = (e: KeyboardEvent) => {
     if (!input.enabled || (e.target as HTMLElement)?.tagName === "INPUT") return;
     keys.add(e.code);
+    if (e.code === "Space" && !e.repeat) {
+      input.jump = true;
+      e.preventDefault();
+    }
+    const emote = EMOTE_KEYS[e.code];
+    if (emote && !e.repeat) input.emote = emote;
     updateFromKeys();
   };
   const up = (e: KeyboardEvent) => {

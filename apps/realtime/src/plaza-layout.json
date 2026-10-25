@@ -1,0 +1,190 @@
+{
+ "$comment": "Disposición de la plaza (coordenadas del mundo: X este, Z sur, metros). La usan seed.ts y la forja (tools/forge) para hornear la oclusión de cada pieza en su sitio. Si mueves algo aquí, vuelve a forjar y sube SEED_VERSION.",
+ "plaza": {
+  "min": [12, 12],
+  "max": [52, 52]
+ },
+ "fountain": [32, 30],
+ "spawn": [32, 43],
+ "tower": {
+  "id": "tower",
+  "p": [32, 8.6],
+  "facing": 0
+ },
+ "buildings": [
+  {
+   "id": "arcade",
+   "p": [7.5, 20.5],
+   "facing": 90,
+   "w": 14,
+   "d": 9,
+   "floors": [4.4, 3.3, 3.3],
+   "arcade": true,
+   "roof": "flat",
+   "wall": "#efe2cf",
+   "plinth": "#b9583a",
+   "shutter": "#2f5f8f",
+   "neon": "#ff4fd8",
+   "name": {
+    "es": "Recreativos",
+    "en": "Arcade"
+   }
+  },
+  {
+   "id": "projects",
+   "p": [7.5, 38.5],
+   "facing": 90,
+   "w": 14,
+   "d": 9,
+   "floors": [4.4, 3.3, 3.3],
+   "arcade": true,
+   "roof": "hip",
+   "wall": "#f4efe6",
+   "plinth": "#2f6fb0",
+   "shutter": "#3f6b4f",
+   "neon": "#4fa3ff",
+   "name": {
+    "es": "Proyectos",
+    "en": "Projects"
+   }
+  },
+  {
+   "id": "agents",
+   "p": [56.5, 20.5],
+   "facing": -90,
+   "w": 14,
+   "d": 9,
+   "floors": [4.4, 3.3, 3.3],
+   "arcade": true,
+   "roof": "hip",
+   "wall": "#ecc98f",
+   "plinth": "#8a5a2b",
+   "shutter": "#7a2e2a",
+   "neon": "#ffc24a",
+   "name": {
+    "es": "Agentes",
+    "en": "Agents"
+   }
+  },
+  {
+   "id": "sandbox",
+   "p": [56.5, 38.5],
+   "facing": -90,
+   "w": 14,
+   "d": 9,
+   "floors": [4.4, 3.3, 3.3],
+   "arcade": true,
+   "roof": "flat",
+   "wall": "#dfe7e4",
+   "plinth": "#4f7a3a",
+   "shutter": "#3f6b4f",
+   "neon": "#6dff8a",
+   "name": {
+    "es": "Taller",
+    "en": "Sandbox"
+   }
+  },
+  {
+   "id": "social",
+   "p": [19, 7.5],
+   "facing": 0,
+   "w": 12,
+   "d": 9,
+   "floors": [4.4, 3.3, 3.3],
+   "arcade": false,
+   "roof": "hip",
+   "wall": "#e8b7a0",
+   "plinth": "#7a3b2a",
+   "shutter": "#2f5f8f",
+   "neon": "#ff5fa0",
+   "name": {
+    "es": "La Terraza",
+    "en": "Social"
+   }
+  },
+  {
+   "id": "townhall",
+   "p": [45, 7.5],
+   "facing": 0,
+   "w": 14,
+   "d": 9,
+   "floors": [4.6, 3.6, 3.4],
+   "arcade": true,
+   "roof": "hip",
+   "wall": "#f1e4c8",
+   "plinth": "#9a8a70",
+   "shutter": "#3f6b4f",
+   "neon": "#ff6a3d",
+   "name": {
+    "es": "Ayuntamiento",
+    "en": "Town hall"
+   }
+  },
+  {
+   "id": "house_sw",
+   "p": [18.5, 56.5],
+   "facing": 180,
+   "w": 13,
+   "d": 9,
+   "floors": [4.2, 3.2, 3.2],
+   "arcade": true,
+   "roof": "hip",
+   "sign": false,
+   "wall": "#f2e2c4",
+   "plinth": "#a8492c",
+   "shutter": "#3f6b4f",
+   "neon": "#b06bff"
+  },
+  {
+   "id": "house_se",
+   "p": [45.5, 56.5],
+   "facing": 180,
+   "w": 13,
+   "d": 9,
+   "floors": [4.2, 3.2, 3.2],
+   "arcade": true,
+   "roof": "flat",
+   "sign": false,
+   "wall": "#e9d3c0",
+   "plinth": "#2f6fb0",
+   "shutter": "#2f5f8f",
+   "neon": "#3fe0d0"
+  }
+ ],
+ "trees": [
+  [17, 27],
+  [47, 27],
+  [17, 34],
+  [47, 34],
+  [23, 49],
+  [41, 49]
+ ],
+ "lamps": [
+  [24, 22],
+  [40, 22],
+  [24, 38],
+  [40, 38],
+  [14.5, 49.5],
+  [49.5, 49.5]
+ ],
+ "benches": [
+  [25.2, 30, 90],
+  [38.8, 30, 90],
+  [32, 23.2, 0],
+  [17.5, 30.5, 90],
+  [46.5, 30.5, 90]
+ ],
+ "terrace": [
+  [15.5, 15],
+  [19, 15.4],
+  [22.5, 15]
+ ],
+ "gate": {
+  "id": "gate",
+  "p": [32, 53.4],
+  "facing": 180,
+  "span": 9.0,
+  "height": 7.6,
+  "neon": "#4fa3ff"
+ }
+}

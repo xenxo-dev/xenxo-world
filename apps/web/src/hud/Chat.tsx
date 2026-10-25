@@ -67,7 +67,7 @@ export function Chat({ touch, onSignup }: { touch: boolean; onSignup: () => void
         aria-expanded={false}
       >
         {t("chat.open")}
-        {chat.messages.length > 0 && <span className="ml-2 rounded-full bg-terracota px-1.5 text-xs text-cal">{chat.messages.length}</span>}
+        {chat.messages.length > 0 && <span className="ml-2 rounded-full bg-neon px-1.5 text-xs text-noche">{chat.messages.length}</span>}
       </button>
     );
   }
@@ -91,7 +91,7 @@ export function Chat({ touch, onSignup }: { touch: boolean; onSignup: () => void
           return (
             <li key={m.id} className="group flex items-start gap-1.5">
               <p className="min-w-0 flex-1 break-words">
-                <span className={m.sender.kind === "agent" ? "text-azulejo-claro" : mine ? "text-terracota-claro" : "text-ocre"}>
+                <span className={m.sender.kind === "agent" ? "text-azulejo-claro" : mine ? "text-neon-suave" : "text-ocre"}>
                   {m.sender.kind === "agent" ? `${t("agents.agentPrefix")} · ` : ""}
                   {m.sender.display_name}
                 </span>
@@ -134,9 +134,9 @@ export function Chat({ touch, onSignup }: { touch: boolean; onSignup: () => void
               placeholder={t("chat.placeholder")}
               aria-label={t("chat.placeholder")}
               enterKeyHint="send"
-              className="min-w-0 flex-1 rounded-lg border border-cal/10 bg-cal/5 px-2.5 py-1.5 text-sm text-cal outline-none placeholder:text-cal/35 focus:border-terracota"
+              className="min-w-0 flex-1 rounded-lg border border-cal/10 bg-cal/5 px-2.5 py-1.5 text-sm text-cal outline-none placeholder:text-cal/35 focus:border-neon"
             />
-            <button type="submit" className="rounded-lg bg-terracota px-3 text-sm text-cal hover:bg-terracota-claro disabled:opacity-40" disabled={!text.trim()}>
+            <button type="submit" className="rounded-lg bg-neon px-3 text-sm font-medium text-noche hover:bg-neon-suave disabled:opacity-40" disabled={!text.trim()}>
               {t("chat.send")}
             </button>
           </form>

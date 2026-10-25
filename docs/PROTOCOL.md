@@ -76,8 +76,8 @@ Lectura pública sin WebSocket: `GET /chunk/<chunk_id>/state` (contadores y últ
 
 | Tipo | Payload | Notas |
 |---|---|---|
-| `HELLO` | `client_type`, `capabilities`, `display_name?` | Obligatorio antes de cualquier otro |
-| `POSE` | `t`, `head {p, r}`, `hand_l?`, `hand_r?` | Sin `entity_id`: el servidor sabe de quién es. Máx. 15 Hz; el exceso se descarta |
+| `HELLO` | `client_type`, `capabilities`, `display_name?`, `avatar?` | Obligatorio antes de cualquier otro. `avatar` = `{hash, format: "vrm"}` de un **avatar de serie** (invitados y agentes); cualquier otro hash se ignora, y las personas registradas llevan el de su cuenta |
+| `POSE` | `t`, `head {p, r}`, `hand_l?`, `hand_r?`, `emote?` | Sin `entity_id`: el servidor sabe de quién es. Máx. 15 Hz; el exceso se descarta. `emote` = gesto en curso (`^[a-z_]{1,24}$`; hoy `dance`, `wave`, `sit`, `talk`, `cheer`, `crouch`). Los clientes ignoran los que no conocen. La altura de la cabeza por encima de 1,6 m indica un salto |
 | `MUTATE_WORLD` | `idempotency_key`, `target`, `mutation` | Ver §8 |
 | `PING` | `t` | |
 | `CHAT` | `text` (1–280) | Solo personas registradas y agentes (los invitados reciben `forbidden`). Máx. 5 cada 10 s (`rate_limited`). El servidor quita caracteres de control y espacios de más |
@@ -89,7 +89,7 @@ Lectura pública sin WebSocket: `GET /chunk/<chunk_id>/state` (contadores y últ
 | `WELCOME` | `session_id`, `principal`, `chunk_id`, `server_time`, `tick_hz`, `budgets` |
 | `SNAPSHOT` | `entities[]`, `peers[]`, `poses[]`, `chat[]?` (últimos 30 mensajes) |
 | `DELTA` | `changes[]`: `{kind: "upsert", entity}` o `{kind: "remove", entity_id}` |
-| `POSES` | `t` (hora del servidor), `poses[]` — lote por tick (10 Hz) |
+| `POSES` | `t` (hora del servidor), `poses[]` (cada una con su `emote?`) — lote por tick (10 Hz) |
 | `PEER_JOIN` / `PEER_LEAVE` | datos del peer (`session_id`, `kind`, `display_name`, `client_type`, `avatar?`) / `session_id` |
 | `ACK` | `ref`, `entity_id`, `rev`, `replayed` |
 | `ERROR` | `ref`, `code`, `message`, `detail?` |
@@ -144,8 +144,8 @@ El mundo solo se escribe por WebSocket (`MUTATE_WORLD`). Lo que no es mundo va p
 | `POST /auth/passkey/register/options` · `/verify` | cualquiera | Alta con passkey: `display_name`, `age_confirmed: true` (14+), `accept_terms: "2026-10"` |
 | `POST /auth/passkey/login/options` · `/verify` | cualquiera | Acceso con passkey (descubrible, sin nombre de usuario) |
 | `POST /assets?kind=avatar\|model` | persona o agente | Sube un GLB/VRM. El servidor lo inspecciona, aplica el presupuesto, calcula el hash y lo guarda en R2 |
-| `GET /assets/<sha256-hex>` | público | Sirve el asset, inmutable y cacheable para siempre |
-| `GET /me` · `PATCH /me` · `POST /me/avatar` | persona | Perfil, nombre visible y personaje. Devuelven un token nuevo con nombre y avatar |
+| `GET /assets/<sha256-hex>` | público | Sirve el asset, inmutable y cacheable para siempre. Los **assets del sistema** (la plaza y los avatares de serie, generados por la forja) se sirven desde los recursos estáticos del Worker con la misma ruta |
+| `GET /me` · `PATCH /me` · `POST /me/avatar` | persona | Perfil, nombre visible y personaje (uno subido o uno de serie). Devuelven un token nuevo con nombre y avatar |
 | `GET /me/export` · `DELETE /me` | persona | RGPD: exportar todos tus datos; borrar la cuenta y todo su contenido |
 | `GET /projects` · `POST /projects` · `DELETE /projects/<id>` | público / persona | Proyectos. Al publicar, el chunk coloca su stand (pedestal, modelo y cartel) |
 | `POST /reports` | cualquiera con token | Denuncia (DSA): `target_type` (`project`, `avatar`, `user`, `chat`…), `target_id`, `reason`, `details?`. Si es un mensaje de chat, el servidor adjunta una copia: el chat caduca a los 7 días, la denuncia no |
@@ -160,13 +160,30 @@ El mundo solo se escribe por WebSocket (`MUTATE_WORLD`). Lo que no es mundo va p
 
 ## 12. Semilla del sistema y jurisdicción
 
-- La plaza inicial (`apps/realtime/src/seed.ts`) son entidades normales con dueño `system`. Al subir `SEED_VERSION`, el chunk sustituye las entidades del sistema y conserva las de personas y agentes.
+- La plaza inicial (`apps/realtime/src/seed.ts` + `plaza-layout.json`) son entidades normales con dueño `system`. Si cambia la semilla (su versión o su contenido, por ejemplo al volver a forjar los modelos), el chunk sustituye las entidades del sistema y conserva las de personas y agentes.
+- Su arquitectura son modelos `mesh@1` generados por la forja (`tools/forge`), con dos niveles de detalle y la oclusión ambiental horneada en el segundo canal UV.
+
+## 12 bis. Convenciones de los modelos (no son protocolo, son pistas de render)
+
+Un GLB puede nombrar sus materiales `xenxo:<biblioteca>.<tinte>` (p. ej. `xenxo:teja.b5583a`). El cliente web los viste con su biblioteca de texturas escaneadas (CC0) según el nivel gráfico y el ambiente; cualquier otro cliente ve el color base del GLB, que ya es correcto.
+
+| Biblioteca | Qué es |
+|---|---|
+| `cal`, `estuco`, `piedra`, `losa`, `adoquin`, `teja`, `azulejo`, `madera`, `persiana`, `hierro`, `metal`, `toldo`, `tela`, `corteza`, `tierra`, `hoja` | Superficies con textura real. Las UV del primer canal van **en metros** |
+| `neon` | Tubo de neón: brilla, mucho más de noche |
+| `farol` | Cristal de farolas y esferas de reloj: luz cálida de noche |
+| `ventana` | Vidrio: refleja de día; de noche se encienden unas sí y otras no |
+| `agua` | Superficie animada |
+| `oscuro`, `fruta`, `flor` | Colores sin textura |
+
+La oclusión horneada (si la hay) va como `occlusionTexture` en `texCoord: 1`.
 - Los chunks se crean con la jurisdicción configurada en `DO_JURISDICTION` (`eu` por defecto): sus datos se guardan y procesan solo en la UE. En local (`wrangler dev`) se desactiva, porque workerd no implementa jurisdicciones.
 
 ## 13. Pendiente para v1
 
 - Codificación binaria de `POSE`/`POSES` (posiciones cuantizadas), con el mismo significado.
 - Manos en VR en `POSE`.
+- Gestos con duración y sincronía (bailes en grupo) y gestos de cara (sonrisa, sorpresa) desde las expresiones VRM.
 - `behavior@1` con sandbox WASM y medición de combustible.
 - Propuestas en ramas y validación en el cliente headless antes de fusionar.
 - Escritura diferida del log de eventos a Postgres (Supabase) para consultas globales y copias.

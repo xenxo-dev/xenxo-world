@@ -29,7 +29,7 @@ export function CustomAvatar({ url, fallback, motion }: { url: string | null; fa
     };
   }, [url]);
 
-  useFrame((_, dt) => avatar?.update(Math.min(dt, 0.1), motion.speed, motion.phase));
+  useFrame((_, dt) => avatar?.update(Math.min(dt, 0.1), motion));
 
   if (!url || !avatar) return <>{fallback}</>;
   return <primitive object={avatar.object} />;

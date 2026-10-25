@@ -240,13 +240,29 @@ const envelope = <T extends string, P extends z.ZodTypeAny>(type: T, payload: P)
 
 export const HelloMsg = envelope(
   "HELLO",
-  z.object({ client_type: ClientType, capabilities: Capabilities, display_name: z.string().max(32).optional() }),
+  z.object({
+    client_type: ClientType,
+    capabilities: Capabilities,
+    display_name: z.string().max(32).optional(),
+    /**
+     * Avatar de serie elegido por un invitado o un agente (solo los que publica el servidor).
+     * Las personas registradas llevan el de su cuenta y esto se ignora.
+     */
+    avatar: z.lazy(() => AvatarRef).optional(),
+  }),
 );
 
 /** El cliente NO dice qué entidad mueve: el servidor la deduce de la sesión. */
+/**
+ * Gesto que el avatar está haciendo ("dance", "wave", "sit", "talk"…). Es texto libre corto:
+ * cada cliente reproduce los que conoce y trata los demás como si no hubiera gesto.
+ */
+export const Emote = z.string().regex(/^[a-z_]{1,24}$/);
+export const EMOTES = ["dance", "wave", "sit", "talk", "cheer", "crouch"] as const;
+
 export const PoseMsg = envelope(
   "POSE",
-  z.object({ t: z.number(), head: Pose, hand_l: Pose.optional(), hand_r: Pose.optional() }),
+  z.object({ t: z.number(), head: Pose, hand_l: Pose.optional(), hand_r: Pose.optional(), emote: Emote.optional() }),
 );
 
 export const MutationOp = z.discriminatedUnion("op", [
@@ -286,6 +302,7 @@ export const AvatarPose = z.object({
   head: Pose,
   hand_l: Pose.optional(),
   hand_r: Pose.optional(),
+  emote: Emote.optional(),
 });
 export type AvatarPose = z.infer<typeof AvatarPose>;
 

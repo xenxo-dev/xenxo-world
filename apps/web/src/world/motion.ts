@@ -7,10 +7,14 @@ export interface Motion {
   speed: number;
   /** Fase del ciclo de paso (radianes). La avanza quien dibuja. */
   phase: number;
+  /** En el aire (saltando). */
+  airborne: boolean;
+  /** Gesto en curso ("dance", "wave", "sit"…) o null. */
+  emote: string | null;
 }
 
 export function createMotion(): Motion {
-  return { speed: 0, phase: 0 };
+  return { speed: 0, phase: 0, airborne: false, emote: null };
 }
 
 /** Pasos por metro aproximados: el ciclo completo (dos pasos) son ~1,4 m. */

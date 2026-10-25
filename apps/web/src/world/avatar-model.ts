@@ -7,16 +7,19 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { clone as cloneSkinned } from "three/examples/jsm/utils/SkeletonUtils.js";
 import { VRMLoaderPlugin, VRMUtils, type VRM } from "@pixiv/three-vrm";
+import { VRMLookAtQuaternionProxy } from "@pixiv/three-vrm-animation";
+import { VrmAnimator } from "./animation";
+import type { Motion } from "./motion";
 
 export const AVATAR_HEIGHT = 1.75;
 
 export interface LoadedAvatar {
   object: THREE.Object3D;
   /**
-   * Llamar en cada frame. `speed` en m/s y `phase` (radianes) del ciclo de paso,
-   * para que todos los personajes caminen al mismo ritmo que se mueven.
+   * Llamar en cada frame con el estado de movimiento (velocidad, fase del paso,
+   * si está en el aire y el gesto en curso).
    */
-  update(dt: number, speed: number, phase: number): void;
+  update(dt: number, motion: Motion): void;
   dispose(): void;
 }
 
@@ -35,12 +38,16 @@ function getLoader() {
   return loader;
 }
 
-/** Ajusta altura, apoya los pies en y = 0 y centra en x/z. */
-function normalize(root: THREE.Object3D) {
+/**
+ * Ajusta altura, apoya los pies en y = 0 y centra en x/z.
+ * Con `keepRealScale` (VRM, que va en metros) respeta la estatura si es creíble.
+ */
+function normalize(root: THREE.Object3D, keepRealScale = false) {
   root.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(root);
   const size = box.getSize(new THREE.Vector3());
-  const scale = size.y > 0.01 ? AVATAR_HEIGHT / size.y : 1;
+  const plausible = keepRealScale && size.y > 1.3 && size.y < 2.2;
+  const scale = plausible ? 1 : size.y > 0.01 ? AVATAR_HEIGHT / size.y : 1;
   const wrapper = new THREE.Group();
   root.scale.multiplyScalar(scale);
   root.position.set(-((box.min.x + box.max.x) / 2) * scale, -box.min.y * scale, -((box.min.z + box.max.z) / 2) * scale);
@@ -95,36 +102,43 @@ function fromVrm(vrm: VRM, scene: THREE.Group): LoadedAvatar {
   };
   const hipsY = b.hips?.position.y ?? 0;
 
-  // Los VRM cargan en pose de T: bajamos los brazos antes de medir y normalizar.
-  // En el espacio normalizado del VRM la izquierda del personaje es +X y mira a +Z.
+  // Los VRM cargan en pose de T: se mide así y después se bajan los brazos
+  // (pose de respaldo mientras llegan las animaciones).
+  vrm.update(0);
+  // Los VRM miran a +Z; nuestros avatares miran a -Z.
+  vrm.scene.rotation.y += Math.PI;
+  const object = normalize(vrm.scene, true);
   const ARMS_DOWN = 1.2;
   if (b.lUpperArm) b.lUpperArm.rotation.z = -ARMS_DOWN;
   if (b.rUpperArm) b.rUpperArm.rotation.z = ARMS_DOWN;
-  vrm.update(0);
 
-  // Los VRM miran a +Z; nuestros avatares miran a -Z.
-  vrm.scene.rotation.y += Math.PI;
-  const object = normalize(vrm.scene);
-
+  // Proxy de mirada para las animaciones VRMA (evita que la librería lo cree con un aviso).
+  if (vrm.lookAt) {
+    const proxy = new VRMLookAtQuaternionProxy(vrm.lookAt);
+    proxy.name = "VRMLookAtQuaternionProxy";
+    vrm.scene.add(proxy);
+  }
+  const animator = new VrmAnimator(vrm);
   let blinkIn = 2 + Math.random() * 3;
   let blinkT = -1;
 
   return {
     object,
-    update: (dt, speed, phase) => {
-      const k = walkAmount(speed);
-      const s = Math.sin(phase);
-      if (b.lUpperLeg) b.lUpperLeg.rotation.x = s * 0.55 * k;
-      if (b.rUpperLeg) b.rUpperLeg.rotation.x = -s * 0.55 * k;
-      // La rodilla solo se dobla hacia atrás, en la fase de recogida de cada pierna.
-      if (b.lLowerLeg) b.lLowerLeg.rotation.x = -Math.max(0, -s) * 0.8 * k;
-      if (b.rLowerLeg) b.rLowerLeg.rotation.x = -Math.max(0, s) * 0.8 * k;
-      if (b.lUpperArm) b.lUpperArm.rotation.x = -s * 0.45 * k;
-      if (b.rUpperArm) b.rUpperArm.rotation.x = s * 0.45 * k;
-      if (b.lLowerArm) b.lLowerArm.rotation.x = -0.25 * k;
-      if (b.rLowerArm) b.rLowerArm.rotation.x = -0.25 * k;
-      if (b.hips) b.hips.position.y = hipsY + Math.abs(Math.cos(phase)) * 0.025 * k;
-      if (b.spine) b.spine.rotation.y = s * 0.08 * k;
+    update: (dt, m) => {
+      if (animator.ready) {
+        animator.update(dt, m.speed, m.airborne, m.emote);
+      } else {
+        // Respaldo: paso procedural sencillo hasta que cargan los clips.
+        const k = walkAmount(m.speed);
+        const s = Math.sin(m.phase);
+        if (b.lUpperLeg) b.lUpperLeg.rotation.x = s * 0.55 * k;
+        if (b.rUpperLeg) b.rUpperLeg.rotation.x = -s * 0.55 * k;
+        if (b.lLowerLeg) b.lLowerLeg.rotation.x = -Math.max(0, -s) * 0.8 * k;
+        if (b.rLowerLeg) b.rLowerLeg.rotation.x = -Math.max(0, s) * 0.8 * k;
+        if (b.lUpperArm) b.lUpperArm.rotation.x = -s * 0.45 * k;
+        if (b.rUpperArm) b.rUpperArm.rotation.x = s * 0.45 * k;
+        if (b.hips) b.hips.position.y = hipsY + Math.abs(Math.cos(m.phase)) * 0.025 * k;
+      }
 
       // Parpadeo cada pocos segundos (si el VRM trae la expresión).
       const em = vrm.expressionManager;
@@ -143,7 +157,10 @@ function fromVrm(vrm: VRM, scene: THREE.Group): LoadedAvatar {
       }
       vrm.update(dt);
     },
-    dispose: () => VRMUtils.deepDispose(vrm.scene),
+    dispose: () => {
+      animator.dispose();
+      VRMUtils.deepDispose(vrm.scene);
+    },
   };
 }
 
@@ -176,7 +193,8 @@ function fromGltf(source: THREE.Group, clips: THREE.AnimationClip[]): LoadedAvat
 
   return {
     object,
-    update: (dt, speed, phase) => {
+    update: (dt, m) => {
+      const { speed, phase } = m;
       const k = walkAmount(speed);
       if (walk) {
         // Mezcla suave entre reposo y andar según la velocidad.

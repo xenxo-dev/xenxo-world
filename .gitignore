@@ -7,3 +7,6 @@ dist/
 !.env.example
 *.log
 .DS_Store
+tools/materials/.cache/
+tools/forge/out/
+__pycache__/

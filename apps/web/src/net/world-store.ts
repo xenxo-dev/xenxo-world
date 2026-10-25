@@ -12,6 +12,8 @@ import type { ConnectionStatus } from "./NetworkAdapter";
 export interface PoseSample {
   t: number; // hora del servidor (ms)
   head: AvatarPose["head"];
+  /** Gesto en curso ("dance", "wave", "sit"…), si lo hay. */
+  emote?: string;
 }
 
 const BUFFER = 20;
@@ -67,7 +69,7 @@ class WorldStore {
         chat.reset(m.payload.chat ?? []);
         this.entities = new Map(m.payload.entities.map((e) => [e.entity_id, e]));
         this.peers = new Map(m.payload.peers.filter((p) => p.session_id !== this.sessionId).map((p) => [p.session_id, p]));
-        for (const p of m.payload.poses) this.pushPose(p.session_id, this.serverNow(), p.head);
+        for (const p of m.payload.poses) this.pushPose(p.session_id, this.serverNow(), p.head, p.emote);
         this.bump();
         break;
       case "DELTA":
@@ -81,7 +83,7 @@ class WorldStore {
         // Ajuste suave del reloj: nunca adelantamos el servidor.
         this.clockOffset = Math.min(this.clockOffset + 2, m.payload.t - Date.now());
         for (const p of m.payload.poses) {
-          if (p.session_id !== this.sessionId) this.pushPose(p.session_id, m.payload.t, p.head);
+          if (p.session_id !== this.sessionId) this.pushPose(p.session_id, m.payload.t, p.head, p.emote);
         }
         break;
       case "PEER_JOIN":
@@ -112,9 +114,9 @@ class WorldStore {
     }
   }
 
-  private pushPose(id: string, t: number, head: AvatarPose["head"]) {
+  private pushPose(id: string, t: number, head: AvatarPose["head"], emote?: string) {
     const buf = this.poseBuffers.get(id) ?? [];
-    buf.push({ t, head });
+    buf.push({ t, head, emote });
     if (buf.length > BUFFER) buf.shift();
     this.poseBuffers.set(id, buf);
   }

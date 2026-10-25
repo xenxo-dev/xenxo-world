@@ -9,7 +9,7 @@ import type { Ambience } from "./graphics";
  * Es presentación del cliente, no datos del mundo.
  */
 export const SKY = {
-  day: { top: "#6f9fd6", horizon: "#f3c99b", ground: "#c9a77c", fog: "#f3c99b" },
+  day: { top: "#5f8fd0", horizon: "#dfe6ee", ground: "#c9b79a", fog: "#d9e0e8" },
   night: { top: "#04060f", horizon: "#3a1c5c", ground: "#06070d", fog: "#120d26" },
 } as const;
 

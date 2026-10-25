@@ -14,6 +14,8 @@ import {
   useAccount,
   type PreparedModel,
 } from "../net/account";
+import { reconnect } from "../net/session";
+import { AVATAR_PRESETS, setChosenPreset, useChosenPreset } from "../world/presets";
 import { ModelPicker } from "./ModelPicker";
 import { Block, Button, card, input, Label, Notice, Segmented } from "./ui";
 
@@ -32,6 +34,7 @@ export function CustomizeSection(props: CustomizeProps) {
       <Block title={t("account.title")}>{user ? <SignedIn /> : <SignedOut />}</Block>
 
       <Block title={t("avatar.title")}>
+        <AvatarPresets />
         <AvatarUploader />
       </Block>
 
@@ -55,6 +58,53 @@ export function CustomizeSection(props: CustomizeProps) {
         <Segmented value={lang} onChange={setLang} options={LANGS} />
       </Block>
     </>
+  );
+}
+
+/**
+ * Personajes de serie (realistas y animados). Con cuenta se guardan en ella; sin cuenta,
+ * en este navegador, y la plaza los ve igual.
+ */
+function AvatarPresets() {
+  const user = useAccount();
+  const chosen = useChosenPreset();
+  const [busy, setBusy] = useState<string | null>(null);
+  const current = user ? user.avatar_hash : chosen?.hash;
+  const pick = async (id: string, hash: string) => {
+    setBusy(id);
+    try {
+      if (user) await setAvatar(hash);
+      else {
+        setChosenPreset(id);
+        reconnect();
+      }
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <div className="mb-4">
+      <p className="mb-3 text-sm text-cal/70">{t("avatar.presetsIntro")}</p>
+      <div className="grid grid-cols-4 gap-2 sm:grid-cols-8">
+        {AVATAR_PRESETS.map((p) => {
+          const on = current === p.hash;
+          return (
+            <button
+              key={p.id}
+              onClick={() => void pick(p.id, p.hash)}
+              disabled={busy !== null}
+              aria-pressed={on}
+              className={`group relative overflow-hidden rounded-xl border bg-gradient-to-b from-cal/[0.08] to-transparent transition ${
+                on ? "border-neon ring-2 ring-neon/40" : "border-cal/10 hover:border-cal/30"
+              }`}
+            >
+              <img src={`/avatars/${p.id}.webp`} alt="" loading="lazy" className="aspect-square w-full object-cover object-top transition group-hover:scale-105" />
+              <span className="absolute inset-x-0 bottom-0 bg-noche/70 py-0.5 text-center text-xs text-cal/90">{busy === p.id ? "…" : p.name}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -127,11 +177,11 @@ function SignedOut() {
         <Label htmlFor="acc-name">{t("customize.name")}</Label>
         <input id="acc-name" required minLength={2} maxLength={32} value={name} onChange={(e) => setName(e.target.value)} className={`${input} max-w-sm`} />
         <label className="mt-4 flex items-start gap-2 text-sm text-cal/80">
-          <input type="checkbox" checked={age} onChange={(e) => setAge(e.target.checked)} className="mt-1 accent-terracota" />
+          <input type="checkbox" checked={age} onChange={(e) => setAge(e.target.checked)} className="mt-1 accent-neon" />
           {t("account.age")}
         </label>
         <label className="mt-2 flex items-start gap-2 text-sm text-cal/80">
-          <input type="checkbox" checked={terms} onChange={(e) => setTerms(e.target.checked)} className="mt-1 accent-terracota" />
+          <input type="checkbox" checked={terms} onChange={(e) => setTerms(e.target.checked)} className="mt-1 accent-neon" />
           <span>
             {t("account.termsPrefix")}{" "}
             <a href={legalPath("terms")} target="_blank" rel="noreferrer" className="text-azulejo-claro underline">
@@ -238,7 +288,7 @@ function AvatarUploader() {
         <Notice>{t("avatar.needAccount")}</Notice>
       ) : (
         <div className="mt-4">
-          {user.avatar_hash && state !== "done" && (
+          {user.avatar_hash && !AVATAR_PRESETS.some((p) => p.hash === user.avatar_hash) && state !== "done" && (
             <div className="mb-3 flex flex-wrap items-center gap-3 text-sm text-cal/70">
               {t("avatar.current")}
               <Button variant="ghost" onClick={() => void setAvatar(null)}>

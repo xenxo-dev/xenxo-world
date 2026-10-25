@@ -7,6 +7,8 @@
  * cualquier cambio (tuyo o de una IA) no rompa el contrato.
  */
 import { randomUUID } from "node:crypto";
+import { AVATAR_PRESETS } from "../../realtime/src/avatar-presets";
+import { msg } from "@xenxo/protocol";
 import { XenxoClient } from "./client";
 import { makeBoxGlb, makeVrmMannequin, withExternalImage } from "./fixtures";
 import { Api } from "./http";
@@ -38,7 +40,7 @@ await scenario("un invitado entra y recibe WELCOME + SNAPSHOT con la plaza", asy
   const c = await XenxoClient.connect({ baseUrl, displayName: "conf-guest" });
   assert(c.welcome.principal.kind === "guest", "debería ser invitado");
   assert(c.snapshot.entities.some((e) => e.entity_id === "tower_body"), "falta el campanario de la plaza");
-  assert(c.snapshot.entities.some((e) => e.entity_id === "fountain_basin"), "falta la fuente de la plaza");
+  assert(c.snapshot.entities.some((e) => e.entity_id === "fountain"), "falta la fuente de la plaza");
   c.close();
 });
 
@@ -65,6 +67,39 @@ await scenario("dos clientes se ven: las poses de A llegan a B", async () => {
   await got;
   a.close();
   b.close();
+});
+
+await scenario("gestos: el emote de A llega a B con su pose; uno mal formado se descarta", async () => {
+  const a = await XenxoClient.connect({ baseUrl, displayName: "conf-emote-a" });
+  const b = await XenxoClient.connect({ baseUrl, displayName: "conf-emote-b" });
+  const got = b.next("POSES", (m) => m.payload.poses.some((p) => p.session_id === a.welcome.session_id && p.emote === "dance"), 3000);
+  a.pose([31, 1.6, 41], 0, "dance");
+  await got;
+  // Un emote con mayúsculas o espacios no pasa el esquema: el servidor lo rechaza como bad_message.
+  const bad = a.next("ERROR", (m) => m.payload.code === "bad_message", 3000);
+  a.sendRaw(JSON.stringify({ ...msg("POSE", { t: Date.now(), head: { p: [31, 1.6, 41], r: [0, 0, 0, 1] } }), payload: { t: Date.now(), head: { p: [31, 1.6, 41], r: [0, 0, 0, 1] }, emote: "Bailar mucho" } }));
+  await bad;
+  a.close();
+  b.close();
+});
+
+await scenario("avatar de serie: un invitado puede llevarlo; un hash cualquiera se ignora", async () => {
+  const preset = AVATAR_PRESETS[0]!;
+  const watcher = await XenxoClient.connect({ baseUrl });
+  const joinOk = watcher.next("PEER_JOIN", (m) => m.payload.display_name === "conf-preset" && m.payload.avatar?.hash === preset.hash, 3000);
+  const g1 = await XenxoClient.connect({ baseUrl, displayName: "conf-preset", avatar: { hash: preset.hash, format: "vrm" } });
+  await joinOk;
+  const fake = "sha256:" + "ab".repeat(32);
+  const joinFake = watcher.next("PEER_JOIN", (m) => m.payload.display_name === "conf-fake", 3000);
+  const g2 = await XenxoClient.connect({ baseUrl, displayName: "conf-fake", avatar: { hash: fake, format: "vrm" } });
+  const j = await joinFake;
+  if (j.payload.avatar) throw new Error("un invitado no puede vestir un archivo que no es de serie");
+  // El archivo del avatar de serie se sirve como cualquier otro asset.
+  const r = await fetch(new URL(`/assets/${preset.hash.slice(7)}`, baseUrl));
+  if (!r.ok) throw new Error(`el avatar de serie no se sirve: ${r.status}`);
+  g1.close();
+  g2.close();
+  watcher.close();
 });
 
 if (!agentKey) {

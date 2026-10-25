@@ -62,10 +62,10 @@ export function Panel(props: PanelProps) {
   const live = useLiveState();
 
   return (
-    <div className="pointer-events-auto absolute inset-0 flex items-end justify-center bg-noche/30 backdrop-blur-md sm:items-center sm:p-6">
-      <div className="flex h-[min(90dvh,760px)] w-full max-w-5xl flex-col overflow-hidden rounded-t-3xl border border-cal/10 bg-noche/85 shadow-2xl sm:h-[min(84dvh,700px)] sm:flex-row sm:rounded-3xl">
+    <div className="pointer-events-auto absolute inset-0 flex items-end justify-center bg-gradient-to-t from-noche/70 via-noche/20 to-transparent sm:items-center sm:p-6 lg:justify-start lg:pl-[5vw]">
+      <div className="flex h-[min(90dvh,760px)] w-full max-w-5xl flex-col lg:max-w-[880px] overflow-hidden rounded-t-[28px] border border-neon-suave/15 bg-noche/80 shadow-[0_30px_80px_-20px_rgb(0_0_0/0.7)] backdrop-blur-xl sm:h-[min(84dvh,700px)] sm:flex-row sm:rounded-[28px]">
         {/* Barra lateral (escritorio) */}
-        <aside className="hidden w-56 shrink-0 flex-col gap-1 border-r border-cal/10 p-5 sm:flex">
+        <aside className="azulejo hidden w-60 shrink-0 flex-col gap-1 border-r border-neon-suave/10 bg-noche-2/60 p-6 sm:flex">
           <Brand live={live} />
           <nav className="mt-6 flex flex-col gap-1">
             {SECTIONS.map((s) => (
@@ -73,11 +73,13 @@ export function Panel(props: PanelProps) {
                 key={s.id}
                 onClick={() => setSection(s.id)}
                 aria-current={section === s.id ? "page" : undefined}
-                className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition ${
-                  section === s.id ? "bg-terracota/25 text-cal" : "text-cal/60 hover:bg-cal/5 hover:text-cal"
+                className={`relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[15px] transition ${
+                  section === s.id
+                    ? "bg-neon/10 text-cal before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-full before:bg-neon before:shadow-[0_0_10px_var(--color-neon)]"
+                    : "text-cal/60 hover:bg-cal/5 hover:text-cal"
                 }`}
               >
-                <span aria-hidden className="w-4 text-center text-terracota-claro">{s.icon}</span>
+                <span aria-hidden className={`w-4 text-center ${section === s.id ? "text-neon-suave" : "text-cal/40"}`}>{s.icon}</span>
                 {t(s.label)}
               </button>
             ))}
@@ -98,15 +100,20 @@ export function Panel(props: PanelProps) {
         <main className="min-h-0 flex-1 overflow-y-auto p-5 sm:p-7">
           {section === "solutions" && (
             <Block title={t("nav.solutions")}>
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <p className="-mt-2 mb-5 max-w-prose text-[15px] leading-relaxed text-cal/65">{t("solutions.intro")}</p>
+              <ul className="divide-y divide-cal/[0.07] border-y border-cal/[0.07]">
                 {SOLUTIONS.map((s) => (
-                  <a key={s.tag.en} href={s.href} className={`${card} block p-4 transition hover:border-cal/25`}>
-                    <span className={`inline-block rounded-full border px-2 py-0.5 text-xs ${ACCENTS[s.accent]}`}>{s.tag[lang]}</span>
-                    <h3 className="mt-3 font-medium text-cal">{s.title[lang]}</h3>
-                    <p className="mt-1 text-sm text-cal/60">{s.summary[lang]}</p>
-                  </a>
+                  <li key={s.tag.en}>
+                    <a href={s.href} className="group flex flex-col gap-2 py-4 sm:grid sm:grid-cols-[6rem_1fr] sm:items-baseline sm:gap-4">
+                      <span className={`justify-self-start rounded-md border px-2 py-0.5 text-xs ${ACCENTS[s.accent]}`}>{s.tag[lang]}</span>
+                      <span>
+                        <span className="display block text-[17px] font-semibold text-cal transition group-hover:text-neon-suave">{s.title[lang]}</span>
+                        <span className="mt-1 block max-w-prose text-sm leading-relaxed text-cal/60">{s.summary[lang]}</span>
+                      </span>
+                    </a>
+                  </li>
                 ))}
-              </div>
+              </ul>
             </Block>
           )}
 
@@ -153,7 +160,7 @@ export function Panel(props: PanelProps) {
                 key={s.id}
                 onClick={() => setSection(s.id)}
                 aria-current={section === s.id ? "page" : undefined}
-                className={`flex flex-col items-center gap-0.5 rounded-lg py-1.5 text-[11px] ${section === s.id ? "text-terracota-claro" : "text-cal/50"}`}
+                className={`flex flex-col items-center gap-0.5 rounded-lg py-1.5 text-[11px] ${section === s.id ? "text-neon-suave [text-shadow:0_0_8px_var(--color-neon)]" : "text-cal/50"}`}
               >
                 <span aria-hidden className="text-base">{s.icon}</span>
                 {t(s.label)}
@@ -169,9 +176,11 @@ export function Panel(props: PanelProps) {
 function Brand({ live }: { live: LiveState | null }) {
   return (
     <div className="flex w-full items-center justify-between gap-3">
-      <span className="text-xl font-semibold tracking-tight text-cal">xenxo<span className="text-terracota-claro">.io</span></span>
+      <span className="display neon-sign text-[26px] font-bold leading-none" translate="no">
+        xenxo<span className="dot">.io</span>
+      </span>
       <span className="flex items-center gap-1.5 text-xs text-cal/60" title={t("online.title")}>
-        <span className={`h-2 w-2 rounded-full ${live ? "bg-huerta" : "bg-cal/30"}`} />
+        <span className={`h-2 w-2 rounded-full ${live ? "bg-[#6dff8a] shadow-[0_0_8px_#6dff8a]" : "bg-cal/30"}`} />
         {live ? live.online : "–"}
       </span>
     </div>
@@ -212,11 +221,11 @@ function LegalLinks() {
 function EnterButtons({ onEnter, onEnterVR }: PanelProps) {
   return (
     <div className="flex flex-col gap-2">
-      <button onClick={onEnter} className="w-full rounded-xl bg-terracota px-4 py-3 font-medium text-cal transition hover:bg-terracota-claro">
+      <button onClick={onEnter} className="neon-tube display w-full rounded-full px-4 py-3 text-[15px] font-semibold">
         {t("enter.world")}
       </button>
       {onEnterVR && (
-        <button onClick={onEnterVR} className="w-full rounded-xl border border-azulejo-claro/40 px-4 py-2.5 text-sm text-azulejo-claro hover:bg-azulejo/20">
+        <button onClick={onEnterVR} className="w-full rounded-full border border-cal/15 px-4 py-2.5 text-sm text-cal/80 hover:border-neon-suave/50 hover:text-cal">
           {t("enter.vr")}
         </button>
       )}

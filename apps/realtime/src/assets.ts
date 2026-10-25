@@ -9,6 +9,18 @@
  */
 import { ASSET_BUDGETS, checkBudget, GLB_MEDIA, GlbError, inspectGlb, sha256Hash, type AssetKind } from "@xenxo/assets";
 import type { Principal } from "./auth";
+import { AVATAR_PRESETS } from "./avatar-presets";
+import { SEED_ASSETS } from "./seed-assets";
+
+const SYSTEM_HASHES = new Set([
+  ...Object.values(SEED_ASSETS).flatMap((a) => a.lods.map((l) => l.hash.slice(7))),
+  ...AVATAR_PRESETS.map((a) => a.hash.slice(7)),
+]);
+
+/** ¿Es un modelo generado por la forja y servido como recurso estático? */
+export function isSystemAsset(hex: string): boolean {
+  return SYSTEM_HASHES.has(hex);
+}
 
 export function assetKey(hash: string): string {
   return `assets/${hash.replace(/^sha256:/, "")}`;
@@ -88,7 +100,7 @@ export async function handleUpload(req: Request, principal: Principal, bucket: R
   };
 }
 
-export async function handleGet(hex: string, bucket: R2Bucket, req: Request): Promise<Response> {
+export async function handleGet(hex: string, bucket: R2Bucket, req: Request, statik?: Fetcher): Promise<Response> {
   if (!/^[0-9a-f]{64}$/.test(hex)) return new Response("not found", { status: 404 });
   const etag = `"${hex}"`;
   const common = {
@@ -99,8 +111,13 @@ export async function handleGet(hex: string, bucket: R2Bucket, req: Request): Pr
   };
   if (req.headers.get("If-None-Match") === etag) return new Response(null, { status: 304, headers: common });
   const obj = await bucket.get(`assets/${hex}`);
-  if (!obj) return new Response("not found", { status: 404, headers: { "Access-Control-Allow-Origin": "*" } });
-  return new Response(obj.body, { headers: { ...common, "Content-Type": GLB_MEDIA } });
+  if (obj) return new Response(obj.body, { headers: { ...common, "Content-Type": GLB_MEDIA } });
+  // Modelos del sistema (la plaza): vienen con el propio Worker, no de R2.
+  if (statik && isSystemAsset(hex)) {
+    const r = await statik.fetch(new Request(`https://static.local/${hex}.glb`));
+    if (r.ok) return new Response(r.body, { headers: { ...common, "Content-Type": GLB_MEDIA } });
+  }
+  return new Response("not found", { status: 404, headers: { "Access-Control-Allow-Origin": "*" } });
 }
 
 /** Metadatos guardados al subir (los usa el Directory para validar avatares y proyectos). */

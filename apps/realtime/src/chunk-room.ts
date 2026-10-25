@@ -28,6 +28,7 @@ import type { Env } from "./index";
 import { randomId, type Principal } from "./auth";
 import { plazaSeed, SEED_VERSION } from "./seed";
 import { assetKey } from "./assets";
+import { isAvatarPreset } from "./avatar-presets-check";
 
 /** Ranuras de la exposición de proyectos, delante del edificio «Proyectos» (oeste de la plaza). */
 const EXPO_SLOTS: [number, number][] = [
@@ -35,6 +36,16 @@ const EXPO_SLOTS: [number, number][] = [
 ];
 
 const TICK_HZ = 10;
+
+/** Huella corta de un texto (FNV-1a de 32 bits). */
+function fnv1a(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16);
+}
 const CHAT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_MESSAGE_BYTES = 64 * 1024;
 const MIN_POSE_INTERVAL_MS = 1000 / BUDGETS.maxPoseHz - 5;
@@ -45,6 +56,8 @@ interface Attachment {
   hello: boolean;
   client_type: Peer["client_type"];
   display_name: string;
+  /** Avatar de serie elegido en HELLO (invitados y agentes). */
+  preset?: { hash: string; format: "vrm" };
 }
 
 class MutationError extends Error {
@@ -128,20 +141,23 @@ export class ChunkRoom extends DurableObject<Env> {
   }
 
   /**
-   * Siembra o actualiza la plaza del sistema. Si SEED_VERSION cambió, sustituye
-   * las entidades con dueño "system" y conserva las de personas y agentes.
+   * Siembra o actualiza la plaza del sistema. Si cambió la semilla (SEED_VERSION o su
+   * contenido, p. ej. al volver a forjar los modelos), sustituye las entidades con dueño
+   * "system" y conserva las de personas y agentes.
    */
   private applySeed() {
+    const seed = plazaSeed();
+    const fingerprint = `${SEED_VERSION}:${fnv1a(JSON.stringify(seed))}`;
     const current = this.sql.exec<{ v: string }>("SELECT v FROM meta WHERE k = 'seed_version'").toArray()[0]?.v;
-    if (current === String(SEED_VERSION)) return;
+    if (current === fingerprint) return;
     this.ctx.storage.transactionSync(() => {
       this.sql.exec("DELETE FROM entities WHERE owner = 'system'");
-      for (const { id, components } of plazaSeed()) {
+      for (const { id, components } of seed) {
         // Si alguien ya usó ese id, la semilla no lo pisa.
         if (!this.getRow(id)) this.insertEntity(id, "system", components);
       }
       this.logEvent("system", "SEED", "plaza", SEED_VERSION, null);
-      this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('seed_version', ?)", String(SEED_VERSION));
+      this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('seed_version', ?)", fingerprint);
     });
   }
 
@@ -177,6 +193,10 @@ export class ChunkRoom extends DurableObject<Env> {
         att.client_type = m.payload.client_type;
         // Solo los invitados eligen nombre en HELLO; el de personas registradas y agentes lo fija el servidor.
         if (m.payload.display_name && att.principal.kind === "guest") att.display_name = m.payload.display_name.trim() || "guest";
+        // Invitados y agentes pueden vestir un avatar de serie (nunca un archivo cualquiera).
+        if (m.payload.avatar && !att.principal.avatar && isAvatarPreset(m.payload.avatar.hash)) {
+          att.preset = { hash: m.payload.avatar.hash, format: "vrm" };
+        }
         ws.serializeAttachment(att);
         this.send(ws, msg("WELCOME", {
           session_id: att.session_id,
@@ -197,9 +217,9 @@ export class ChunkRoom extends DurableObject<Env> {
         const now = Date.now();
         if (now - (this.lastPoseAt.get(att.session_id) ?? 0) < MIN_POSE_INTERVAL_MS) return; // descarta en silencio
         this.lastPoseAt.set(att.session_id, now);
-        const { head, hand_l, hand_r } = m.payload;
+        const { head, hand_l, hand_r, emote } = m.payload;
         if (!this.inBounds(head.p)) return;
-        this.poses.set(att.session_id, { session_id: att.session_id, head, hand_l, hand_r });
+        this.poses.set(att.session_id, { session_id: att.session_id, head, hand_l, hand_r, ...(emote ? { emote } : {}) });
         this.dirty.add(att.session_id);
         this.scheduleTick();
         return;
@@ -656,7 +676,11 @@ export class ChunkRoom extends DurableObject<Env> {
       kind: att.principal.kind,
       display_name: att.display_name,
       client_type: att.client_type,
-      ...(att.principal.avatar ? { avatar: att.principal.avatar as Peer["avatar"] } : {}),
+      ...(att.principal.avatar
+        ? { avatar: att.principal.avatar as Peer["avatar"] }
+        : att.preset
+          ? { avatar: att.preset }
+          : {}),
     };
   }
 

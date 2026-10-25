@@ -31,7 +31,9 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 
 - Toda cadena de la interfaz va en `apps/web/src/i18n.ts` (ES y EN como mínimo). Nada de textos sueltos en los componentes.
 - Los textos del mundo viajan como datos en `label@1.i18n`, no en el cliente.
-- La plaza es `apps/realtime/src/seed.ts`. Si la cambias, sube `SEED_VERSION`.
+- La plaza es `apps/realtime/src/seed.ts` + `plaza-layout.json` (única fuente de la disposición, también para la forja). Si cambia su contenido, el servidor vuelve a sembrar solo; sube `SEED_VERSION` si cambias el significado.
+- Los modelos del sistema (plaza y avatares de serie) **se generan**, no se editan: `npm run forge` (ver `tools/forge/README.md`) y `tools/avatars/`. No toques a mano `apps/realtime/seed-assets/`, `seed-assets.ts` ni `avatar-presets.*`.
+- Materiales de los modelos: `xenxo:<biblioteca>.<tinte>` (lista en `docs/PROTOCOL.md` §12 bis). Texturas nuevas solo CC0, descargadas por `tools/materials/` y servidas desde xenxo.
 - `DO_JURISDICTION = "eu"` en `wrangler.toml`: no lo cambies tras el primer despliegue (los datos quedarían en otros objetos).
 
 ## Rendimiento (Quest 3 es el mínimo)

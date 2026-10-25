@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import type { XRStore } from "@react-three/xr";
 import { loadPref, savePref } from "./config";
 import { Chat } from "./hud/Chat";
+import { Emotes } from "./hud/Emotes";
 import { t, useLang } from "./i18n";
 import { setGuestName as setSessionGuestName, startSession } from "./net/session";
 import { useWorldVersion, world } from "./net/world-store";
@@ -109,11 +110,13 @@ export function App() {
               setInWorld(false);
             }}
           />
+          <Emotes className={`pointer-events-auto absolute right-4 ${touch ? "bottom-36" : "bottom-5"}`} />
           {touch ? (
             <TouchJoystick />
           ) : (
-            <p className={`absolute bottom-5 left-1/2 -translate-x-1/2 px-3 py-1.5 text-xs text-cal/70 ${hudBox}`}>
+            <p className={`absolute bottom-5 left-1/2 -translate-x-1/2 px-3 py-1.5 text-center text-xs text-cal/70 ${hudBox}`}>
               {t("hud.desktopHint")}
+              <span className="block text-cal/45">{t("hud.keys")}</span>
             </p>
           )}
         </div>

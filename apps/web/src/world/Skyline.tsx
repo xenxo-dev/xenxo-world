@@ -21,6 +21,30 @@ function rng(seed: number) {
   };
 }
 
+/** De día: fachadas claras con todas las ventanas oscuras (y alguna persiana). */
+function dayTexture() {
+  const c = document.createElement("canvas");
+  c.width = 64;
+  c.height = 128;
+  const g = c.getContext("2d")!;
+  g.fillStyle = "#ffffff";
+  g.fillRect(0, 0, 64, 128);
+  const r = rng(11);
+  for (let y = 4; y < 124; y += 8) {
+    for (let x = 4; x < 60; x += 8) {
+      g.fillStyle = r() < 0.25 ? "#5d7a5a" : "#3b3f46";
+      g.fillRect(x, y, 4, 5);
+    }
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.magFilter = THREE.LinearFilter;
+  return tex;
+}
+
+const DAY_COLORS = ["#efe6d6", "#ead2ad", "#f1d6c4", "#dcd8cc", "#e9c690", "#f4efe6", "#d9c6a8"];
+
 /** Textura de ventanas dibujada en un canvas: nada se descarga. */
 function windowsTexture() {
   const c = document.createElement("canvas");
@@ -51,6 +75,7 @@ const MAX = 220;
 export function Skyline({ count, ambience, pbr }: { count: number; ambience: Ambience; pbr: boolean }) {
   const mesh = useRef<THREE.InstancedMesh>(null);
   const texture = useMemo(windowsTexture, []);
+  const dayTex = useMemo(dayTexture, []);
   const night = ambience === "night";
 
   useLayoutEffect(() => {
@@ -70,7 +95,10 @@ export function Skyline({ count, ambience, pbr }: { count: number; ambience: Amb
       o.updateMatrix();
       m.setMatrixAt(i, o.matrix);
     }
+    const col = new THREE.Color();
+    for (let i = 0; i < MAX; i++) m.setColorAt(i, col.set(DAY_COLORS[Math.floor(r() * DAY_COLORS.length)]!));
     m.instanceMatrix.needsUpdate = true;
+    if (m.instanceColor) m.instanceColor.needsUpdate = true;
     m.computeBoundingSphere();
   }, []);
 
@@ -78,20 +106,24 @@ export function Skyline({ count, ambience, pbr }: { count: number; ambience: Amb
     if (mesh.current) mesh.current.count = Math.min(count, MAX);
   }, [count]);
 
-  const color = night ? "#151a33" : "#cdb99a";
+  // De noche, fachadas casi negras (el color de cada torre apenas tiñe); de día, el color de cada torre.
+  const color = night ? "#171c30" : "#ffffff";
+  const map = night ? null : dayTex;
   return (
     <instancedMesh ref={mesh} args={[undefined, undefined, MAX]} frustumCulled={false}>
       <boxGeometry />
       {pbr ? (
         <meshStandardMaterial
+          key={night ? "n" : "d"}
           color={color}
+          map={map}
           roughness={0.85}
           emissive="#ffffff"
           emissiveMap={texture}
           emissiveIntensity={night ? 1.6 : 0}
         />
       ) : (
-        <meshLambertMaterial color={color} emissive="#ffffff" emissiveMap={texture} emissiveIntensity={night ? 1.2 : 0} />
+        <meshLambertMaterial key={night ? "n" : "d"} color={color} map={map} emissive="#ffffff" emissiveMap={texture} emissiveIntensity={night ? 1.2 : 0} />
       )}
     </instancedMesh>
   );

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { PerformanceMonitor } from "@react-three/drei";
 import * as THREE from "three";
@@ -10,9 +10,11 @@ import { Avatars } from "./Avatars";
 import { Entities } from "./Entities";
 import { graphics, useGraphics, type Ambience, type Features } from "./graphics";
 import { attachDesktopInput, input } from "./input";
+import { setMaxAnisotropy, tickMaterials } from "./materials";
 import { Player } from "./Player";
 import { Sky, SKY } from "./Sky";
 import { Skyline } from "./Skyline";
+import skyDay from "./sky-day.json";
 
 /** Una sola tienda XR para toda la app. Activa foveation para ganar rendimiento en Quest. */
 export const xrStore = createXRStore({ foveation: 1, emulate: false });
@@ -26,10 +28,18 @@ const CENTER = new THREE.Vector3(CHUNK_SIZE / 2, 0, CHUNK_SIZE / 2);
 /* Luz                                                                  */
 /* ------------------------------------------------------------------ */
 
+/** El sol de día está donde lo tiene el cielo (HDRI): las sombras cuadran con las nubes. */
+const SUN_DIR = (() => {
+  const theta = (skyDay.sunU - 0.5) * Math.PI * 2;
+  const elev = (skyDay.sunElevationDeg * Math.PI) / 180;
+  const d = 48;
+  return [Math.cos(theta) * Math.cos(elev) * d, Math.sin(elev) * d, Math.sin(theta) * Math.cos(elev) * d] as const;
+})();
+
 const LIGHTING = {
   day: {
-    hemi: ["#ffe9cc", "#9c7a55", 1.5],
-    sun: { color: "#ffd6a8", intensity: 1.9, offset: [-30, 24, 18] },
+    hemi: ["#e8f0ff", "#9c8a6a", 1.25],
+    sun: { color: "#fff1dc", intensity: 2.3, offset: SUN_DIR },
     env: 0.55,
   },
   night: {
@@ -87,6 +97,44 @@ function Lighting({ ambience, features }: { ambience: Ambience; features: Featur
 }
 
 /* ------------------------------------------------------------------ */
+/* Cielo real de día (HDRI de Poly Haven, CC0, servido desde xenxo)     */
+/* ------------------------------------------------------------------ */
+
+let dayTexture: Promise<THREE.Texture> | null = null;
+function loadDaySky() {
+  dayTexture ??= new THREE.TextureLoader().loadAsync("/sky/day.webp").then((t) => {
+    t.mapping = THREE.EquirectangularReflectionMapping;
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  });
+  return dayTexture;
+}
+
+/** Cielo de nubes de día: la textura (para el fondo) y su mapa de entorno. null mientras carga. */
+function useDaySky(enabled: boolean) {
+  const gl = useThree((s) => s.gl);
+  const [sky, setSky] = useState<{ tex: THREE.Texture; env: THREE.Texture } | null>(null);
+  useEffect(() => {
+    if (!enabled) return;
+    let alive = true;
+    let made: THREE.Texture | null = null;
+    void loadDaySky().then((tex) => {
+      if (!alive) return;
+      const pmrem = new THREE.PMREMGenerator(gl);
+      made = pmrem.fromEquirectangular(tex).texture;
+      pmrem.dispose();
+      setSky({ tex, env: made });
+    });
+    return () => {
+      alive = false;
+      made?.dispose();
+      setSky(null);
+    };
+  }, [enabled, gl]);
+  return enabled ? sky : null;
+}
+
+/* ------------------------------------------------------------------ */
 /* Reflejos                                                             */
 /* ------------------------------------------------------------------ */
 
@@ -96,9 +144,10 @@ function Lighting({ ambience, features }: { ambience: Ambience; features: Featur
  *  - Alta/Ultra: una «sonda» que fotografía la propia plaza (neones incluidos)
  *    al cargar y cuando cambia el mundo, para que el suelo mojado y el metal la reflejen.
  */
-function Environment({ ambience, probe }: { ambience: Ambience; probe: Features["probe"] }) {
+function Environment({ ambience, probe, sky }: { ambience: Ambience; probe: Features["probe"]; sky: THREE.Texture | null }) {
   const gl = useThree((s) => s.gl);
   const scene = useThree((s) => s.scene);
+  const base = sky ?? null;
   const room = useMemo(() => {
     const pmrem = new THREE.PMREMGenerator(gl);
     const tex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
@@ -123,12 +172,12 @@ function Environment({ ambience, probe }: { ambience: Ambience; probe: Features[
   useEffect(() => {
     dirty.current = true;
     wait.current = 0.8;
-  }, [ambience, cube]);
+  }, [ambience, cube, sky]);
 
   useFrame((_, dt) => {
     scene.environmentIntensity = cube ? (ambience === "night" ? 0.55 : 1) : LIGHTING[ambience].env;
     if (!cube) {
-      scene.environment = room;
+      scene.environment = base ?? room;
       return;
     }
     const v = world.getVersion();
@@ -141,8 +190,8 @@ function Environment({ ambience, probe }: { ambience: Ambience; probe: Features[
     wait.current -= dt;
     if (wait.current > 0) return;
     dirty.current = false;
-    // La foto se hace sin entorno, para que no se refleje a sí misma.
-    scene.environment = room;
+    // La foto se hace con el entorno base (cielo o estudio), no con la propia foto.
+    scene.environment = base ?? room;
     cube.cam.update(gl, scene);
     cube.rt.texture.needsPMREMUpdate = true;
     scene.environment = cube.rt.texture;
@@ -154,6 +203,14 @@ function Environment({ ambience, probe }: { ambience: Ambience; probe: Features[
 /* ------------------------------------------------------------------ */
 /* Entrada, VR y rendimiento                                            */
 /* ------------------------------------------------------------------ */
+
+/** Reloj de los materiales animados (agua) y anisotropía máxima de la GPU. */
+function MaterialClock() {
+  const gl = useThree((s) => s.gl);
+  useEffect(() => setMaxAnisotropy(gl.capabilities.getMaxAnisotropy()), [gl]);
+  useFrame((s) => tickMaterials(s.clock.elapsedTime));
+  return null;
+}
 
 function InputBinder({ active }: { active: boolean }) {
   const gl = useThree((s) => s.gl);
@@ -179,11 +236,45 @@ function XRWatcher() {
 /* Escena                                                               */
 /* ------------------------------------------------------------------ */
 
-export function World({ active }: { active: boolean }) {
+function Scene({ active }: { active: boolean }) {
   const g = useGraphics();
   const f = g.features;
   const ambience = g.ambience;
   const sky = SKY[ambience];
+  const realSky = ambience === "day" && f.pbr;
+  const daySky = useDaySky(realSky);
+  const dayEnv = daySky?.env ?? null;
+  const skyReady = !!daySky;
+  return (
+    <>
+      <XRWatcher />
+      <PerformanceMonitor bounds={(hz) => (hz > 90 ? [60, 100] : [45, 58])} flipflops={3} onDecline={() => graphics.decline()} />
+      {daySky ? <primitive key="sky" attach="background" object={daySky.tex} /> : <color key="color" attach="background" args={[sky.fog]} />}
+      <fog attach="fog" args={[sky.fog, ambience === "night" ? 45 : 70, ambience === "night" ? 230 : 260]} />
+      {!skyReady && <Sky ambience={ambience} />}
+      <Skyline count={f.skyline} ambience={ambience} pbr={f.pbr} />
+      <Lighting ambience={ambience} features={f} />
+      <Environment ambience={ambience} probe={f.probe} sky={dayEnv} />
+      {/* Los textos cargan su fuente de forma asíncrona: que nunca bloqueen la escena ni el panel. */}
+      <Suspense fallback={null}>
+        <Entities features={f} ambience={ambience} />
+        <Avatars />
+      </Suspense>
+      <Player active={active} />
+      <InputBinder active={active} />
+      <MaterialClock />
+      {f.post && !g.inXR && (
+        <Suspense fallback={null}>
+          <Effects features={f} ambience={ambience} />
+        </Suspense>
+      )}
+    </>
+  );
+}
+
+export function World({ active }: { active: boolean }) {
+  const g = useGraphics();
+  const f = g.features;
 
   return (
     <Canvas
@@ -196,26 +287,7 @@ export function World({ active }: { active: boolean }) {
       camera={{ fov: 70, near: 0.1, far: 400, position: [32, 14, 66] }}
     >
       <XR store={xrStore}>
-        <XRWatcher />
-        <PerformanceMonitor bounds={(hz) => (hz > 90 ? [60, 100] : [45, 58])} flipflops={3} onDecline={() => graphics.decline()} />
-        <color attach="background" args={[sky.fog]} />
-        <fog attach="fog" args={[sky.fog, ambience === "night" ? 45 : 60, ambience === "night" ? 230 : 230]} />
-        <Sky ambience={ambience} />
-        <Skyline count={f.skyline} ambience={ambience} pbr={f.pbr} />
-        <Lighting ambience={ambience} features={f} />
-        <Environment ambience={ambience} probe={f.probe} />
-        {/* Los textos cargan su fuente de forma asíncrona: que nunca bloqueen la escena ni el panel. */}
-        <Suspense fallback={null}>
-          <Entities features={f} ambience={ambience} />
-          <Avatars />
-        </Suspense>
-        <Player active={active} />
-        <InputBinder active={active} />
-        {f.post && !g.inXR && (
-          <Suspense fallback={null}>
-            <Effects features={f} ambience={ambience} />
-          </Suspense>
-        )}
+        <Scene active={active} />
       </XR>
     </Canvas>
   );

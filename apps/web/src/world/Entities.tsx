@@ -7,6 +7,7 @@ import { useLang } from "../i18n";
 import { useWorldVersion, world } from "../net/world-store";
 import { FONT_URL } from "./font";
 import type { Ambience, Features } from "./graphics";
+import { lightweight, libraryMaterial, parseLibraryName } from "./materials";
 
 /** Origen global de un chunk "c_<x>_<z>". */
 function chunkOrigin(chunkId: string): [number, number] {
@@ -33,19 +34,40 @@ class SkipOnError extends Component<{ children: ReactNode }, { failed: boolean }
   }
 }
 
-/** Modelo glTF por hash. useGLTF cachea por URL; cada entidad clona la escena compartiendo geometría y materiales. */
-function MeshAsset({ hash, shadows }: { hash: string; shadows: boolean }) {
+/**
+ * Modelo glTF por hash. useGLTF cachea por URL; cada entidad clona la escena compartiendo geometría.
+ * Los materiales "xenxo:<biblioteca>" se visten con la biblioteca (texturas reales según el nivel)
+ * y se comparten entre todas las copias del mismo modelo.
+ */
+const materialCache = new Map<string, THREE.Material>();
+
+function MeshAsset({ hash, features, ambience }: { hash: string; features: Features; ambience: Ambience }) {
   const gltf = useGLTF(assetUrl(hash), false, true);
+  const shadows = features.shadows > 0;
   const scene = useMemo(() => {
     const c = gltf.scene.clone(true);
+    const tierKey = `${features.textures}|${features.normalMaps}|${features.pbr}|${features.bloom}|${ambience}`;
     c.traverse((o) => {
-      if ((o as THREE.Mesh).isMesh) {
-        o.castShadow = shadows;
-        o.receiveShadow = shadows;
-      }
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const swap = (m: THREE.Material) => {
+        const key = `${hash}|${m.uuid}|${tierKey}`;
+        let out = materialCache.get(key);
+        if (!out) {
+          const ref = parseLibraryName(m.name);
+          const ao = (m as THREE.MeshStandardMaterial).aoMap ?? null;
+          out = ref ? libraryMaterial(ref, features, ambience, ao) : features.pbr ? m : lightweight(m);
+          materialCache.set(key, out);
+        }
+        return out;
+      };
+      mesh.material = Array.isArray(mesh.material) ? mesh.material.map(swap) : swap(mesh.material);
+      const emits = !Array.isArray(mesh.material) && (mesh.material as THREE.MeshBasicMaterial).isMeshBasicMaterial;
+      mesh.castShadow = shadows && !emits;
+      mesh.receiveShadow = shadows;
     });
     return c;
-  }, [gltf, shadows]);
+  }, [gltf, hash, shadows, features, ambience]);
   return <primitive object={scene} />;
 }
 
@@ -96,7 +118,7 @@ const EntityView = memo(function EntityView({
       {lod && (
         <SkipOnError>
           <Suspense fallback={null}>
-            <MeshAsset hash={lod.hash} shadows={shadows} />
+            <MeshAsset hash={lod.hash} features={features} ambience={ambience} />
           </Suspense>
         </SkipOnError>
       )}
@@ -107,7 +129,8 @@ const EntityView = memo(function EntityView({
             <Label text={labelText(label.data, lang)} size={label.data.size} />
           </Billboard>
         ) : (
-          <Label text={labelText(label.data, lang)} size={label.data.size} />
+          // Carteles fijos (los de las fachadas): de noche brillan como un rótulo luminoso.
+          <Label text={labelText(label.data, lang)} size={label.data.size} glow={ambience === "night" && features.bloom ? 2.4 : 1} />
         ))}
     </group>
   );
@@ -168,18 +191,30 @@ function Primitive(props: PrimitiveV1Type & { pbr: boolean; glow: number; shadow
 
 type PrimitiveV1Type = ReturnType<typeof PrimitiveV1.parse>;
 
-function Label({ text, size }: { text: string; size: number }) {
+function Label({ text, size, glow = 1 }: { text: string; size: number; glow?: number }) {
   // Cada texto en su propio Suspense: mientras carga la fuente, la geometría ya se ve.
   return (
     <Suspense fallback={null}>
-      <LabelText text={text} size={size} />
+      <LabelText text={text} size={size} glow={glow} />
     </Suspense>
   );
 }
 
-function LabelText({ text, size }: { text: string; size: number }) {
+const LABEL_COLOR = new THREE.Color("#f6f1e7");
+
+function LabelText({ text, size, glow }: { text: string; size: number; glow: number }) {
+  const color = useMemo(() => LABEL_COLOR.clone().multiplyScalar(glow), [glow]);
   return (
-    <Text font={FONT_URL} fontSize={size} color="#f6f1e7" anchorX="center" anchorY="middle" outlineWidth={size * 0.04} outlineColor="#2a211c">
+    <Text
+      font={FONT_URL}
+      fontSize={size}
+      color={color}
+      material-toneMapped={glow <= 1}
+      anchorX="center"
+      anchorY="middle"
+      outlineWidth={size * 0.04}
+      outlineColor="#2a211c"
+    >
       {text}
     </Text>
   );

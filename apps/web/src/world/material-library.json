@@ -1,0 +1,82 @@
+{
+ "cal": {
+  "tile": 1.998,
+  "source": "Poly Haven · White Stucco (CC0)",
+  "asset": "white_stucco"
+ },
+ "estuco": {
+  "tile": 1.0,
+  "source": "Poly Haven · White Plaster 02 (CC0)",
+  "asset": "white_plaster_02"
+ },
+ "piedra": {
+  "tile": 3.0,
+  "source": "Poly Haven · Sandstone Blocks 04 (CC0)",
+  "asset": "sandstone_blocks_04"
+ },
+ "losa": {
+  "tile": 3.0,
+  "source": "Poly Haven · Large Grey Tiles (CC0)",
+  "asset": "large_grey_tiles"
+ },
+ "adoquin": {
+  "tile": 1.0,
+  "source": "Poly Haven · Cobblestone Square (CC0)",
+  "asset": "cobblestone_square"
+ },
+ "teja": {
+  "tile": 2.5,
+  "source": "Poly Haven · Clay Roof Tiles 02 (CC0)",
+  "asset": "clay_roof_tiles_02"
+ },
+ "azulejo": {
+  "tile": 2.0,
+  "source": "Poly Haven · Rounded Square Tiled Wall (CC0)",
+  "asset": "rounded_square_tiled_wall"
+ },
+ "madera": {
+  "tile": 0.6,
+  "source": "Poly Haven · Fine Grained Wood (CC0)",
+  "asset": "fine_grained_wood"
+ },
+ "persiana": {
+  "tile": 1.0,
+  "source": "Poly Haven · Wood Shutter (CC0)",
+  "asset": "wood_shutter"
+ },
+ "hierro": {
+  "tile": 2.0,
+  "source": "Poly Haven · Metal Plate 02 (CC0)",
+  "asset": "metal_plate_02"
+ },
+ "metal": {
+  "tile": 2.0,
+  "source": "Poly Haven · Metal Plate 02 (CC0)",
+  "asset": "metal_plate_02"
+ },
+ "toldo": {
+  "tile": 2.0,
+  "source": "Poly Haven · Denim Fabric (CC0)",
+  "asset": "denim_fabric"
+ },
+ "tela": {
+  "tile": 0.5,
+  "source": "Poly Haven · Denim Fabric (CC0)",
+  "asset": "denim_fabric"
+ },
+ "corteza": {
+  "tile": 1.0,
+  "source": "Poly Haven · Bark Brown 01 (CC0)",
+  "asset": "bark_brown_01"
+ },
+ "tierra": {
+  "tile": 2.07,
+  "source": "Poly Haven · Dirt Floor (CC0)",
+  "asset": "dirt_floor"
+ },
+ "hoja": {
+  "tile": 2.0,
+  "source": "Poly Haven · Leafy Grass (CC0)",
+  "asset": "leafy_grass"
+ }
+}

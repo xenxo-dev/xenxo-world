@@ -21,6 +21,8 @@ export interface ConnectOptions {
   /** Token ya emitido (p. ej. de una persona registrada con passkey). Tiene prioridad. */
   token?: string;
   displayName?: string;
+  /** Avatar de serie (solo invitados y agentes; el servidor ignora hashes que no publica). */
+  avatar?: { hash: string; format: "vrm" };
 }
 
 export class XenxoClient {
@@ -72,6 +74,7 @@ export class XenxoClient {
         client_type: "headless",
         capabilities: { xr: false, hand_tracking: false, haptics: false, lod: "low" },
         display_name: o.displayName,
+        ...(o.avatar ? { avatar: o.avatar } : {}),
       }),
     );
     this.welcome = (await welcome).payload;
@@ -114,8 +117,8 @@ export class XenxoClient {
     this.ws.send(typeof m === "string" ? m : JSON.stringify(m));
   }
 
-  pose(p: [number, number, number], yaw = 0) {
-    this.sendRaw(msg("POSE", { t: Date.now(), head: { p, r: [0, Math.sin(yaw / 2), 0, Math.cos(yaw / 2)] } }));
+  pose(p: [number, number, number], yaw = 0, emote?: string) {
+    this.sendRaw(msg("POSE", { t: Date.now(), head: { p, r: [0, Math.sin(yaw / 2), 0, Math.cos(yaw / 2)] }, ...(emote ? { emote } : {}) }));
   }
 
   /** Envía una mutación y resuelve con su ACK o su ERROR. */

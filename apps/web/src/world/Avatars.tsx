@@ -10,6 +10,7 @@ import { walkAmount } from "./avatar-model";
 import { CustomAvatar } from "./CustomAvatar";
 import { FONT_URL } from "./font";
 import { advance, createMotion, smoothSpeed, type Motion } from "./motion";
+import { presetFor } from "./presets";
 
 /** Retraso de interpolación: mostramos a los demás ~100 ms en el pasado, entre dos poses reales. */
 const INTERP_DELAY_MS = 100;
@@ -95,11 +96,16 @@ export function DefaultAvatar({ color, motion }: { color: THREE.ColorRepresentat
   );
 }
 
-/** Personaje de alguien: el suyo propio si lo tiene, si no el de por defecto. Avanza el ciclo de paso. */
-export function AvatarBody({ avatar, color, motion }: { avatar?: AvatarRef; color: THREE.ColorRepresentation; motion: Motion }) {
+/**
+ * Personaje de alguien: el suyo propio si lo tiene; si no, uno de serie (realista, animado).
+ * Mientras carga se ve el muñeco articulado de respaldo.
+ */
+export function AvatarBody({ avatar, seed, motion }: { avatar?: AvatarRef; seed: string; motion: Motion }) {
   useFrame((_, dt) => advance(motion, Math.min(dt, 0.1)));
-  const fallback = <DefaultAvatar color={color} motion={motion} />;
-  return <CustomAvatar url={avatar ? assetUrl(avatar.hash) : null} fallback={fallback} motion={motion} />;
+  const fallback = <DefaultAvatar color={colorFor(seed)} motion={motion} />;
+  const preset = avatar ? null : presetFor(seed);
+  const url = avatar ? assetUrl(avatar.hash) : preset ? assetUrl(preset.hash) : null;
+  return <CustomAvatar url={url} fallback={fallback} motion={motion} />;
 }
 
 /** Bocadillo con el último mensaje del chat de esa sesión, durante unos segundos. */
@@ -137,7 +143,6 @@ export function ChatBubble({ sessionId, self }: { sessionId?: string; self?: boo
 
 function RemoteAvatar({ sessionId, name, avatar }: { sessionId: string; name: string; avatar?: AvatarRef }) {
   const body = useRef<THREE.Group>(null);
-  const color = useRef(colorFor(sessionId)).current;
   const motion = useRef(createMotion()).current;
   const last = useRef(new THREE.Vector3(NaN, 0, 0)).current;
 
@@ -162,13 +167,16 @@ function RemoteAvatar({ sessionId, name, avatar }: { sessionId: string; name: st
     if (dt > 0) smoothSpeed(motion, step / dt, dt);
 
     // Pies bajo la cabeza; el cuerpo solo sigue el giro horizontal.
-    body.current.position.set(_a.x, Math.max(0, _a.y - EYE_HEIGHT), _a.z);
+    const feet = Math.max(0, _a.y - EYE_HEIGHT);
+    motion.airborne = feet > 0.05;
+    motion.emote = s1.emote ?? null;
+    body.current.position.set(_a.x, feet, _a.z);
     body.current.rotation.set(0, _e.setFromQuaternion(_qa, "YXZ").y, 0);
   });
 
   return (
     <group ref={body}>
-      <AvatarBody avatar={avatar} color={color} motion={motion} />
+      <AvatarBody avatar={avatar} seed={sessionId} motion={motion} />
       <Suspense fallback={null}>
         <Billboard position={[0, 2.15, 0]}>
           <Text font={FONT_URL} fontSize={0.22} color="#ffffff" outlineWidth={0.02} outlineColor="#000000">

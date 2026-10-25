@@ -3,13 +3,13 @@ import type { ReactNode } from "react";
 
 export const card = "rounded-2xl border border-cal/10 bg-cal/[0.04]";
 export const input =
-  "w-full rounded-xl border border-cal/10 bg-cal/5 px-3 py-2 text-cal outline-none placeholder:text-cal/35 focus:border-terracota";
+  "w-full rounded-xl border border-cal/10 bg-cal/5 px-3 py-2 text-cal outline-none placeholder:text-cal/35 focus:border-neon";
 
 export function Block({ title, children, aside }: { title: string; children: ReactNode; aside?: ReactNode }) {
   return (
     <section className="mb-8 last:mb-0">
       <div className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="text-lg font-medium text-cal">{title}</h2>
+        <h2 className="display text-xl font-semibold text-cal">{title}</h2>
         {aside}
       </div>
       {children}
@@ -42,7 +42,7 @@ export function Segmented<T extends string>({
           key={o.id}
           onClick={() => onChange(o.id)}
           aria-pressed={value === o.id}
-          className={`rounded-lg px-4 py-1.5 text-sm ${value === o.id ? "bg-terracota/30 text-cal" : "text-cal/60"}`}
+          className={`rounded-lg px-4 py-1.5 text-sm ${value === o.id ? "bg-neon/20 text-cal" : "text-cal/60"}`}
         >
           {o.label}
         </button>
@@ -53,7 +53,7 @@ export function Segmented<T extends string>({
 
 type Variant = "primary" | "secondary" | "danger" | "ghost";
 const VARIANTS: Record<Variant, string> = {
-  primary: "bg-terracota text-cal hover:bg-terracota-claro disabled:bg-terracota/40",
+  primary: "bg-neon font-medium text-noche hover:bg-neon-suave disabled:bg-neon/25 disabled:text-cal/50",
   secondary: "border border-cal/15 text-cal/85 hover:bg-cal/5 disabled:text-cal/30",
   danger: "border border-red-400/30 text-red-200 hover:bg-red-500/10",
   ghost: "text-cal/60 hover:text-cal",
