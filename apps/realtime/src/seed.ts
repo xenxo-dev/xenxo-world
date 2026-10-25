@@ -5,8 +5,10 @@ import { CHUNK_SIZE, type Components } from "@xenxo/protocol";
  * (web, VR, nativo, headless) la recibe igual en el SNAPSHOT.
  *
  * Plaza mayor mediterránea hecha solo con primitive@1: cal, terracota, azulejo,
- * fuente, campanario, naranjos, farolas y barrios con toldos.
- * Presupuesto aproximado: ~140 entidades, ~25k triángulos.
+ * fuente, campanario, naranjos, farolas y barrios con toldos. De noche, los
+ * neones (emisivos) y las farolas (light@1) la convierten en una plaza de neón
+ * en los equipos que pueden dibujarlo; los ligeros la ven igual, sin efectos.
+ * Presupuesto aproximado: ~175 entidades, ~27k triángulos, 8 luces.
  *
  * Sube SEED_VERSION cuando cambies algo aquí: el servidor sustituye las entidades
  * del sistema por las nuevas y conserva las de personas y agentes.
@@ -14,7 +16,7 @@ import { CHUNK_SIZE, type Components } from "@xenxo/protocol";
  * Tamaños de primitive@1:
  *   box = [ancho, alto, fondo] · sphere = [diámetro, -, -] · cylinder = [diámetro, alto, -] · plane = [ancho, -, fondo]
  */
-export const SEED_VERSION = 2;
+export const SEED_VERSION = 3;
 
 type V3 = [number, number, number];
 type Q = [number, number, number, number];
@@ -37,7 +39,12 @@ const C = {
   agua: "#5fb6c9",
   esfera: "#f6e7b0",
   hueco: "#3a2f28",
+  neonAzul: "#4fa3ff",
+  neonTerracota: "#ff6a3d",
+  neonOcre: "#ffc24a",
 } as const;
+
+type Finish = "matte" | "glossy" | "metal" | "glass";
 
 /** Rotación: primero cabeceo (eje X), después giro (eje Y). */
 function quat(yaw = 0, pitch = 0): Q {
@@ -56,13 +63,14 @@ export function plazaSeed(): { id: string; components: Components }[] {
     p: V3,
     size: V3,
     color: string,
-    o: { r?: Q; emissive?: boolean; collider?: V3 } = {},
+    o: { r?: Q; emissive?: boolean; collider?: V3; finish?: Finish; light?: { color: string; intensity: number; range: number } } = {},
   ) => {
     const components: Components = {
       "transform@1": { p, r: o.r ?? [0, 0, 0, 1], s: [1, 1, 1], parent: null },
-      "primitive@1": { shape, size, color, emissive: o.emissive ?? false },
+      "primitive@1": { shape, size, color, emissive: o.emissive ?? false, finish: o.finish ?? "matte" },
     };
     if (o.collider) components["collider@1"] = { shape: "box", half_extents: o.collider, trigger: false };
+    if (o.light) components["light@1"] = { type: "point", ...o.light, when: "night" };
     out.push({ id, components });
   };
 
@@ -78,41 +86,57 @@ export function plazaSeed(): { id: string; components: Components }[] {
 
   /* --- Suelo --------------------------------------------------------- */
   prim("ground", "box", [c, -0.2, c], [CHUNK_SIZE, 0.4, CHUNK_SIZE], C.albero);
-  prim("plaza_paving", "box", [c, 0.05, c], [40, 0.1, 40], C.piedra);
+  prim("plaza_paving", "box", [c, 0.05, c], [40, 0.1, 40], C.piedra, { finish: "glossy" });
+  // Bordillo de neón alrededor de la plaza
+  prim("neon_kerb_n", "box", [c, 0.12, c - 20], [40, 0.05, 0.14], C.neonAzul, { emissive: true });
+  prim("neon_kerb_s", "box", [c, 0.12, c + 20], [40, 0.05, 0.14], C.neonAzul, { emissive: true });
+  prim("neon_kerb_w", "box", [c - 20, 0.12, c], [0.14, 0.05, 40], C.neonAzul, { emissive: true });
+  prim("neon_kerb_e", "box", [c + 20, 0.12, c], [0.14, 0.05, 40], C.neonAzul, { emissive: true });
   prim("plaza_stripe_ew", "box", [c, 0.12, 30], [40, 0.04, 1.2], C.terracota);
   prim("plaza_stripe_ns", "box", [c, 0.12, c], [1.2, 0.04, 40], C.terracota);
   prim("plaza_ring", "cylinder", [c, 0.13, 30], [12, 0.06, 0], C.azulejo);
 
   /* --- Punto de aparición: la X de xenxo en azulejo ------------------- */
   prim("spawn_disc", "cylinder", [c, 0.13, c + 11], [3.2, 0.06, 0], C.cal);
-  prim("spawn_x1", "box", [c, 0.17, c + 11], [2.6, 0.03, 0.35], C.azulejo, { r: quat(Math.PI / 4), emissive: true });
-  prim("spawn_x2", "box", [c, 0.17, c + 11], [2.6, 0.03, 0.35], C.azulejo, { r: quat(-Math.PI / 4), emissive: true });
+  prim("spawn_x1", "box", [c, 0.17, c + 11], [2.6, 0.03, 0.35], C.neonAzul, { r: quat(Math.PI / 4), emissive: true });
+  prim("spawn_x2", "box", [c, 0.17, c + 11], [2.6, 0.03, 0.35], C.neonAzul, { r: quat(-Math.PI / 4), emissive: true });
+  prim("spawn_glow", "sphere", [c, 1.6, c + 11], [0.1, 0, 0], C.neonAzul, {
+    emissive: true,
+    light: { color: C.neonAzul, intensity: 1.2, range: 5 },
+  });
 
   /* --- Fuente central ------------------------------------------------- */
   const fz = 30;
   prim("fountain_basin", "cylinder", [c, 0.55, fz], [7, 0.9, 0], C.calSombra, { collider: [3.5, 0.45, 3.5] });
-  prim("fountain_water", "cylinder", [c, 0.99, fz], [6.4, 0.04, 0], C.agua);
+  prim("fountain_water", "cylinder", [c, 0.99, fz], [6.4, 0.04, 0], C.agua, { finish: "glass" });
+  prim("fountain_neon", "cylinder", [c, 1.02, fz], [7.1, 0.03, 0], C.neonAzul, { emissive: true });
   prim("fountain_pillar", "cylinder", [c, 2.0, fz], [0.7, 2.2, 0], C.cal);
   prim("fountain_bowl", "cylinder", [c, 3.2, fz], [2.4, 0.35, 0], C.calSombra);
-  prim("fountain_bowl_water", "cylinder", [c, 3.39, fz], [2.0, 0.04, 0], C.agua);
+  prim("fountain_bowl_water", "cylinder", [c, 3.39, fz], [2.0, 0.04, 0], C.agua, { finish: "glass" });
   prim("fountain_jet", "sphere", [c, 3.75, fz], [0.5, 0, 0], "#9fd8e6");
 
   /* --- Campanario (la torre de xenxo.io) ------------------------------ */
   const tz = 9;
   const front = tz + 2.5;
   prim("tower_body", "box", [c, 7, tz], [5, 14, 5], C.cal, { collider: [2.5, 7, 2.5] });
-  prim("tower_band", "box", [c, 10.6, tz], [5.2, 0.7, 5.2], C.azulejo);
+  prim("tower_band", "box", [c, 10.6, tz], [5.2, 0.7, 5.2], C.azulejo, { finish: "glossy" });
+  prim("tower_neon_low", "box", [c, 10.15, tz], [5.3, 0.08, 5.3], C.neonAzul, { emissive: true });
+  prim("tower_neon_high", "box", [c, 17.45, tz], [4.9, 0.08, 4.9], C.neonTerracota, { emissive: true });
   prim("tower_belfry", "box", [c, 15.5, tz], [4.2, 3, 4.2], C.cal);
   prim("tower_arch_s", "box", [c, 15.3, tz + 2.12], [1.6, 2, 0.1], C.hueco);
   prim("tower_arch_e", "box", [c + 2.12, 15.3, tz], [0.1, 2, 1.6], C.hueco);
   prim("tower_arch_w", "box", [c - 2.12, 15.3, tz], [0.1, 2, 1.6], C.hueco);
   prim("tower_cornice", "box", [c, 17.2, tz], [4.8, 0.4, 4.8], C.terracota);
   prim("tower_cap", "box", [c, 18, tz], [2.2, 1.2, 2.2], C.teja);
-  prim("tower_spire", "box", [c, 19.3, tz], [0.25, 1.5, 0.25], C.hierro);
+  prim("tower_spire", "box", [c, 19.3, tz], [0.25, 1.5, 0.25], C.hierro, { finish: "metal" });
+  prim("tower_beacon", "sphere", [c, 20.2, tz], [0.45, 0, 0], C.neonTerracota, {
+    emissive: true,
+    light: { color: C.neonTerracota, intensity: 4, range: 18 },
+  });
   prim("tower_clock", "cylinder", [c, 12.6, front + 0.06], [2.4, 0.12, 0], C.esfera, { r: quat(0, Math.PI / 2), emissive: true });
   prim("tower_clock_h", "box", [c, 12.9, front + 0.14], [0.12, 0.7, 0.04], C.hierro);
   prim("tower_clock_m", "box", [c + 0.35, 12.6, front + 0.14], [0.8, 0.1, 0.04], C.hierro);
-  prim("tower_plaque", "box", [c, 8.4, front + 0.06], [4.6, 1.5, 0.12], C.azulejo);
+  prim("tower_plaque", "box", [c, 8.4, front + 0.06], [4.6, 1.5, 0.12], C.azulejo, { finish: "glossy" });
   label("tower_logo", [c, 8.4, front + 0.16], "xenxo.io", {}, 1.0, quat(0));
 
   /* --- Barrios ---------------------------------------------------------- */
@@ -121,6 +145,7 @@ export function plazaSeed(): { id: string; components: Components }[] {
     cx: number,
     cz: number,
     accent: string,
+    neon: string,
     name?: { es: string; en: string },
   ) => {
     const w = 9, h = 6, d = 7;
@@ -140,6 +165,10 @@ export function plazaSeed(): { id: string; components: Components }[] {
     prim(`${id}_win_l`, "box", at(-w * 0.32, 3.9, f + 0.04), [1.3, 1.5, 0.1], C.persiana, { r });
     prim(`${id}_win_r`, "box", at(w * 0.32, 3.9, f + 0.04), [1.3, 1.5, 0.1], C.persiana, { r });
     prim(`${id}_awning`, "box", at(0, 3.55, f + 0.9), [w * 0.8, 0.08, 1.8], accent, { r: quat(yaw, 0.3) });
+    // Neones: línea bajo el alero y dos verticales en las esquinas de la fachada.
+    prim(`${id}_neon_eave`, "box", at(0, h - 0.12, f + 0.08), [w, 0.08, 0.08], neon, { r, emissive: true });
+    prim(`${id}_neon_l`, "box", at(-w / 2 + 0.05, h / 2, f + 0.08), [0.08, h - 0.4, 0.08], neon, { r, emissive: true });
+    prim(`${id}_neon_r`, "box", at(w / 2 - 0.05, h / 2, f + 0.08), [0.08, h - 0.4, 0.08], neon, { r, emissive: true });
     prim(`${id}_pot_l`, "cylinder", at(-1.8, 0.35, f + 0.5), [0.6, 0.7, 0], C.terracota, { r });
     prim(`${id}_pot_r`, "cylinder", at(1.8, 0.35, f + 0.5), [0.6, 0.7, 0], C.terracota, { r });
     prim(`${id}_plant_l`, "sphere", at(-1.8, 1.0, f + 0.5), [0.8, 0, 0], C.hoja);
@@ -150,12 +179,12 @@ export function plazaSeed(): { id: string; components: Components }[] {
     }
   };
 
-  building("arcade", 8.5, 22, "#e0663a", { es: "Recreativos", en: "Arcade" });
-  building("projects", 8.5, 40, C.azulejo, { es: "Proyectos", en: "Projects" });
-  building("agents", 55.5, 22, "#d9a441", { es: "Agentes", en: "Agents" });
-  building("sandbox", 55.5, 40, "#5b8f3a", { es: "Taller", en: "Sandbox" });
-  building("social", 19, 8.5, "#b2456e", { es: "La Terraza", en: "Social" });
-  building("townhall", 45, 8.5, C.terracota, { es: "Ayuntamiento", en: "Town hall" });
+  building("arcade", 8.5, 22, "#e0663a", "#ff4fd8", { es: "Recreativos", en: "Arcade" });
+  building("projects", 8.5, 40, C.azulejo, C.neonAzul, { es: "Proyectos", en: "Projects" });
+  building("agents", 55.5, 22, "#d9a441", C.neonOcre, { es: "Agentes", en: "Agents" });
+  building("sandbox", 55.5, 40, "#5b8f3a", "#6dff8a", { es: "Taller", en: "Sandbox" });
+  building("social", 19, 8.5, "#b2456e", "#ff5fa0", { es: "La Terraza", en: "Social" });
+  building("townhall", 45, 8.5, C.terracota, C.neonTerracota, { es: "Ayuntamiento", en: "Town hall" });
 
   /* --- Naranjos ---------------------------------------------------------- */
   const trees: [number, number][] = [
@@ -173,8 +202,11 @@ export function plazaSeed(): { id: string; components: Components }[] {
     [24, 22], [40, 22], [24, 38], [40, 38], [14, 44], [50, 44],
   ];
   lamps.forEach(([x, z], i) => {
-    prim(`lamp_${i}_post`, "cylinder", [x, 1.75, z], [0.15, 3.5, 0], C.hierro);
-    prim(`lamp_${i}_light`, "sphere", [x, 3.65, z], [0.5, 0, 0], C.luz, { emissive: true });
+    prim(`lamp_${i}_post`, "cylinder", [x, 1.75, z], [0.15, 3.5, 0], C.hierro, { finish: "metal" });
+    prim(`lamp_${i}_light`, "sphere", [x, 3.65, z], [0.5, 0, 0], C.luz, {
+      emissive: true,
+      light: { color: C.luz, intensity: 3, range: 12 },
+    });
   });
 
   /* --- Bancos alrededor de la fuente ------------------------------------- */

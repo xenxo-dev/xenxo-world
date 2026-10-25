@@ -53,37 +53,37 @@ export function DefaultAvatar({ color, motion }: { color: THREE.ColorRepresentat
     <group ref={root}>
       {/* Piernas: el pivote está en la cadera */}
       <group ref={legL} position={[-0.12, 0.82, 0]}>
-        <mesh position={[0, -0.41, 0]}>
+        <mesh position={[0, -0.41, 0]} castShadow>
           <capsuleGeometry args={[0.1, 0.62, 3, 8]} />
           <meshLambertMaterial color="#5a4a3f" />
         </mesh>
       </group>
       <group ref={legR} position={[0.12, 0.82, 0]}>
-        <mesh position={[0, -0.41, 0]}>
+        <mesh position={[0, -0.41, 0]} castShadow>
           <capsuleGeometry args={[0.1, 0.62, 3, 8]} />
           <meshLambertMaterial color="#5a4a3f" />
         </mesh>
       </group>
       {/* Torso */}
-      <mesh position={[0, 1.12, 0]}>
+      <mesh position={[0, 1.12, 0]} castShadow>
         <capsuleGeometry args={[0.24, 0.42, 4, 12]} />
         <meshLambertMaterial color={color} />
       </mesh>
       {/* Brazos: el pivote está en el hombro */}
       <group ref={armL} position={[-0.33, 1.36, 0]}>
-        <mesh position={[0, -0.3, 0]}>
+        <mesh position={[0, -0.3, 0]} castShadow>
           <capsuleGeometry args={[0.075, 0.48, 3, 8]} />
           <meshLambertMaterial color={color} />
         </mesh>
       </group>
       <group ref={armR} position={[0.33, 1.36, 0]}>
-        <mesh position={[0, -0.3, 0]}>
+        <mesh position={[0, -0.3, 0]} castShadow>
           <capsuleGeometry args={[0.075, 0.48, 3, 8]} />
           <meshLambertMaterial color={color} />
         </mesh>
       </group>
       {/* Cabeza con visor de azulejo */}
-      <mesh position={[0, EYE_HEIGHT, 0]}>
+      <mesh position={[0, EYE_HEIGHT, 0]} castShadow>
         <sphereGeometry args={[0.2, 16, 12]} />
         <meshLambertMaterial color="#f1d9c4" />
       </mesh>

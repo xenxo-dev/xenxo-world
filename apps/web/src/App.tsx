@@ -46,9 +46,6 @@ export function App() {
   const [inWorld, setInWorld] = useState(false);
   const [panelSection, setPanelSection] = useState<Section>("solutions");
   const [name, setNameState] = useState(() => loadPref("name", randomName()));
-  const [quality, setQualityState] = useState<"low" | "high">(() =>
-    loadPref("quality", matchMedia("(pointer: coarse)").matches ? "low" : "high"),
-  );
   const vr = useVRSupported();
   const xrStore = useXRStore();
   const enterVR = vr && xrStore ? () => void xrStore.enterVR() : null;
@@ -67,15 +64,11 @@ export function App() {
     savePref("name", n);
     setSessionGuestName(n);
   };
-  const setQuality = (q: "low" | "high") => {
-    setQualityState(q);
-    savePref("quality", q);
-  };
 
   return (
     <div className="relative h-dvh w-full overflow-hidden bg-noche text-cal">
       <Suspense fallback={null}>
-        <World active={inWorld} quality={quality} />
+        <World active={inWorld} />
       </Suspense>
 
       {!inWorld && (
@@ -86,8 +79,6 @@ export function App() {
           onEnterVR={enterVR}
           guestName={name}
           setGuestName={setName}
-          quality={quality}
-          setQuality={setQuality}
         />
       )}
 

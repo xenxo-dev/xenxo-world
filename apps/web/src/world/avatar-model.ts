@@ -7,7 +7,6 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { clone as cloneSkinned } from "three/examples/jsm/utils/SkeletonUtils.js";
 import { VRMLoaderPlugin, VRMUtils, type VRM } from "@pixiv/three-vrm";
-import { applyEnvironment } from "./environment";
 
 export const AVATAR_HEIGHT = 1.75;
 
@@ -49,13 +48,15 @@ function normalize(root: THREE.Object3D) {
   return wrapper;
 }
 
-/** Materiales baratos para Quest: sin sombras y sin frustum culling erróneo en mallas con huesos. */
+/**
+ * Los personajes proyectan sombra (solo se ve en equipos con sombras activadas)
+ * y las mallas con huesos no se recortan por error al moverse.
+ */
 function tune(root: THREE.Object3D) {
-  applyEnvironment(root);
   root.traverse((o) => {
     const m = o as THREE.Mesh;
     if (m.isMesh) {
-      m.castShadow = false;
+      m.castShadow = true;
       m.receiveShadow = false;
       if ((m as THREE.SkinnedMesh).isSkinnedMesh) m.frustumCulled = false;
     }

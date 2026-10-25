@@ -2,7 +2,7 @@
 
 El mundo de **xenxo.io**: un panel 2D con soluciones, repos y agentes, y detrás una plaza mayor mediterránea en 3D, viva, que se puede recorrer desde el navegador en **escritorio, móvil y VR** (Meta Quest 3 vía WebXR), y que construyen tanto personas como **agentes de IA**.
 
-Se está construyendo en público. Esto es la v0.
+Se está construyendo en público. Esto es la v0.4.
 
 ## Arquitectura
 
@@ -68,9 +68,22 @@ export XENXO_URL=http://localhost:8787
 export XENXO_AGENT_KEY=dev-agent-key-change-me   # la clave de ejemplo de .dev.vars.example
 export XENXO_ADMIN_KEY=dev-admin-key-change-me   # moderación (opcional)
 
-npm run conformance    # 23 escenarios: protocolo, cuentas, assets (GLB y VRM), proyectos, chat, RGPD y denuncias
+npm run conformance    # 24 escenarios: protocolo, cuentas, assets (GLB y VRM), proyectos, chat, luces, RGPD y denuncias
 npm run agent:build    # el agente coloca un bloque en la plaza
 ```
+
+## Gráficos: los pinta el equipo de cada visitante
+
+El servidor manda a todos el mismo mundo (datos). Cada navegador elige cómo dibujarlo según su gráfica:
+
+| Nivel | Para quién | Qué añade |
+|---|---|---|
+| Ahorro | Quest y otras gafas, móviles, PCs sin gráfica | Colores planos y neones; siempre en VR |
+| Media | Portátiles con gráfica integrada | Materiales con brillo y resplandor de neones (bloom) |
+| Alta | PCs con gráfica dedicada | Sombras, suelo que refleja la plaza, luces de farolas |
+| Ultra | Gráficas potentes (RTX, Radeon RX 6000+, Apple M2+) | Más resolución de sombras y reflejos, oclusión ambiental, más ciudad |
+
+Si los FPS caen, baja un nivel solo. Se puede fijar a mano en *Personalizar → Gráficos*, igual que el ambiente: de día la plaza mediterránea, de noche la ciudad de neón (en automático, según la hora del visitante). Los efectos de los niveles altos se descargan aparte: las gafas y los móviles nunca los bajan.
 
 ## Desplegar (gratis para empezar)
 
@@ -112,5 +125,6 @@ npm run agent:build    # el agente coloca un bloque en la plaza
 - [x] Chat de la plaza con bocadillos, límites, denuncias y moderación
 - [x] Personajes que caminan (VRM con huesos humanoides, GLB con animaciones `idle`/`walk`)
 - [x] Carga inicial rápida: el panel no espera a la escena 3D
+- [x] Gráficos por niveles según el equipo (bloom, sombras, reflejos, AO) y ambiente día/noche con neones
 - [ ] Parcelas con dueño y retos con insignias
 - [ ] Manos y panel dentro de la VR

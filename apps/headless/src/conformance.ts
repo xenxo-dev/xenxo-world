@@ -127,6 +127,36 @@ if (!agentKey) {
     c.close();
   });
 
+  await scenario("agente: primitive@1.finish y light@1 se aceptan; las luces tienen presupuesto por chunk", async () => {
+    // Llenar el presupuesto de luces gasta muchas mutaciones: se hace con otro actor
+    // (moderación) para no agotar el límite por minuto del agente principal.
+    const c = await XenxoClient.connect({ baseUrl, agentKey: adminKey ?? agentKey });
+    const bad = await c.mutate({
+      op: "SPAWN",
+      components: { "transform@1": { p: [26, 0.5, 26] }, "primitive@1": { shape: "box", size: [1, 1, 1], color: "#ffffff", finish: "chrome" } },
+    });
+    assert(bad.type === "ERROR" && bad.payload.code === "bad_message", "un acabado inventado debería rechazarse");
+    const created: string[] = [];
+    let limited = false;
+    for (let i = 0; i < (adminKey ? 20 : 1) && !limited; i++) {
+      const r = await c.mutate({
+        op: "SPAWN",
+        components: {
+          "transform@1": { p: [26 + (i % 5), 3, 26 + Math.floor(i / 5)] },
+          "primitive@1": { shape: "sphere", size: [0.3, 0.3, 0.3], color: "#ffd98a", emissive: true, finish: "glossy" },
+          "light@1": { type: "point", color: "#ffd98a", intensity: 2, range: 8 },
+        },
+      });
+      if (r.type === "ACK") created.push(r.payload.entity_id);
+      else if (r.payload.code === "budget_exceeded") limited = true;
+      else throw new Error(`error inesperado: ${r.payload.code}`);
+    }
+    assert(created.length > 0, "una luz debería aceptarse");
+    if (adminKey) assert(limited, "debería aplicarse el máximo de luces por chunk");
+    for (const id of created) await c.mutate({ op: "DESPAWN", entity_id: id, base_rev: 1 });
+    c.close();
+  });
+
   await scenario("agente: componente desconocido → unknown_component", async () => {
     const c = await XenxoClient.connect({ baseUrl, agentKey });
     const r = await c.mutate({ op: "SPAWN", components: { "transform@1": { p: [5, 0, 5] }, "laser@1": { power: 9000 } } });

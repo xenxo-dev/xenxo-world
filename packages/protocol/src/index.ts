@@ -42,6 +42,8 @@ export const BUDGETS = {
   maxPoseHz: 15,
   maxLabelChars: 140,
   maxChatChars: 280,
+  /** Luces puntuales por chunk (los clientes ligeros las ignoran). */
+  maxLightsPerChunk: 16,
   /** Mensajes de chat por sesión en una ventana de 10 s. */
   maxChatPer10s: 5,
 } as const;
@@ -64,6 +66,11 @@ export const PrimitiveV1 = z.object({
   size: Vec3,
   color: HexColor,
   emissive: z.boolean().default(false),
+  /**
+   * Acabado de la superficie. Pista para clientes con buena gráfica (brillo, reflejos);
+   * los ligeros (Quest, móvil) pueden ignorarlo y pintarlo mate.
+   */
+  finish: z.enum(["matte", "glossy", "metal", "glass"]).default("matte"),
 });
 
 export const MeshV1 = z.object({
@@ -105,6 +112,21 @@ export function labelText(label: { text: string; i18n?: Record<string, string> }
   return label.i18n?.[lang] ?? label.text;
 }
 
+/**
+ * Luz puntual (farolas, neones). Es una pista: cada cliente decide si la dibuja
+ * según su gráfica; el mundo debe verse bien sin ella.
+ */
+export const LightV1 = z.object({
+  type: z.literal("point"),
+  color: HexColor,
+  /** 0–10, en unidades de Three.js (candelas aproximadas). */
+  intensity: z.number().min(0).max(10),
+  /** Alcance en metros. */
+  range: z.number().min(0.5).max(30),
+  /** Solo de noche (farolas) o siempre. */
+  when: z.enum(["night", "always"]).default("night"),
+});
+
 /** Reservado en v0: el servidor lo rechaza hasta que exista el sandbox WASM. */
 export const BehaviorV1 = z.object({
   module: Hash,
@@ -120,6 +142,7 @@ export const COMPONENTS = {
   "mesh@1": MeshV1,
   "collider@1": ColliderV1,
   "label@1": LabelV1,
+  "light@1": LightV1,
   "behavior@1": BehaviorV1,
 } as const;
 
@@ -130,6 +153,7 @@ export const ACCEPTED_IN_V0: readonly ComponentKey[] = [
   "mesh@1",
   "collider@1",
   "label@1",
+  "light@1",
 ];
 
 /**
@@ -143,6 +167,7 @@ export const ComponentsStrict = z
     "mesh@1": MeshV1.optional(),
     "collider@1": ColliderV1.optional(),
     "label@1": LabelV1.optional(),
+    "light@1": LightV1.optional(),
     "behavior@1": BehaviorV1.optional(),
   })
   .strict();

@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { errorText, LANGS, legalPath, setLang, t, useLang } from "../i18n";
+import { errorText, LANGS, legalPath, setLang, t, useLang, type Key } from "../i18n";
+import { detectGpu, TIERS, useGraphics, type Tier } from "../world/graphics";
 import {
   deleteAccount,
   exportData,
@@ -19,8 +20,6 @@ import { Block, Button, card, input, Label, Notice, Segmented } from "./ui";
 export interface CustomizeProps {
   guestName: string;
   setGuestName: (n: string) => void;
-  quality: "low" | "high";
-  setQuality: (q: "low" | "high") => void;
 }
 
 /** Personalizar: cuenta, personaje propio, nombre, calidad e idioma. */
@@ -51,17 +50,45 @@ export function CustomizeSection(props: CustomizeProps) {
       )}
 
       <Block title={t("customize.quality")}>
-        <Segmented
-          value={props.quality}
-          onChange={props.setQuality}
-          options={[
-            { id: "low", label: t("customize.low") },
-            { id: "high", label: t("customize.high") },
-          ]}
-        />
+        <GraphicsSettings />
         <p className="mb-1 mt-6 text-sm text-cal/70">{t("customize.language")}</p>
         <Segmented value={lang} onChange={setLang} options={LANGS} />
       </Block>
+    </>
+  );
+}
+
+/** Calidad gráfica según el equipo (automática o elegida) y ambiente día/noche. */
+function GraphicsSettings() {
+  const g = useGraphics();
+  const gpu = detectGpu();
+  const tierLabel = (tier: Tier) => t(`gfx.tier.${tier}` as Key);
+  return (
+    <>
+      <Segmented
+        value={g.pref}
+        onChange={(v) => g.setPref(v)}
+        options={[
+          { id: "auto", label: t("gfx.auto") },
+          ...TIERS.map((tier) => ({ id: tier, label: tierLabel(tier) })),
+        ]}
+      />
+      <p className="mt-2 text-xs text-cal/45">
+        {g.pref === "auto"
+          ? t("gfx.autoNow", { tier: tierLabel(g.tier), reason: t(`gfx.reason.${gpu.reason}` as Key) })
+          : t("gfx.manual", { tier: tierLabel(g.tier) })}
+      </p>
+      <p className="mt-1 text-xs text-cal/35">{t(`gfx.desc.${g.tier}` as Key)}</p>
+      <p className="mb-1 mt-6 text-sm text-cal/70">{t("gfx.ambience")}</p>
+      <Segmented
+        value={g.ambiencePref}
+        onChange={(v) => g.setAmbience(v)}
+        options={[
+          { id: "auto", label: t("gfx.ambience.auto") },
+          { id: "day", label: t("gfx.ambience.day") },
+          { id: "night", label: t("gfx.ambience.night") },
+        ]}
+      />
     </>
   );
 }

@@ -38,7 +38,9 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 
 - Nada de `new THREE.Vector3()` (ni objetos) dentro de `useFrame`: reutiliza objetos de módulo.
 - La red escribe en `world-store`; React solo re-renderiza en cambios estructurales, nunca por cada pose.
-- Sin post-procesado, sin sombras dinámicas. Emisivos con `meshBasicMaterial`, resto `meshLambertMaterial`.
+- La calidad la decide el equipo del visitante (`world/graphics.ts`, tabla `FEATURES`). Quest, VR y móvil van en `low`: sin post-procesado, sin sombras, sin luces puntuales, `meshLambertMaterial` y emisivos con `meshBasicMaterial`. Solo los niveles de escritorio (`medium`/`high`/`ultra`) pueden usar post-proceso, sombras o reflejos, y siempre bajan solos si caen los FPS.
+- Todo efecto nuevo entra en la tabla `FEATURES`, nunca con un `if` suelto. El mundo debe verse bien en `low`: lo de los niveles altos es un extra.
+- `Effects.tsx` (post-proceso) se carga aparte y nunca se monta en XR.
 - Textos 3D con la fuente empaquetada (`world/font.ts`) y siempre dentro de `<Suspense>`: si suspenden fuera, congelan toda la app.
 - Mide en las gafas, no en el escritorio.
 

@@ -292,6 +292,7 @@ export class ChunkRoom extends DurableObject<Env> {
       if (this.getRow(entity_id)) throw new MutationError("duplicate", "ya existe una entidad con ese id");
       const count = this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM entities").one().n;
       if (count >= BUDGETS.maxEntitiesPerChunk) throw new MutationError("budget_exceeded", "chunk lleno de entidades", { max: BUDGETS.maxEntitiesPerChunk });
+      if (components["light@1"]) this.checkLights(1);
       this.checkTris(estimateTris(components), 0);
       const entity = this.insertEntity(entity_id, actor, components);
       this.logEvent(actor, "SPAWN", entity_id, 1, components);
@@ -317,6 +318,7 @@ export class ChunkRoom extends DurableObject<Env> {
       else merged[k] = v;
     }
     const components = this.validateComponents(merged);
+    if (components["light@1"] && !(JSON.parse(row.data) as Entity).components["light@1"]) this.checkLights(1);
     const tris = estimateTris(components);
     this.checkTris(tris, row.tris);
     const rev = row.rev + 1;
@@ -554,6 +556,15 @@ export class ChunkRoom extends DurableObject<Env> {
     const total = this.sql.exec<{ t: number | null }>("SELECT SUM(tris) AS t FROM entities").one().t ?? 0;
     if (total - remove + add > BUDGETS.maxTrisPerChunk) {
       throw new MutationError("budget_exceeded", "el chunk superaría su presupuesto de triángulos", { total, add, max: BUDGETS.maxTrisPerChunk });
+    }
+  }
+
+  private checkLights(add: number) {
+    const n = this.sql
+      .exec<{ n: number }>("SELECT COUNT(*) AS n FROM entities WHERE data LIKE '%\"light@1\"%'")
+      .one().n;
+    if (n + add > BUDGETS.maxLightsPerChunk) {
+      throw new MutationError("budget_exceeded", "demasiadas luces en este chunk", { max: BUDGETS.maxLightsPerChunk });
     }
   }
 
