@@ -31,6 +31,8 @@ export interface Features {
   probe: 0 | 128 | 256;
   /** Luces puntuales de farolas y neones (light@1). */
   pointLights: boolean;
+  /** Sin luces puntuales: charco de luz pintado en el suelo bajo cada light@1 (de noche). */
+  lightPools: boolean;
   /** Edificios del horizonte. */
   skyline: number;
   /** Nivel de detalle de los modelos: el más detallado o el más ligero. */
@@ -42,10 +44,10 @@ export interface Features {
 }
 
 export const FEATURES: Record<Tier, Features> = {
-  low: { dpr: [0.75, 1], antialias: false, pbr: false, post: false, bloom: false, ao: false, shadows: 0, probe: 0, pointLights: false, skyline: 48, lod: "light", textures: 512, normalMaps: false },
-  medium: { dpr: [1, 1.5], antialias: true, pbr: true, post: true, bloom: true, ao: false, shadows: 0, probe: 0, pointLights: false, skyline: 96, lod: "light", textures: 512, normalMaps: true },
-  high: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: false, shadows: 1024, probe: 128, pointLights: true, skyline: 150, lod: "detailed", textures: 1024, normalMaps: true },
-  ultra: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: true, shadows: 2048, probe: 256, pointLights: true, skyline: 220, lod: "detailed", textures: 1024, normalMaps: true },
+  low: { dpr: [0.75, 1], antialias: false, pbr: false, post: false, bloom: false, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 48, lod: "light", textures: 512, normalMaps: false },
+  medium: { dpr: [1, 1.5], antialias: true, pbr: true, post: true, bloom: true, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 96, lod: "light", textures: 512, normalMaps: true },
+  high: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: false, shadows: 1024, probe: 128, pointLights: true, lightPools: false, skyline: 150, lod: "detailed", textures: 1024, normalMaps: true },
+  ultra: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: true, shadows: 2048, probe: 256, pointLights: true, lightPools: false, skyline: 220, lod: "detailed", textures: 1024, normalMaps: true },
 };
 
 /* ------------------------------------------------------------------ */
@@ -58,7 +60,9 @@ export interface GpuInfo {
   cores: number;
   tier: Tier;
   /** Motivo, como código (el texto lo pone el panel en su idioma). */
-  reason: "vr" | "mobile" | "nowebgl" | "software" | "integrated" | "dedicated_strong" | "dedicated" | "unknown";
+  reason: "vr" | "vr_strong" | "mobile" | "mobile_strong" | "nowebgl" | "software" | "integrated" | "dedicated_strong" | "dedicated" | "unknown";
+  /** Gafas o pantalla táctil: sin efectos de pantalla completa ni sombras (ver `portable`). */
+  portable: boolean;
 }
 
 let detected: GpuInfo | null = null;
@@ -81,9 +85,12 @@ export function detectGpu(): GpuInfo {
     /* sin WebGL: se queda en ligero */
   }
 
-  const pick = (tier: Tier, reason: GpuInfo["reason"]): GpuInfo => (detected = { renderer, memory, cores, tier, reason });
-  if (/OculusBrowser|Quest|Pico|Wolvic|VisionOS/i.test(ua)) return pick("low", "vr");
-  if (matchMedia("(pointer: coarse)").matches) return pick("low", "mobile");
+  const vr = /OculusBrowser|Quest|Pico|Wolvic|VisionOS/i.test(ua);
+  const touch = matchMedia("(pointer: coarse)").matches;
+  const pick = (tier: Tier, reason: GpuInfo["reason"]): GpuInfo => (detected = { renderer, memory, cores, tier, reason, portable: vr || touch });
+  // Gafas: Quest 3/3S/Pro y Vision Pro mueven materiales reales; Quest 2, Pico y el resto, el nivel ligero.
+  if (vr) return /Quest 3|Quest Pro|VisionOS/i.test(ua) ? pick("medium", "vr_strong") : pick("low", "vr");
+  if (touch) return strongMobileGpu(renderer, memory) ? pick("medium", "mobile_strong") : pick("low", "mobile");
   if (!renderer) return pick("low", "nowebgl");
   if (/swiftshader|llvmpipe|softpipe|software|basic render|microsoft basic/i.test(renderer)) return pick("low", "software");
   if (/intel|uhd|iris|mali|adreno|powervr|vivante/i.test(renderer)) return pick(memory >= 8 ? "medium" : "low", "integrated");
@@ -92,6 +99,37 @@ export function detectGpu(): GpuInfo {
   }
   if (/nvidia|geforce|radeon|amd|apple/i.test(renderer)) return pick("high", "dedicated");
   return pick("medium", "unknown");
+}
+
+/** Móviles de gama media-alta de los últimos años (iPhone, Adreno 660+, Mali-G7x/G6xx, Immortalis, Xclipse). */
+function strongMobileGpu(renderer: string, memory: number): boolean {
+  if (memory < 4) return false;
+  if (/apple gpu/i.test(renderer)) return true;
+  const adreno = /adreno[^\d]*(\d{3})/i.exec(renderer);
+  if (adreno) return Number(adreno[1]) >= 660;
+  if (/immortalis|xclipse|mali-g7\d|mali-g6[1-9]\d|mali-g71\d/i.test(renderer)) return true;
+  return false;
+}
+
+/**
+ * Gafas y móviles: aunque el nivel sea «medio», nada de efectos de pantalla completa,
+ * sombras, sondas de reflejo ni luces puntuales (lo que más caro sale en esas GPU).
+ * Los neones brillan igual gracias al halo de sus materiales (no necesita bloom).
+ */
+function portableClamp(f: Features, xr: boolean): Features {
+  return {
+    ...f,
+    dpr: [Math.min(f.dpr[0], 1), Math.min(f.dpr[1], xr ? 1 : 1.75)],
+    post: false,
+    bloom: false,
+    ao: false,
+    shadows: 0,
+    probe: 0,
+    pointLights: false,
+    lightPools: true,
+    skyline: Math.min(f.skyline, 96),
+    lod: f.lod,
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -126,14 +164,18 @@ class GraphicsStore {
   }
 
   get tier(): Tier {
-    if (this.inXR) return "low";
-    if (this.pref !== "auto") return this.pref;
-    const base = TIERS.indexOf(detectGpu().tier);
-    return TIERS[Math.max(0, base - this.declines)]!;
+    const gpu = detectGpu();
+    let t: Tier;
+    if (this.pref !== "auto") t = this.pref;
+    else t = TIERS[Math.max(0, TIERS.indexOf(gpu.tier) - this.declines)]!;
+    // En VR, como mucho «medio» (y solo si las gafas lo aguantan).
+    if (this.inXR) t = TIERS[Math.min(TIERS.indexOf(t), TIERS.indexOf(gpu.tier === "low" ? "low" : "medium"))]!;
+    return t;
   }
 
   get features(): Features {
-    return FEATURES[this.tier];
+    const f = FEATURES[this.tier];
+    return detectGpu().portable || this.inXR ? portableClamp(f, this.inXR) : f;
   }
 
   get ambience(): Ambience {

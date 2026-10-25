@@ -318,8 +318,8 @@ def gate(spec: dict, detail: int = 1):
         p.box((x0, -T / 2 - 0.1, zs - 0.25), (x1, T / 2 + 0.1, zs), dark)
     p.box((-W / 2 - 0.25, -T / 2 - 0.25, top - 1.5), (W / 2 + 0.25, T / 2 + 0.25, top - 1.2), dark)
     p.box((-W / 2 - 0.35, -T / 2 - 0.35, top), (W / 2 + 0.35, T / 2 + 0.35, top + 0.35), dark)
-    p.box((-3.2, -T / 2 - 0.12, top - 1.15), (3.2, -T / 2, top - 0.1), mat("azulejo", "#1d3f6e"))
-    p.box((-3.2, T / 2, top - 1.15), (3.2, T / 2 + 0.12, top - 0.1), mat("azulejo", "#1d3f6e"))
+    p.box((-3.2, -T / 2 - 0.1, top - 1.15), (3.2, -T / 2, top - 0.1), mat("hierro", "#1a1e38"))
+    p.box((-3.2, T / 2, top - 1.15), (3.2, T / 2 + 0.1, top - 0.1), mat("hierro", "#1a1e38"))
     # Dovelas marcadas y clave
     seg = 15
     for k in range(seg + 1):
@@ -332,7 +332,7 @@ def gate(spec: dict, detail: int = 1):
         pts = [(-r, y, 0.9)] + [(math.cos(math.pi - math.pi * i / 24) * (r + 0.02), y, zs + math.sin(math.pi - math.pi * i / 24) * (r + 0.02)) for i in range(25)] + [(r, y, 0.9)]
         p.tube(pts, 0.04, neon, segments=6 if detail else 4)
         rect = [(-3.3, y, top - 1.2), (3.3, y, top - 1.2), (3.3, y, top - 0.05), (-3.3, y, top - 0.05)]
-        p.tube(rect, 0.035, mat("neon", "#ff6a3d"), segments=6 if detail else 4, closed=True)
+        p.tube(rect, 0.03, mat("hierro", "#26231f"), segments=4, closed=True)
     # Faroles en los pilares (por la cara de la plaza)
     from townhouse import lantern
     for sx in (-1, 1):

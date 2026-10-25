@@ -105,6 +105,14 @@ export const LabelV1 = z.object({
     .record(z.string().regex(/^[a-z]{2}$/), z.string().min(1).max(BUDGETS.maxLabelChars))
     .refine((o) => Object.keys(o).length <= 12, "máximo 12 idiomas por label")
     .optional(),
+  /**
+   * Estilo del rótulo: "plain" (texto claro con contorno, el de siempre) o "neon"
+   * (letras de tubo de neón que se encienden de noche). Los clientes que no lo
+   * conozcan lo dibujan como "plain".
+   */
+  style: z.string().regex(/^[a-z_]{1,16}$/).default("plain"),
+  /** Color del texto (o del neón). Si falta, el cliente elige uno legible. */
+  color: HexColor.optional(),
 });
 
 /** Texto de un label en el idioma pedido, con `text` como respaldo. */

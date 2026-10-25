@@ -26,6 +26,14 @@ export const TERMS_VERSION = "2026-10";
 const FLOW_TTL_MS = 5 * 60 * 1000;
 const MAX_PROJECTS_PER_USER = 3;
 const MAX_UPLOADS_PER_DAY = 30;
+/**
+ * Topes de almacenamiento para no salir nunca del plan gratuito de R2 (10 GB-mes).
+ * Al llegar al tope global se rechazan subidas nuevas; nada se cobra.
+ */
+export const STORAGE_CAP_BYTES = 8 * 1024 ** 3;
+export const USER_QUOTA_BYTES = 100 * 1024 ** 2;
+/** Margen: el mayor modelo permitido (6 MB), porque el tamaño real se sabe después de leerlo. */
+const UPLOAD_HEADROOM = 6 * 1024 ** 2;
 const MAX_REPORTS_PER_DAY = 20;
 const RESERVED_NAMES = new Set(["system", "admin", "xenxo", "moderador", "moderator", "anthropic", "claude"]);
 
@@ -98,6 +106,9 @@ export class Directory extends DurableObject<Env> {
         id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, reporter TEXT NOT NULL, target_type TEXT NOT NULL,
         target_id TEXT NOT NULL, reason TEXT NOT NULL, details TEXT, status TEXT NOT NULL DEFAULT 'open');
     `);
+    // Migración: tamaño de cada subida (para los topes de almacenamiento).
+    const cols = this.sql.exec<{ name: string }>("PRAGMA table_info(uploads)").toArray().map((c) => c.name);
+    if (!cols.includes("bytes")) this.sql.exec("ALTER TABLE uploads ADD COLUMN bytes INTEGER NOT NULL DEFAULT 0");
   }
 
   private get rpID() {
@@ -323,11 +334,33 @@ export class Directory extends DurableObject<Env> {
     const n = this.sql
       .exec<{ n: number }>("SELECT COUNT(*) AS n FROM uploads WHERE uploader = ? AND ts > ?", uploader, Date.now() - 86_400_000)
       .one().n;
-    return n >= MAX_UPLOADS_PER_DAY ? fail(429, "rate_limited", "has llegado al máximo de subidas por hoy") : ok(true);
+    if (n >= MAX_UPLOADS_PER_DAY) return fail(429, "rate_limited", "has llegado al máximo de subidas por hoy");
+    const mine = this.sql
+      .exec<{ b: number | null }>("SELECT SUM(bytes) AS b FROM uploads WHERE uploader = ?", uploader)
+      .one().b ?? 0;
+    if (mine + UPLOAD_HEADROOM > USER_QUOTA_BYTES) {
+      return fail(413, "quota_exceeded", `has llegado a tu espacio (${USER_QUOTA_BYTES / 1024 ** 2} MB): borra algún modelo para subir otro`);
+    }
+    if (this.storedBytes() + UPLOAD_HEADROOM > STORAGE_CAP_BYTES) {
+      return fail(507, "storage_full", "el almacén de xenxo está lleno por ahora; vuelve a intentarlo más adelante");
+    }
+    return ok(true);
   }
 
-  recordUpload(uploader: string, hash: string, kind: string) {
-    this.sql.exec("INSERT OR REPLACE INTO uploads (hash, uploader, kind, ts) VALUES (?, ?, ?, ?)", hash, uploader, kind, Date.now());
+  /** Bytes guardados en R2 por subidas de la gente (cada hash cuenta una vez). */
+  storedBytes(): number {
+    return (
+      this.sql
+        .exec<{ b: number | null }>("SELECT SUM(b) AS b FROM (SELECT MAX(bytes) AS b FROM uploads GROUP BY hash)")
+        .one().b ?? 0
+    );
+  }
+
+  recordUpload(uploader: string, hash: string, kind: string, bytes: number) {
+    this.sql.exec(
+      "INSERT OR REPLACE INTO uploads (hash, uploader, kind, ts, bytes) VALUES (?, ?, ?, ?, ?)",
+      hash, uploader, kind, Date.now(), bytes,
+    );
   }
 
   /* ---------------------------------------------------------------- */

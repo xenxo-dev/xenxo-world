@@ -7,6 +7,6 @@ Los recursos gráficos que no son propios son de dominio público (CC0): no hace
 - **Personas de serie**: generadas con [MPFB / MakeHuman](https://static.makehumancommunity.org)
   y sus paquetes de recursos CC0 (pieles, pelo, ropa).
 - **Animaciones**: [Universal Animation Library](https://quaternius.com) de Quaternius (CC0).
-- **Tipografías**: Inter y Archivo (SIL Open Font License), empaquetadas con la web.
+- **Tipografías**: Inter, Archivo y Tilt Neon de Andy Clymer, para los rótulos de neón (SIL Open Font License), empaquetadas con la web.
 
 Herramientas: Blender, VRM Add-on for Blender, glTF-Transform, meshoptimizer, three.js, @pixiv/three-vrm.

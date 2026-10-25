@@ -162,6 +162,24 @@ if (!agentKey) {
     c.close();
   });
 
+  await scenario("agente: label@1 con estilo neón y color se acepta; un color mal formado no", async () => {
+    const c = await XenxoClient.connect({ baseUrl, agentKey });
+    const ok = await c.mutate({
+      op: "SPAWN",
+      components: {
+        "transform@1": { p: [24, 2, 26] },
+        "label@1": { text: "xenxo.io", billboard: false, size: 0.6, style: "neon", color: "#ff4fd8" },
+      },
+    });
+    assert(ok.type === "ACK", `esperaba ACK: ${JSON.stringify(ok.payload)}`);
+    const plain = await c.mutate({ op: "PATCH", entity_id: ok.payload.entity_id, base_rev: 1, components: { "label@1": { text: "sin estilo" } } });
+    assert(plain.type === "ACK", "un label@1 sin style ni color sigue siendo válido (style por defecto: plain)");
+    const bad = await c.mutate({ op: "PATCH", entity_id: ok.payload.entity_id, base_rev: 2, components: { "label@1": { text: "x", style: "neon", color: "rosa" } } });
+    assert(bad.type === "ERROR" && bad.payload.code === "bad_message", "esperaba bad_message por color inválido");
+    await c.mutate({ op: "DESPAWN", entity_id: ok.payload.entity_id, base_rev: 2 });
+    c.close();
+  });
+
   await scenario("agente: primitive@1.finish y light@1 se aceptan; las luces tienen presupuesto por chunk", async () => {
     // Llenar el presupuesto de luces gasta muchas mutaciones: se hace con otro actor
     // (moderación) para no agotar el límite por minuto del agente principal.
@@ -251,6 +269,9 @@ await scenario("assets: un invitado no puede subir; un GLB con referencias exter
   assert(okUp.ok && okUp.data.hash.startsWith("sha256:"), "un GLB válido debería aceptarse");
   const get = await fetch(new URL(`/assets/${okUp.data.hash.slice(7)}`, baseUrl));
   assert(get.ok && get.headers.get("cache-control")?.includes("immutable"), "el asset debería servirse como inmutable");
+  await get.arrayBuffer();
+  const again = await fetch(new URL(`/assets/${okUp.data.hash.slice(7)}`, baseUrl));
+  assert(again.ok && (await again.arrayBuffer()).byteLength === okUp.data.bytes, "la segunda lectura (desde caché) debe devolver el mismo modelo");
 });
 
 await scenario("avatar propio: los demás lo ven en el peer de la persona registrada", async () => {

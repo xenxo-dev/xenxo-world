@@ -222,3 +222,54 @@ export function lightweight(m: THREE.Material): THREE.Material {
     vertexColors: s.vertexColors,
   });
 }
+
+/* ------------------------------------------------------------------ */
+/* Halo de neón sin post-proceso (VR, móvil y equipos sin bloom)        */
+/* ------------------------------------------------------------------ */
+
+const halos = new Map<string, THREE.ShaderMaterial>();
+
+/**
+ * Funda transparente un poco más gruesa que el tubo, aditiva y más intensa en el centro:
+ * da el resplandor del neón sin pasadas de pantalla completa (compatible con WebXR).
+ */
+export function haloMaterial(color: THREE.Color, ambience: Ambience): THREE.ShaderMaterial {
+  const key = `${color.getHexString()}|${ambience}`;
+  let m = halos.get(key);
+  if (!m) {
+    m = new THREE.ShaderMaterial({
+      uniforms: {
+        uColor: { value: color.clone() },
+        uStrength: { value: ambience === "night" ? 0.95 : 0.22 },
+        uGrow: { value: 0.07 },
+      },
+      vertexShader: /* glsl */ `
+        uniform float uGrow;
+        varying vec3 vN;
+        varying vec3 vV;
+        void main() {
+          vec3 p = position + normal * uGrow;
+          vec4 mv = modelViewMatrix * vec4(p, 1.0);
+          vN = normalize(normalMatrix * normal);
+          vV = normalize(-mv.xyz);
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: /* glsl */ `
+        uniform vec3 uColor;
+        uniform float uStrength;
+        varying vec3 vN;
+        varying vec3 vV;
+        void main() {
+          float facing = abs(dot(normalize(vN), normalize(vV)));
+          float a = pow(facing, 2.2) * uStrength;
+          gl_FragColor = vec4(uColor * a, 1.0);
+        }`,
+      blending: THREE.AdditiveBlending,
+      transparent: true,
+      depthWrite: false,
+      toneMapped: false,
+    });
+    halos.set(key, m);
+  }
+  return m;
+}

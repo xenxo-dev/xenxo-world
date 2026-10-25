@@ -92,9 +92,13 @@ def build(spec: dict, detail: int = 1):
                 p.box((x0, y0, 1.35), (x1, y1, 14.0), stone)
 
     # Placa de azulejo para el nombre (el texto lo pone el mundo)
-    p.box((-2.3, -h - 0.1, 7.7), (2.3, -h, 9.1), mat("azulejo", "#1d3f6e"))
-    p.box((-2.42, -h - 0.14, 7.58), (2.42, -h - 0.08, 7.7), stone)
-    p.box((-2.42, -h - 0.14, 9.1), (2.42, -h - 0.08, 9.22), stone)
+    # Placa del nombre: chapa azul noche con marco de forja (las letras de neón las pone el mundo)
+    p.box((-2.3, -h - 0.08, 7.7), (2.3, -h, 9.1), mat("hierro", "#1a1e38"))
+    iron = mat("hierro", IRON)
+    p.box((-2.36, -h - 0.11, 7.64), (2.36, -h - 0.02, 7.7), iron)
+    p.box((-2.36, -h - 0.11, 9.1), (2.36, -h - 0.02, 9.16), iron)
+    p.box((-2.36, -h - 0.11, 7.7), (-2.3, -h - 0.02, 9.1), iron)
+    p.box((2.3, -h - 0.11, 7.7), (2.36, -h - 0.02, 9.1), iron)
 
     # Reloj en las cuatro caras
     for ang in (0, 90, 180, 270):

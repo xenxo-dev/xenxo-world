@@ -315,13 +315,19 @@ def build(spec: dict, detail: int = 1, seed: int = 1) -> bpy.types.Object:
     # Cartel del barrio (el texto lo pone el mundo con label@1)
     sx = -W / 2 + bay * (n // 2 + 0.5)
     if has_sign:
-        sw, sh, sz = bay - 0.5, 1.25, z1 + 0.85
-        p.box((sx - sw / 2, yf - 0.12, sz), (sx + sw / 2, yf, sz + sh), mat("azulejo", "#1d3f6e"))
-        p.box((sx - sw / 2 - 0.1, yf - 0.16, sz - 0.1), (sx + sw / 2 + 0.1, yf - 0.1, sz), stone)
-        p.box((sx - sw / 2 - 0.1, yf - 0.16, sz + sh), (sx + sw / 2 + 0.1, yf - 0.1, sz + sh + 0.1), stone)
-        rect = [(sx - sw / 2 - 0.02, yf - 0.17, sz - 0.02), (sx + sw / 2 + 0.02, yf - 0.17, sz - 0.02),
-                (sx + sw / 2 + 0.02, yf - 0.17, sz + sh + 0.02), (sx - sw / 2 - 0.02, yf - 0.17, sz + sh + 0.02)]
-        p.tube(rect, 0.03, mat("neon", neon), segments=6 if detail else 4, closed=True)
+        # Rótulo: chapa pintada azul noche con marco de forja y dos escuadras; las letras de
+        # neón las pone el mundo (label@1 estilo "neon").
+        sw, sh, sz = bay - 0.3, 1.3, z1 + 0.8
+        board = mat("hierro", "#1a1e38")
+        iron = mat("hierro", IRON)
+        p.box((sx - sw / 2, yf - 0.1, sz), (sx + sw / 2, yf - 0.04, sz + sh), board)
+        t = 0.05
+        for (x0, z0, x1, z1b) in ((sx - sw / 2 - t, sz - t, sx + sw / 2 + t, sz), (sx - sw / 2 - t, sz + sh, sx + sw / 2 + t, sz + sh + t),
+                                  (sx - sw / 2 - t, sz, sx - sw / 2, sz + sh), (sx + sw / 2, sz, sx + sw / 2 + t, sz + sh)):
+            p.box((x0, yf - 0.13, z0), (x1, yf - 0.03, z1b), iron)
+        for x in (sx - sw / 2 + 0.3, sx + sw / 2 - 0.3):
+            p.box((x - 0.03, yf - 0.06, sz + sh + t), (x + 0.03, yf, sz + sh + 0.28), iron)
+            p.box((x - 0.03, yf - 0.06, sz - 0.28), (x + 0.03, yf, sz - t), iron)
 
     # Impostas (líneas de piedra entre plantas)
     for fi in range(1, len(F)):

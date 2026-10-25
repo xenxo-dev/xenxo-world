@@ -45,7 +45,9 @@ const LIGHTING = {
   night: {
     hemi: ["#3a4a9a", "#1a1410", 0.3],
     sun: { color: "#9fb4ff", intensity: 0.3, offset: [22, 40, -12] },
-    env: 0.12,
+    // Sin sonda, el entorno es un estudio blanco (RoomEnvironment): de noche casi nada,
+    // o la plaza se ve gris y lavada en VR y móvil.
+    env: 0.025,
   },
 } as const;
 

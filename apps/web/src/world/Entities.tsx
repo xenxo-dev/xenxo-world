@@ -5,9 +5,9 @@ import { CHUNK_SIZE, LabelV1, labelText, LightV1, MeshV1, PrimitiveV1, Transform
 import { assetUrl } from "../config";
 import { useLang } from "../i18n";
 import { useWorldVersion, world } from "../net/world-store";
-import { FONT_URL } from "./font";
+import { FONT_URL, NEON_FONT_URL } from "./font";
 import type { Ambience, Features } from "./graphics";
-import { lightweight, libraryMaterial, parseLibraryName } from "./materials";
+import { haloMaterial, lightweight, libraryMaterial, parseLibraryName } from "./materials";
 
 /** Origen global de un chunk "c_<x>_<z>". */
 function chunkOrigin(chunkId: string): [number, number] {
@@ -61,7 +61,18 @@ function MeshAsset({ hash, features, ambience }: { hash: string; features: Featu
         }
         return out;
       };
-      mesh.material = Array.isArray(mesh.material) ? mesh.material.map(swap) : swap(mesh.material);
+      const original = mesh.material;
+      mesh.material = Array.isArray(original) ? original.map(swap) : swap(original);
+      // Sin bloom (VR, móvil, equipos modestos): el neón lleva su propio halo.
+      if (!features.bloom && !Array.isArray(original)) {
+        const ref = parseLibraryName(original.name);
+        if (ref?.lib === "neon") {
+          const halo = new THREE.Mesh(mesh.geometry, haloMaterial(ref.tint, ambience));
+          halo.renderOrder = 2;
+          halo.frustumCulled = mesh.frustumCulled;
+          mesh.add(halo);
+        }
+      }
       const emits = !Array.isArray(mesh.material) && (mesh.material as THREE.MeshBasicMaterial).isMeshBasicMaterial;
       mesh.castShadow = shadows && !emits;
       mesh.receiveShadow = shadows;
@@ -79,6 +90,51 @@ function glow(ambience: Ambience, bloom: boolean) {
 
 /** Luces de la escala de protocolo (0–10) a candelas de Three.js. */
 const CANDELA_PER_UNIT = 4;
+
+/* ------------------------------------------------------------------ */
+/* Charcos de luz (VR, móvil y niveles sin luces puntuales)             */
+/* ------------------------------------------------------------------ */
+
+let poolTexture: THREE.CanvasTexture | null = null;
+function poolGradient() {
+  if (poolTexture) return poolTexture;
+  const n = 128;
+  const c = document.createElement("canvas");
+  c.width = c.height = n;
+  const g = c.getContext("2d")!;
+  const grad = g.createRadialGradient(n / 2, n / 2, 0, n / 2, n / 2, n / 2);
+  grad.addColorStop(0, "rgba(255,255,255,1)");
+  grad.addColorStop(0.35, "rgba(255,255,255,0.55)");
+  grad.addColorStop(0.7, "rgba(255,255,255,0.14)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, n, n);
+  poolTexture = new THREE.CanvasTexture(c);
+  return poolTexture;
+}
+const poolGeometry = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+const poolMaterials = new Map<string, THREE.MeshBasicMaterial>();
+function poolMaterial(color: string, strength: number) {
+  const key = `${color}|${strength.toFixed(2)}`;
+  let m = poolMaterials.get(key);
+  if (!m) {
+    m = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(color).multiplyScalar(strength),
+      map: poolGradient(),
+      blending: THREE.AdditiveBlending,
+      transparent: true,
+      depthWrite: false,
+      toneMapped: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+    });
+    poolMaterials.set(key, m);
+  }
+  return m;
+}
+/** Altura del suelo de la plaza; las luces más altas (balizas) no pintan charco. */
+const POOL_FLOOR_Y = 0.02;
+const POOL_MAX_HEIGHT = 8;
 
 const EntityView = memo(function EntityView({
   entity,
@@ -102,9 +158,21 @@ const EntityView = memo(function EntityView({
   // Equipos potentes: el LOD más detallado (el primero). Ligeros (Quest, móvil): el último.
   const lod = mesh.success ? (features.lod === "detailed" ? mesh.data.lods[0] : mesh.data.lods[mesh.data.lods.length - 1]) : undefined;
   const shadows = features.shadows > 0;
-  const showLight = light.success && features.pointLights && (light.data.when === "always" || ambience === "night");
+  const lit = light.success && (light.data.when === "always" || ambience === "night");
+  const showLight = lit && features.pointLights;
+  const showPool = lit && features.lightPools && p[1] - POOL_FLOOR_Y < POOL_MAX_HEIGHT;
 
   return (
+    <>
+    {showPool && light.success && (
+      <mesh
+        geometry={poolGeometry}
+        material={poolMaterial(light.data.color, Math.min(1, 0.25 + light.data.intensity * 0.35))}
+        position={[p[0] + ox, POOL_FLOOR_Y, p[2] + oz]}
+        scale={[Math.min(light.data.range, 7) * 1.5, 1, Math.min(light.data.range, 7) * 1.5]}
+        renderOrder={1}
+      />
+    )}
     <group position={[p[0] + ox, p[1], p[2] + oz]} quaternion={r} scale={s}>
       {prim.success && <Primitive {...prim.data} pbr={features.pbr} glow={glow(ambience, features.bloom)} shadows={shadows} />}
       {showLight && (
@@ -128,11 +196,16 @@ const EntityView = memo(function EntityView({
           <Billboard position={[0, prim.success ? prim.data.size[1] / 2 + label.data.size : 0, 0]}>
             <Label text={labelText(label.data, lang)} size={label.data.size} />
           </Billboard>
+        ) : label.data.style === "neon" ? (
+          <Suspense fallback={null}>
+            <NeonLabel text={labelText(label.data, lang)} size={label.data.size} color={label.data.color ?? "#4fa3ff"} ambience={ambience} bloom={features.bloom} />
+          </Suspense>
         ) : (
           // Carteles fijos (los de las fachadas): de noche brillan como un rótulo luminoso.
           <Label text={labelText(label.data, lang)} size={label.data.size} glow={ambience === "night" && features.bloom ? 2.4 : 1} />
         ))}
     </group>
+    </>
   );
 });
 
@@ -214,6 +287,42 @@ function LabelText({ text, size, glow }: { text: string; size: number; glow: num
       anchorY="middle"
       outlineWidth={size * 0.04}
       outlineColor="#2a211c"
+    >
+      {text}
+    </Text>
+  );
+}
+
+const WHITE = new THREE.Color("#ffffff");
+
+/**
+ * Rótulo de neón: letras de tubo (Tilt Neon) del color del barrio.
+ *  - De día, tubo de cristal apagado: color pálido con un filo oscuro para leerse sobre la fachada.
+ *  - De noche con bloom (PC): núcleo casi blanco por encima de 1 y el bloom pone el resplandor.
+ *  - De noche sin bloom (VR, móvil): el resplandor lo hace un contorno difuminado del mismo color.
+ */
+function NeonLabel({ text, size, color, ambience, bloom }: { text: string; size: number; color: string; ambience: Ambience; bloom: boolean }) {
+  const night = ambience === "night";
+  const base = useMemo(() => new THREE.Color(color), [color]);
+  const fill = useMemo(() => {
+    if (!night) return base.clone().lerp(WHITE, 0.45);
+    const c = base.clone().lerp(WHITE, bloom ? 0.5 : 0.35);
+    return bloom ? c.multiplyScalar(3.2) : c;
+  }, [base, night, bloom]);
+  const glowOutline = night && !bloom;
+  return (
+    <Text
+      font={NEON_FONT_URL}
+      fontSize={size}
+      color={fill}
+      material-toneMapped={!(night && bloom)}
+      anchorX="center"
+      anchorY="middle"
+      letterSpacing={0.02}
+      outlineWidth={glowOutline ? size * 0.09 : size * 0.025}
+      outlineBlur={glowOutline ? size * 0.32 : night ? 0 : size * 0.04}
+      outlineColor={glowOutline ? base : night ? base : "#151830"}
+      outlineOpacity={glowOutline ? 0.9 : night ? 0.6 : 0.85}
     >
       {text}
     </Text>

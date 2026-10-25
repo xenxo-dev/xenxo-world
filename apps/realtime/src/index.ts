@@ -180,7 +180,7 @@ export default {
 
       /* --- Assets --- */
       const asset = path.match(/^\/assets\/([0-9a-f]{64})$/);
-      if (asset && (req.method === "GET" || req.method === "HEAD")) return handleGet(asset[1]!, env.ASSETS, req, env.STATIC);
+      if (asset && (req.method === "GET" || req.method === "HEAD")) return handleGet(asset[1]!, env.ASSETS, req, ctx, env.STATIC);
       if (path === "/assets" && req.method === "POST") {
         const p = await bearer(req, env);
         if (!p) return json({ error: "unauthorized", message: "inicia sesión para subir modelos" }, 401, h);
@@ -188,7 +188,7 @@ export default {
         if (!allowed.ok) return failure(allowed, h);
         const r = await handleUpload(req, p, env.ASSETS);
         if (!r.ok) return failure(r, h);
-        await dir.recordUpload(p.sub, r.data.hash, r.data.kind);
+        await dir.recordUpload(p.sub, r.data.hash, r.data.kind, r.data.bytes);
         return json(r.data, 201, h);
       }
 

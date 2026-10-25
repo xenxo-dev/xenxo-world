@@ -100,7 +100,7 @@ export async function handleUpload(req: Request, principal: Principal, bucket: R
   };
 }
 
-export async function handleGet(hex: string, bucket: R2Bucket, req: Request, statik?: Fetcher): Promise<Response> {
+export async function handleGet(hex: string, bucket: R2Bucket, req: Request, ctx: ExecutionContext, statik?: Fetcher): Promise<Response> {
   if (!/^[0-9a-f]{64}$/.test(hex)) return new Response("not found", { status: 404 });
   const etag = `"${hex}"`;
   const common = {
@@ -110,14 +110,24 @@ export async function handleGet(hex: string, bucket: R2Bucket, req: Request, sta
     ETag: etag,
   };
   if (req.headers.get("If-None-Match") === etag) return new Response(null, { status: 304, headers: common });
-  const obj = await bucket.get(`assets/${hex}`);
-  if (obj) return new Response(obj.body, { headers: { ...common, "Content-Type": GLB_MEDIA } });
-  // Modelos del sistema (la plaza): vienen con el propio Worker, no de R2.
+  // Modelos del sistema (la plaza y los avatares de serie): vienen con el propio Worker, no de R2.
   if (statik && isSystemAsset(hex)) {
     const r = await statik.fetch(new Request(`https://static.local/${hex}.glb`));
     if (r.ok) return new Response(r.body, { headers: { ...common, "Content-Type": GLB_MEDIA } });
   }
-  return new Response("not found", { status: 404, headers: { "Access-Control-Allow-Origin": "*" } });
+  // Los de la gente, de R2 a través de la caché de Cloudflare: un mismo modelo se lee de R2
+  // una vez por centro de datos, no una por visitante (lecturas de R2 dentro del plan gratuito).
+  const cache = (globalThis as unknown as { caches?: { default?: Cache } }).caches?.default;
+  const cacheKey = new Request(new URL(`/assets/${hex}`, req.url).toString(), { method: "GET" });
+  if (cache) {
+    const hit = await cache.match(cacheKey);
+    if (hit) return req.method === "HEAD" ? new Response(null, { headers: hit.headers }) : hit;
+  }
+  const obj = await bucket.get(`assets/${hex}`);
+  if (!obj) return new Response("not found", { status: 404, headers: { "Access-Control-Allow-Origin": "*" } });
+  const res = new Response(obj.body, { headers: { ...common, "Content-Type": GLB_MEDIA } });
+  if (cache) ctx.waitUntil(cache.put(cacheKey, res.clone()));
+  return req.method === "HEAD" ? new Response(null, { headers: res.headers }) : res;
 }
 
 /** Metadatos guardados al subir (los usa el Directory para validar avatares y proyectos). */

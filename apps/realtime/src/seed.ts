@@ -86,12 +86,13 @@ export function plazaSeed(): { id: string; components: Components }[] {
     });
   };
 
-  const label = (id: string, p: V3, deg: number, text: string, i18n: Record<string, string>, size: number) => {
+  /** Rótulo de neón fijo en una fachada (el texto viaja traducido; el color es el del barrio). */
+  const label = (id: string, p: V3, deg: number, text: string, i18n: Record<string, string>, size: number, color: string) => {
     out.push({
       id,
       components: {
         "transform@1": { p: r3(p), r: yaw(deg), s: [1, 1, 1], parent: null },
-        "label@1": { text, i18n, billboard: false, size },
+        "label@1": { text, i18n, billboard: false, size, style: "neon", color },
       },
     });
   };
@@ -122,7 +123,7 @@ export function plazaSeed(): { id: string; components: Components }[] {
     // Cartel del barrio sobre el panel de azulejo, y su luz de neón para la noche.
     if (b.name) {
       const signY = STREET + H0 + 1.775;
-      label(`${b.id}_label`, at(px, pz, f, 0, signY, D / 2 + 0.2), f, b.name.en, { es: b.name.es, en: b.name.en }, 0.58);
+      label(`${b.id}_label`, at(px, pz, f, 0, signY, D / 2 + 0.16), f, b.name.en, { es: b.name.es, en: b.name.en }, 0.62, b.neon);
       light(`${b.id}_glow`, at(px, pz, f, 0, signY - 0.6, D / 2 + 1.6), b.neon, 2.2, 9);
     }
   }
@@ -133,7 +134,7 @@ export function plazaSeed(): { id: string; components: Components }[] {
     mesh("gate_arch", "gate", [px, STREET, pz], f);
     for (const sx of [-1, 1]) solid(`gate_pillar_${sx < 0 ? "l" : "r"}`, at(px, pz, f, sx * (span / 2 + 0.65), 4, 0), f, [0.8, 4, 0.75]);
     const top = 4.2 + span / 2 + 1.4;
-    label("gate_label", at(px, pz, f, 0, STREET + top - 0.62, 0.74), f, "xenxo.io", {}, 0.78);
+    label("gate_label", at(px, pz, f, 0, STREET + top - 0.62, 0.72), f, "xenxo.io", {}, 0.8, "#ff4fd8");
     light("gate_glow", at(px, pz, f, 0, 3.2, 1.6), "#4fa3ff", 2, 8);
   }
 
@@ -142,7 +143,7 @@ export function plazaSeed(): { id: string; components: Components }[] {
     const [px, pz] = layout.tower.p;
     const f = layout.tower.facing;
     mesh("tower_body", "tower", [px, STREET, pz], f, [3, 7, 3]);
-    label("tower_logo", at(px, pz, f, 0, STREET + 8.4, 2.85), f, "xenxo.io", {}, 0.95);
+    label("tower_logo", at(px, pz, f, 0, STREET + 8.4, 2.84), f, "xenxo.io", {}, 0.95, "#4fa3ff");
     light("tower_beacon", [px, STREET + 26.2, pz], "#ff6a3d", 4, 18);
   }
 
