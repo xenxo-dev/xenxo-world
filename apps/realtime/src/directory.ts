@@ -34,6 +34,8 @@ export const STORAGE_CAP_BYTES = 8 * 1024 ** 3;
 export const USER_QUOTA_BYTES = 100 * 1024 ** 2;
 /** Margen: el mayor modelo permitido (6 MB), porque el tamaño real se sabe después de leerlo. */
 const UPLOAD_HEADROOM = 6 * 1024 ** 2;
+/** Subidas al día entre todo el mundo: unas 30.000 escrituras al mes como mucho (R2 regala 1 millón). */
+export const MAX_UPLOADS_PER_DAY_GLOBAL = 1000;
 const MAX_REPORTS_PER_DAY = 20;
 const RESERVED_NAMES = new Set(["system", "admin", "xenxo", "moderador", "moderator", "anthropic", "claude"]);
 
@@ -335,6 +337,10 @@ export class Directory extends DurableObject<Env> {
       .exec<{ n: number }>("SELECT COUNT(*) AS n FROM uploads WHERE uploader = ? AND ts > ?", uploader, Date.now() - 86_400_000)
       .one().n;
     if (n >= MAX_UPLOADS_PER_DAY) return fail(429, "rate_limited", "has llegado al máximo de subidas por hoy");
+    const all = this.sql
+      .exec<{ n: number }>("SELECT COUNT(*) AS n FROM uploads WHERE ts > ?", Date.now() - 86_400_000)
+      .one().n;
+    if (all >= MAX_UPLOADS_PER_DAY_GLOBAL) return fail(429, "storage_busy", "hoy ya se han subido muchos modelos a xenxo; prueba mañana");
     const mine = this.sql
       .exec<{ b: number | null }>("SELECT SUM(bytes) AS b FROM uploads WHERE uploader = ?", uploader)
       .one().b ?? 0;
