@@ -4,6 +4,12 @@ El mundo de **xenxo.io**: un panel 2D con soluciones, repos y agentes, y detrás
 
 Se está construyendo en público. Esto es la v0.5.
 
+## Publicar en xenxo.io (si no vas a tocar el código)
+
+- **Tu personaje y tu proyecto:** entra en [xenxo.io](https://xenxo.io), *Personalizar → Crear cuenta con passkey* (sin email). Desde ahí subes tu personaje (`.vrm` o `.glb`) y en *Proyectos → Publicar el mío* tu proyecto con un modelo 3D. El modelo se muestra en la exposición como **maqueta de hasta 1,3 m sobre un pedestal**. Guía de modelos: [`docs/CREAR-MODELOS.md`](docs/CREAR-MODELOS.md).
+- **Construir con un agente de IA:** hoy hace falta una clave de agente que da el equipo de xenxo (escribe a contact@xenxo.io). Están en camino las parcelas propias y un servidor MCP para conectar Claude Code o Cursor sin pedir nada a nadie.
+- **Tu propia copia del mundo:** sigue *Arrancar en local* y *Desplegar*.
+
 ## Arquitectura
 
 ```
@@ -17,7 +23,7 @@ Se está construyendo en público. Esto es la v0.5.
  └─────────────┘
 ```
 
-- **Cloudflare Pages** sirve el cliente web (panel + 3D).
+- **Cloudflare Workers** (recursos estáticos) sirve el cliente web (panel + 3D).
 - **Cloudflare Workers + Durable Objects** (`apps/realtime`): un objeto por chunk de 64 × 64 m, con jurisdicción de la UE (los datos se guardan y procesan solo en Europa). Valida cada mutación, guarda el estado en su SQLite, reparte las poses a 10 Hz y duerme cuando no hay mensajes (WebSocket Hibernation).
 - **Directory** (otro Durable Object): cuentas con **passkey** (sin email ni contraseña), proyectos de la comunidad y denuncias.
 - **R2**: modelos 3D (personajes y stands) direccionados por hash, en la UE y sin coste de descarga.
@@ -68,7 +74,7 @@ export XENXO_URL=http://localhost:8787
 export XENXO_AGENT_KEY=dev-agent-key-change-me   # la clave de ejemplo de .dev.vars.example
 export XENXO_ADMIN_KEY=dev-admin-key-change-me   # moderación (opcional)
 
-npm run conformance    # 26 escenarios: protocolo, gestos, avatares de serie, cuentas, assets (GLB y VRM), proyectos, chat, luces, RGPD y denuncias
+npm run conformance    # 28 escenarios: protocolo, gestos, avatares de serie, cuentas, assets (GLB y VRM), proyectos, chat, luces, RGPD y denuncias
 npm run agent:build    # el agente coloca un bloque en la plaza
 ```
 
@@ -87,8 +93,8 @@ El servidor manda a todos el mismo mundo (datos). Cada navegador elige cómo dib
 
 | Nivel | Para quién | Qué añade |
 |---|---|---|
-| Ahorro | Quest y otras gafas, móviles, PCs sin gráfica | Texturas de 512 px, oclusión horneada, neones; siempre en VR |
-| Media | Portátiles con gráfica integrada | Relieve de las texturas, cielo real, resplandor de neones (bloom) |
+| Ahorro | Gafas y móviles modestos, PCs sin gráfica | Texturas de 512 px, oclusión horneada, neones con halo y charcos de luz |
+| Media | Quest 3/Pro, móviles potentes, portátiles con gráfica integrada | Relieve de las texturas, cielo real; en escritorio, resplandor de neones (bloom). En VR y móvil, sin post-proceso ni sombras |
 | Alta | PCs con gráfica dedicada | Sombras, suelo que refleja la plaza, luces de farolas |
 | Ultra | Gráficas potentes (RTX, Radeon RX 6000+, Apple M2+) | Más resolución de sombras y reflejos, oclusión ambiental, más ciudad |
 
@@ -110,7 +116,7 @@ Se publica solo: cada vez que el CI pasa en `main`, el flujo **Desplegar** (`.gi
 
 El agente de ejemplo usa la variable `XENXO_URL=https://api.xenxo.io` y el secreto `XENXO_AGENT_KEY`.
 
-**Antes de publicar un vídeo invitando a entrar**, pasa la cuenta de Cloudflare al plan Workers Paid (5 $/mes): en el gratuito, al superar los límites diarios el multijugador se corta hasta las 00:00 UTC.
+**Gasto:** está pensado para el plan gratuito, donde superar un límite corta el servicio (el multijugador, hasta las 00:00 UTC) en vez de cobrar. R2 sí cobraría al pasar de su capa gratis, por eso hay topes de almacenamiento y subidas (ver `CLAUDE.md`, sección Gasto). Pasar a Workers Paid (5 $/mes) es una decisión para cuando haya tráfico real.
 
 ## Estado
 

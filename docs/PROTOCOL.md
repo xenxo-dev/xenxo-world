@@ -163,6 +163,7 @@ El mundo solo se escribe por WebSocket (`MUTATE_WORLD`). Lo que no es mundo va p
 
 - La plaza inicial (`apps/realtime/src/seed.ts` + `plaza-layout.json`) son entidades normales con dueño `system`. Si cambia la semilla (su versión o su contenido, por ejemplo al volver a forjar los modelos), el chunk sustituye las entidades del sistema y conserva las de personas y agentes.
 - Su arquitectura son modelos `mesh@1` generados por la forja (`tools/forge`), con dos niveles de detalle y la oclusión ambiental horneada en el segundo canal UV.
+- Los chunks se crean con la jurisdicción configurada en `DO_JURISDICTION` (`eu` por defecto): sus datos se guardan y procesan solo en la UE. En local (`wrangler dev`) se desactiva, porque workerd no implementa jurisdicciones.
 
 ## 12 bis. Convenciones de los modelos (no son protocolo, son pistas de render)
 
@@ -177,8 +178,7 @@ Un GLB puede nombrar sus materiales `xenxo:<biblioteca>.<tinte>` (p. ej. `xenxo:
 | `agua` | Superficie animada |
 | `oscuro`, `fruta`, `flor` | Colores sin textura |
 
-La oclusión horneada (si la hay) va como `occlusionTexture` en `texCoord: 1`.
-- Los chunks se crean con la jurisdicción configurada en `DO_JURISDICTION` (`eu` por defecto): sus datos se guardan y procesan solo en la UE. En local (`wrangler dev`) se desactiva, porque workerd no implementa jurisdicciones.
+La oclusión horneada (si la hay) va como `occlusionTexture` en `texCoord: 1`. Como manda glTF, el frente de un modelo mira hacia **+Z** y el suelo es Y = 0 (en Blender: frente hacia −Y, la vista frontal).
 
 ## 13. Pendiente para v1
 

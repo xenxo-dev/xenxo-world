@@ -27,7 +27,11 @@ Si te pasas en triángulos, el navegador intenta simplificar la malla para que q
    - **No actives la compresión Draco**: la plaza usa meshopt y la aplica sola.
    - Sin luces ni cámaras.
 6. Animaciones (opcional): si incluyes una acción llamada `idle` (en reposo) y otra llamada `walk` (andar), la plaza las mezcla según la velocidad. Sin ellas, tu personaje se mueve con un pequeño rebote. En Blender, crea las acciones en el *Action Editor* y expórtalas con *Animation → Actions*. Si quieres todas las animaciones de la plaza sin hacerlas, exporta tu personaje como **VRM** con la extensión gratuita *VRM Add-on for Blender* (asigna los huesos humanoides con un clic).
-7. Materiales de la plaza (opcional): si llamas a un material `xenxo:teja.b5583a`, `xenxo:piedra.d9c7a6`, `xenxo:neon.4fa3ff`… la plaza lo viste con sus texturas reales y lo enciende de noche si es neón, farol o ventana. La lista completa está en `docs/PROTOCOL.md` (§12 bis).
+7. Materiales de la plaza (opcional): si llamas a un material `xenxo:<biblioteca>.<color>`, por ejemplo `xenxo:teja.b5583a`, la plaza lo viste con sus texturas reales y lo enciende de noche si es neón, farol o ventana. Para que la textura salga a su tamaño, las UV del primer canal van **en metros** (1 unidad de UV = 1 m).
+   - Con textura: `cal`, `estuco`, `piedra`, `losa`, `adoquin`, `teja`, `azulejo`, `madera`, `persiana`, `hierro`, `metal`, `toldo`, `tela`, `corteza`, `tierra`, `hoja`.
+   - Que brillan o cambian: `neon`, `farol`, `ventana`, `agua`.
+   - Solo color: `oscuro`, `fruta`, `flor`.
+8. Modelos de proyecto: frente hacia **−Y en Blender** (lo que ves en la vista frontal), apoyados en el suelo. En la exposición se muestran como **maqueta de hasta 1,3 m** sobre un pedestal.
 
 ## Personajes de serie (sin hacer nada)
 

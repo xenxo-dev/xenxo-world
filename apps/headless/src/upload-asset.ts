@@ -6,6 +6,7 @@
  * Sirve para ti (assets de la plaza: packs CC0, Blender, escaneos…) y para cualquier agente.
  */
 import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { checkBudget, inspectGlb } from "@xenxo/assets";
 import { optimizeGlb } from "@xenxo/assets/optimize";
 import { Api } from "./http";
@@ -19,7 +20,8 @@ if (!file || (kindArg !== "model" && kindArg !== "avatar") || !agentKey) {
 }
 const kind = kindArg;
 
-const input = new Uint8Array(await readFile(file));
+// `npm run -w` ejecuta dentro de apps/headless: las rutas relativas son desde donde lo lanzaste.
+const input = new Uint8Array(await readFile(resolve(process.env.INIT_CWD ?? process.cwd(), file)));
 const before = inspectGlb(input);
 console.log(
   `Original: ${before.triangles} triángulos, ${(before.bytes / 1024).toFixed(0)} KB` +
