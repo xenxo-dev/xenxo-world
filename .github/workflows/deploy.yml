@@ -54,7 +54,7 @@ jobs:
           if [ -n "$current" ]; then echo "ya existe: $current.workers.dev"; exit 0; fi
           for name in xenxo xenxo-io xenxo-world "xenxo-$(date +%s)"; do
             r=$(curl -s -X PUT -H "$AUTH" -H "Content-Type: application/json" --data "{\"subdomain\":\"$name\"}" "$API")
-            if echo "$r" | grep -q '"success":true'; then echo "creado: $name.workers.dev"; exit 0; fi
+            if echo "$r" | python3 -c "import json,sys; sys.exit(0 if json.load(sys.stdin).get('success') else 1)"; then echo "creado: $name.workers.dev"; exit 0; fi
             echo "$name no disponible: $(echo "$r" | head -c 300)"
           done
           echo "::error::No se pudo crear el subdominio workers.dev: abre una vez Workers & Pages en el panel de Cloudflare."
