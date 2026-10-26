@@ -42,7 +42,7 @@ const MAX_PENDING_PER_CLIENT = 300;
 const MAX_PENDING_TOTAL = 5000;
 /** Un permiso usado hace más de esto vuelve a pedir un clic (no se entra solo). */
 const SILENT_GRANT_MS = 30 * 86_400_000;
-const MAX_PROJECTS_PER_USER = 3;
+const MAX_PROJECTS_PER_USER = 5;
 /** Personajes propios guardados por cuenta (el armario). Los de serie no cuentan. */
 export const MAX_SKINS = 3;
 /** Claves de agente por proyecto (para construir en su parcela). */
