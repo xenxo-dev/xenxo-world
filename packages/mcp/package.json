@@ -14,7 +14,7 @@
   ],
   "scripts": {
     "start": "tsx src/index.ts",
-    "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/xenxo-mcp.mjs --banner:js=\"import { createRequire as __xenxoRequire } from 'node:module'; const require = __xenxoRequire(import.meta.url);\"",
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/xenxo-mcp.mjs --alias:sharp=./src/no-sharp.ts --banner:js=\"import { createRequire as __xenxoRequire } from 'node:module'; const require = __xenxoRequire(import.meta.url);\"",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {

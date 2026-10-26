@@ -3,7 +3,7 @@
  * crea una cuenta y un proyecto, saca una clave de parcela y usa cada herramienta como lo haría
  * un agente. `npm run mcp-e2e -w @xenxo/headless` (con el servidor MCP ya compilado).
  */
-import { writeFile, mkdtemp } from "node:fs/promises";
+import { copyFile, writeFile, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -32,11 +32,15 @@ const dir = await mkdtemp(join(tmpdir(), "xenxo-mcp-"));
 const glb = join(dir, "caja.glb");
 await writeFile(glb, await makeBoxGlb({ segments: 4, height: 2, color: [0.9, 0.4, 0.1, 1] }));
 
+// El archivo único, copiado fuera del repo: así se prueba como lo descarga la gente (sin node_modules).
+const bundle = join(dir, "xenxo-mcp.mjs");
+await copyFile(resolve(import.meta.dirname, "../../../packages/mcp/dist/xenxo-mcp.mjs"), bundle);
 const client = new Client({ name: "e2e", version: "1.0.0" });
 await client.connect(
   new StdioClientTransport({
     command: "node",
-    args: [resolve(import.meta.dirname, "../../../packages/mcp/dist/xenxo-mcp.mjs")],
+    args: [bundle],
+    cwd: dir,
     env: { ...process.env, XENXO_KEY: k.data.key, XENXO_URL: baseUrl } as Record<string, string>,
   }),
 );
