@@ -328,6 +328,10 @@ await scenario("número de jugador: cada alta recibe el siguiente y los demás l
   assert(ma.ok && mb.ok, "GET /me");
   const na = ma.data.player_no, nb = mb.data.player_no;
   assert(Number.isInteger(na) && na >= 1 && nb === na + 1, `esperaba números seguidos desde el 1, llegó ${na} y ${nb}`);
+  const renewed = await a.call<{ token: string; user: { player_no: number } }>("POST", "/me/session");
+  assert(renewed.ok && renewed.data.token && renewed.data.user.player_no === na, "POST /me/session debería dar un token nuevo con el número de ahora");
+  const anon = await new Api(baseUrl).call("POST", "/me/session");
+  assert(!anon.ok && anon.status === 401, "sin sesión, /me/session es 401");
   const tok = await b.call<{ token: string }>("PATCH", "/me", { display_name: `conf ${randomUUID().slice(0, 6)}` });
   assert(tok.ok, "token nuevo");
   const watcher = await XenxoClient.connect({ baseUrl });

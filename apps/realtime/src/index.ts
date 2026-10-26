@@ -390,6 +390,13 @@ export default {
           const r = await dir.me(uid);
           return r.ok ? json(r.data, 200, h) : failure(r, h);
         }
+        // Renueva la sesión con los datos de ahora (número, nombre, personaje): al abrir la web.
+        if (path === "/me/session" && req.method === "POST") {
+          const r = await dir.me(uid);
+          if (!r.ok) return failure(r, h);
+          const { projects: _p, ...u } = r.data;
+          return json(await userToken(u, env), 200, h);
+        }
         if (path === "/me" && req.method === "PATCH") {
           const r = await dir.rename(uid, (await readJson(req)).display_name);
           return r.ok ? json(await userToken(r.data, env), 200, h) : failure(r, h);

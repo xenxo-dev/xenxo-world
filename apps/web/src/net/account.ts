@@ -110,6 +110,25 @@ function adopt(r: { token: string; user: User; principal: { exp: number } }) {
   reconnect();
 }
 
+/**
+ * Al abrir la web con la sesión guardada: pide una nueva con los datos de ahora (el número de
+ * jugador, el nombre o el personaje pueden haber cambiado en otro dispositivo o en el servidor).
+ * Solo reconecta si cambió algo que ven los demás.
+ */
+export async function refreshSession() {
+  if (!accountToken()) return;
+  const before = session?.user;
+  try {
+    const r = await api<{ token: string; user: User; principal: { exp: number } }>("POST", "/me/session");
+    store({ token: r.token, user: r.user, exp: r.principal.exp });
+    const u = r.user;
+    if (!before || before.player_no !== u.player_no || before.display_name !== u.display_name || before.avatar_hash !== u.avatar_hash) reconnect();
+  } catch (e) {
+    // La cuenta ya no existe o la sesión no vale: se sale.
+    if (e instanceof ApiError && (e.code === "unauthorized" || e.code === "not_found")) store(null);
+  }
+}
+
 /* --- Alta y acceso --- */
 
 export function passkeysSupported(): boolean {

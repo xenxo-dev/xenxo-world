@@ -6,7 +6,7 @@ import { Emotes } from "./hud/Emotes";
 import { PortalCard, TravelToast } from "./hud/PortalCard";
 import { errorText, placeName, t, useLang } from "./i18n";
 import { setGuestName as setSessionGuestName, startSession } from "./net/session";
-import { completeGoogleReturn } from "./net/account";
+import { completeGoogleReturn, refreshSession } from "./net/account";
 import { useWorldVersion, world } from "./net/world-store";
 import { Panel, type Section } from "./panel/Panel";
 import { TouchJoystick } from "./world/TouchJoystick";
@@ -61,7 +61,7 @@ export function App() {
   const [authNotice, setAuthNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   useEffect(() => {
     void completeGoogleReturn().then((r) => {
-      if (!r.returned) return;
+      if (!r.returned) return void refreshSession();
       setPanelSection("customize");
       if (r.error) setAuthNotice({ tone: "error", text: errorText({ code: r.error }) });
       else if (r.linked) setAuthNotice({ tone: "ok", text: t("account.googleLinkedOk") });
