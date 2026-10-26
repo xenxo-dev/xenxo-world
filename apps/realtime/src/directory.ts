@@ -62,6 +62,7 @@ const UPLOAD_HEADROOM = 6 * 1024 ** 2;
 /** Subidas al día entre todo el mundo: unas 30.000 escrituras al mes como mucho (R2 regala 1 millón). */
 export const MAX_UPLOADS_PER_DAY_GLOBAL = 1000;
 const MAX_REPORTS_PER_DAY = 20;
+const MAX_MANIFEST_READS_PER_DAY = 30;
 const RESERVED_NAMES = new Set(["system", "admin", "xenxo", "moderador", "moderator", "anthropic", "claude"]);
 
 export type Fail = { ok: false; status: number; error: string; message: string; detail?: unknown };
@@ -1024,7 +1025,8 @@ export class Directory extends DurableObject<Env> {
 
   /** Un juego por su enlace (xenxo.io/j/<slug>): publicado, revisado o no. */
   gameBySlug(slug: string): PublicProject | null {
-    return this.projectRows("p.slug = ? AND p.status = 'published' AND p.game IS NOT NULL", [slug])[0] ?? null;
+    // Lo rechazado en la revisión no tiene enlace propio (sigue en su parcela, sin abrirse dentro de xenxo).
+    return this.projectRows("p.slug = ? AND p.status = 'published' AND p.game IS NOT NULL AND p.review != 'rejected'", [slug])[0] ?? null;
   }
 
   /**
@@ -1057,11 +1059,36 @@ export class Directory extends DurableObject<Env> {
     if (taken) return fail(409, "slug_taken", "ese enlace ya lo usa otro juego; elige otro");
     const info = JSON.stringify(gameInfo(manifest, p.url));
     const changed = info !== p.game;
-    this.sql.exec(
-      `UPDATE projects SET slug = ?, game = ?, game_at = ?${changed ? ", review = 'pending', review_note = NULL, reviewed_at = NULL" : ""} WHERE id = ?`,
-      slug, info, Date.now(), projectId,
-    );
+    // Sin cambios no se escribe nada (cada escritura cuenta en la cuota diaria del plan gratuito).
+    if (changed || slug !== p.slug) {
+      this.sql.exec(
+        `UPDATE projects SET slug = ?, game = ?, game_at = ?${changed ? ", review = 'pending', review_note = NULL, reviewed_at = NULL" : ""} WHERE id = ?`,
+        slug, info, Date.now(), projectId,
+      );
+    }
     return ok(this.projectsOf(userId, true).find((x) => x.id === projectId)!);
+  }
+
+  /**
+   * Tope de lecturas de fichas por persona y día (cada una es una petición a otra web y puede
+   * escribir en el Directory). Cuenta y responde si puede leer otra.
+   */
+  takeManifestRead(userId: string): Result<true> {
+    const day = Math.floor(Date.now() / 86_400_000);
+    const k = `manifest:${userId}:${day}`;
+    const n = this.sql.exec<{ v: number }>("SELECT v FROM counters WHERE k = ?", k).toArray()[0]?.v ?? 0;
+    if (n >= MAX_MANIFEST_READS_PER_DAY) return fail(429, "rate_limited", `puedes leer la ficha ${MAX_MANIFEST_READS_PER_DAY} veces al día; prueba mañana`);
+    this.sql.exec("INSERT INTO counters (k, v) VALUES (?, 1) ON CONFLICT (k) DO UPDATE SET v = v + 1", k);
+    // Los contadores de días pasados sobran.
+    if (n === 0) this.sql.exec("DELETE FROM counters WHERE k LIKE 'manifest:%' AND k NOT LIKE ?", `%:${day}`);
+    return ok(true);
+  }
+
+  /** ¿Es este juego de «Entrar con xenxo» el de este proyecto? (para el juego abierto dentro de xenxo) */
+  embeddedClientOk(projectId: unknown, clientId: unknown): boolean {
+    if (typeof projectId !== "string" || typeof clientId !== "string") return false;
+    const p = this.projectRows("p.id = ? AND p.status = 'published' AND p.review != 'rejected'", [projectId])[0];
+    return !!p?.game?.clientId && p.game.clientId === clientId;
   }
 
   /** Quita la ficha de juego (vuelve a ser un proyecto sin juego; su enlace /j/ deja de existir). */
@@ -1097,6 +1124,10 @@ export class Directory extends DurableObject<Env> {
 
   review(moderator: string, projectId: string, decision: unknown, rawNote: unknown): Result<PublicProject> {
     if (decision !== "approved" && decision !== "rejected") return fail(400, "bad_message", "decision: approved o rejected");
+    // Nadie revisa lo suyo (salvo el fundador, que es quien opera xenxo).
+    const owner = this.projectOwner(projectId);
+    const founder = (this.env.FOUNDER_USER_ID ?? "").replace(/^usr_/, "").trim();
+    if (owner && moderator === `usr_${owner}` && owner !== founder) return fail(403, "own_project", "no puedes revisar tu propio proyecto");
     const note = typeof rawNote === "string" ? rawNote.trim().slice(0, 500) : "";
     if (decision === "rejected" && note.length < 3) return fail(400, "note_required", "explica el motivo: lo verá su autor");
     const n = this.sql

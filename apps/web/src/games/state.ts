@@ -47,7 +47,7 @@ export function gameName(p: Project, lang: string): string {
 export function gameSrc(p: Project, lang: string): string {
   const u = new URL(p.game?.url ?? p.url ?? "about:blank");
   u.searchParams.set("xenxo_lang", lang);
-  // En producción el SDK ya sabe que xenxo es https://xenxo.io; en local hay que decírselo.
+  // En producción el SDK ya sabe que xenxo es https://xenxo.io; en www o en local hay que decírselo.
   if (location.origin !== "https://xenxo.io") u.searchParams.set("xenxo_origin", location.origin);
   return u.toString();
 }

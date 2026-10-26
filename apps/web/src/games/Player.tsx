@@ -4,15 +4,14 @@
  * origen exacto:
  *
  *   juego → xenxo   xenxo:hello · xenxo:login { params } · xenxo:back
- *   xenxo → juego   xenxo:welcome { lang, account, guest } · xenxo:authorization { params }
+ *   xenxo → juego   xenxo:welcome { lang } · xenxo:authorization { params }
  *
  * «Entrar con xenxo» dentro: xenxo enseña el permiso encima del juego y le entrega el código por
  * postMessage al origen registrado (response_mode=web_message); el juego lo cambia por sus tokens.
  */
 import { useEffect, useRef, useState } from "react";
-import { loadPref } from "../config";
 import { getLang, t, useLang } from "../i18n";
-import { oidcEmbedded, useAccount } from "../net/account";
+import { oidcEmbedded } from "../net/account";
 import { Consent } from "../panel/Consent";
 import { ReportButton } from "../panel/ReportButton";
 import { closeGame, gameName, gameSrc, type OpenGame } from "./state";
@@ -25,7 +24,6 @@ const LOGIN_KEYS = ["response_type", "client_id", "redirect_uri", "scope", "stat
 
 export function Player({ open }: { open: OpenGame }) {
   const lang = useLang();
-  const user = useAccount();
   const p = open.project;
   const src = gameSrc(p, lang);
   const origin = new URL(src).origin;
@@ -33,8 +31,6 @@ export function Player({ open }: { open: OpenGame }) {
   const [consent, setConsent] = useState<{ request: string; state: string } | null>(null);
   const [loaded, setLoaded] = useState(false);
   const answered = useRef(false);
-  const userRef = useRef(user);
-  userRef.current = user;
 
   const post = (msg: unknown) => frame.current?.contentWindow?.postMessage(msg, origin);
   const fail = (state: string, error: string, description: string) =>
@@ -47,8 +43,8 @@ export function Player({ open }: { open: OpenGame }) {
       const d = e.data as { type?: string; params?: Record<string, unknown> } | null;
       if (!d || typeof d.type !== "string") return;
       if (d.type === "xenxo:hello") {
-        const u = userRef.current;
-        post({ type: "xenxo:welcome", v: 0, lang: getLang(), account: !!u, guest: u ? null : { name: loadPref("name", "") } });
+        // Lo mínimo: el idioma. Nada de la persona sin que lo permita con «Entrar con xenxo».
+        post({ type: "xenxo:welcome", v: 0, lang: getLang() });
       } else if (d.type === "xenxo:back") {
         closeGame();
       } else if (d.type === "xenxo:login" && d.params && typeof d.params === "object") {
@@ -63,7 +59,9 @@ export function Player({ open }: { open: OpenGame }) {
           /* no válida */
         }
         if (back !== origin) return fail(state, "invalid_request", "redirect_uri tiene que ser de este mismo juego");
-        oidcEmbedded(params)
+        // Y el juego de «Entrar con xenxo» tiene que ser el que declara su ficha (xenxo.clientId).
+        if (!p.game?.clientId || params.client_id !== p.game.clientId) return fail(state, "invalid_client", "este juego no es el de la ficha del proyecto");
+        oidcEmbedded({ ...params, project_id: p.id })
           .then((request) => {
             answered.current = false;
             setConsent({ request, state });

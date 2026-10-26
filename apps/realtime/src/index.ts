@@ -271,6 +271,10 @@ async function oidcRoutes(req: Request, env: Env, url: URL, h: Record<string, st
       const v = body[k];
       q[k] = typeof v === "string" ? v.slice(0, 600) : null;
     }
+    // Solo el juego de «Entrar con xenxo» que declara el proyecto abierto (no otro del mismo dominio).
+    if (!(await dir.embeddedClientOk(body.project_id, q.client_id))) {
+      return json({ error: "invalid_client", message: "ese juego no es el de este proyecto (xenxo.clientId en su xenxo.json)" }, 400, { ...h, ...noStore });
+    }
     const r = await dir.authorizeRequest(q, true);
     return r.ok ? json({ request: r.request }, 200, { ...h, ...noStore }) : json({ error: r.error, message: r.message }, 400, { ...h, ...noStore });
   }
@@ -796,6 +800,8 @@ export default {
         const p = mine.ok ? mine.data.projects.find((x) => x.id === id && x.status === "published") : undefined;
         if (!p) return json({ error: "not_found", message: "ese proyecto no es tuyo o no existe" }, 404, h);
         if (!p.url) return json({ error: "bad_url", message: "el proyecto necesita el enlace del juego" }, 400, h);
+        const quota = await dir.takeManifestRead(uid);
+        if (!quota.ok) return failure(quota, h);
         // En local (RP_ID=localhost) se puede leer la ficha de un servidor de pruebas en localhost.
         const localGame = env.RP_ID === "localhost" && /^http:\/\/(localhost|127\.0\.0\.1):/.test(p.url) ? new URL("xenxo.json", p.url).toString() : null;
         const devUrl = env.RP_ID === "localhost" ? (typeof body.manifest_url === "string" ? body.manifest_url : localGame) : null;

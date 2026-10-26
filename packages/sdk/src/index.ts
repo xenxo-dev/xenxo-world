@@ -197,7 +197,9 @@ function parentCandidate(o: XenxoOptions): string | null {
   if (window.parent === window) return null;
   const home = new URL(homeOf(o)).origin;
   const q = new URLSearchParams(location.search).get("xenxo_origin");
-  if (q && q !== home && (q === "https://www.xenxo.io" || /^http:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/.test(q))) return q;
+  if (q === "https://www.xenxo.io") return q;
+  // Un xenxo en localhost solo vale si el juego también está en tu equipo (desarrollo).
+  if (q && isLocal() && /^http:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/.test(q)) return q;
   return home;
 }
 
@@ -291,7 +293,7 @@ export const xenxo = {
       welcome = await greet(candidate);
       parentOrigin = welcome ? candidate : null;
       // Un xenxo de desarrollo (localhost) usa su servidor local de identidad, salvo que digas otro.
-      if (parentOrigin?.startsWith("http://") && !options.issuer) o.issuer = "http://localhost:8787";
+      if (parentOrigin?.startsWith("http://") && isLocal() && !options.issuer) o.issuer = "http://localhost:8787";
     }
     const saved = read<XenxoPlayer>("player");
     if (saved && saved.expiresAt > Date.now()) return saved;

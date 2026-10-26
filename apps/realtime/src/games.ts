@@ -28,6 +28,8 @@ export type GameInfo = {
   host: string;
   /** Dirección del juego (la del proyecto). */
   url: string;
+  /** El juego de «Entrar con xenxo» de este proyecto (dentro de xenxo solo se acepta ese). */
+  clientId: string | null;
 };
 
 type Problem = { ok: false; error: string; message: string; detail?: unknown };
@@ -83,8 +85,9 @@ export async function fetchManifest(gameUrl: string): Promise<{ ok: true; manife
   if (!res.ok) return bad("manifest_unreachable", `${target} respondió ${res.status}: ¿está en la misma carpeta que el juego?`);
   const declared = Number(res.headers.get("Content-Length") ?? 0);
   if (declared > MANIFEST_MAX_BYTES) return bad("manifest_too_big", "el xenxo.json no puede pasar de 32 KB");
-  const buf = new Uint8Array(await res.arrayBuffer());
-  if (buf.byteLength > MANIFEST_MAX_BYTES) return bad("manifest_too_big", "el xenxo.json no puede pasar de 32 KB");
+  // Se lee a trozos y se corta al pasar de 32 KB (no fiarse de Content-Length).
+  const buf = await readCapped(res, MANIFEST_MAX_BYTES);
+  if (!buf) return bad("manifest_too_big", "el xenxo.json no puede pasar de 32 KB");
   let raw: unknown;
   try {
     raw = JSON.parse(new TextDecoder().decode(buf));
@@ -97,6 +100,31 @@ export async function fetchManifest(gameUrl: string): Promise<{ ok: true; manife
     return bad("manifest_invalid", "el xenxo.json no cumple el esquema xenxo.game/0", { issues });
   }
   return { ok: true, manifest: parsed.data, at: target.toString() };
+}
+
+/** Lee el cuerpo hasta `max` bytes; null si es más grande (y deja de leer). */
+async function readCapped(res: Response, max: number): Promise<Uint8Array | null> {
+  if (!res.body) return new Uint8Array(0);
+  const reader = res.body.getReader();
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    parts.push(value);
+  }
+  const out = new Uint8Array(size);
+  let o = 0;
+  for (const p of parts) {
+    out.set(p, o);
+    o += p.byteLength;
+  }
+  return out;
 }
 
 /** Solo en local (RP_ID=localhost, pruebas): la ficha de un servidor de pruebas en localhost. */
@@ -169,5 +197,6 @@ export function gameInfo(m: GameManifest, projectUrl: string): GameInfo {
     embed: m.embed && !xenxoHost(u.hostname),
     host: u.host,
     url: projectUrl,
+    clientId: m.xenxo?.clientId ?? null,
   };
 }

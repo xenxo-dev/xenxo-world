@@ -1006,6 +1006,8 @@ await scenario("juegos de fuera: ficha xenxo.json leída por el servidor, enlace
     const queue = await mod.call<{ pending: { id: string }[] }>("GET", "/mod/queue");
     assert(queue.ok && queue.data.pending.some((p) => p.id === id), "el juego está en la cola de revisión");
     assert(errOf(await mod.call("POST", `/mod/projects/${id}/review`, { decision: "rejected" })) === "note_required", "rechazar exige motivo");
+    assert((await mod.call("POST", `/mod/projects/${id}/review`, { decision: "rejected", note: "No carga en el móvil" })).ok, "rechazar con motivo");
+    assert((await fetch(new URL(`/games/${slug}`, baseUrl))).status === 404, "rechazado, pierde su enlace propio");
     assert((await mod.call("POST", `/mod/projects/${id}/review`, { decision: "approved" })).ok, "aprobar");
     assert(await catalog(), "aprobado, sale en el catálogo");
     manifest = { ...base, ageRating: "+14" };
@@ -1027,21 +1029,46 @@ await scenario("juegos de fuera: ficha xenxo.json leída por el servidor, enlace
 
 await scenario("Entrar con xenxo dentro de xenxo: el permiso viaja por postMessage al origen exacto del juego", async () => {
   const { createHash, randomBytes } = await import("node:crypto");
+  const { createServer } = await import("node:http");
   const b64u = (b: Buffer) => b.toString("base64url");
   const dev = new Api(baseUrl);
   await dev.register(`conf ${randomUUID().slice(0, 6)}`);
   const cb = "https://juego.example/";
   const g = await dev.call<{ client_id: string }>("POST", "/me/games", { name: "Incrustado", redirect_uris: [cb] });
-  assert(g.ok, "registrar juego");
-  const verifier = b64u(randomBytes(48));
-  const params = {
-    response_type: "code", client_id: g.data.client_id, redirect_uri: cb, scope: "openid profile", state: "st1", nonce: "n1",
-    code_challenge: b64u(createHash("sha256").update(verifier).digest()), code_challenge_method: "S256",
+  const other = await dev.call<{ client_id: string }>("POST", "/me/games", { name: "Otro del mismo dominio", redirect_uris: [cb] });
+  assert(g.ok && other.ok, "registrar juegos");
+  // Su proyecto con ficha: xenxo.clientId dice cuál es su juego de «Entrar con xenxo».
+  const model = await dev.upload(await makeBoxGlb({ segments: 2, color: [0.1, Math.random(), 0.9, 1] }), "model");
+  const cover = await dev.upload(makeCoverPng(320, 180, [12, Math.floor(Math.random() * 255), 200]), "cover");
+  assert(model.ok && cover.ok, "subidas");
+  const pr = await dev.call<{ project: { id: string } }>("POST", "/projects", {
+    title: "Incrustado", summary: "", url: cb, district: "pixel", parcel: await freeParcel("pixel"), cover_hash: cover.data.hash, mesh_hash: model.data.hash,
+  });
+  assert(pr.ok, "proyecto");
+  const projectId = pr.data.project.id;
+  const manifest = {
+    schema: "xenxo.game/0", name: { es: "Incrustado", en: "Embedded" }, description: { es: "x", en: "x" }, category: "game2d", devices: ["pc"],
+    multiplayer: false, ageRating: "all", monetization: { hasAds: false, hasPurchases: false }, author: "A", contact: "https://example.org",
+    privacy: "https://juego.example/privacidad", xenxo: { clientId: g.data.client_id, project: projectId },
   };
-  const embedded = (origin: string | null) =>
-    fetch(new URL("/oidc/embedded", baseUrl), { method: "POST", headers: { "Content-Type": "application/json", ...(origin ? { Origin: origin } : {}) }, body: JSON.stringify(params) });
-  assert((await embedded("https://evil.example")).status === 403, "solo la web de xenxo pide permisos para juegos incrustados");
-  const r = await embedded("http://localhost:5173");
+  const server = createServer((_q, res) => res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(manifest)));
+  await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+  try {
+    const reg = await dev.call("POST", `/projects/${projectId}/game`, { manifest_url: `http://127.0.0.1:${(server.address() as { port: number }).port}/xenxo.json`, slug: `inc-${randomUUID().slice(0, 6)}` });
+    assert(reg.ok, `ficha: ${JSON.stringify(reg)}`);
+  } finally {
+    server.close();
+  }
+  const verifier = b64u(randomBytes(48));
+  const params = (clientId: string) => ({
+    response_type: "code", client_id: clientId, redirect_uri: cb, scope: "openid profile", state: "st1", nonce: "n1",
+    code_challenge: b64u(createHash("sha256").update(verifier).digest()), code_challenge_method: "S256", project_id: projectId,
+  });
+  const embedded = (origin: string | null, body: Record<string, string>) =>
+    fetch(new URL("/oidc/embedded", baseUrl), { method: "POST", headers: { "Content-Type": "application/json", ...(origin ? { Origin: origin } : {}) }, body: JSON.stringify(body) });
+  assert((await embedded("https://evil.example", params(g.data.client_id))).status === 403, "solo la web de xenxo pide permisos para juegos incrustados");
+  assert((await embedded("http://localhost:5173", params(other.data.client_id))).status === 400, "otro juego del mismo dominio no se cuela: solo el de la ficha");
+  const r = await embedded("http://localhost:5173", params(g.data.client_id));
   const { request } = (await r.json()) as { request: string };
   assert(r.status === 200 && request?.startsWith("ar_"), "la web de xenxo recibe la petición");
   const player = new Api(baseUrl);
@@ -1057,10 +1084,12 @@ await scenario("Entrar con xenxo dentro de xenxo: el permiso viaja por postMessa
   assert(tok.status === 200, "el juego cambia el código por sus tokens");
   // Por la puerta normal (navegación), web_message no se admite.
   const u = new URL("/oidc/authorize", baseUrl);
-  for (const [k, v] of Object.entries({ ...params, response_mode: "web_message" })) u.searchParams.set(k, v);
+  const { project_id: _p, ...plain } = params(g.data.client_id);
+  for (const [k, v] of Object.entries({ ...plain, response_mode: "web_message" })) u.searchParams.set(k, v);
   const loc = new URL((await fetch(u, { redirect: "manual" })).headers.get("location") ?? "about:blank");
   const bad = await new Api(baseUrl).call<{ error: string }>("GET", `/oidc/request/${loc.searchParams.get("autorizar")}`);
   assert(bad.ok && bad.data.error === "invalid_request", "web_message fuera de xenxo → invalid_request");
+  await dev.call("DELETE", `/projects/${projectId}`);
 });
 
 await scenario("limpieza: lo subido que nada usa se borra pasados 7 días; lo que se usa, no", async () => {

@@ -211,8 +211,8 @@ plantilla `create-xenxo` la trae rellena; el registro de juegos (fase 4) la leer
 `xenxo.json` junto al enlace del proyecto (solo https a un dominio público, sin seguir
 redirecciones, 5 s y 32 KB como mucho), la valida con `GameManifest` y exige `privacy`. Si trae
 `xenxo.project`, tiene que ser ese proyecto; si trae `xenxo.clientId`, un juego de su autor. Da el
-enlace `xenxo.io/j/<slug>` (3–40, minúsculas, números y guiones; no reservado). Cambiar la ficha
-devuelve el proyecto a revisión. `DELETE /projects/<id>/game` la quita. Errores: `manifest_unreachable`,
+enlace `xenxo.io/j/<slug>` (lo rechazado en la revisión lo pierde y no se abre dentro de xenxo) (3–40, minúsculas, números y guiones; no reservado). Cambiar la ficha
+devuelve el proyecto a revisión. `DELETE /projects/<id>/game` la quita. Como mucho 30 lecturas de ficha por persona y día. Errores: `manifest_unreachable`,
 `manifest_redirect`, `manifest_too_big`, `manifest_invalid` (con `detail.issues`), `privacy_required`,
 `manifest_mismatch`, `bad_slug`, `slug_taken`. En local (`RP_ID=localhost`) se puede leer de localhost.
 
@@ -239,12 +239,12 @@ allow-pointer-lock allow-popups allow-popups-to-escape-sandbox allow-downloads a
 | Mensaje | Sentido | Qué |
 |---|---|---|
 | `xenxo:hello { v: 0 }` | juego → xenxo | Saludo del SDK al conectar |
-| `xenxo:welcome { v, lang, account, guest }` | xenxo → juego | Idioma, si tiene cuenta y, si es invitado, su nombre de invitado |
-| `xenxo:login { params }` | juego → xenxo | Parámetros de autorización (PKCE); `redirect_uri` tiene que ser de ese origen |
+| `xenxo:welcome { v, lang }` | xenxo → juego | Solo el idioma (nada de la persona sin su permiso) |
+| `xenxo:login { params }` | juego → xenxo | Parámetros de autorización (PKCE); `redirect_uri` tiene que ser de ese origen y `client_id` el `xenxo.clientId` de su ficha |
 | `xenxo:authorization { params }` | xenxo → juego | `code`, `state`, `iss` (o `error`): la respuesta `web_message` |
 | `xenxo:back { project }` | juego → xenxo | Cerrar el juego y volver al mundo |
 
-`POST /oidc/embedded` (solo desde la web de xenxo, por CORS) crea la petición con
+`POST /oidc/embedded { …params, project_id }` (solo desde la web de xenxo, por CORS; `client_id` tiene que ser el de la ficha de ese proyecto, que no esté rechazado) crea la petición con
 `response_mode=web_message`; la decisión (`POST /oidc/request/<id>`) devuelve
 `{ web_message: { origin, params } }` en vez de `{ redirect }`, y la web lo manda al juego con
 `postMessage(…, origin)`. Por `GET /oidc/authorize`, `web_message` no se admite.

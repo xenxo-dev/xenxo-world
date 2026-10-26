@@ -18,8 +18,11 @@ export function Gate({ open, onSignIn }: { open: OpenGame; onSignIn: () => void 
   const p = open.project;
   const g = p.game!;
   const reviewed = p.review === "approved";
+  const rejected = p.review === "rejected";
   // Las cuentas ya declaran tener 14 años o más al darse de alta.
   const blocked = !user && (g.ageRating !== "all" || !reviewed);
+  // Lo que xenxo revisó y no aprobó no se abre dentro de xenxo (solo en su web, y con cuenta).
+  const embed = g.embed && !rejected;
   const description = g.description[lang] ?? g.description.en ?? p.summary;
 
   return (
@@ -30,6 +33,8 @@ export function Gate({ open, onSignIn }: { open: OpenGame; onSignIn: () => void 
           <div className="flex flex-wrap gap-1.5">
             {reviewed ? (
               <span className={`${chip} border-huerta/40 text-lime-100`}>✓ {t("gate.reviewed")}</span>
+            ) : rejected ? (
+              <span className={`${chip} border-red-400/50 text-red-100`}>{t("gate.rejected")}</span>
             ) : (
               <span className={`${chip} border-ocre/50 text-amber-100`}>{t("gate.unreviewed")}</span>
             )}
@@ -45,7 +50,11 @@ export function Gate({ open, onSignIn }: { open: OpenGame; onSignIn: () => void 
             {t("gate.devices", { list: g.devices.map((d) => t(`gate.device.${d}` as Key)).join(" · ") })}
           </p>
 
-          {!reviewed && <p className="mt-4 rounded-lg border border-ocre/30 bg-ocre/10 px-3 py-2 text-sm text-amber-100">{t("gate.unreviewedNote")}</p>}
+          {!reviewed && (
+            <p className={`mt-4 rounded-lg border px-3 py-2 text-sm ${rejected ? "border-red-400/30 bg-red-500/10 text-red-100" : "border-ocre/30 bg-ocre/10 text-amber-100"}`}>
+              {t(rejected ? "gate.rejectedNote" : "gate.unreviewedNote")}
+            </p>
+          )}
           {(g.monetization.hasAds || g.monetization.hasPurchases) && (
             <div className="mt-3 rounded-lg border border-cal/15 px-3 py-2 text-sm text-cal/80">
               {g.monetization.hasAds && <p>• {t("gate.ads")}</p>}
@@ -74,7 +83,7 @@ export function Gate({ open, onSignIn }: { open: OpenGame; onSignIn: () => void 
             </div>
           ) : (
             <div className="mt-5 flex flex-wrap gap-2">
-              {g.embed && (
+              {embed && (
                 <Button variant="primary" onClick={playHere}>
                   {t("gate.playHere")}
                 </Button>
@@ -84,7 +93,7 @@ export function Gate({ open, onSignIn }: { open: OpenGame; onSignIn: () => void 
                 target="_blank"
                 rel="noopener noreferrer nofollow ugc"
                 onClick={closeGame}
-                className={`rounded-xl px-4 py-2 text-sm ${g.embed ? "border border-cal/15 text-cal/85 hover:bg-cal/5" : "bg-neon font-medium text-noche hover:bg-neon-suave"}`}
+                className={`rounded-xl px-4 py-2 text-sm ${embed ? "border border-cal/15 text-cal/85 hover:bg-cal/5" : "bg-neon font-medium text-noche hover:bg-neon-suave"}`}
               >
                 {t("gate.openSite")}
               </a>
@@ -93,7 +102,7 @@ export function Gate({ open, onSignIn }: { open: OpenGame; onSignIn: () => void 
               </Button>
             </div>
           )}
-          {!g.embed && !blocked && <p className="mt-2 text-xs text-cal/45">{t("gate.noEmbed")}</p>}
+          {!embed && !blocked && <p className="mt-2 text-xs text-cal/45">{t(rejected ? "gate.rejectedSite" : "gate.noEmbed")}</p>}
           <div className="mt-4 flex justify-end">
             <ReportButton targetType="project" targetId={p.id} />
           </div>

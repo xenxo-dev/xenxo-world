@@ -60,6 +60,8 @@ export interface GameInfo {
   embed: boolean;
   host: string;
   url: string;
+  /** El juego de «Entrar con xenxo» del proyecto (xenxo.clientId de su ficha). */
+  clientId: string | null;
 }
 
 export class ApiError extends Error {

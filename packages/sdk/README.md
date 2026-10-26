@@ -90,8 +90,10 @@ Si tu ficha (`xenxo.json`) dice `"embed": true`, xenxo puede abrir tu juego dent
 (un iframe aislado en tu dominio). El SDK lo detecta solo: `xenxo.embedded` es `true`, `xenxo.lang`
 es el idioma de la persona, `xenxo.login()` enseña el permiso encima del juego **sin salir de él**
 (el código llega por `postMessage` a tu origen exacto) y `xenxo.back()` cierra el juego y devuelve
-a la persona al mundo. Si entra como invitado de xenxo, `connect()` devuelve `{ guest: true, name }`.
-No tienes que hacer nada distinto; solo que tu dirección de vuelta registrada sea la de esa página.
+a la persona al mundo. xenxo no le cuenta nada de la persona hasta que entra con su permiso.
+No tienes que hacer nada distinto: que tu dirección de vuelta registrada sea la de esa página y que
+el `client_id` esté en `xenxo.json` (`"xenxo": { "clientId": "xg_…" }`), porque dentro de xenxo solo
+se acepta el juego que declara la ficha.
 
 ## Comprobarlo en tu servidor
 
