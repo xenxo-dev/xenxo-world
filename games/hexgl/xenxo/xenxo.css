@@ -1,0 +1,92 @@
+/* Barra de xenxo encima de HexGL, con su misma letra (Bebas Neue). */
+.xenxo-bar {
+  position: fixed;
+  top: max(12px, env(safe-area-inset-top));
+  right: 12px;
+  z-index: 10000;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-family: "BebasNeueRegular", system-ui, sans-serif;
+  letter-spacing: 0.04em;
+}
+.xenxo-bar.xenxo-hidden {
+  display: none;
+}
+.xenxo-chip,
+.xenxo-btn {
+  font: inherit;
+  font-size: 20px;
+  line-height: 1;
+  padding: 9px 14px 7px;
+  border-radius: 10px;
+  border: 1px solid rgba(120, 200, 255, 0.35);
+  background: rgba(8, 12, 30, 0.72);
+  color: #e8f4ff;
+  backdrop-filter: blur(6px);
+}
+.xenxo-no {
+  margin-left: 8px;
+  color: #52c7ff;
+}
+.xenxo-btn {
+  cursor: pointer;
+}
+.xenxo-btn:hover {
+  border-color: rgba(120, 200, 255, 0.8);
+}
+.xenxo-primary {
+  background: #1f8fff;
+  border-color: #1f8fff;
+  color: #fff;
+}
+.xenxo-note {
+  position: fixed;
+  top: 64px;
+  right: 12px;
+  z-index: 10000;
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(8, 12, 30, 0.8);
+  color: #ffd7a8;
+  font: 15px system-ui, sans-serif;
+}
+.xenxo-foot {
+  position: fixed;
+  bottom: 10px;
+  right: 14px;
+  z-index: 10000;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: rgba(8, 12, 30, 0.6);
+  color: rgba(232, 244, 255, 0.75);
+  font: 13px system-ui, sans-serif;
+  text-decoration: none;
+}
+.xenxo-foot:hover {
+  color: #e8f4ff;
+}
+.xenxo-result {
+  text-align: center;
+  font-family: "BebasNeueRegular", system-ui, sans-serif;
+  color: #e8f4ff;
+}
+.xenxo-result p {
+  margin: 6px 0;
+}
+.xenxo-record {
+  font-size: 34px;
+  color: #52c7ff;
+}
+.xenxo-sub {
+  font-size: 24px;
+  opacity: 0.85;
+}
+@media (max-width: 640px) {
+  .xenxo-chip,
+  .xenxo-btn {
+    font-size: 16px;
+    padding: 7px 10px 5px;
+  }
+}

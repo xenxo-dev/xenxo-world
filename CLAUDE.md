@@ -21,6 +21,7 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 | `packages/mcp` | Servidor MCP (MIT): el agente de una persona construye en su parcela con su clave `xk_` |
 | `packages/sdk` | `@xenxo/sdk` (MIT): «Entrar con xenxo», simulador local y `xenxo.back()` para juegos web; se sirve en `xenxo.io/sdk/` con un juego de ejemplo y se publica en npm |
 | `packages/create-xenxo` | Plantilla (MIT): `npm create xenxo` crea un juego 2D o 3D con el SDK, `xenxo.json` y `AGENTS.md`; con `--multi`, una sala (Worker + Durable Object) para la cuenta de Cloudflare del creador |
+| `games/` | Juegos de ejemplo hechos como cualquier creador (cada uno con su licencia y su dominio): `games/hexgl` (HexGL, uso no comercial: ver su `NOTICE.md`) |
 | `docs/PROTOCOL.md` | Explicación del contrato |
 
 ## Antes de dar algo por terminado
@@ -69,6 +70,8 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 - Lo que se abre de terceros va en el `iframe` aislado de `games/Player.tsx` (sin `allow-top-navigation`), con aviso previo (`games/Gate.tsx`). Solo se habla con su origen exacto. Un juego en xenxo.io nunca se incrusta (`embed` lo apaga el servidor).
 - Catálogo: solo `review = 'approved'`. Rechazar u ocultar exige motivo, que ve su autor, y queda en `moderation_log` (DSA). Sin cuenta solo se abren juegos `all` y aprobados.
 - Si tocas el puente (`xenxo:*`) o `web_message`, cambia a la vez el SDK, `games/Player.tsx` y `docs/PROTOCOL.md` §9 quater, y que pasen los escenarios «juegos de fuera» y «Entrar con xenxo dentro de xenxo».
+
+- Los juegos de `games/` se publican como los de cualquier creador: su `xenxo.json`, su privacidad, su parcela y su `client_id`, sin vías privilegiadas. Nunca en `*.xenxo.io` (no se podrían incrustar): van a `*.xenxo.workers.dev`. HexGL tiene archivos CC BY-NC: ni anuncios ni compras mientras esté.
 
 ## Gasto (cero sorpresas en Cloudflare)
 

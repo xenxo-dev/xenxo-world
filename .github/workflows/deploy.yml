@@ -96,6 +96,13 @@ jobs:
           mkdir -p apps/web/dist/mcp && cp packages/mcp/dist/xenxo-mcp.mjs apps/web/dist/mcp/
           cd apps/web && npx wrangler deploy --domain "$WEB_DOMAIN" --domain "www.$WEB_DOMAIN"
 
+      # Juego de ejemplo de Arcade, en su propio dominio (no en xenxo.io: así se puede incrustar).
+      - name: HexGL → xenxo-hexgl.<subdominio>.workers.dev
+        if: env.SKIP != '1'
+        run: |
+          cp packages/sdk/dist/index.js games/hexgl/xenxo/xenxo-sdk.mjs
+          cd games/hexgl && npx wrangler deploy
+
       - name: Comprobación
         if: env.SKIP != '1'
         run: |

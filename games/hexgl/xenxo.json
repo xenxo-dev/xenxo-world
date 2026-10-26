@@ -1,0 +1,19 @@
+{
+  "schema": "xenxo.game/0",
+  "name": { "es": "HexGL", "en": "HexGL" },
+  "description": {
+    "es": "Carreras futuristas a toda velocidad por Cityscape: tres vueltas, turbos y cuidado con las paredes. El clásico de WebGL de Thibaut Despoulain, con tu nombre de xenxo y tu mejor tiempo.",
+    "en": "Futuristic high-speed racing through Cityscape: three laps, boost pads and mind the walls. Thibaut Despoulain's WebGL classic, with your xenxo name and your best time."
+  },
+  "category": "game3d",
+  "devices": ["pc", "mobile"],
+  "multiplayer": false,
+  "ageRating": "all",
+  "monetization": { "hasAds": false, "hasPurchases": false },
+  "author": "Thibaut Despoulain (BKcore) · adaptado por xenxo",
+  "contact": "https://github.com/xenxo-dev/xenxo-world/tree/main/games/hexgl",
+  "privacy": "https://xenxo-hexgl.xenxo.workers.dev/privacidad.html",
+  "thumbnail": "/portada.webp",
+  "embed": true,
+  "xenxo": {}
+}

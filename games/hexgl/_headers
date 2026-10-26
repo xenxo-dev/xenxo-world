@@ -1,0 +1,18 @@
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Content-Security-Policy: frame-ancestors 'self' https://xenxo.io https://www.xenxo.io http://localhost:5173
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+
+/xenxo.json
+  Cache-Control: no-cache
+  Access-Control-Allow-Origin: *
+
+/geometries/*
+  Cache-Control: public, max-age=86400
+/textures/*
+  Cache-Control: public, max-age=86400
+/textures.full/*
+  Cache-Control: public, max-age=86400
+/audio/*
+  Cache-Control: public, max-age=86400

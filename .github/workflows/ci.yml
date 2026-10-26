@@ -22,6 +22,12 @@ jobs:
       - run: npm run build
 
       # La plantilla de juegos: crea uno 2D y otro 3D con el SDK empaquetado y los compila.
+      - name: Juegos de ejemplo (ficha xenxo.json válida)
+        run: |
+          for f in games/*/xenxo.json; do
+            npx tsx -e "import { GameManifest } from './packages/protocol/src/index.ts'; import { readFileSync } from 'node:fs'; GameManifest.parse(JSON.parse(readFileSync('$f', 'utf8'))); console.log('ok $f');"
+          done
+
       - name: Plantilla create-xenxo
         run: |
           T=$(mktemp -d)
