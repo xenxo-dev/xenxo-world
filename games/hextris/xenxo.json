@@ -25,5 +25,7 @@
   "privacy": "https://xenxo-hextris.xenxo.workers.dev/privacidad.html",
   "thumbnail": "/portada.webp",
   "embed": true,
-  "xenxo": {}
+  "xenxo": {
+    "project": "pVOY0dIxTO2o"
+  }
 }

@@ -19,7 +19,7 @@ export const CODE_TTL_MS = 60_000;
 export const REQUEST_TTL_MS = 10 * 60_000;
 export const ID_TOKEN_TTL_S = 3600;
 export const ACCESS_TOKEN_TTL_MS = 3600_000;
-export const MAX_CLIENTS_PER_USER = 3;
+export const MAX_CLIENTS_PER_USER = 5;
 export const MAX_REDIRECTS = 5;
 
 const enc = new TextEncoder();

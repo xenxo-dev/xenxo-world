@@ -25,5 +25,8 @@
   "privacy": "https://xenxo-2048.xenxo.workers.dev/privacidad.html",
   "thumbnail": "/portada.webp",
   "embed": true,
-  "xenxo": {}
+  "xenxo": {
+    "clientId": "xg_ilWM8LTBByRmC2F8",
+    "project": "pXnfZ8E89Ivw"
+  }
 }
