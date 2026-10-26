@@ -311,3 +311,61 @@ export function haloMaterial(color: THREE.Color, ambience: Ambience): THREE.Shad
   }
   return m;
 }
+
+/* ------------------------------------------------------------------ */
+/* Holograma (hologram@1)                                               */
+/* ------------------------------------------------------------------ */
+
+/** Reloj compartido de todos los hologramas: lo avanza `tickHolograms` una vez por frame. */
+const holoTime = { value: 0 };
+
+export function tickHolograms(elapsed: number) {
+  holoTime.value = elapsed;
+}
+
+const holoCache = new Map<string, THREE.ShaderMaterial>();
+
+/**
+ * Luz proyectada: aditiva, sin escribir profundidad y sin sombras. Brilla más en los bordes
+ * (fresnel) y lleva líneas de barrido que suben despacio. Barata: sirve también en Quest y móvil.
+ */
+export function hologramMaterial(color: string, opacity: number): THREE.ShaderMaterial {
+  const key = `${color}|${opacity.toFixed(2)}`;
+  let m = holoCache.get(key);
+  if (m) return m;
+  m = new THREE.ShaderMaterial({
+    uniforms: { uColor: { value: new THREE.Color(color) }, uOpacity: { value: opacity }, uTime: holoTime },
+    vertexShader: /* glsl */ `
+      varying vec3 vN;
+      varying vec3 vV;
+      varying float vY;
+      void main() {
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vY = wp.y;
+        vN = normalize(mat3(modelMatrix) * normal);
+        vV = normalize(cameraPosition - wp.xyz);
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform vec3 uColor;
+      uniform float uOpacity;
+      uniform float uTime;
+      varying vec3 vN;
+      varying vec3 vV;
+      varying float vY;
+      void main() {
+        float rim = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 2.0);
+        float scan = 0.7 + 0.3 * sin(vY * 38.0 - uTime * 2.6);
+        float flick = 0.94 + 0.06 * sin(uTime * 11.0 + vY * 3.0);
+        float a = (0.38 + 1.1 * rim) * scan * flick * uOpacity;
+        gl_FragColor = vec4(uColor * a, a);
+      }`,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+    toneMapped: false,
+  });
+  holoCache.set(key, m);
+  return m;
+}

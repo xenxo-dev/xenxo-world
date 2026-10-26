@@ -19,7 +19,7 @@
     "forge": "python3 tools/forge/forge.py && npm run forge:pack",
     "forge:pack": "tsx tools/forge/pack.mjs",
     "forge:districts": "python3 tools/forge/forge.py --only=district_arcade,district_pixel,district_agora,district_taller,district_frontera,emblem_arcade,emblem_pixel,emblem_agora,emblem_taller,emblem_frontera && tsx tools/forge/pack.mjs --keep",
-    "forge:nexo": "python3 tools/forge/forge.py --only=nexo_floor,nexo_beacon,nexo_gate,nexo_island,nexo_spires_arcade,nexo_spires_pixel,nexo_spires_agora,nexo_spires_taller,nexo_spires_frontera && tsx tools/forge/pack.mjs --keep"
+    "forge:nexo": "python3 tools/forge/forge.py --only=nexo_floor,nexo_beacon,nexo_gate,nexo_island,nexo_spires_arcade,nexo_spires_pixel,nexo_spires_agora,nexo_spires_taller,nexo_spires_frontera,nexo_decor_plaza,nexo_decor_arcade,nexo_decor_pixel,nexo_decor_agora,nexo_decor_taller,nexo_decor_frontera && tsx tools/forge/pack.mjs --keep"
   },
   "engines": {
     "node": ">=22"

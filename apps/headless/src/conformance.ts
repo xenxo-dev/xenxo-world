@@ -237,6 +237,22 @@ if (!agentKey) {
     c.close();
   });
 
+  await scenario("agente: hologram@1 se acepta con su color y opacidad; una opacidad fuera de rango no", async () => {
+    const c = await XenxoClient.connect({ baseUrl, agentKey });
+    const ok = await c.mutate({
+      op: "SPAWN",
+      components: { "transform@1": { p: [41, 1.5, 50] }, "primitive@1": { shape: "box", size: [1, 1, 1], color: "#4fa3ff" }, "hologram@1": { color: "#4fa3ff", opacity: 0.7 } },
+    });
+    assert(ok.type === "ACK", `hologram@1 debería aceptarse: ${JSON.stringify(ok.payload)}`);
+    const bad = await c.mutate({
+      op: "SPAWN",
+      components: { "transform@1": { p: [41, 1.5, 50] }, "primitive@1": { shape: "box", size: [1, 1, 1], color: "#4fa3ff" }, "hologram@1": { opacity: 3 } },
+    });
+    assert(bad.type === "ERROR" && bad.payload.code === "bad_message", "opacidad entre 0,05 y 1");
+    if (ok.type === "ACK") await c.mutate({ op: "DESPAWN", entity_id: ok.payload.entity_id, base_rev: 1 });
+    c.close();
+  });
+
   await scenario("agente: componente desconocido → unknown_component", async () => {
     const c = await XenxoClient.connect({ baseUrl, agentKey });
     const r = await c.mutate({ op: "SPAWN", components: { "transform@1": { p: [5, 0, 5] }, "laser@1": { power: 9000 } } });
@@ -483,17 +499,19 @@ await scenario("nexo y distritos: el nexo lleva a la plaza y a los distritos, y 
   assert(toArcade?.to.chunk_id === "c_1_0", "falta el portal del nexo al distrito Arcade");
   const arcadePortal = c.snapshot.entities.find((e) => e.entity_id === "nexo_portal_arcade")?.components["portal@1"] as { color?: string; cover?: string } | undefined;
   assert(!!arcadePortal?.color && !arcadePortal.cover, "la puerta del distrito es abierta (sin portada) y del color del distrito");
-  for (const id of ["nexo_gate_arcade", "nexo_monument_arcade", "nexo_island_arcade", "nexo_mini_arcade_spires", "nexo_island_plaza"]) {
+  for (const id of ["nexo_gate_arcade", "nexo_monument_arcade", "nexo_island_arcade", "nexo_spires_arcade", "nexo_island_plaza"]) {
     assert(c.snapshot.entities.some((e) => e.entity_id === id), `falta ${id} (puerta, emblema e isla del distrito)`);
   }
-  assert(c.snapshot.entities.some((e) => e.entity_id.startsWith("nexo_mini_plaza_")), "la isla de la plaza lleva la plaza en pequeño");
+  assert(c.snapshot.entities.some((e) => e.entity_id.startsWith("nexo_holo_plaza_") && !!e.components["hologram@1"]), "la isla de la plaza proyecta la plaza en holograma");
   assert(!c.snapshot.entities.some((e) => e.entity_id.startsWith("show_") || e.entity_id.startsWith("nexo_frame_")), "en el nexo solo hay distritos");
-  for (const id of ["nexo_arch_arcade", "nexo_bridge_arcade", "nexo_table_arcade", "nexo_sign_desc_arcade"]) {
-    assert(c.snapshot.entities.some((e) => e.entity_id === id), `falta ${id} (arco, pasarela, maqueta y rótulo del distrito)`);
+  for (const id of ["nexo_post_label_arcade", "nexo_bridge_arcade", "nexo_holo_arcade_ground", "nexo_panel_arcade", "nexo_sign_desc_arcade", "nexo_decor_arcade"]) {
+    assert(c.snapshot.entities.some((e) => e.entity_id === id), `falta ${id} (poste, pasarela, holograma, panel y decorado del distrito)`);
   }
-  const archP = (c.snapshot.entities.find((e) => e.entity_id === "nexo_arch_arcade")?.components["transform@1"] as { p: number[] }).p;
-  const portalP = (c.snapshot.entities.find((e) => e.entity_id === "nexo_portal_arcade")?.components["transform@1"] as { p: number[] }).p;
-  assert(Math.hypot(portalP[0]! - 32, portalP[2]! - 32) > Math.hypot(archP[0]! - 32, archP[2]! - 32) + 20, "la puerta del distrito está en su isla, al otro lado de la pasarela");
+  const pos = (id: string) => (c.snapshot.entities.find((e) => e.entity_id === id)?.components["transform@1"] as { p: number[] }).p;
+  const fromCenter = (p: number[]) => Math.hypot(p[0]! - 32, p[2]! - 32);
+  const portalP = pos("nexo_portal_arcade");
+  assert(fromCenter(portalP) > fromCenter(pos("nexo_post_label_arcade")) + 20, "la puerta del distrito está en su isla, al otro lado de la pasarela");
+  assert(fromCenter(portalP) < fromCenter(pos("nexo_holo_arcade_ground")), "la puerta va delante del holograma (lo primero al llegar)");
   const walk = c.welcome.walk;
   assert(c.welcome.solo === true && !!walk && walk[0] < 0 && walk[1] > 64, "el nexo se recorre en solitario y más allá del chunk");
   c.close();

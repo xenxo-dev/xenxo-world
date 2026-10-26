@@ -1,13 +1,14 @@
 import { Component, memo, Suspense, useMemo, type ReactNode } from "react";
 import { Billboard, Text, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
-import { LabelV1, labelText, LightV1, MeshV1, PrimitiveV1, TransformV1, type Entity } from "@xenxo/protocol";
+import { HologramV1, LabelV1, labelText, LightV1, MeshV1, PrimitiveV1, TransformV1, type Entity } from "@xenxo/protocol";
 import { assetUrl } from "../config";
 import { useLang } from "../i18n";
 import { useWorldVersion, world } from "../net/world-store";
 import { FONT_URL, NEON_FONT_URL } from "./font";
 import type { Ambience, Features } from "./graphics";
-import { haloMaterial, lightweight, libraryMaterial, parseLibraryName } from "./materials";
+import { useFrame } from "@react-three/fiber";
+import { haloMaterial, hologramMaterial, lightweight, libraryMaterial, parseLibraryName, tickHolograms } from "./materials";
 
 /** Origen de un chunk respecto al lugar actual (que se dibuja en 0..CHUNK_SIZE). */
 const chunkOrigin = (chunkId: string) => world.offsetOf(chunkId);
@@ -38,11 +39,35 @@ class SkipOnError extends Component<{ children: ReactNode }, { failed: boolean }
  */
 const materialCache = new Map<string, THREE.Material>();
 
-function MeshAsset({ hash, features, ambience }: { hash: string; features: Features; ambience: Ambience }) {
+type Holo = { color: string; opacity: number } | null;
+
+/** El mismo objeto para el mismo holograma (así no se rehacen las escenas en cada render). */
+const holos = new Map<string, { color: string; opacity: number }>();
+function holoOf(color: string, opacity: number) {
+  const k = `${color}|${opacity}`;
+  let h = holos.get(k);
+  if (!h) holos.set(k, (h = { color, opacity }));
+  return h;
+}
+
+function MeshAsset({ hash, features, ambience, holo }: { hash: string; features: Features; ambience: Ambience; holo: Holo }) {
   const gltf = useGLTF(assetUrl(hash), false, true);
   const shadows = features.shadows > 0;
   const scene = useMemo(() => {
     const c = gltf.scene.clone(true);
+    // Holograma: toda la geometría con el mismo material de luz, sin halos ni sombras.
+    if (holo) {
+      const m = hologramMaterial(holo.color, holo.opacity);
+      c.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        mesh.material = m;
+        mesh.castShadow = false;
+        mesh.receiveShadow = false;
+        mesh.renderOrder = 3;
+      });
+      return c;
+    }
     const tierKey = `${features.textures}|${features.normalMaps}|${features.pbr}|${features.bloom}|${ambience}`;
     c.traverse((o) => {
       const mesh = o as THREE.Mesh;
@@ -75,7 +100,7 @@ function MeshAsset({ hash, features, ambience }: { hash: string; features: Featu
       mesh.receiveShadow = shadows;
     });
     return c;
-  }, [gltf, hash, shadows, features, ambience]);
+  }, [gltf, hash, shadows, features, ambience, holo]);
   return <primitive object={scene} />;
 }
 
@@ -152,12 +177,14 @@ const EntityView = memo(function EntityView({
   const label = LabelV1.safeParse(entity.components["label@1"]);
   const mesh = MeshV1.safeParse(entity.components["mesh@1"]);
   const light = LightV1.safeParse(entity.components["light@1"]);
+  const hologram = HologramV1.safeParse(entity.components["hologram@1"]);
   // Equipos potentes: el LOD más detallado (el primero). Ligeros (Quest, móvil): el último.
   const lod = mesh.success ? (features.lod === "detailed" ? mesh.data.lods[0] : mesh.data.lods[mesh.data.lods.length - 1]) : undefined;
   const shadows = features.shadows > 0;
   const lit = light.success && (light.data.when === "always" || ambience === "night");
   const showLight = lit && features.pointLights;
   const showPool = lit && features.lightPools && p[1] - POOL_FLOOR_Y < POOL_MAX_HEIGHT;
+  const holo = hologram.success ? holoOf(hologram.data.color ?? "#4fe3ff", hologram.data.opacity) : null;
 
   return (
     <>
@@ -171,7 +198,7 @@ const EntityView = memo(function EntityView({
       />
     )}
     <group position={[p[0] + ox, p[1], p[2] + oz]} quaternion={r} scale={s}>
-      {prim.success && <Primitive {...prim.data} pbr={features.pbr} glow={glow(ambience, features.bloom)} shadows={shadows} />}
+      {prim.success && <Primitive {...prim.data} pbr={features.pbr} glow={glow(ambience, features.bloom)} shadows={shadows} holo={holo} />}
       {showLight && (
         <pointLight
           color={light.data.color}
@@ -183,7 +210,7 @@ const EntityView = memo(function EntityView({
       {lod && (
         <SkipOnError>
           <Suspense fallback={null}>
-            <MeshAsset hash={lod.hash} features={features} ambience={ambience} />
+            <MeshAsset hash={lod.hash} features={features} ambience={ambience} holo={holo} />
           </Suspense>
         </SkipOnError>
       )}
@@ -237,11 +264,11 @@ function Material({ color, emissive, finish, pbr, glow }: PrimitiveV1Type & { pb
   );
 }
 
-function Primitive(props: PrimitiveV1Type & { pbr: boolean; glow: number; shadows: boolean }) {
-  const { shape, size, emissive, shadows } = props;
-  const material = <Material {...props} />;
-  const cast = shadows && !emissive;
-  const receive = shadows && !emissive;
+function Primitive(props: PrimitiveV1Type & { pbr: boolean; glow: number; shadows: boolean; holo: Holo }) {
+  const { shape, size, emissive, shadows, holo } = props;
+  const material = holo ? <primitive object={hologramMaterial(holo.color, holo.opacity)} attach="material" /> : <Material {...props} />;
+  const cast = shadows && !emissive && !holo;
+  const receive = shadows && !emissive && !holo;
   switch (shape) {
     case "box":
       return <mesh castShadow={cast} receiveShadow={receive}>{material}<boxGeometry args={size} /></mesh>;
@@ -329,11 +356,18 @@ function NeonLabel({ text, size, color, ambience, bloom }: { text: string; size:
   );
 }
 
+/** Avanza el reloj de los hologramas (uno para todos). */
+function HologramClock() {
+  useFrame((state) => tickHolograms(state.clock.elapsedTime));
+  return null;
+}
+
 export function Entities({ features, ambience }: { features: Features; ambience: Ambience }) {
   useWorldVersion();
   const lang = useLang();
   return (
     <>
+      <HologramClock />
       {[...world.entities.values()].map((e) => (
         <EntityView key={`${e.entity_id}:${e.rev}`} entity={e} lang={lang} features={features} ambience={ambience} />
       ))}

@@ -193,6 +193,17 @@ export const PortalV1 = z.object({
   color: HexColor.optional(),
 });
 
+/**
+ * Holograma: la geometría de la entidad (su `mesh@1` o su `primitive@1`) se dibuja como luz
+ * proyectada, translúcida y del color dado, con líneas de barrido. No hace sombra ni tapa nada.
+ * Los clientes que no lo conozcan la dibujan normal.
+ */
+export const HologramV1 = z.object({
+  color: HexColor.optional(),
+  /** 0,05–1: cuánto se ve (por defecto 0,6). */
+  opacity: z.number().min(0.05).max(1).default(0.6),
+});
+
 /** Reservado en v0: el servidor lo rechaza hasta que exista el sandbox WASM. */
 export const BehaviorV1 = z.object({
   module: Hash,
@@ -210,6 +221,7 @@ export const COMPONENTS = {
   "label@1": LabelV1,
   "light@1": LightV1,
   "portal@1": PortalV1,
+  "hologram@1": HologramV1,
   "behavior@1": BehaviorV1,
 } as const;
 
@@ -222,6 +234,7 @@ export const ACCEPTED_IN_V0: readonly ComponentKey[] = [
   "label@1",
   "light@1",
   "portal@1",
+  "hologram@1",
 ];
 
 /**
@@ -237,6 +250,7 @@ export const ComponentsStrict = z
     "label@1": LabelV1.optional(),
     "light@1": LightV1.optional(),
     "portal@1": PortalV1.optional(),
+    "hologram@1": HologramV1.optional(),
     "behavior@1": BehaviorV1.optional(),
   })
   .strict();
