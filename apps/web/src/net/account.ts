@@ -322,6 +322,61 @@ export async function setAvatar(hash: string | null, label?: string) {
   emitSkins();
 }
 
+/* --- «Entrar con xenxo»: permisos a juegos y juegos propios --- */
+
+export interface OidcRequestInfo {
+  client: { name: string; owner: string; host: string };
+  scopes: string[];
+  granted: boolean;
+  prompt: string | null;
+}
+
+export function oidcRequest(id: string): Promise<OidcRequestInfo> {
+  return api("GET", `/oidc/request/${encodeURIComponent(id)}`);
+}
+
+/** La respuesta de la persona; devuelve a dónde ir (el juego, con su código o con access_denied). */
+export async function oidcDecide(id: string, approve: boolean): Promise<string> {
+  return (await api<{ redirect: string }>("POST", `/oidc/request/${encodeURIComponent(id)}`, { approve })).redirect;
+}
+
+export interface ConnectedGame {
+  client_id: string;
+  name: string;
+  scopes: string[];
+  host: string;
+  created_at: number;
+  last_used: number | null;
+}
+
+export async function myConnected(): Promise<ConnectedGame[]> {
+  return (await api<{ connected: ConnectedGame[] }>("GET", "/me/connected")).connected;
+}
+
+export async function revokeConnected(clientId: string) {
+  await api("DELETE", `/me/connected/${clientId}`);
+}
+
+export interface MyGame {
+  client_id: string;
+  name: string;
+  redirect_uris: string[];
+  project_id: string | null;
+  created_at: number;
+}
+
+export async function myGames(): Promise<MyGame[]> {
+  return (await api<{ games: MyGame[] }>("GET", "/me/games")).games;
+}
+
+export async function registerGame(name: string, redirectUris: string[], projectId: string | null): Promise<MyGame> {
+  return api("POST", "/me/games", { name, redirect_uris: redirectUris, project_id: projectId });
+}
+
+export async function deleteGame(clientId: string) {
+  await api("DELETE", `/me/games/${clientId}`);
+}
+
 /* --- Claves de agente: construir en la parcela de un proyecto --- */
 
 export interface AgentKey {

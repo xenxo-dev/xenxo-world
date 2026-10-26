@@ -199,6 +199,103 @@ function chunk(env: Env, id: string) {
   });
 }
 
+/** Página de xenxo donde la persona da (o no) permiso a un juego. En local, la web de desarrollo. */
+function consentOrigin(env: Env): string {
+  const allowed = (env.ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  if ((env.RP_ID ?? "localhost") === "localhost") return allowed[0] ?? "http://localhost:5173";
+  return webOrigin(env, null);
+}
+
+/**
+ * Rutas del proveedor OpenID Connect. Las que usan los juegos (descubrimiento, claves, token,
+ * userinfo) están abiertas a cualquier origen y sin cookies; las de la pantalla de permiso, solo
+ * a la web de xenxo y con la sesión de la persona.
+ */
+async function oidcRoutes(req: Request, env: Env, url: URL, h: Record<string, string>, open: Record<string, string>): Promise<Response | null> {
+  const path = url.pathname;
+  const issuer = url.origin;
+  const dir = directory(env);
+  const noStore = { "Cache-Control": "no-store", Pragma: "no-cache", "Referrer-Policy": "no-referrer" };
+
+  if (path === "/.well-known/openid-configuration" && req.method === "GET") {
+    return json(
+      {
+        issuer,
+        authorization_endpoint: `${issuer}/oidc/authorize`,
+        token_endpoint: `${issuer}/oidc/token`,
+        userinfo_endpoint: `${issuer}/oidc/userinfo`,
+        jwks_uri: `${issuer}/.well-known/jwks.json`,
+        response_types_supported: ["code"],
+        response_modes_supported: ["query"],
+        grant_types_supported: ["authorization_code"],
+        subject_types_supported: ["pairwise"],
+        id_token_signing_alg_values_supported: ["EdDSA"],
+        scopes_supported: ["openid", "profile", "player", "avatar"],
+        claims_supported: ["sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "name", "player_no", "avatar"],
+        code_challenge_methods_supported: ["S256"],
+        token_endpoint_auth_methods_supported: ["none"],
+        prompt_values_supported: ["none", "consent", "login"],
+      },
+      200,
+      { ...open, "Cache-Control": "public, max-age=300" },
+    );
+  }
+  if (path === "/.well-known/jwks.json" && req.method === "GET") {
+    return json(await dir.jwks(), 200, { ...open, "Cache-Control": "public, max-age=600" });
+  }
+
+  if (path === "/oidc/authorize" && req.method === "GET") {
+    const q = Object.fromEntries([...url.searchParams.keys()].map((k) => [k, url.searchParams.get(k)]));
+    const r = await dir.authorizeRequest(q);
+    const web = consentOrigin(env);
+    if (r.ok) return back(web, { autorizar: r.request });
+    // Sin juego o sin dirección de vuelta válidos no se redirige a ningún sitio de fuera.
+    if (!r.redirect) return back(web, { autorizar_error: r.error });
+    return new Response(null, { status: 302, headers: { Location: r.redirect, ...noStore } });
+  }
+
+  if (path === "/oidc/token" && req.method === "POST") {
+    let body: Record<string, unknown> = {};
+    const type = req.headers.get("Content-Type") ?? "";
+    const text = await req.text();
+    if (text.length > 8192) return json({ error: "invalid_request" }, 400, { ...open, ...noStore });
+    if (type.includes("application/json")) {
+      try {
+        body = JSON.parse(text) as Record<string, unknown>;
+      } catch {
+        return json({ error: "invalid_request" }, 400, { ...open, ...noStore });
+      }
+    } else body = Object.fromEntries(new URLSearchParams(text));
+    const r = await dir.exchangeCode(body, issuer);
+    return r.ok ? json(r.data, 200, { ...open, ...noStore }) : json({ error: r.error, error_description: r.message }, r.status, { ...open, ...noStore });
+  }
+
+  if (path === "/oidc/userinfo" && (req.method === "GET" || req.method === "POST")) {
+    const token = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
+    const claims = token ? await dir.userinfo(token, issuer) : null;
+    if (!claims) return json({ error: "invalid_token" }, 401, { ...open, ...noStore, "WWW-Authenticate": 'Bearer error="invalid_token"' });
+    return json(claims, 200, { ...open, ...noStore });
+  }
+
+  // Pantalla de permiso (solo la web de xenxo): qué pide el juego y la respuesta de la persona.
+  const reqm = path.match(/^\/oidc\/request\/(ar_[A-Za-z0-9_-]{10,40})$/);
+  if (reqm) {
+    const p = await bearer(req, env);
+    const uid = p ? userIdOf(p) : null;
+    if (req.method === "GET") {
+      const r = await dir.requestInfo(reqm[1], uid);
+      return r.ok ? json(r.data, 200, { ...h, ...noStore }) : failure(r, { ...h, ...noStore });
+    }
+    if (req.method === "POST") {
+      if (!uid) return json({ error: "unauthorized", message: "entra en tu cuenta de xenxo para dar permiso" }, 401, h);
+      const { approve } = await readJson(req);
+      const r = await dir.decide(reqm[1], uid, approve === true);
+      return r.ok ? json(r.data, 200, { ...h, ...noStore }) : failure(r, { ...h, ...noStore });
+    }
+  }
+  return null;
+}
+
 /** Vacía la parcela de un proyecto: su portal, lo que construyeron sus agentes y los agentes conectados. */
 async function clearParcel(env: Env, district: string | null | undefined, projectId: string, agents: string[]) {
   const c = districtChunk(district);
@@ -272,8 +369,16 @@ export default {
     const url = new URL(req.url);
     const path = url.pathname;
     const h = cors(req, env);
+    // Lo que usan los juegos de cualquier dominio («Entrar con xenxo»): abierto, sin cookies.
+    const publicOidc = path.startsWith("/.well-known/") || path === "/oidc/token" || path === "/oidc/userinfo";
+    const open = {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Authorization, Content-Type",
+      "Access-Control-Max-Age": "600",
+    };
 
-    if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: h });
+    if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: publicOidc ? open : h });
     if (!env.TOKEN_SECRET) return json({ error: "TOKEN_SECRET no configurado" }, 500, h);
 
     try {
@@ -282,6 +387,12 @@ export default {
       if (path === "/github/repos" && req.method === "GET") {
         const r = await githubRepos(env, ctx);
         return new Response(r.body, { status: r.status, headers: { ...Object.fromEntries(r.headers), ...h } });
+      }
+
+      /* --- «Entrar con xenxo»: proveedor OpenID Connect para juegos --- */
+      if (path.startsWith("/.well-known/") || path.startsWith("/oidc/")) {
+        const r = await oidcRoutes(req, env, url, h, open);
+        if (r) return r;
       }
 
       /* --- Invitados y agentes --- */
@@ -440,6 +551,23 @@ export default {
           const r = await dir.setAvatar(uid, hash, format, label);
           return r.ok ? json(await userToken(r.data, env), 200, h) : failure(r, h);
         }
+        /* «Entrar con xenxo»: juegos registrados y juegos a los que se dio permiso */
+        if (path === "/me/games" && req.method === "GET") return json({ games: await dir.clientsOf(uid) }, 200, h);
+        if (path === "/me/games" && req.method === "POST") {
+          const r = await dir.registerClient(uid, await readJson(req));
+          return r.ok ? json(r.data, 201, h) : failure(r, h);
+        }
+        const game = path.match(/^\/me\/games\/(xg_[A-Za-z0-9_]{6,30})$/);
+        if (game && req.method === "DELETE") {
+          const r = await dir.deleteClient(uid, game[1]!);
+          return r.ok ? json(r.data, 200, h) : failure(r, h);
+        }
+        if (path === "/me/connected" && req.method === "GET") return json({ connected: await dir.grantsOf(uid) }, 200, h);
+        const conn = path.match(/^\/me\/connected\/(xg_[A-Za-z0-9_]{6,30})$/);
+        if (conn && req.method === "DELETE") {
+          const r = await dir.revokeGrant(uid, conn[1]!);
+          return r.ok ? json(r.data, 200, h) : failure(r, h);
+        }
         /* Claves de agente: construir en la parcela de un proyecto */
         if (path === "/me/agent-keys" && req.method === "GET") {
           return json({ keys: await dir.agentKeys(uid), max_per_project: MAX_AGENT_KEYS_PER_PROJECT, budgets: PARCEL_BUDGETS }, 200, h);
@@ -567,6 +695,7 @@ export default {
           await forgetAssets(env.ASSETS, req.url, r.deleteFromR2);
           return json({ marked: r.marked, deleted: r.deleteFromR2.length }, 200, h);
         }
+        if (path === "/admin/oidc/rotate" && req.method === "POST") return json(await dir.rotateSigningKey(), 200, h);
         if (path === "/admin/reports" && req.method === "GET") {
           return json({ reports: await dir.listReports(url.searchParams.get("status") ?? "open") }, 200, h);
         }

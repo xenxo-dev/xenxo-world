@@ -5,7 +5,7 @@ xenxo.io — licencias del repositorio
   otra cosa): GNU Affero General Public License v3.0 (AGPL-3.0-only), texto completo abajo.
   Si montas una copia pública de xenxo, tienes que publicar tu código con tus cambios.
 - Lo que usan los creadores para conectar sus juegos y agentes (packages/protocol,
-  packages/assets, apps/headless, packages/mcp y, cuando existan, el SDK y la plantilla):
+  packages/assets, apps/headless, packages/mcp, packages/sdk y, cuando exista, la plantilla):
   MIT. Cada carpeta lleva su propio LICENSE. Tu juego o tu agente siguen siendo tuyos.
 - Recursos gráficos: ver CREDITS.md (CC0 salvo lo indicado).
 

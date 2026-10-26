@@ -7,7 +7,7 @@
   "description": "Cliente web: panel 2D + plaza 3D (desktop, móvil y WebXR)",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -p tsconfig.json && vite build",
+    "build": "npm run build -w @xenxo/sdk && tsc -p tsconfig.json && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json"
   },

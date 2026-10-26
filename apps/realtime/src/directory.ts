@@ -23,6 +23,11 @@ import type { Env } from "./index";
 import { randomId } from "./auth";
 import { isAvatarPreset } from "./avatar-presets-check";
 import { assetKey } from "./assets";
+import { AVATAR_PRESETS } from "./avatar-presets";
+import {
+  b64url, CODE_TTL_MS, ACCESS_TOKEN_TTL_MS, ID_TOKEN_TTL_S, MAX_CLIENTS_PER_USER, MAX_REDIRECTS, parseScopes, REQUEST_TTL_MS,
+  sha256b64url, signJwt, validChallenge, validClientName, validNonce, validRedirectUri, validState, validVerifier, withParams,
+} from "./oidc";
 import { type ProjectCategory } from "@xenxo/protocol";
 import { DISTRICTS, districtById, PARCELS, parcelIndex, parcelRect } from "./districts";
 
@@ -56,6 +61,8 @@ export type Result<T> = Ok<T> | Fail;
 
 const ok = <T>(data: T): Ok<T> => ({ ok: true, data });
 const fail = (status: number, error: string, message: string, detail?: unknown): Fail => ({ ok: false, status, error, message, detail });
+
+export type OidcClientRow = { client_id: string; name: string; redirect_uris: string[]; project_id: string | null; created_at: number };
 
 export type AgentKeyRow = { id: string; project_id: string; project_title: string; label: string | null; created_at: number; last_used: number | null };
 export type AgentZone = { chunk_id: string; district: string; parcel: string; owner: string; x0: number; z0: number; x1: number; z1: number; facing: number };
@@ -149,6 +156,21 @@ export class Directory extends DurableObject<Env> {
         provider TEXT NOT NULL, subject TEXT NOT NULL, user_id TEXT NOT NULL, created_at INTEGER NOT NULL, last_used INTEGER,
         PRIMARY KEY (provider, subject));
       CREATE TABLE IF NOT EXISTS counters (k TEXT PRIMARY KEY, v INTEGER NOT NULL);
+      -- «Entrar con xenxo» (OpenID Connect). Claves de firma Ed25519: la privada no sale de aquí.
+      CREATE TABLE IF NOT EXISTS oidc_keys (
+        kid TEXT PRIMARY KEY, private_jwk TEXT NOT NULL, public_jwk TEXT NOT NULL, created_at INTEGER NOT NULL, active INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS oidc_secrets (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+      -- Juegos que usan «Entrar con xenxo» (clientes públicos: sin secreto, con PKCE).
+      CREATE TABLE IF NOT EXISTS oidc_clients (
+        client_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, redirect_uris TEXT NOT NULL,
+        project_id TEXT, created_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'active');
+      -- Lo que cada persona ha permitido a cada juego.
+      CREATE TABLE IF NOT EXISTS oidc_grants (
+        user_id TEXT NOT NULL, client_id TEXT NOT NULL, scopes TEXT NOT NULL, created_at INTEGER NOT NULL, last_used INTEGER,
+        PRIMARY KEY (user_id, client_id));
+      -- Peticiones en curso, códigos de un uso y tokens de acceso (de estos, solo su huella).
+      CREATE TABLE IF NOT EXISTS oidc_pending (
+        id TEXT PRIMARY KEY, kind TEXT NOT NULL, data TEXT NOT NULL, expires INTEGER NOT NULL);
       -- Claves de agente de una parcela: solo se guarda la huella (sha256) de la clave.
       CREATE TABLE IF NOT EXISTS agent_keys (
         id TEXT PRIMARY KEY, user_id TEXT NOT NULL, project_id TEXT NOT NULL, hash TEXT NOT NULL UNIQUE,
@@ -624,6 +646,9 @@ export class Directory extends DurableObject<Env> {
       skins: this.skins(id),
       // De cada clave de agente solo guardamos su huella; aquí van sus datos, nunca la huella.
       agent_keys: this.agentKeys(id),
+      // «Entrar con xenxo»: juegos a los que diste permiso y juegos que registraste.
+      connected_games: this.grantsOf(id),
+      registered_games: this.clientsOf(id),
       reports_sent: this.sql.exec("SELECT ts, target_type, target_id, reason, details FROM reports WHERE reporter = ?", `usr_${id}`).toArray(),
     });
   }
@@ -650,6 +675,10 @@ export class Directory extends DurableObject<Env> {
       this.sql.exec("DELETE FROM logins WHERE user_id = ?", id);
       this.sql.exec("DELETE FROM skins WHERE user_id = ?", id);
       this.sql.exec("DELETE FROM agent_keys WHERE user_id = ?", id);
+      this.sql.exec("DELETE FROM oidc_grants WHERE user_id = ?", id);
+      this.sql.exec("DELETE FROM oidc_grants WHERE client_id IN (SELECT client_id FROM oidc_clients WHERE user_id = ?)", id);
+      this.sql.exec("DELETE FROM oidc_clients WHERE user_id = ?", id);
+      this.sql.exec("DELETE FROM oidc_pending WHERE json_extract(data, '$.user_id') = ?", id);
       this.sql.exec("DELETE FROM projects WHERE user_id = ?", id);
       this.sql.exec("DELETE FROM uploads WHERE uploader = ?", sub);
       this.sql.exec("UPDATE reports SET reporter = 'deleted' WHERE reporter = ?", sub);
@@ -859,6 +888,286 @@ export class Directory extends DurableObject<Env> {
     });
     const orphanHashes = hashes.filter((h) => this.sql.exec("SELECT 1 FROM uploads WHERE hash = ? AND kind != 'removed'", h).toArray().length === 0);
     return { agents, orphanHashes };
+  }
+
+  /* ================================================================ */
+  /* «Entrar con xenxo»: proveedor OpenID Connect                       */
+  /* ================================================================ */
+
+  /** La clave de firma activa (se crea la primera vez; la privada nunca sale del Directory). */
+  private async signingKey(): Promise<{ kid: string; key: CryptoKey }> {
+    let row = this.sql.exec<{ kid: string; private_jwk: string }>("SELECT kid, private_jwk FROM oidc_keys WHERE active = 1 ORDER BY created_at DESC LIMIT 1").toArray()[0];
+    if (!row) {
+      const pair = (await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"])) as CryptoKeyPair;
+      const priv = (await crypto.subtle.exportKey("jwk", pair.privateKey)) as JsonWebKey;
+      const pub = (await crypto.subtle.exportKey("jwk", pair.publicKey)) as JsonWebKey;
+      // kid = huella RFC 7638 de la clave pública.
+      const kid = await sha256b64url(JSON.stringify({ crv: pub.crv, kty: pub.kty, x: pub.x }));
+      this.sql.exec(
+        "INSERT INTO oidc_keys (kid, private_jwk, public_jwk, created_at, active) VALUES (?, ?, ?, ?, 1)",
+        kid, JSON.stringify(priv), JSON.stringify({ kty: pub.kty, crv: pub.crv, x: pub.x }), Date.now(),
+      );
+      row = { kid, private_jwk: JSON.stringify(priv) };
+    }
+    const key = await crypto.subtle.importKey("jwk", JSON.parse(row.private_jwk) as JsonWebKey, { name: "Ed25519" }, false, ["sign"]);
+    return { kid: row.kid, key };
+  }
+
+  /** Claves públicas (las activas y las retiradas hace menos de un día, para tokens aún vivos). */
+  async jwks() {
+    await this.signingKey();
+    const rows = this.sql.exec<{ kid: string; public_jwk: string }>("SELECT kid, public_jwk FROM oidc_keys ORDER BY created_at DESC LIMIT 3").toArray();
+    return { keys: rows.map((r) => ({ ...(JSON.parse(r.public_jwk) as object), kid: r.kid, use: "sig", alg: "EdDSA" })) };
+  }
+
+  /** Moderación: nueva clave de firma (la anterior se sigue publicando un tiempo para los tokens vivos). */
+  async rotateSigningKey(): Promise<{ kid: string }> {
+    this.sql.exec("UPDATE oidc_keys SET active = 0");
+    return { kid: (await this.signingKey()).kid };
+  }
+
+  private oidcSecret(name: string): string {
+    const row = this.sql.exec<{ v: string }>("SELECT v FROM oidc_secrets WHERE k = ?", name).toArray()[0];
+    if (row) return row.v;
+    const v = randomId("", 32);
+    this.sql.exec("INSERT INTO oidc_secrets (k, v) VALUES (?, ?)", name, v);
+    return v;
+  }
+
+  /** Identificador de una persona para un juego: estable, distinto en cada juego y sin dar la cuenta. */
+  private async pairwiseSub(userId: string, clientId: string): Promise<string> {
+    const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(this.oidcSecret("pairwise")), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${userId}:${clientId}`)));
+    return "x" + b64url(mac).slice(0, 31);
+  }
+
+  private pruneOidc() {
+    this.sql.exec("DELETE FROM oidc_pending WHERE expires < ?", Date.now());
+  }
+
+  /* --- Juegos (clientes) --- */
+
+  async registerClient(userId: string, body: { name?: unknown; redirect_uris?: unknown; project_id?: unknown }): Promise<Result<OidcClientRow>> {
+    const name = validClientName(body.name);
+    if (!name) return fail(400, "bad_game_name", "el nombre del juego debe tener entre 2 y 40 caracteres");
+    const list = Array.isArray(body.redirect_uris) ? body.redirect_uris : [];
+    const uris = list.map(validRedirectUri);
+    if (!uris.length || uris.length > MAX_REDIRECTS || uris.some((u) => !u)) {
+      return fail(400, "bad_redirect", `entre 1 y ${MAX_REDIRECTS} direcciones de vuelta, https (o http://localhost para probar), sin # ni usuario`);
+    }
+    const n = this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM oidc_clients WHERE user_id = ? AND status = 'active'", userId).one().n;
+    if (n >= MAX_CLIENTS_PER_USER) return fail(409, "too_many_clients", `máximo ${MAX_CLIENTS_PER_USER} juegos por persona`);
+    let projectId: string | null = null;
+    if (body.project_id !== undefined && body.project_id !== null && body.project_id !== "") {
+      if (typeof body.project_id !== "string" || this.projectOwner(body.project_id) !== userId) return fail(404, "not_found", "ese proyecto no es tuyo");
+      projectId = body.project_id;
+    }
+    const clientId = randomId("xg_", 12).replace(/[^a-zA-Z0-9_]/g, "x");
+    this.sql.exec(
+      "INSERT INTO oidc_clients (client_id, user_id, name, redirect_uris, project_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      clientId, userId, name, JSON.stringify([...new Set(uris)]), projectId, Date.now(),
+    );
+    return ok(this.clientsOf(userId).find((c) => c.client_id === clientId)!);
+  }
+
+  clientsOf(userId: string): OidcClientRow[] {
+    return this.sql
+      .exec<{ client_id: string; name: string; redirect_uris: string; project_id: string | null; created_at: number }>(
+        "SELECT client_id, name, redirect_uris, project_id, created_at FROM oidc_clients WHERE user_id = ? AND status = 'active' ORDER BY created_at",
+        userId,
+      )
+      .toArray()
+      .map((r) => ({ ...r, redirect_uris: JSON.parse(r.redirect_uris) as string[] }));
+  }
+
+  /** Quita un juego: deja de poder pedir identidades y se borran sus permisos y tokens. */
+  deleteClient(userId: string, clientId: string): Result<{ deleted: true }> {
+    const n = this.sql.exec("DELETE FROM oidc_clients WHERE client_id = ? AND user_id = ?", clientId, userId).rowsWritten;
+    if (!n) return fail(404, "not_found", "ese juego no es tuyo");
+    this.sql.exec("DELETE FROM oidc_grants WHERE client_id = ?", clientId);
+    this.sql.exec("DELETE FROM oidc_pending WHERE json_extract(data, '$.client_id') = ?", clientId);
+    return ok({ deleted: true });
+  }
+
+  private client(clientId: unknown) {
+    if (typeof clientId !== "string") return null;
+    const r = this.sql
+      .exec<{ client_id: string; user_id: string; name: string; redirect_uris: string }>(
+        "SELECT client_id, user_id, name, redirect_uris FROM oidc_clients WHERE client_id = ? AND status = 'active'",
+        clientId,
+      )
+      .toArray()[0];
+    return r ? { ...r, redirect_uris: JSON.parse(r.redirect_uris) as string[] } : null;
+  }
+
+  /* --- Autorización --- */
+
+  /**
+   * Valida una petición de /oidc/authorize. Si el juego o la dirección de vuelta no valen, NO se
+   * redirige (`redirect: null`): xenxo enseña el error. Si valen, los demás errores vuelven al juego.
+   */
+  async authorizeRequest(q: Record<string, string | null>): Promise<{ ok: true; request: string } | { ok: false; error: string; message: string; redirect: string | null }> {
+    this.pruneOidc();
+    const c = this.client(q.client_id);
+    if (!c) return { ok: false, error: "invalid_client", message: "ese juego no está registrado en xenxo", redirect: null };
+    const redirect = q.redirect_uri ?? "";
+    if (!c.redirect_uris.includes(redirect)) {
+      return { ok: false, error: "invalid_redirect_uri", message: "esa dirección de vuelta no está registrada para este juego", redirect: null };
+    }
+    const back = (error: string, message: string) => ({ ok: false as const, error, message, redirect: withParams(redirect, { error, error_description: message, state: q.state ?? undefined }) });
+    if (!validState(q.state)) return { ok: false, error: "invalid_request", message: "state no válido", redirect: null };
+    if (q.response_type !== "code") return back("unsupported_response_type", "solo response_type=code");
+    const scopes = parseScopes(q.scope);
+    if (!scopes) return back("invalid_scope", "scope: openid y, si quieres, profile, player y avatar");
+    if (q.code_challenge_method !== "S256" || !validChallenge(q.code_challenge)) return back("invalid_request", "hace falta PKCE con code_challenge_method=S256");
+    if (!validNonce(q.nonce)) return back("invalid_request", "nonce no válido");
+    if (q.prompt && !["none", "consent", "login"].includes(q.prompt)) return back("invalid_request", "prompt no admitido");
+    const id = randomId("ar_", 18);
+    this.sql.exec(
+      "INSERT INTO oidc_pending (id, kind, data, expires) VALUES (?, 'request', ?, ?)",
+      id,
+      JSON.stringify({ client_id: c.client_id, redirect_uri: redirect, scopes, state: q.state || null, nonce: q.nonce || null, code_challenge: q.code_challenge, prompt: q.prompt || null }),
+      Date.now() + REQUEST_TTL_MS,
+    );
+    return { ok: true, request: id };
+  }
+
+  private pending<T>(id: unknown, kind: "request" | "code" | "access"): T | null {
+    this.pruneOidc();
+    if (typeof id !== "string" || id.length > 200) return null;
+    const r = this.sql.exec<{ data: string }>("SELECT data FROM oidc_pending WHERE id = ? AND kind = ?", id, kind).toArray()[0];
+    return r ? (JSON.parse(r.data) as T) : null;
+  }
+
+  /** Lo que enseña la pantalla de permiso: qué juego, de quién, a dónde vuelve y qué pide. */
+  requestInfo(id: unknown, userId: string | null): Result<{ client: { name: string; owner: string; host: string }; scopes: string[]; granted: boolean; prompt: string | null }> {
+    const r = this.pending<{ client_id: string; redirect_uri: string; scopes: string[]; prompt: string | null }>(id, "request");
+    if (!r) return fail(404, "request_expired", "la petición caducó; vuelve a pulsar «Entrar con xenxo» en el juego");
+    const c = this.client(r.client_id);
+    if (!c) return fail(404, "invalid_client", "ese juego ya no está registrado");
+    const owner = this.user(c.user_id);
+    const granted = userId ? this.grantCovers(userId, r.client_id, r.scopes) : false;
+    return ok({ client: { name: c.name, owner: owner ? `${owner.display_name}${owner.player_no != null ? ` #${owner.player_no}` : ""}` : "?", host: new URL(r.redirect_uri).host }, scopes: r.scopes, granted, prompt: r.prompt });
+  }
+
+  private grantCovers(userId: string, clientId: string, scopes: string[]): boolean {
+    const g = this.sql.exec<{ scopes: string }>("SELECT scopes FROM oidc_grants WHERE user_id = ? AND client_id = ?", userId, clientId).toArray()[0];
+    if (!g) return false;
+    const have = g.scopes.split(" ");
+    return scopes.every((s) => have.includes(s));
+  }
+
+  /**
+   * La persona responde en la pantalla de permiso. Devuelve a dónde ir: al juego con un código
+   * de un uso (o con error=access_denied si dijo que no).
+   */
+  async decide(id: unknown, userId: string, approve: boolean): Promise<Result<{ redirect: string }>> {
+    const r = this.pending<{ client_id: string; redirect_uri: string; scopes: string[]; state: string | null; nonce: string | null; code_challenge: string }>(id, "request");
+    if (!r) return fail(404, "request_expired", "la petición caducó; vuelve a pulsar «Entrar con xenxo» en el juego");
+    this.sql.exec("DELETE FROM oidc_pending WHERE id = ?", id as string); // un solo uso
+    if (!this.client(r.client_id) || !this.user(userId)) return fail(404, "invalid_client", "ese juego ya no está registrado");
+    if (!approve) {
+      return ok({ redirect: withParams(r.redirect_uri, { error: "access_denied", error_description: "la persona no dio permiso", state: r.state ?? undefined }) });
+    }
+    const now = Date.now();
+    this.sql.exec(
+      `INSERT INTO oidc_grants (user_id, client_id, scopes, created_at, last_used) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (user_id, client_id) DO UPDATE SET scopes = excluded.scopes, last_used = excluded.last_used`,
+      userId, r.client_id, r.scopes.join(" "), now, now,
+    );
+    const code = randomId("ac_", 24);
+    this.sql.exec(
+      "INSERT INTO oidc_pending (id, kind, data, expires) VALUES (?, 'code', ?, ?)",
+      await sha256b64url(code),
+      JSON.stringify({ user_id: userId, client_id: r.client_id, redirect_uri: r.redirect_uri, scopes: r.scopes, nonce: r.nonce, code_challenge: r.code_challenge, auth_time: Math.floor(now / 1000) }),
+      now + CODE_TTL_MS,
+    );
+    return ok({ redirect: withParams(r.redirect_uri, { code, state: r.state ?? undefined }) });
+  }
+
+  /** Lo que un juego sabe de una persona, según lo permitido. */
+  private async claims(userId: string, clientId: string, scopes: string[], publicBase: string) {
+    const u = this.user(userId);
+    if (!u) return null;
+    const out: Record<string, unknown> = { sub: await this.pairwiseSub(userId, clientId) };
+    if (scopes.includes("profile")) out.name = u.display_name;
+    if (scopes.includes("player")) out.player_no = u.player_no;
+    if (scopes.includes("avatar")) {
+      // Sin personaje elegido, uno de serie fijo para esa persona (el mismo en todos los juegos).
+      let hash = u.avatar_hash, format = u.avatar_format ?? "vrm";
+      if (!hash) {
+        const i = parseInt((await sha256b64url(userId)).replace(/[^0-9]/g, "").slice(0, 6) || "0", 10) % AVATAR_PRESETS.length;
+        hash = AVATAR_PRESETS[i]!.hash;
+        format = "vrm";
+      }
+      out.avatar = { url: `${publicBase}/assets/${hash.replace(/^sha256:/, "")}`, format, hash };
+    }
+    return out;
+  }
+
+  /** /oidc/token: cambia un código por los tokens (con su verificador PKCE). */
+  async exchangeCode(
+    body: { grant_type?: unknown; code?: unknown; redirect_uri?: unknown; client_id?: unknown; code_verifier?: unknown },
+    issuer: string,
+  ): Promise<{ ok: true; data: Record<string, unknown> } | { ok: false; status: number; error: string; message: string }> {
+    const bad = (error: string, message: string, status = 400) => ({ ok: false as const, status, error, message });
+    if (body.grant_type !== "authorization_code") return bad("unsupported_grant_type", "solo authorization_code");
+    if (typeof body.code !== "string" || body.code.length > 100) return bad("invalid_grant", "código no válido");
+    const id = await sha256b64url(body.code);
+    const c = this.pending<{ user_id: string; client_id: string; redirect_uri: string; scopes: string[]; nonce: string | null; code_challenge: string; auth_time: number }>(id, "code");
+    // El código se gasta aunque lo demás falle: nunca se puede probar dos veces.
+    this.sql.exec("DELETE FROM oidc_pending WHERE id = ?", id);
+    if (!c) return bad("invalid_grant", "el código no existe, caducó o ya se usó");
+    if (body.client_id !== c.client_id || body.redirect_uri !== c.redirect_uri) return bad("invalid_grant", "el código no es de este juego o de esta dirección");
+    if (!validVerifier(body.code_verifier) || (await sha256b64url(body.code_verifier)) !== c.code_challenge) return bad("invalid_grant", "el code_verifier no coincide (PKCE)");
+    if (!this.client(c.client_id) || !this.grantCovers(c.user_id, c.client_id, c.scopes)) return bad("invalid_grant", "el permiso ya no existe");
+    const claims = await this.claims(c.user_id, c.client_id, c.scopes, issuer);
+    if (!claims) return bad("invalid_grant", "la cuenta ya no existe");
+    const now = Math.floor(Date.now() / 1000);
+    const { kid, key } = await this.signingKey();
+    const idToken = await signJwt(key, kid, {
+      iss: issuer, aud: c.client_id, iat: now, exp: now + ID_TOKEN_TTL_S, auth_time: c.auth_time,
+      ...(c.nonce ? { nonce: c.nonce } : {}), ...claims,
+    });
+    const access = randomId("xa_", 24);
+    this.sql.exec(
+      "INSERT INTO oidc_pending (id, kind, data, expires) VALUES (?, 'access', ?, ?)",
+      await sha256b64url(access), JSON.stringify({ user_id: c.user_id, client_id: c.client_id, scopes: c.scopes }), Date.now() + ACCESS_TOKEN_TTL_MS,
+    );
+    this.sql.exec("UPDATE oidc_grants SET last_used = ? WHERE user_id = ? AND client_id = ?", Date.now(), c.user_id, c.client_id);
+    return { ok: true, data: { access_token: access, token_type: "Bearer", expires_in: ACCESS_TOKEN_TTL_MS / 1000, id_token: idToken, scope: c.scopes.join(" ") } };
+  }
+
+  /** /oidc/userinfo: lo mismo que el id_token, con un token de acceso vivo y el permiso aún dado. */
+  async userinfo(accessToken: string, issuer: string): Promise<Record<string, unknown> | null> {
+    if (!accessToken.startsWith("xa_")) return null;
+    const a = this.pending<{ user_id: string; client_id: string; scopes: string[] }>(await sha256b64url(accessToken), "access");
+    if (!a || !this.client(a.client_id) || !this.grantCovers(a.user_id, a.client_id, a.scopes)) return null;
+    return this.claims(a.user_id, a.client_id, a.scopes, issuer);
+  }
+
+  /* --- Juegos conectados (lo que ve cada persona en Cuenta) --- */
+
+  grantsOf(userId: string) {
+    return this.sql
+      .exec<{ client_id: string; name: string; scopes: string; created_at: number; last_used: number | null; redirect_uris: string }>(
+        `SELECT g.client_id, c.name, g.scopes, g.created_at, g.last_used, c.redirect_uris FROM oidc_grants g
+         JOIN oidc_clients c ON c.client_id = g.client_id WHERE g.user_id = ? ORDER BY g.last_used DESC`,
+        userId,
+      )
+      .toArray()
+      .map((g) => ({ client_id: g.client_id, name: g.name, scopes: g.scopes.split(" "), created_at: g.created_at, last_used: g.last_used, host: new URL((JSON.parse(g.redirect_uris) as string[])[0]!).host }));
+  }
+
+  /** Retira el permiso a un juego: sus tokens de acceso dejan de valer al momento. */
+  revokeGrant(userId: string, clientId: string): Result<{ revoked: true }> {
+    const n = this.sql.exec("DELETE FROM oidc_grants WHERE user_id = ? AND client_id = ?", userId, clientId).rowsWritten;
+    if (!n) return fail(404, "not_found", "ese juego no tiene permiso");
+    this.sql.exec(
+      "DELETE FROM oidc_pending WHERE kind IN ('access', 'code') AND json_extract(data, '$.user_id') = ? AND json_extract(data, '$.client_id') = ?",
+      userId, clientId,
+    );
+    return ok({ revoked: true });
   }
 
   /* --- Claves de agente: construir en la parcela de un proyecto --- */

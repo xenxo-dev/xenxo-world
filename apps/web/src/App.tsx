@@ -8,6 +8,7 @@ import { errorText, placeName, t, useLang } from "./i18n";
 import { setGuestName as setSessionGuestName, startSession } from "./net/session";
 import { completeGoogleReturn, refreshSession } from "./net/account";
 import { useWorldVersion, world } from "./net/world-store";
+import { Consent, pendingConsent } from "./panel/Consent";
 import { Panel, type Section } from "./panel/Panel";
 import { TouchJoystick } from "./world/TouchJoystick";
 
@@ -59,6 +60,13 @@ export function App() {
   // La plaza se ve viva detrás del panel desde el primer segundo.
   // Vuelta de Google: termina el acceso y abre Personalizar con el resultado.
   const [authNotice, setAuthNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+  // «Entrar con xenxo»: un juego pide la identidad (?autorizar=… lo pone /oidc/authorize).
+  const [consent, setConsent] = useState(() => {
+    const q = new URLSearchParams(location.search);
+    const request = q.get("autorizar") ?? pendingConsent();
+    const error = q.get("autorizar_error");
+    return request || error ? { request, error } : null;
+  });
   useEffect(() => {
     void completeGoogleReturn().then((r) => {
       if (!r.returned) return void refreshSession();
@@ -84,6 +92,8 @@ export function App() {
       <Suspense fallback={null}>
         <World active={inWorld} />
       </Suspense>
+
+      {consent && <Consent request={consent.request} error={consent.error} onClose={() => setConsent(null)} />}
 
       {!inWorld && (
         <Panel

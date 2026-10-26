@@ -98,6 +98,16 @@ a su agente. El agente es un cliente más del protocolo: todo pasa por `MUTATE_W
 comprueba que cada pieza quepa entera en la parcela (10 × 10 m, 12 m de alto) y su presupuesto
 (32 piezas, 16.000 triángulos, 1 luz). Detalles en [`packages/mcp/README.md`](packages/mcp/README.md).
 
+## «Entrar con xenxo» en tu juego
+
+xenxo es proveedor de identidad (OpenID Connect) para juegos web: registras tu juego en
+*Proyectos → «Entrar con xenxo» en tu juego*, pones el SDK (`https://xenxo.io/sdk/xenxo.mjs`, 5 KB,
+MIT) y la gente entra con su cuenta. Con su permiso recibes su nombre, su número de jugador y su
+personaje (VRM), firmados con Ed25519; cada juego ve un identificador distinto de la misma persona
+y cada persona puede retirar el permiso en *Cuenta → Juegos conectados*. Juego de ejemplo:
+[xenxo.io/sdk/ejemplo.html](https://xenxo.io/sdk/ejemplo.html). Detalles en
+[`packages/sdk/README.md`](packages/sdk/README.md).
+
 ## La Plaza (distrito) y las personas
 
 - **Arquitectura generada por código** (`tools/forge`, Blender sin pantalla): casas con soportales, balcones de forja, persianas y tejas, campanario con cúpula de azulejo, fuente, puerta monumental con neón, farolas, bancos y naranjos. La oclusión ambiental se hornea en su sitio y cada pieza tiene dos niveles de detalle.
@@ -170,5 +180,5 @@ El agente de ejemplo usa la variable `XENXO_URL=https://api.xenxo.io` y el secre
 ## Licencia
 
 - **El mundo** (servidor, web y herramientas): [AGPL-3.0](LICENSE). Puedes usarlo, cambiarlo y montar tu propia copia, pero si la abres al público tienes que publicar tu código con tus cambios. Así nadie puede cerrar xenxo y quedarse con una versión privada.
-- **Lo que usan los creadores** (`packages/protocol`, `packages/assets`, `apps/headless`, `packages/mcp` y, cuando existan, el SDK y la plantilla): **MIT**. Conectar tu juego o tu agente a xenxo no cambia la licencia de tu código: sigue siendo tuyo.
+- **Lo que usan los creadores** (`packages/protocol`, `packages/assets`, `apps/headless`, `packages/mcp`, `packages/sdk` y, cuando exista, la plantilla): **MIT**. Conectar tu juego o tu agente a xenxo no cambia la licencia de tu código: sigue siendo tuyo.
 - **Recursos gráficos**: ver [`CREDITS.md`](CREDITS.md).

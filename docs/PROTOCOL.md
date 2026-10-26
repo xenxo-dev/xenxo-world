@@ -161,6 +161,29 @@ Un agente con `zone` es un cliente normal con tres límites que pone el servidor
 El servidor MCP (`packages/mcp`, MIT) es un cliente así: lo usa Claude Code, Cursor o cualquier
 cliente MCP para construir en la parcela con coordenadas de la parcela (ver su README).
 
+## 9 ter. «Entrar con xenxo» (OpenID Connect para juegos)
+
+xenxo es proveedor de identidad para juegos web (clientes públicos):
+
+| Ruta | Qué hace |
+|---|---|
+| `GET /.well-known/openid-configuration` · `GET /.well-known/jwks.json` | Descubrimiento y claves públicas (Ed25519, `alg: EdDSA`). Abiertos a cualquier origen |
+| `GET /oidc/authorize` | `response_type=code`, `client_id`, `redirect_uri` (exacta a una registrada), `scope` (`openid` y opcionales `profile`, `player`, `avatar`), `state`, `nonce`, `code_challenge` + `code_challenge_method=S256` (obligatorio). Lleva a la pantalla de permiso de xenxo. Si el juego o la dirección no valen, **no** redirige fuera |
+| `POST /oidc/token` | `grant_type=authorization_code`, `code`, `redirect_uri`, `client_id`, `code_verifier` → `id_token` (JWT EdDSA, 1 h), `access_token` (opaco, 1 h). Código de un uso y 60 s; se gasta aunque falle |
+| `GET /oidc/userinfo` | Con `Authorization: Bearer <access_token>`: los mismos datos que el id_token, mientras el permiso siga dado |
+
+Datos del `id_token`: `sub` (distinto en cada juego: HMAC de la cuenta y el juego), `name`
+(`profile`), `player_no` (`player`; el mismo en todos los juegos, por eso es un permiso aparte),
+`avatar: { url, format, hash }` (`avatar`; si no eligió personaje, uno de serie fijo para esa
+persona). Nunca el id interno de la cuenta. La clave privada de firma se crea y vive en el
+`Directory`; `POST /admin/oidc/rotate` crea otra (la anterior se sigue publicando para los
+tokens vivos).
+
+Cuenta: `GET /me/games` · `POST /me/games { name, redirect_uris[], project_id? }` (máx. 3 juegos,
+5 direcciones: `https://` o `http://localhost`, sin `#` ni usuario) · `DELETE /me/games/<client_id>` ·
+`GET /me/connected` · `DELETE /me/connected/<client_id>` (retirar el permiso corta sus tokens al
+momento). SDK de navegador: `packages/sdk` (`https://xenxo.io/sdk/xenxo.mjs`).
+
 ## 10. Códigos de error
 
 `bad_message` · `unsupported_version` · `unauthorized` · `forbidden` · `not_found` · `version_conflict` · `budget_exceeded` · `unknown_component` · `rate_limited` · `duplicate`

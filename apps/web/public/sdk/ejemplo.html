@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Juego de ejemplo · Entrar con xenxo</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; min-height: 100dvh; background: radial-gradient(ellipse at 70% 60%, #3a0f2e, transparent 60%), #07060c; color: #ece8f8; font: 16px/1.45 system-ui, sans-serif; display: grid; place-items: center; }
+  main { width: min(920px, 100% - 32px); display: grid; gap: 20px; grid-template-columns: 1fr; }
+  @media (min-width: 760px) { main { grid-template-columns: 1fr 340px; } }
+  .card { border: 1px solid #ffffff1f; border-radius: 18px; background: #0d0c18cc; padding: 20px; }
+  canvas { width: 100%; height: min(70dvh, 520px); display: block; border-radius: 18px; background: #0b0a14; border: 1px solid #ffffff14; }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  .muted { color: #b8b2d0; font-size: 14px; }
+  button { font: inherit; border: 0; border-radius: 12px; padding: 10px 16px; cursor: pointer; }
+  #login { background: #ff3d9a; color: #fff; font-weight: 600; box-shadow: 0 0 18px #ff3d9a88; }
+  #logout { background: #ffffff14; color: #ece8f8; }
+  input { font: 13px ui-monospace, monospace; width: 100%; box-sizing: border-box; border-radius: 10px; border: 1px solid #ffffff26; background: #ffffff0d; color: inherit; padding: 8px 10px; }
+  #name { font-size: 26px; font-weight: 700; margin: 12px 0 0; }
+  #number { color: #3ee6ff; font-family: ui-monospace, monospace; }
+  .small { font-size: 12px; color: #8e88a8; word-break: break-all; }
+</style>
+</head>
+<body>
+<main>
+  <canvas id="view" aria-label="Tu personaje de xenxo"></canvas>
+  <div class="card">
+    <h1>Juego de ejemplo</h1>
+    <p class="muted">Un juego cualquiera que usa «Entrar con xenxo»: entras con tu cuenta y aparece tu personaje.</p>
+    <label class="small" for="client">client_id del juego (lo da xenxo al registrarlo)</label>
+    <input id="client" placeholder="xg_…" autocomplete="off" spellcheck="false" />
+    <p><button id="login" hidden>Entrar con xenxo</button> <button id="logout" hidden>Salir</button></p>
+    <p id="status" class="muted"></p>
+    <p id="name"></p>
+    <p id="number"></p>
+    <p id="sub" class="small"></p>
+    <p id="sig" class="small"></p>
+  </div>
+</main>
+<script type="module" src="./ejemplo.js"></script>
+</body>
+</html>

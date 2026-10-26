@@ -19,6 +19,7 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 | `apps/web` | Panel 2D (HTML) + mundo 3D: nexo, plaza y distritos (React Three Fiber, WebXR) |
 | `apps/headless` | Cliente sin render: banco de conformidad, prueba del MCP y agente de ejemplo |
 | `packages/mcp` | Servidor MCP (MIT): el agente de una persona construye en su parcela con su clave `xk_` |
+| `packages/sdk` | `@xenxo/sdk` (MIT): «Entrar con xenxo» para juegos web; se sirve en `xenxo.io/sdk/` con un juego de ejemplo |
 | `docs/PROTOCOL.md` | Explicación del contrato |
 
 ## Antes de dar algo por terminado
@@ -57,6 +58,7 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 - Nada externo en los GLB (sin URIs, sin Draco): los clientes no descargan nada de terceros.
 - El navegador del visitante no habla con terceros (GitHub va por `/github/repos`; las fuentes van empaquetadas). Única excepción, elegida por la persona: «Entrar con Google», que es una redirección (sin scripts de Google en la web), pide solo `openid` y guarda la huella del identificador, nunca el identificador.
 - El número de jugador sale de un contador (`counters.next_player`): nunca se reutiliza.
+- «Entrar con xenxo» (OIDC, `oidc.ts` + `directory.ts`): solo clientes públicos con PKCE S256, `redirect_uri` exacta, códigos de un uso, `sub` distinto por juego y nunca el id interno. La clave privada Ed25519 se crea y vive en el `Directory`: no se exporta, no va a secretos ni al código. La pantalla de permiso no se puede incrustar (`_headers`). Si tocas el flujo, el escenario «Entrar con xenxo» de la conformidad tiene que seguir pasando.
 
 ## Gasto (cero sorpresas en Cloudflare)
 
@@ -65,7 +67,7 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 
 ## Licencias
 
-- AGPL-3.0 por defecto (`LICENSE`). MIT en lo que usan los creadores: `packages/protocol`, `packages/assets`, `apps/headless`, `packages/mcp` y el futuro SDK y plantilla (cada uno con su `LICENSE`).
+- AGPL-3.0 por defecto (`LICENSE`). MIT en lo que usan los creadores: `packages/protocol`, `packages/assets`, `apps/headless`, `packages/mcp`, `packages/sdk` y la futura plantilla (cada uno con su `LICENSE`).
 - Lo MIT nunca importa código AGPL (`apps/realtime`, `apps/web`, `tools/`). Al revés sí. Excepción: los datos de prueba del banco de conformidad.
 - La web enlaza su código fuente (AGPL §13): no quites el enlace «Código».
 

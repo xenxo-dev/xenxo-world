@@ -1,0 +1,26 @@
+{
+  "name": "@xenxo/sdk",
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "description": "«Entrar con xenxo» para juegos web: identidad, número de jugador y personaje (VRM), firmados por xenxo",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --format=esm --target=es2022 --outfile=../../apps/web/public/sdk/xenxo.mjs && esbuild src/ejemplo.ts --bundle --format=esm --target=es2022 --minify --outfile=../../apps/web/public/sdk/ejemplo.js",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@pixiv/three-vrm": "^3.5.5",
+    "@pixiv/three-vrm-animation": "^3.5.5",
+    "@types/three": "^0.186.0",
+    "esbuild": "^0.28.2",
+    "three": "^0.186.0"
+  }
+}

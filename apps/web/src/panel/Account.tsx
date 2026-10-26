@@ -29,6 +29,7 @@ import {
 import { reconnect } from "../net/session";
 import { AVATAR_PRESETS, presetByHash, setChosenPreset, useChosenPreset } from "../world/presets";
 import type { PreviewPose } from "./AvatarPreview";
+import { ConnectedGames } from "./Games";
 import { ModelPicker } from "./ModelPicker";
 import { Block, Button, card, input, Label, Notice, Segmented } from "./ui";
 
@@ -55,6 +56,12 @@ export function AccountSection(props: CustomizeProps) {
       <Block title={t("avatar.title")}>
         <Wardrobe />
       </Block>
+
+      {user && (
+        <Block title={t("connected.title")}>
+          <ConnectedGames />
+        </Block>
+      )}
 
       {!user && (
         <Block title={t("customize.name")}>
@@ -341,7 +348,7 @@ function GraphicsSettings() {
   );
 }
 
-function SignedOut() {
+export function SignedOut() {
   const [name, setName] = useState("");
   const [age, setAge] = useState(false);
   const [terms, setTerms] = useState(false);

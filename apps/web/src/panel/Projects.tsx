@@ -18,6 +18,7 @@ import {
 } from "../net/account";
 import { refreshProjects } from "../net/projects";
 import { AgentKeys } from "./AgentKeys";
+import { MyGames } from "./Games";
 import { ModelPicker } from "./ModelPicker";
 import { ReportButton } from "./ReportButton";
 import { Block, Button, card, input, Label, Notice } from "./ui";
@@ -132,6 +133,12 @@ export function ProjectsSection({ onGoToAccount }: { onGoToAccount: () => void }
         </ul>
         {!user && !publishing && <p className="mt-4 text-sm text-cal/50">{t("projects.loginToPublish")}</p>}
       </Block>
+
+      {user && (
+        <Block title={t("games.title")}>
+          <MyGames projects={(projects ?? []).filter((p) => mine.has(p.id))} />
+        </Block>
+      )}
 
       <Block title={t("projects.xenxo")}>
         {repos === null && <p className="text-sm text-cal/50">{t("repos.loading")}</p>}

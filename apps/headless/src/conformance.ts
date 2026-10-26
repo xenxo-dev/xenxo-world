@@ -754,6 +754,128 @@ await scenario("parcela: la clave de agente de un proyecto construye solo dentro
   watcher.close();
 });
 
+await scenario("Entrar con xenxo: OpenID Connect con PKCE, consentimiento, sub por juego y revocación", async () => {
+  const { createHash, randomBytes, webcrypto } = await import("node:crypto");
+  const b64u = (b: Buffer | Uint8Array) => Buffer.from(b).toString("base64url");
+  const dev = new Api(baseUrl);
+  await dev.register(`conf ${randomUUID().slice(0, 6)}`);
+  const badReg = await dev.call("POST", "/me/games", { name: "Malo", redirect_uris: ["http://evil.example/cb"] });
+  assert(!badReg.ok && badReg.error === "bad_redirect", "http fuera de localhost → bad_redirect");
+  const frag = await dev.call("POST", "/me/games", { name: "Malo", redirect_uris: ["https://juego.example/cb#x"] });
+  assert(!frag.ok && frag.error === "bad_redirect", "con fragmento → bad_redirect");
+  const cb = "https://juego.example/cb";
+  const g = await dev.call<{ client_id: string }>("POST", "/me/games", { name: "Juego de prueba", redirect_uris: [cb] });
+  assert(g.ok && g.data.client_id.startsWith("xg_"), `registrar juego: ${JSON.stringify(g)}`);
+  const g2 = await dev.call<{ client_id: string }>("POST", "/me/games", { name: "Otro juego", redirect_uris: [cb] });
+  assert(g2.ok, "segundo juego");
+
+  const player = new Api(baseUrl);
+  await player.register(`conf ${randomUUID().slice(0, 6)}`);
+  const me = await player.call<{ display_name: string; player_no: number }>("GET", "/me");
+  assert(me.ok, "GET /me");
+
+  const pkce = () => {
+    const verifier = b64u(randomBytes(48));
+    return { verifier, challenge: b64u(createHash("sha256").update(verifier).digest()) };
+  };
+  const authorize = async (params: Record<string, string>) => {
+    const u = new URL("/oidc/authorize", baseUrl);
+    for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
+    const r = await fetch(u, { redirect: "manual" });
+    return new URL(r.headers.get("location") ?? "about:blank");
+  };
+  const flow = async (clientId: string, scope = "openid profile player avatar", approve = true) => {
+    const p = pkce();
+    const nonce = b64u(randomBytes(12)), state = b64u(randomBytes(12));
+    const loc = await authorize({ response_type: "code", client_id: clientId, redirect_uri: cb, scope, state, nonce, code_challenge: p.challenge, code_challenge_method: "S256" });
+    const req = loc.searchParams.get("autorizar");
+    assert(!!req, `authorize debería llevar a la pantalla de permiso (${loc})`);
+    const info = await player.call<{ client: { name: string; host: string }; scopes: string[] }>("GET", `/oidc/request/${req}`);
+    assert(info.ok && info.data.client.host === "juego.example", "la pantalla enseña el juego y su dominio");
+    const d = await player.call<{ redirect: string }>("POST", `/oidc/request/${req}`, { approve });
+    assert(d.ok, `decidir: ${JSON.stringify(d)}`);
+    const back = new URL(d.data.redirect);
+    assert(back.origin + back.pathname === cb && back.searchParams.get("state") === state, "vuelve al juego con su state");
+    return { code: back.searchParams.get("code"), error: back.searchParams.get("error"), verifier: p.verifier, nonce };
+  };
+  const token = (body: Record<string, string>) =>
+    fetch(new URL("/oidc/token", baseUrl), { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(body) });
+
+  // Lo que no debe pasar: dirección de vuelta ajena, sin PKCE, sin sesión.
+  const evil = await authorize({ response_type: "code", client_id: g.data.client_id, redirect_uri: "https://evil.example/cb", scope: "openid", code_challenge: pkce().challenge, code_challenge_method: "S256" });
+  assert(evil.searchParams.get("autorizar_error") === "invalid_redirect_uri" && evil.hostname !== "evil.example", "una dirección no registrada nunca recibe la redirección");
+  const noPkce = await authorize({ response_type: "code", client_id: g.data.client_id, redirect_uri: cb, scope: "openid", state: "s1" });
+  assert(noPkce.hostname === "juego.example" && noPkce.searchParams.get("error") === "invalid_request", "sin PKCE → invalid_request al juego");
+  const plain = await authorize({ response_type: "code", client_id: g.data.client_id, redirect_uri: cb, scope: "openid", code_challenge: "a".repeat(43), code_challenge_method: "plain" });
+  assert(plain.searchParams.get("error") === "invalid_request", "PKCE plain → rechazado");
+  const p0 = pkce();
+  const loc0 = await authorize({ response_type: "code", client_id: g.data.client_id, redirect_uri: cb, scope: "openid", code_challenge: p0.challenge, code_challenge_method: "S256" });
+  const anon = await new Api(baseUrl).call("POST", `/oidc/request/${loc0.searchParams.get("autorizar")}`, { approve: true });
+  assert(!anon.ok && anon.status === 401, "sin sesión no se puede dar permiso");
+
+  // Verificador equivocado: falla, y el código queda gastado.
+  const f1 = await flow(g.data.client_id);
+  const wrong = await token({ grant_type: "authorization_code", code: f1.code!, redirect_uri: cb, client_id: g.data.client_id, code_verifier: pkce().verifier });
+  assert(wrong.status === 400 && ((await wrong.json()) as { error: string }).error === "invalid_grant", "PKCE equivocado → invalid_grant");
+  const late = await token({ grant_type: "authorization_code", code: f1.code!, redirect_uri: cb, client_id: g.data.client_id, code_verifier: f1.verifier });
+  assert(late.status === 400, "un código ya probado no vale ni con el verificador bueno");
+
+  // El bueno.
+  const f2 = await flow(g.data.client_id);
+  const okRes = await token({ grant_type: "authorization_code", code: f2.code!, redirect_uri: cb, client_id: g.data.client_id, code_verifier: f2.verifier });
+  const tok = (await okRes.json()) as { access_token: string; id_token: string; token_type: string };
+  assert(okRes.status === 200 && tok.token_type === "Bearer" && okRes.headers.get("cache-control") === "no-store", `token: ${JSON.stringify(tok)}`);
+  const again = await token({ grant_type: "authorization_code", code: f2.code!, redirect_uri: cb, client_id: g.data.client_id, code_verifier: f2.verifier });
+  assert(again.status === 400, "el código es de un solo uso");
+
+  // La firma: Ed25519 con la clave pública de /.well-known/jwks.json.
+  const [h64, b64, s64] = tok.id_token.split(".");
+  const header = JSON.parse(Buffer.from(h64!, "base64url").toString()) as { alg: string; kid: string };
+  const jwks = (await (await fetch(new URL("/.well-known/jwks.json", baseUrl))).json()) as { keys: (JsonWebKey & { kid: string })[] };
+  const jwk = jwks.keys.find((k) => k.kid === header.kid);
+  assert(header.alg === "EdDSA" && !!jwk, "id_token EdDSA con kid publicado");
+  const key = await webcrypto.subtle.importKey("jwk", { kty: jwk!.kty, crv: jwk!.crv, x: jwk!.x }, { name: "Ed25519" }, false, ["verify"]);
+  const valid = await webcrypto.subtle.verify({ name: "Ed25519" }, key, Buffer.from(s64!, "base64url"), Buffer.from(`${h64}.${b64}`));
+  assert(valid, "la firma del id_token se comprueba con la clave pública");
+  const tampered = await webcrypto.subtle.verify({ name: "Ed25519" }, key, Buffer.from(s64!, "base64url"), Buffer.from(`${h64}.${b64}x`));
+  assert(!tampered, "un id_token tocado no pasa");
+  const claims = JSON.parse(Buffer.from(b64!, "base64url").toString()) as Record<string, unknown> & { avatar: { url: string; format: string } };
+  assert(claims.aud === g.data.client_id && claims.iss === new URL(baseUrl).origin && claims.nonce === f2.nonce, "aud, iss y nonce");
+  assert(claims.name === me.data.display_name && claims.player_no === me.data.player_no, "nombre y número de jugador");
+  assert(typeof claims.avatar?.url === "string" && claims.avatar.format === "vrm", "skin (VRM) con su enlace");
+  assert(typeof claims.sub === "string" && !String(claims.sub).includes(String(me.data.player_no)) && !JSON.stringify(claims).includes("usr_"), "sub propio del juego, sin el id interno");
+  const vrm = await fetch(claims.avatar.url);
+  await vrm.arrayBuffer();
+  assert(vrm.ok && vrm.headers.get("access-control-allow-origin") === "*", "la skin se descarga desde cualquier juego");
+
+  const ui = await fetch(new URL("/oidc/userinfo", baseUrl), { headers: { Authorization: `Bearer ${tok.access_token}` } });
+  const uiClaims = (await ui.json()) as { sub: string };
+  assert(ui.ok && uiClaims.sub === claims.sub, "userinfo con el mismo sub");
+
+  // Otro juego ve a la misma persona con otro sub.
+  const f3 = await flow(g2.data.client_id, "openid");
+  const t3 = (await (await token({ grant_type: "authorization_code", code: f3.code!, redirect_uri: cb, client_id: g2.data.client_id, code_verifier: f3.verifier })).json()) as { id_token: string };
+  const c3 = JSON.parse(Buffer.from(t3.id_token.split(".")[1]!, "base64url").toString()) as Record<string, unknown>;
+  assert(c3.sub !== claims.sub && c3.name === undefined && c3.player_no === undefined, "con solo openid: otro sub y nada más");
+
+  // Decir que no.
+  const no = await flow(g.data.client_id, "openid", false);
+  assert(no.error === "access_denied" && !no.code, "si dice que no, el juego recibe access_denied");
+
+  // Juegos conectados y retirar el permiso: el token de acceso deja de valer al momento.
+  const conn = await player.call<{ connected: { client_id: string }[] }>("GET", "/me/connected");
+  assert(conn.ok && conn.data.connected.some((c) => c.client_id === g.data.client_id), "lista de juegos conectados");
+  const exp = await player.call<{ connected_games: unknown[] }>("GET", "/me/export");
+  assert(exp.ok && exp.data.connected_games.length === 2, "la exportación incluye los juegos conectados");
+  assert((await player.call("DELETE", `/me/connected/${g.data.client_id}`)).ok, "retirar permiso");
+  const after = await fetch(new URL("/oidc/userinfo", baseUrl), { headers: { Authorization: `Bearer ${tok.access_token}` } });
+  await after.arrayBuffer();
+  assert(after.status === 401, "tras retirar el permiso, userinfo → 401");
+  const otherDev = await player.call("DELETE", `/me/games/${g.data.client_id}`);
+  assert(!otherDev.ok, "nadie más puede borrar el juego de otro");
+  assert((await dev.call("DELETE", `/me/games/${g.data.client_id}`)).ok && (await dev.call("DELETE", `/me/games/${g2.data.client_id}`)).ok, "su autor sí");
+});
+
 await scenario("limpieza: lo subido que nada usa se borra pasados 7 días; lo que se usa, no", async () => {
   if (!adminKey) return console.log("    (sin XENXO_ADMIN_KEY: se omite)");
   const user = new Api(baseUrl);
