@@ -21,7 +21,7 @@ const EYE = 1.6;
 const CAM_DIST = 3.4;
 /** Gestos que terminan solos (segundos); los demás duran hasta que te mueves. */
 const EMOTE_SECONDS: Record<string, number> = { wave: 2.6, cheer: 1.5 };
-const SEND_EVERY_MS = 100; // 10 Hz
+const SEND_EVERY_MS = 125; // 8 Hz: el movimiento se suaviza al otro lado (interpolación)
 const HEARTBEAT_MS = 1000;
 /** Dónde está el jugador ahora (lo leen los portales; se copia cada frame, sin crear objetos). */
 export const playerPos = new THREE.Vector3(...spawn.p);
@@ -170,7 +170,7 @@ export function Player({ active }: { active: boolean }) {
       _headQ.setFromEuler(_euler.set(l.pitch, bodyYaw.current, 0));
     }
 
-    // Envío de pose: 10 Hz solo si hay cambio real, latido cada segundo. Detrás del panel no se envía.
+    // Envío de pose: 8 Hz solo si hay cambio real, latido cada segundo. Detrás del panel no se envía.
     if ((!active && !inXR) || world.status !== "open" || !world.sessionId) return;
     const now = performance.now();
     if (now - lastSend.current < SEND_EVERY_MS) return;

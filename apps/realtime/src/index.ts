@@ -1,6 +1,6 @@
 import { ASSET_BUDGETS } from "@xenxo/assets";
 import { ChunkId, PLACES } from "@xenxo/protocol";
-import { assetMeta, assetKey, handleGet, handleUpload } from "./assets";
+import { assetMeta, assetKey, forgetAssets, handleGet, handleUpload } from "./assets";
 import { isAvatarPreset } from "./avatar-presets-check";
 import { randomId, resolveAgent, signToken, verifyToken, type Principal } from "./auth";
 import type { ChunkRoom, ShowcaseItem } from "./chunk-room";
@@ -423,7 +423,7 @@ export default {
           const hash = `sha256:${skin[1]}`;
           const r = await dir.removeSkin(uid, hash);
           if (!r.ok) return failure(r, h);
-          if (r.data.orphan) await env.ASSETS.delete(assetKey(hash));
+          if (r.data.orphan) await forgetAssets(env.ASSETS, req.url, [hash]);
           return json({ ...(await userToken(r.data.user, env)), skins: r.data.skins, max: MAX_SKINS }, 200, h);
         }
         /* Formas de entrar: más passkeys, Google */
@@ -466,7 +466,7 @@ export default {
           }
           for (const c of CHAT_CHUNKS) await chunk(env, c).purgeOwner(`usr_${uid}`);
           await syncShowcase(env, dir);
-          for (const hash of r.data.orphanHashes) await env.ASSETS.delete(assetKey(hash));
+          await forgetAssets(env.ASSETS, req.url, r.data.orphanHashes);
           return json({ deleted: true, assets_removed: r.data.orphanHashes.length }, 200, h);
         }
       }
@@ -518,6 +518,15 @@ export default {
       /* --- Moderación (agentes con scope admin) --- */
       if (path.startsWith("/admin/")) {
         if (!isAdmin) return json({ error: "forbidden" }, 403, h);
+        // Limpieza de archivos huérfanos ya (la diaria va sola). En local (RP_ID=localhost) se puede simular la fecha.
+        if (path === "/admin/cleanup" && req.method === "POST") {
+          const body: Record<string, unknown> = await readJson(req).catch(() => ({}));
+          const local = (env.RP_ID ?? "localhost") === "localhost";
+          const now = local && typeof body.now === "number" ? body.now : Date.now();
+          const r = await dir.cleanupNow(now);
+          await forgetAssets(env.ASSETS, req.url, r.deleteFromR2);
+          return json({ marked: r.marked, deleted: r.deleteFromR2.length }, 200, h);
+        }
         if (path === "/admin/reports" && req.method === "GET") {
           return json({ reports: await dir.listReports(url.searchParams.get("status") ?? "open") }, 200, h);
         }

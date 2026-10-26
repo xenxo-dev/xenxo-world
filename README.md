@@ -24,7 +24,7 @@ Se está construyendo en público. Esto es la v0.5.
 ```
 
 - **Cloudflare Workers** (recursos estáticos) sirve el cliente web (panel + 3D).
-- **Cloudflare Workers + Durable Objects** (`apps/realtime`): un objeto por chunk de 64 × 64 m, con jurisdicción de la UE (los datos se guardan y procesan solo en Europa). Valida cada mutación, guarda el estado en su SQLite, reparte las poses a 10 Hz y duerme cuando no hay mensajes (WebSocket Hibernation).
+- **Cloudflare Workers + Durable Objects** (`apps/realtime`): un objeto por chunk de 64 × 64 m, con jurisdicción de la UE (los datos se guardan y procesan solo en Europa). Valida cada mutación, guarda el estado en su SQLite, reparte las poses a 8 Hz y duerme cuando no hay mensajes (WebSocket Hibernation).
 - **Directory** (otro Durable Object): cuentas con **passkey** (sin email ni contraseña), proyectos de la comunidad y denuncias.
 - **R2**: modelos 3D (personajes y stands) direccionados por hash, en la UE y sin coste de descarga.
 - **GitHub Actions** despierta al agente constructor de ejemplo cada 6 horas.

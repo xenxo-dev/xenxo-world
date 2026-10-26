@@ -672,5 +672,35 @@ await scenario("chat: denunciar un mensaje guarda una copia y moderación puede 
   me.close();
 });
 
+await scenario("limpieza: lo subido que nada usa se borra pasados 7 días; lo que se usa, no", async () => {
+  if (!adminKey) return console.log("    (sin XENXO_ADMIN_KEY: se omite)");
+  const user = new Api(baseUrl);
+  await user.register(`conf ${randomUUID().slice(0, 6)}`);
+  const color = (): [number, number, number, number] => [Math.random(), Math.random(), Math.random(), 1];
+  const worn = await user.upload(await makeBoxGlb({ color: color() }), "avatar");
+  const loose = await user.upload(await makeBoxGlb({ segments: 3, color: color() }), "avatar");
+  const cover = await user.upload(await makeCoverPng(), "cover");
+  assert(worn.ok && loose.ok && cover.ok, "subidas");
+  assert((await user.call("POST", "/me/avatar", { hash: worn.data.hash })).ok, "ponerse el primero");
+  const admin = new Api(baseUrl);
+  await admin.agentToken(adminKey);
+  const now = await admin.call<{ marked: number }>("POST", "/admin/cleanup", {});
+  assert(now.ok, "POST /admin/cleanup");
+  const status = async (hash: string) => {
+    const r = await fetch(new URL(`/assets/${hash.slice(7)}`, baseUrl));
+    await r.arrayBuffer();
+    return r.status;
+  };
+  assert((await status(loose.data.hash)) === 200, "recién subido, aún no se borra");
+  const later = await admin.call<{ marked: number; deleted: number }>("POST", "/admin/cleanup", { now: Date.now() + 8 * 86_400_000 });
+  assert(later.ok && later.data.marked >= 2, `debería marcar al menos 2, llegó ${JSON.stringify(later)}`);
+  assert((await status(loose.data.hash)) === 404, "el personaje que no usa nadie debería borrarse");
+  assert((await status(cover.data.hash)) === 404, "la portada sin proyecto debería borrarse");
+  assert((await status(worn.data.hash)) === 200, "el personaje puesto no se toca");
+  const guest = new Api(baseUrl);
+  const denied = await guest.call("POST", "/admin/cleanup", {});
+  assert(!denied.ok && denied.status === 403, "solo moderación puede lanzar la limpieza");
+});
+
 console.log(failed ? `\n${failed} escenario(s) fallaron.` : "\nTodo conforme.");
 process.exit(failed ? 1 : 0);

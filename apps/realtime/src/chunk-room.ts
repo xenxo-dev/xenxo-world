@@ -35,7 +35,7 @@ import { assetKey } from "./assets";
 import { SEED_ASSETS } from "./seed-assets";
 import { isAvatarPreset } from "./avatar-presets-check";
 
-const TICK_HZ = 10;
+const TICK_HZ = 8;
 
 /** Triángulos de cada LOD de las piezas de la forja (para usarlas sin pasar por R2). */
 const SYSTEM_LODS = new Map(Object.values(SEED_ASSETS).flatMap((a) => a.lods.map((l) => [l.hash, l.tris] as const)));

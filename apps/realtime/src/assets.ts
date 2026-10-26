@@ -186,6 +186,19 @@ export async function handleGet(hex: string, bucket: R2Bucket, req: Request, ctx
   return req.method === "HEAD" ? new Response(null, { headers: res.headers }) : res;
 }
 
+/**
+ * Borra archivos de la gente: de R2 y de la caché de este centro de datos (en los demás caduca
+ * sola; el enlace es un hash que nadie conoce si no lo tenía).
+ */
+export async function forgetAssets(bucket: R2Bucket, reqUrl: string, hashes: string[]) {
+  const cache = (globalThis as unknown as { caches?: { default?: Cache } }).caches?.default;
+  for (const hash of hashes) {
+    const hex = hash.replace(/^sha256:/, "");
+    await bucket.delete(`assets/${hex}`);
+    await cache?.delete(new Request(new URL(`/assets/${hex}`, reqUrl).toString(), { method: "GET" }));
+  }
+}
+
 /** Metadatos guardados al subir (los usa el Directory para validar avatares y proyectos). */
 export async function assetMeta(bucket: R2Bucket, hash: string) {
   const head = await bucket.head(assetKey(hash));

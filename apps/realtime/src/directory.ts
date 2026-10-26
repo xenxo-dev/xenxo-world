@@ -22,6 +22,7 @@ import { isoBase64URL } from "@simplewebauthn/server/helpers";
 import type { Env } from "./index";
 import { randomId } from "./auth";
 import { isAvatarPreset } from "./avatar-presets-check";
+import { assetKey } from "./assets";
 import { type ProjectCategory } from "@xenxo/protocol";
 import { DISTRICTS, districtById, PARCELS, parcelIndex } from "./districts";
 
@@ -30,6 +31,9 @@ const FLOW_TTL_MS = 5 * 60 * 1000;
 const MAX_PROJECTS_PER_USER = 3;
 /** Personajes propios guardados por cuenta (el armario). Los de serie no cuentan. */
 export const MAX_SKINS = 3;
+/** Un archivo subido por una persona que nada usa se borra pasados estos días. */
+export const ORPHAN_GRACE_MS = 7 * 86_400_000;
+const CLEANUP_EVERY_MS = 86_400_000;
 const MAX_UPLOADS_PER_DAY = 30;
 /**
  * Topes de almacenamiento para no salir nunca del plan gratuito de R2 (10 GB-mes).
@@ -113,6 +117,10 @@ export class Directory extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
+    // Limpieza diaria de archivos huérfanos (alarma del propio objeto: sin servicios extra).
+    void ctx.blockConcurrencyWhile(async () => {
+      if ((await ctx.storage.getAlarm()) === null) await ctx.storage.setAlarm(Date.now() + 3_600_000);
+    });
     this.sql.exec(`
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY, display_name TEXT NOT NULL, avatar_hash TEXT, avatar_format TEXT,
@@ -630,6 +638,57 @@ export class Directory extends DurableObject<Env> {
       this.sql.exec("DELETE FROM users WHERE id = ?", id);
     });
     return ok({ orphanHashes, projects });
+  }
+
+  async alarm() {
+    try {
+      const r = this.findOrphans(Date.now());
+      for (const hash of r.deleteFromR2) await this.env.ASSETS.delete(assetKey(hash));
+      if (r.marked) console.log(`[xenxo] limpieza: ${r.marked} subidas sin usar, ${r.deleteFromR2.length} archivos borrados`);
+    } finally {
+      await this.ctx.storage.setAlarm(Date.now() + CLEANUP_EVERY_MS);
+    }
+  }
+
+  /**
+   * Archivos que subió una persona y que nada usa pasados ORPHAN_GRACE_MS: un personaje que no está
+   * en su armario ni puesto, una portada o un monumento que no es de ningún proyecto. Se marcan como
+   * quitados (dejan de contar en la cuota; la subida sigue contando para el límite diario) y se
+   * devuelven los que ya nadie tiene, para borrarlos de R2. Los modelos de agentes no se tocan:
+   * pueden estar en el mundo, y eso solo lo sabe cada chunk.
+   */
+  findOrphans(now: number, limit = 200): { marked: number; deleteFromR2: string[] } {
+    const rows = this.sql
+      .exec<{ hash: string; uploader: string; kind: string }>(
+        `SELECT hash, uploader, kind FROM uploads
+         WHERE uploader LIKE 'usr_%' AND kind IN ('avatar', 'cover', 'monument', 'model') AND ts < ? LIMIT ?`,
+        now - ORPHAN_GRACE_MS, limit * 5,
+      )
+      .toArray();
+    const used = (r: { hash: string; uploader: string; kind: string }) => {
+      const uid = r.uploader.slice(4);
+      if (r.kind === "avatar") {
+        return (
+          this.sql.exec("SELECT 1 FROM skins WHERE user_id = ? AND hash = ?", uid, r.hash).toArray().length > 0 ||
+          this.sql.exec("SELECT 1 FROM users WHERE id = ? AND avatar_hash = ?", uid, r.hash).toArray().length > 0
+        );
+      }
+      const col = r.kind === "cover" ? "cover_hash" : "mesh_hash";
+      return this.sql.exec(`SELECT 1 FROM projects WHERE ${col} = ?`, r.hash).toArray().length > 0;
+    };
+    const orphans = rows.filter((r) => !used(r)).slice(0, limit);
+    const deleteFromR2: string[] = [];
+    for (const r of orphans) {
+      this.sql.exec("UPDATE uploads SET kind = 'removed', bytes = 0 WHERE hash = ? AND uploader = ?", r.hash, r.uploader);
+      const alive = this.sql.exec("SELECT 1 FROM uploads WHERE hash = ? AND kind != 'removed'", r.hash).toArray().length > 0;
+      if (!alive && !deleteFromR2.includes(r.hash)) deleteFromR2.push(r.hash);
+    }
+    return { marked: orphans.length, deleteFromR2 };
+  }
+
+  /** Limpieza a demanda (moderación); en local, con fecha simulada para el banco de conformidad. */
+  cleanupNow(now: number): { marked: number; deleteFromR2: string[] } {
+    return this.findOrphans(now);
   }
 
   /* ---------------------------------------------------------------- */

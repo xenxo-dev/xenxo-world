@@ -13,7 +13,8 @@ import { advance, createMotion, smoothSpeed, type Motion } from "./motion";
 import { presetFor } from "./presets";
 
 /** Retraso de interpolación: mostramos a los demás ~100 ms en el pasado, entre dos poses reales. */
-const INTERP_DELAY_MS = 100;
+/** Se dibuja con este retraso para tener siempre dos poses entre las que interpolar (a 8 Hz llegan cada 125 ms). */
+const INTERP_DELAY_MS = 200;
 export const EYE_HEIGHT = 1.6;
 
 const _a = new THREE.Vector3();
