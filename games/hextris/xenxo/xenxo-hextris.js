@@ -20,6 +20,7 @@ const T = {
     keys1: "Flechas izquierda y derecha",
     keys2: "para girar el hexágono",
     match: "¡Junta 3 del mismo color!",
+    play: "¡A jugar!",
     enter: "Entrar con xenxo",
     out: "Salir",
     back: "Volver a xenxo",
@@ -45,6 +46,7 @@ const T = {
     keys1: "Use the right and left arrow keys",
     keys2: "to rotate the hexagon",
     match: "Match 3+ blocks to score!",
+    play: "Play!",
     enter: "Sign in with xenxo",
     out: "Sign out",
     back: "Back to xenxo",
@@ -62,7 +64,7 @@ const T = {
 }[lang];
 
 document.documentElement.lang = lang;
-window.xenxoText = { paused: T.paused, start: T.start, tap1: T.tap1, tap2: T.tap2, keys1: T.keys1, keys2: T.keys2, match: T.match };
+window.xenxoText = { paused: T.paused, start: T.start, tap1: T.tap1, tap2: T.tap2, keys1: T.keys1, keys2: T.keys2, match: T.match, play: T.play };
 window.xenxoHelp = (platform) => T.help(platform === "mobile");
 for (const el of document.querySelectorAll("[data-x]")) el.textContent = T[el.dataset.x] ?? el.textContent;
 
