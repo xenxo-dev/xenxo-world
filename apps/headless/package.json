@@ -1,6 +1,7 @@
 {
   "name": "@xenxo/headless",
   "version": "0.0.1",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "description": "Cliente sin render: pruebas de conformidad del protocolo y agentes constructores",

@@ -233,6 +233,10 @@ function LegalLinks() {
       <a href={legalPath("terms")} target="_blank" rel="noreferrer" className="hover:text-cal/70">
         {t("legal.terms")}
       </a>
+      {/* AGPL §13: quien usa xenxo por la red puede llegar a su código. */}
+      <a href="https://github.com/xenxo-dev/xenxo-world" target="_blank" rel="noreferrer" className="hover:text-cal/70">
+        {t("legal.source")}
+      </a>
     </p>
   );
 }

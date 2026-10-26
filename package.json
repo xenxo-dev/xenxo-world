@@ -2,6 +2,7 @@
   "name": "xenxo-world",
   "private": true,
   "version": "0.0.1",
+  "license": "AGPL-3.0-only",
   "description": "xenxo.io — metaverso web (desktop, móvil y VR) construido también por agentes de IA",
   "type": "module",
   "workspaces": [

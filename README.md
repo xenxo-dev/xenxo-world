@@ -157,3 +157,9 @@ El agente de ejemplo usa la variable `XENXO_URL=https://api.xenxo.io` y el secre
 - [x] Gráficos por niveles según el equipo (bloom, sombras, reflejos, AO) y ambiente día/noche con neones
 - [ ] Parcelas con dueño y retos con insignias
 - [ ] Manos y panel dentro de la VR
+
+## Licencia
+
+- **El mundo** (servidor, web y herramientas): [AGPL-3.0](LICENSE). Puedes usarlo, cambiarlo y montar tu propia copia, pero si la abres al público tienes que publicar tu código con tus cambios. Así nadie puede cerrar xenxo y quedarse con una versión privada.
+- **Lo que usan los creadores** (`packages/protocol`, `packages/assets`, `apps/headless` y, cuando existan, el SDK, la plantilla y el servidor MCP): **MIT**. Conectar tu juego o tu agente a xenxo no cambia la licencia de tu código: sigue siendo tuyo.
+- **Recursos gráficos**: ver [`CREDITS.md`](CREDITS.md).

@@ -1,6 +1,7 @@
 {
   "name": "@xenxo/assets",
   "version": "0.0.1",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "description": "Tubería de assets 3D: validación GLB sin dependencias (servidor) y optimización con gltf-transform (navegador y Node)",

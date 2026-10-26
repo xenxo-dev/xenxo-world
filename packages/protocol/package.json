@@ -1,6 +1,7 @@
 {
   "name": "@xenxo/protocol",
   "version": "0.0.1",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "description": "Contrato del mundo xenxo.io: esquema ECS v0 y mensajes del protocolo v0",

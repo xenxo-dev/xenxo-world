@@ -61,6 +61,12 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 - Se diseña para el plan gratuito: en Workers Free los límites cortan, no cobran. R2 sí factura si pasa de su capa gratis, por eso hay topes en `directory.ts` (`STORAGE_CAP_BYTES`, `USER_QUOTA_BYTES`, subidas al día) y los GET de assets van por la caché.
 - Nada nuevo que lea o escriba en R2 por visitante o por frame sin caché delante. Ningún servicio de pago (AI, Queues, Images…) sin acordarlo antes.
 
+## Licencias
+
+- AGPL-3.0 por defecto (`LICENSE`). MIT en lo que usan los creadores: `packages/protocol`, `packages/assets`, `apps/headless` y el futuro SDK, plantilla y servidor MCP (cada uno con su `LICENSE`).
+- Lo MIT nunca importa código AGPL (`apps/realtime`, `apps/web`, `tools/`). Al revés sí. Excepción: los datos de prueba del banco de conformidad.
+- La web enlaza su código fuente (AGPL §13): no quites el enlace «Código».
+
 ## Seguridad
 
 - Secretos solo en `wrangler secret` / `.dev.vars` (ignorado) / secretos de GitHub. Nunca en el código.

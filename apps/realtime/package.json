@@ -1,6 +1,7 @@
 {
   "name": "@xenxo/realtime",
   "version": "0.0.1",
+  "license": "AGPL-3.0-only",
   "private": true,
   "type": "module",
   "description": "Servidor autoritativo: un Durable Object por chunk del mundo",
