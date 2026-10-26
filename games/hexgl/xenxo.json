@@ -6,7 +6,7 @@
     "en": "Futuristic high-speed racing through Cityscape: three laps, boost pads and mind the walls. Thibaut Despoulain's WebGL classic, with your xenxo name and your best time."
   },
   "category": "game3d",
-  "devices": ["pc", "mobile"],
+  "devices": ["pc", "mobile", "vr"],
   "multiplayer": false,
   "ageRating": "all",
   "monetization": { "hasAds": false, "hasPurchases": false },

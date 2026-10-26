@@ -90,3 +90,110 @@
     padding: 7px 10px 5px;
   }
 }
+
+/* Controles táctiles (xenxo/tactil.js) */
+#xenxo-touch {
+  position: fixed;
+  inset: 0;
+  z-index: 10001;
+  pointer-events: none;
+  font-family: "BebasNeueRegular", system-ui, sans-serif;
+}
+#xenxo-touch[hidden] {
+  display: none;
+}
+.xt-left,
+.xt-right {
+  position: absolute;
+  bottom: max(18px, env(safe-area-inset-bottom));
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+}
+.xt-left {
+  left: max(18px, env(safe-area-inset-left));
+}
+.xt-right {
+  right: max(18px, env(safe-area-inset-right));
+  flex-direction: column;
+  align-items: flex-end;
+}
+.xt-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+}
+.xt-btn {
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  border-radius: 50%;
+  border: 2px solid rgba(120, 200, 255, 0.55);
+  background: rgba(8, 12, 30, 0.45);
+  color: #e8f4ff;
+  font: inherit;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+.xt-btn.xt-on {
+  background: rgba(31, 143, 255, 0.55);
+  border-color: #52c7ff;
+}
+.xt-steer {
+  width: 84px;
+  height: 84px;
+  font-size: 34px;
+}
+.xt-gas {
+  width: 104px;
+  height: 104px;
+  font-size: 30px;
+  background: rgba(31, 143, 255, 0.3);
+}
+.xt-small {
+  width: 58px;
+  height: 58px;
+  font-size: 22px;
+}
+.xt-auto {
+  font-size: 17px;
+}
+.xt-restart {
+  position: absolute;
+  top: max(14px, env(safe-area-inset-top));
+  left: max(14px, env(safe-area-inset-left));
+}
+.xt-help {
+  display: none;
+}
+.xenxo-help-touch {
+  background: #05070f;
+}
+.xenxo-help-touch .xt-help {
+  display: block;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(90vw, 560px);
+  text-align: center;
+  font-family: "BebasNeueRegular", system-ui, sans-serif;
+  color: #e8f4ff;
+  font-size: 30px;
+  line-height: 1.25;
+}
+.xenxo-help-touch .xt-help p:last-child {
+  margin-top: 28px;
+  color: #52c7ff;
+}
+.xenxo-help-touch #ctrl-help {
+  display: none;
+}
+@media (max-height: 420px) {
+  .xt-steer { width: 70px; height: 70px; }
+  .xt-gas { width: 88px; height: 88px; }
+  .xt-small { width: 48px; height: 48px; font-size: 18px; }
+}

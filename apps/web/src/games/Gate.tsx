@@ -8,6 +8,7 @@ import { t, useLang, type Key } from "../i18n";
 import { useAccount } from "../net/account";
 import { ReportButton } from "../panel/ReportButton";
 import { Button, card } from "../panel/ui";
+import { fitsHere, visitorDevice } from "./device";
 import { closeGame, gameName, gameSrc, playHere, type OpenGame } from "./state";
 
 const chip = "rounded-md border px-2 py-0.5 text-xs";
@@ -23,6 +24,8 @@ export function Gate({ open, onSignIn }: { open: OpenGame; onSignIn: () => void 
   const blocked = !user && (g.ageRating !== "all" || !reviewed);
   // Lo que xenxo revisó y no aprobó no se abre dentro de xenxo (solo en su web, y con cuenta).
   const embed = g.embed && !rejected;
+  // Si el juego no dice que funciona en este equipo, se avisa y no se abre.
+  const fits = fitsHere(g.devices);
   const description = g.description[lang] ?? g.description.en ?? p.summary;
 
   return (
@@ -46,9 +49,16 @@ export function Gate({ open, onSignIn }: { open: OpenGame; onSignIn: () => void 
           </h2>
           <p className="mt-1 text-sm text-cal/60">{t("gate.by", { author: g.author, host: g.host })}</p>
           {description && <p className="mt-3 text-sm leading-relaxed text-cal/75">{description}</p>}
-          <p className="mt-3 text-xs text-cal/55">
-            {t("gate.devices", { list: g.devices.map((d) => t(`gate.device.${d}` as Key)).join(" · ") })}
-          </p>
+          <div className="mt-3 flex flex-wrap gap-1.5" aria-label={t("gate.devices", { list: g.devices.map((d) => t(`gate.device.${d}` as Key)).join(", ") })}>
+            {(["pc", "mobile", "vr"] as const).map((d) => {
+              const ok = g.devices.includes(d);
+              return (
+                <span key={d} className={`${chip} ${ok ? "border-huerta/40 text-lime-100" : "border-cal/10 text-cal/35 line-through"}`}>
+                  {ok ? "✓" : "✕"} {t(`gate.device.${d}` as Key)}
+                </span>
+              );
+            })}
+          </div>
 
           {!reviewed && (
             <p className={`mt-4 rounded-lg border px-3 py-2 text-sm ${rejected ? "border-red-400/30 bg-red-500/10 text-red-100" : "border-ocre/30 bg-ocre/10 text-amber-100"}`}>
@@ -69,7 +79,21 @@ export function Gate({ open, onSignIn }: { open: OpenGame; onSignIn: () => void 
             </a>
           </p>
 
-          {blocked ? (
+          {!fits ? (
+            <div className="mt-5">
+              <p role="alert" className="rounded-lg border border-ocre/30 bg-ocre/10 px-3 py-2 text-sm text-amber-100">
+                {t("gate.notHere", {
+                  device: t(`gate.device.${visitorDevice()}` as Key),
+                  list: g.devices.map((d) => t(`gate.device.${d}` as Key)).join(", "),
+                })}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button variant="ghost" onClick={closeGame}>
+                  {t("gate.cancel")}
+                </Button>
+              </div>
+            </div>
+          ) : blocked ? (
             <div className="mt-5">
               <p className="text-sm text-cal/80">{t(g.ageRating !== "all" ? "gate.needAccount14" : "gate.needAccountReview")}</p>
               <div className="mt-3 flex flex-wrap gap-2">
@@ -102,7 +126,7 @@ export function Gate({ open, onSignIn }: { open: OpenGame; onSignIn: () => void 
               </Button>
             </div>
           )}
-          {!embed && !blocked && <p className="mt-2 text-xs text-cal/45">{t(rejected ? "gate.rejectedSite" : "gate.noEmbed")}</p>}
+          {fits && !embed && !blocked && <p className="mt-2 text-xs text-cal/45">{t(rejected ? "gate.rejectedSite" : "gate.noEmbed")}</p>}
           <div className="mt-4 flex justify-end">
             <ReportButton targetType="project" targetId={p.id} />
           </div>

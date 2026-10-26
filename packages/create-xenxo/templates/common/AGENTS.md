@@ -75,6 +75,11 @@ simulador solo enseña adónde iría.
 7. **Recursos:** modelos, texturas y sonidos propios o con licencia libre (CC0 de Poly Haven,
    ambientCG, Kenney, Quaternius…). Guárdalos en `public/` y apunta su licencia en el README.
 8. **Textos de la interfaz en español e inglés** como mínimo (usa `idioma` de `xenxo-hud.js`).
+9. **PC, móvil y gafas VR.** El objetivo es que se pueda jugar en los tres: teclado en el PC,
+   controles táctiles **visibles** en el móvil (botones o joystick en pantalla, que funcionen con
+   varios dedos a la vez: eventos de puntero, no `click`) y, en las gafas, en la ventana del
+   navegador de las Quest con el puntero de los mandos (lo mismo que el táctil). Si algún equipo no
+   va, quítalo de `devices`: xenxo avisa a quien entre desde él y no le abre el juego.
 
 ## `public/xenxo.json` (esquema `xenxo.game/0`)
 
@@ -83,7 +88,7 @@ simulador solo enseña adónde iría.
 | `schema` | Siempre `"xenxo.game/0"` |
 | `name`, `description` | `{ "es": …, "en": … }` (otros idiomas opcionales). Nombre ≤ 60, descripción ≤ 280 |
 | `category` | `game3d`, `game2d`, `social`, `tool` u `other` |
-| `devices` | Lista de `pc`, `mobile`, `vr` (solo los que de verdad funcionan) |
+| `devices` | Lista de `pc`, `mobile`, `vr` (solo los que de verdad funcionan). xenxo **avisa y no abre** el juego en los equipos que no estén |
 | `multiplayer` | `true` o `false` |
 | `ageRating` | `"all"` o `"+14"` |
 | `monetization` | `{ "hasAds": bool, "hasPurchases": bool }` |

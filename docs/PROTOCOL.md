@@ -199,7 +199,7 @@ plantilla `create-xenxo` la trae rellena; el registro de juegos (fase 4) la leer
 | `schema` | `"xenxo.game/0"` |
 | `name` · `description` | `{ es, en, …otros }` (códigos de 2 letras; `es` y `en` obligatorios). ≤ 60 y ≤ 280 |
 | `category` | `game3d`, `game2d`, `social`, `tool`, `other` |
-| `devices` | `pc`, `mobile`, `vr` (1–3) |
+| `devices` | `pc`, `mobile`, `vr` (1–3). En las gafas cuenta el navegador de las Quest (fuera de la realidad virtual). El cliente web de xenxo no abre el juego (ni en el aviso previo, ni en el catálogo, ni desde el portal) en un equipo que no esté en la lista: lo avisa |
 | `multiplayer` · `ageRating` | bool · `"all"` o `"+14"` |
 | `monetization` | `{ hasAds, hasPurchases }`. Prohibido el juego con dinero real |
 | `author` · `contact` | Texto (≤ 60) · email o web (≤ 200) |

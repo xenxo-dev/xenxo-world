@@ -68,6 +68,7 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 
 - La ficha `xenxo.json` la lee el **servidor** (`games.ts`: https a dominio público, sin redirecciones, 5 s, 32 KB); el navegador del visitante no la pide.
 - Lo que se abre de terceros va en el `iframe` aislado de `games/Player.tsx` (sin `allow-top-navigation`), con aviso previo (`games/Gate.tsx`). Solo se habla con su origen exacto. Un juego en xenxo.io nunca se incrusta (`embed` lo apaga el servidor).
+- Equipos: la ficha dice en cuáles funciona (`devices`: pc, mobile, vr = navegador de las gafas). En los que no estén, xenxo lo avisa y no lo abre (`games/device.ts`, en `Gate`, catálogo y portal). La revisión comprueba que sea verdad.
 - Catálogo: solo `review = 'approved'`. Rechazar u ocultar exige motivo, que ve su autor, y queda en `moderation_log` (DSA). Sin cuenta solo se abren juegos `all` y aprobados.
 - Si tocas el puente (`xenxo:*`) o `web_message`, cambia a la vez el SDK, `games/Player.tsx` y `docs/PROTOCOL.md` §9 quater, y que pasen los escenarios «juegos de fuera» y «Entrar con xenxo dentro de xenxo».
 

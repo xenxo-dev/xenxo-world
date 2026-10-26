@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { PLACES } from "@xenxo/protocol";
 import { assetUrl } from "../config";
-import { t, useLang } from "../i18n";
+import { t, useLang, type Key } from "../i18n";
 import { DISTRICT_SPAWN, districtOf, parcelArrival, refreshDistricts, useDistricts, type DistrictInfo } from "../net/districts";
 import { refreshProjects, useProjects } from "../net/projects";
 import { travel } from "../net/session";
+import { fitsHere, visitorDevice } from "../games/device";
 import { gameName, openGame } from "../games/state";
 import { Block, card } from "./ui";
 
@@ -100,15 +101,23 @@ export function NexoSection({ onEnter }: { onEnter: () => void }) {
                   <p className="display text-[17px] font-semibold text-cal">{gameName(p, lang)}</p>
                   <p className="text-xs text-cal/50">{t("projects.by", { name: p.author })}</p>
                   {p.summary && <p className="line-clamp-3 text-sm leading-relaxed text-cal/65">{p.summary}</p>}
+                  {p.game && (
+                    <p className="text-xs text-cal/45">{t("gate.devices", { list: p.game.devices.map((d) => t(`gate.device.${d}` as Key)).join(" · ") })}</p>
+                  )}
                   <div className="mt-auto flex flex-wrap gap-2 pt-3">
-                    {p.game && (
-                      <button
-                        onClick={() => openGame(p)}
-                        className="flex-1 rounded-xl bg-neon px-4 py-3 text-center text-base font-medium text-noche hover:bg-neon-suave"
-                      >
-                        {t("portal.play")}
-                      </button>
-                    )}
+                    {p.game &&
+                      (fitsHere(p.game.devices) ? (
+                        <button
+                          onClick={() => openGame(p)}
+                          className="flex-1 rounded-xl bg-neon px-4 py-3 text-center text-base font-medium text-noche hover:bg-neon-suave"
+                        >
+                          {t("portal.play")}
+                        </button>
+                      ) : (
+                        <p className="flex-1 rounded-xl border border-cal/10 px-4 py-3 text-center text-sm text-cal/55">
+                          {t("gate.unavailable", { device: t(`gate.device.${visitorDevice()}` as Key) })}
+                        </p>
+                      ))}
                     {p.url && !p.game && (
                       <a
                         href={p.url}

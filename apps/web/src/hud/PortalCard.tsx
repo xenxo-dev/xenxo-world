@@ -6,6 +6,7 @@ import { districtOf } from "../net/districts";
 import { refreshProjects, useProjects } from "../net/projects";
 import type { Project } from "../net/account";
 import { projectByIdAny } from "../net/games";
+import { fitsHere, visitorDevice } from "../games/device";
 import { gameName, openGame } from "../games/state";
 import { ReportButton } from "../panel/ReportButton";
 import { categoryColor, usePortalHud } from "../world/portals-state";
@@ -62,7 +63,13 @@ export function PortalCard() {
           </button>
         </div>
         {p?.summary && <p className="mt-2 text-sm leading-relaxed text-cal/70">{p.summary}</p>}
-        {p?.game && (
+        {p?.game && !fitsHere(p.game.devices) && (
+          <p className="mt-4 rounded-xl border border-cal/10 px-4 py-3 text-center text-sm text-cal/60">
+            {t("gate.unavailable", { device: t(`gate.device.${visitorDevice()}` as Key) })} ·{" "}
+            {t("gate.devices", { list: p.game.devices.map((d) => t(`gate.device.${d}` as Key)).join(" · ") })}
+          </p>
+        )}
+        {p?.game && fitsHere(p.game.devices) && (
           <button
             onClick={() => {
               hud.close();

@@ -6,7 +6,7 @@
     "en": "A game made with the xenxo template. Change this description."
   },
   "category": "{{category}}",
-  "devices": ["pc", "mobile"],
+  "devices": ["pc", "mobile", "vr"],
   "multiplayer": false,
   "ageRating": "all",
   "monetization": { "hasAds": false, "hasPurchases": false },
