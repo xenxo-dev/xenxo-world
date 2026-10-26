@@ -2,7 +2,9 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import type { XRStore } from "@react-three/xr";
 import { loadPref, savePref } from "./config";
 import { Chat } from "./hud/Chat";
-import { CameraTools } from "./hud/CameraTools";
+import { CONTROL_PX, useControls } from "./controls";
+import { enterFullscreen } from "./fullscreen";
+import { TopTools, ViewTools } from "./hud/CameraTools";
 import { Emotes } from "./hud/Emotes";
 import { People } from "./hud/People";
 import { PortalCard, TravelToast } from "./hud/PortalCard";
@@ -64,6 +66,12 @@ export function App() {
   useWorldVersion();
   useLang();
   const user = useAccount();
+  const controls = useControls();
+  // Entrar al mundo es un gesto: si se pidió en Personalizar, a pantalla completa.
+  const enterWorld = () => {
+    if (controls.autoFullscreen) void enterFullscreen();
+    setInWorld(true);
+  };
   const game = useOpenGame();
 
   // La plaza se ve viva detrás del panel desde el primer segundo.
@@ -156,7 +164,7 @@ export function App() {
         <Panel
           section={panelSection}
           onSection={setPanelSection}
-          onEnter={() => setInWorld(true)}
+          onEnter={enterWorld}
           onEnterVR={enterVR}
           guestName={name}
           setGuestName={setName}
@@ -173,14 +181,7 @@ export function App() {
             <span className="h-4 w-px bg-cal/15" />
             <People selfName={user?.display_name ?? name} selfNo={user?.player_no ?? null} />
           </div>
-          {enterVR && (
-            <button
-              onClick={enterVR}
-              className={`pointer-events-auto absolute right-4 top-[max(1rem,env(safe-area-inset-top))] px-3 py-2 text-sm text-azulejo-claro ${hudBox}`}
-            >
-              VR
-            </button>
-          )}
+          <TopTools onVR={enterVR} />
           <Chat
             touch={touch}
             onSignup={() => {
@@ -190,9 +191,18 @@ export function App() {
           />
           <PortalCard />
           <TravelToast />
-          <div className={`pointer-events-auto absolute right-4 flex flex-col items-end gap-1.5 ${touch ? "bottom-36" : "bottom-5"}`}>
-            <CameraTools touch={touch} />
-            <Emotes />
+          {/* Primera persona y gestos en una fila; en táctil, por encima del botón de saltar (o del
+              joystick, si va a la derecha). */}
+          <div
+            className={`pointer-events-auto absolute flex gap-1.5 ${touch && controls.hand === "right" ? "left-4" : "right-4"} ${touch ? "" : "bottom-5"}`}
+            style={touch ? { bottom: `calc(max(1.5rem, env(safe-area-inset-bottom)) + ${CONTROL_PX[controls.size].stick + 16}px)` } : undefined}
+          >
+            <ViewTools touch={touch} />
+            {controls.showEmotes && (
+              <div style={touch ? { opacity: controls.opacity } : undefined}>
+                <Emotes />
+              </div>
+            )}
           </div>
           {touch ? (
             <TouchJoystick />

@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
+import { ControlsSettings, ScreenSettings } from "./ControlsSettings";
 import { assetUrl } from "../config";
 import { errorText, LANGS, legalPath, setLang, t, useLang, type Key } from "../i18n";
 import { detectGpu, TIERS, useGraphics, type Tier } from "../world/graphics";
@@ -99,11 +100,19 @@ export function AccountSection(props: CustomizeProps) {
 export function CustomizeSection() {
   const lang = useLang();
   return (
-    <Block title={t("customize.quality")}>
-      <GraphicsSettings />
-      <p className="mb-1 mt-6 text-sm text-cal/70">{t("customize.language")}</p>
-      <Segmented value={lang} onChange={setLang} options={LANGS} />
-    </Block>
+    <>
+      <Block title={t("customize.quality")}>
+        <GraphicsSettings />
+        <p className="mb-1 mt-6 text-sm text-cal/70">{t("customize.language")}</p>
+        <Segmented value={lang} onChange={setLang} options={LANGS} />
+      </Block>
+      <Block title={t("controls.title")}>
+        <ControlsSettings />
+      </Block>
+      <Block title={t("screen.title")}>
+        <ScreenSettings />
+      </Block>
+    </>
   );
 }
 

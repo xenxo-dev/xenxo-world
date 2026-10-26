@@ -14,6 +14,7 @@ import { BODY_HEIGHT, STEP_UP, createBody, placeBody, requestJump, stepBody } fr
 import { useChosenPreset } from "./presets";
 import { input, setFirstPerson, view } from "./input";
 import { self } from "./self";
+import { controls } from "../controls";
 
 const WALK = 2.1; // m/s
 const RUN = 5.4;
@@ -140,7 +141,7 @@ export function Player({ active }: { active: boolean }) {
         _right.set(-_fwd.z, 0, _fwd.x);
         const amount = Math.min(1, Math.hypot(input.move.x, input.move.y));
         // En móvil, el joystick a tope también corre.
-        const speed = input.run || amount > 0.92 ? RUN : WALK;
+        const speed = input.run || (controls.autoRun && amount > 0.92) ? RUN : WALK;
         const wantX = (_fwd.x * input.move.y + _right.x * input.move.x) * speed;
         const wantZ = (_fwd.z * input.move.y + _right.z * input.move.x) * speed;
 

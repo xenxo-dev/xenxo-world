@@ -15,3 +15,11 @@ createRoot(document.getElementById("root")!).render(
     <Suspense fallback={null}>{cardNo === null ? <App /> : <CardPage no={cardNo} />}</Suspense>
   </StrictMode>,
 );
+
+// PWA: se puede instalar y abre sin red con la última copia. Solo en producción (en local, el
+// servidor de desarrollo de Vite no se lleva bien con una caché delante).
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {});
+  });
+}

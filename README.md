@@ -124,7 +124,7 @@ y cada persona puede retirar el permiso en *Cuenta → Juegos conectados*. Juego
 
 - **Arquitectura generada por código** (`tools/forge`, Blender sin pantalla): casas con soportales, balcones de forja, persianas y tejas, campanario con cúpula de azulejo, fuente, puerta monumental con neón, farolas, bancos y naranjos. La oclusión ambiental se hornea en su sitio y cada pieza tiene dos niveles de detalle.
 - **Texturas escaneadas reales** (cal, piedra, losas, adoquín, teja, madera…) y **cielo de nubes** de Poly Haven (CC0), servidos desde xenxo.
-- **Personas realistas y animadas**: 8 avatares de serie generados con MakeHuman (CC0) y 17 animaciones VRMA (Quaternius, CC0) que valen también para cualquier VRM que suba la gente. Correr (Mayús), saltar (Espacio) y gestos (1-4: saludar, bailar, sentarse en un banco, celebrar) que todos ven. Movimiento con inercia, subida de escalones, se puede andar sobre bancos y muros bajos, y salto con margen (coyote y buffer). Cámara con zoom (rueda o pellizco) y primera persona (V), modo foto (P) y lista de «quién está aquí» con su carnet y un botón para ir a su lado.
+- **Personas realistas y animadas**: 8 avatares de serie generados con MakeHuman (CC0) y 17 animaciones VRMA (Quaternius, CC0) que valen también para cualquier VRM que suba la gente. Correr (Mayús), saltar (Espacio) y gestos (1-4: saludar, bailar, sentarse en un banco, celebrar) que todos ven. Movimiento con inercia, subida de escalones, se puede andar sobre bancos y muros bajos, y salto con margen (coyote y buffer). Cámara con zoom (rueda o pellizco) y primera persona (V), modo foto (P) y lista de «quién está aquí» con su carnet y un botón para ir a su lado. En móvil se salta sin dejar de caminar (botón en el otro pulgar) y los controles se ajustan en Personalizar (lado, tamaño, opacidad, sensibilidad). Pantalla completa (F) y se instala como app (PWA, abre sin red con la última copia).
 - **De noche, ciudad de neón**: arcos y cornisas con tubos de neón, ventanas que se encienden, faroles y la ciudad del fondo iluminada.
 
 Cómo regenerar todo: [`tools/forge/README.md`](tools/forge/README.md) y [`tools/avatars/README.md`](tools/avatars/README.md). Créditos en [`CREDITS.md`](CREDITS.md).
@@ -183,6 +183,7 @@ El agente de ejemplo usa la variable `XENXO_URL=https://api.xenxo.io` y el secre
 - [x] Arquitectura generada (forja), texturas escaneadas y cielo real en lugar de primitivas
 - [x] Personas realistas de serie con animaciones VRMA, gestos en red y colisiones
 - [x] Movimiento con inercia, escalones y plataformas; zoom, primera persona, modo foto y «quién está aquí»
+- [x] Controles táctiles configurables, pantalla completa y PWA instalable
 - [x] Chat de cada lugar con bocadillos, límites, denuncias y moderación
 - [x] Personajes que caminan (VRM con huesos humanoides, GLB con animaciones `idle`/`walk`)
 - [x] Carga inicial rápida: el panel no espera a la escena 3D

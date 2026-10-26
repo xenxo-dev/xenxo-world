@@ -2,6 +2,9 @@
  * Entrada unificada de escritorio y móvil. Se escribe desde eventos del DOM
  * y se lee en useFrame: nada de estado de React aquí.
  */
+import { controls } from "../controls";
+import { toggleFullscreen } from "../fullscreen";
+
 export const input = {
   /** Movimiento en ejes locales: x = derecha, y = adelante. Rango -1..1. */
   move: { x: 0, y: 0 },
@@ -76,6 +79,7 @@ export function attachDesktopInput(el: HTMLElement) {
     if (emote && !e.repeat) input.emote = emote;
     if (e.code === "KeyV" && !e.repeat) input.toggleView = true;
     if (e.code === "KeyP" && !e.repeat) input.photo = true;
+    if (e.code === "KeyF" && !e.repeat) void toggleFullscreen();
     updateFromKeys();
   };
   const up = (e: KeyboardEvent) => {
@@ -122,8 +126,9 @@ export function attachDesktopInput(el: HTMLElement) {
       }
     }
     if (e.pointerId !== dragging) return;
-    input.yawDelta -= (e.clientX - lastX) * 0.005;
-    input.pitchDelta -= (e.clientY - lastY) * 0.003;
+    const k = controls.lookSpeed;
+    input.yawDelta -= (e.clientX - lastX) * 0.005 * k;
+    input.pitchDelta -= (e.clientY - lastY) * 0.003 * k * (controls.invertY ? -1 : 1);
     lastX = e.clientX;
     lastY = e.clientY;
   };
