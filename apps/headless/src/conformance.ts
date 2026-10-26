@@ -1025,6 +1025,116 @@ await scenario("juegos de fuera: ficha xenxo.json leída por el servidor, enlace
   }
 });
 
+await scenario("jam: convocatoria con fechas, un juego por persona, votos con cuenta (nunca lo propio) y resultados al final", async () => {
+  if (!adminKey) return console.log("    (sin XENXO_ADMIN_KEY: se omite: las jams las crea moderación)");
+  const { createServer } = await import("node:http");
+  const errOf = (r: { ok: boolean }) => (r.ok ? null : (r as unknown as { error: string }).error);
+  const server = createServer((req, res) => {
+    // Cada juego de prueba sirve su ficha en /<proyecto>/xenxo.json.
+    const pid = (req.url ?? "").split("/")[1] ?? "";
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      schema: "xenxo.game/0", name: { es: "Juego de jam", en: "Jam game" }, description: { es: "Prueba", en: "Test" },
+      category: "game2d", devices: ["pc", "mobile", "vr"], multiplayer: false, ageRating: "all", monetization: { hasAds: false, hasPurchases: false },
+      author: "Alguien", contact: "https://example.org", privacy: "https://jam.example.org/privacidad", xenxo: { project: pid },
+    }));
+  });
+  await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+  const port = (server.address() as { port: number }).port;
+  const mod = new Api(baseUrl);
+  await mod.agentToken(adminKey);
+  const made: { api: Api; id: string }[] = [];
+  const project = async (api: Api, game: boolean) => {
+    const model = await api.upload(await makeBoxGlb({ segments: 2, color: [Math.random(), 0.6, 0.2, 1] }), "model");
+    const cover = await api.upload(makeCoverPng(320, 180, [Math.floor(Math.random() * 255), 90, 40]), "cover");
+    assert(model.ok && cover.ok, "subidas");
+    const c = await api.call<{ project: { id: string } }>("POST", "/projects", {
+      title: "Juego de jam", summary: "", url: "https://jam.example.org/", district: "arcade",
+      parcel: await freeParcel("arcade"), cover_hash: cover.data.hash, mesh_hash: model.data.hash,
+    });
+    assert(c.ok, `crear proyecto: ${JSON.stringify(c)}`);
+    const id = c.data.project.id;
+    made.push({ api, id });
+    if (game) {
+      const reg = await api.call("POST", `/projects/${id}/game`, { manifest_url: `http://127.0.0.1:${port}/${id}/xenxo.json`, slug: `jam-${randomUUID().slice(0, 8)}` });
+      assert(reg.ok, `registrar la ficha: ${JSON.stringify(reg)}`);
+    }
+    assert((await mod.call("POST", `/mod/projects/${id}/review`, { decision: "approved" })).ok, "aprobar");
+    return id;
+  };
+  const slug = `jam-${randomUUID().slice(0, 6)}`;
+  try {
+    const a = new Api(baseUrl);
+    const b = new Api(baseUrl);
+    await a.register(`conf ${randomUUID().slice(0, 6)}`);
+    const voterB = (await b.register(`conf ${randomUUID().slice(0, 6)}`)).user.id;
+    const gameA = await project(a, true);
+    const gameA2 = await project(a, true);
+    const plainB = await project(b, false);
+    const gameB = await project(b, true);
+
+    const now = Date.now();
+    assert(errOf(await a.call("POST", "/mod/jams", { slug })) !== null, "una persona cualquiera no crea jams");
+    const bad = await mod.call("POST", "/mod/jams", { slug, title: "Jam de prueba", theme: "Bucles", starts_at: now, ends_at: now - 1, voting_ends_at: now + 1 });
+    assert(errOf(bad) === "bad_dates", "las fechas tienen que ir en orden");
+    const created = await mod.call<{ jam: { phase: string } }>("POST", "/mod/jams", {
+      slug, title: { es: "Jam de prueba", en: "Test jam" }, theme: { es: "Bucles", en: "Loops" },
+      starts_at: new Date(now - 60_000).toISOString(), ends_at: now + 3_600_000, voting_ends_at: now + 7_200_000,
+    });
+    assert(created.ok && created.data.jam.phase === "submissions", `crear la jam: ${JSON.stringify(created)}`);
+    const list = (await (await fetch(new URL("/jams", baseUrl))).json()) as { jams: { slug: string }[] };
+    assert(list.jams.some((j) => j.slug === slug), "GET /jams la lista");
+
+    const enter = (api: Api, id: string) => api.call("POST", `/jams/${slug}/entries`, { project_id: id });
+    assert((await enter(a, gameA)).ok, "apuntar un juego propio");
+    assert(errOf(await enter(a, gameA2)) === "jam_one_entry", "un juego por persona y jam");
+    assert(errOf(await enter(a, gameB)) === "not_found", "no se apunta lo de otro");
+    assert(errOf(await enter(b, plainB)) === "jam_needs_game", "sin ficha de juego no se apunta");
+    assert((await enter(b, gameB)).ok, "B apunta el suyo");
+    assert(errOf(await b.call("PUT", `/jams/${slug}/votes/${gameA}`, { stars: 5 })) === "jam_not_voting", "aún no se vota");
+
+    // Cierra la inscripción: empieza la votación.
+    assert((await mod.call("PATCH", `/mod/jams/${slug}`, { ends_at: Date.now() - 1 })).ok, "cerrar la inscripción");
+    assert(errOf(await enter(a, gameA2)) === "jam_closed", "cerrada, no se apunta nada");
+    assert(errOf(await a.call("PUT", `/jams/${slug}/votes/${gameA}`, { stars: 5 })) === "jam_own_vote", "nunca lo propio");
+    assert(errOf(await b.call("PUT", `/jams/${slug}/votes/${gameA}`, { stars: 9 })) === "bad_message", "de 1 a 5 estrellas");
+    assert((await b.call("PUT", `/jams/${slug}/votes/${gameA}`, { stars: 3 })).ok, "votar");
+    assert((await b.call("PUT", `/jams/${slug}/votes/${gameA}`, { stars: 5 })).ok, "cambiar el voto");
+    assert((await a.call("PUT", `/jams/${slug}/votes/${gameB}`, { stars: 2 })).ok, "A vota a B");
+    const late = new Api(baseUrl);
+    await late.register(`conf ${randomUUID().slice(0, 6)}`);
+    assert(errOf(await late.call("PUT", `/jams/${slug}/votes/${gameA}`, { stars: 1 })) === "jam_account_too_new", "una cuenta recién hecha no vota");
+    const during = (await (await fetch(new URL(`/jams/${slug}`, baseUrl))).json()) as { jam: { phase: string }; entries: { id: string }[]; results: unknown };
+    assert(during.jam.phase === "voting" && during.entries.length === 2 && during.results === null, "mientras se vota no hay resultados");
+    const mine = await b.call<{ votes: Record<string, number>; entries: { project_id: string }[]; can_vote: boolean }>("GET", `/jams/${slug}/mine`);
+    assert(mine.ok && mine.data.votes[gameA] === 5 && mine.data.entries[0]?.project_id === gameB && mine.data.can_vote, "cada uno ve sus votos y lo suyo");
+
+    // Acaba la votación: resultados.
+    assert((await mod.call("PATCH", `/mod/jams/${slug}`, { ends_at: Date.now() - 2, voting_ends_at: Date.now() - 1 })).ok, "cerrar la votación");
+    assert(errOf(await b.call("PUT", `/jams/${slug}/votes/${gameA}`, { stars: 1 })) === "jam_not_voting", "acabada, no se vota");
+    const end = (await (await fetch(new URL(`/jams/${slug}`, baseUrl))).json()) as { jam: { phase: string }; results: { project_id: string; votes: number; average: number; rank: number }[] };
+    const first = end.results[0];
+    assert(end.jam.phase === "results" && first?.project_id === gameA && first.votes === 1 && first.average === 5 && first.rank === 1, `resultados: ${JSON.stringify(end)}`);
+    assert(!JSON.stringify(end).includes(voterB), "nunca se publica quién votó");
+
+    // Moderación saca un juego: con motivo, que ve su autor, y en el registro.
+    assert(errOf(await mod.call("POST", `/mod/jams/${slug}/entries/${gameB}/remove`, {})) === "note_required", "sacar exige motivo");
+    assert((await mod.call("POST", `/mod/jams/${slug}/entries/${gameB}/remove`, { note: "No es del tema" })).ok, "sacar con motivo");
+    const minB = await b.call<{ entries: { removed_note: string | null }[] }>("GET", `/jams/${slug}/mine`);
+    assert(minB.ok && minB.data.entries[0]?.removed_note === "No es del tema", "su autor ve el motivo");
+    const exp = await b.call<{ jam_votes: { jam: string; stars: number }[] }>("GET", "/me/export");
+    assert(exp.ok && exp.data.jam_votes.some((v) => v.jam === slug && v.stars === 5), "exportar incluye mis votos");
+    assert((await mod.call("PATCH", `/mod/jams/${slug}`, { cancelled: true, note: "Prueba" })).ok, "cancelar");
+    assert((await fetch(new URL(`/jams/${slug}`, baseUrl))).status === 404, "cancelada, no se ve");
+  } finally {
+    server.close();
+    // Si algo falló a medias, que la jam de prueba no se quede abierta.
+    await mod.call("PATCH", `/mod/jams/${slug}`, { cancelled: true });
+    // Deja libres las parcelas del Arcade.
+    for (const m of made) await m.api.call("DELETE", `/projects/${m.id}`);
+  }
+});
+
 await scenario("Entrar con xenxo dentro de xenxo: el permiso viaja por postMessage al origen exacto del juego", async () => {
   const { createHash, randomBytes } = await import("node:crypto");
   const { createServer } = await import("node:http");

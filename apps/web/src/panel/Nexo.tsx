@@ -7,6 +7,7 @@ import { refreshProjects, useProjects } from "../net/projects";
 import { travel } from "../net/session";
 import { fitsHere, visitorDevice } from "../games/device";
 import { gameName, openGame } from "../games/state";
+import { JamBlock } from "./Jam";
 import { Block, card } from "./ui";
 
 /** Viaja al distrito de un proyecto y aparece delante de su portal, mirándolo. */
@@ -33,6 +34,7 @@ export function NexoSection({ onEnter }: { onEnter: () => void }) {
 
   return (
     <>
+      <JamBlock />
       <Block title={t("nav.nexo")}>
         <p className="-mt-2 mb-5 max-w-prose text-[15px] leading-relaxed text-cal/65">{t("nexo.intro")}</p>
         <h3 className="mb-3 text-sm font-medium uppercase tracking-wide text-cal/50">{t("nexo.districts")}</h3>

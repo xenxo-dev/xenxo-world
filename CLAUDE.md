@@ -72,6 +72,8 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 - Catálogo: solo `review = 'approved'`. Rechazar u ocultar exige motivo, que ve su autor, y queda en `moderation_log` (DSA). Sin cuenta solo se abren juegos `all` y aprobados.
 - Si tocas el puente (`xenxo:*`) o `web_message`, cambia a la vez el SDK, `games/Player.tsx` y `docs/PROTOCOL.md` §9 quater, y que pasen los escenarios «juegos de fuera» y «Entrar con xenxo dentro de xenxo».
 
+- Jams (`apps/realtime/src/jam.ts` + métodos del `Directory`): las crea moderación; un juego por persona, votos con cuenta y nunca lo propio, resultados solo al acabar y nunca quién votó qué. Si cambias sus reglas, que pase el escenario «jam» de la conformidad y actualiza `docs/PROTOCOL.md` §9 quinquies y las páginas legales.
+
 - Los juegos de `games/` se publican como los de cualquier creador: su `xenxo.json`, su privacidad, su parcela y su `client_id`, sin vías privilegiadas. Nunca en `*.xenxo.io` (no se podrían incrustar): van a `*.xenxo.workers.dev`. HexGL tiene archivos CC BY-NC: ni anuncios ni compras mientras esté.
 
 ## Gasto (cero sorpresas en Cloudflare)

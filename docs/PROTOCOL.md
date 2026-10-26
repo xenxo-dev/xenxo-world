@@ -254,6 +254,32 @@ web busca la parcela de ese proyecto y deja a la persona en el mundo, delante de
 no existe, se queda en el panel). Si xenxo abrió el juego dentro de su página, el SDK manda
 `postMessage({ type: "xenxo:back", project })` a xenxo en vez de navegar. Idioma: `?xenxo_lang=`.
 
+## 9 quinquies. Jams
+
+Convocatorias con tema y fechas (API HTTP; no tocan el mundo). Las crea moderación; cualquiera las lee.
+
+| Ruta | Quién | Qué hace |
+|---|---|---|
+| `GET /jams` | público | Las últimas 20 sin cancelar: `{ slug, title, theme, about, starts_at, ends_at, voting_ends_at, phase, entries, cancelled }` (textos `{ es, en }`, fechas en ms) |
+| `GET /jams/<slug>` | público | `{ jam, entries, results }`: los juegos apuntados (publicados y aprobados, como en el catálogo) y, solo en `phase = "results"`, `results: [{ project_id, votes, average, score, rank }]`; antes, `null` |
+| `GET /jams/<slug>/mine` | persona | `{ votes: { <project_id>: estrellas }, entries: [{ project_id, removed_note }], can_vote }` |
+| `POST /jams/<slug>/entries { project_id }` · `DELETE /jams/<slug>/entries/<id>` | persona | Apuntar o quitar un juego propio, solo en `submissions` |
+| `PUT /jams/<slug>/votes/<id> { stars }` | persona | De 1 a 5 (0 retira el voto), solo en `voting`; se puede cambiar |
+| `POST /mod/jams` · `PATCH /mod/jams/<slug>` | moderación | Crear (`slug`, `title`, `theme`, `about?`, `starts_at`, `ends_at`, `voting_ends_at`, en ms o ISO 8601) o cambiar textos, fechas o `cancelled` (con `note?`). Queda en el registro |
+| `POST /mod/jams/<slug>/entries/<id>/remove { note }` | moderación | Sacar un juego, con motivo (lo ve su autor en `mine`); se borran sus votos |
+
+**Fases.** Por la hora del servidor: `upcoming` (antes de `starts_at`), `submissions` (hasta `ends_at`),
+`voting` (hasta `voting_ends_at`) y `results`. Las fechas van en ese orden y duran como mucho 90 días.
+
+**Reglas.** Un juego por persona y jam, propio, publicado, con ficha (`xenxo.json`) y no rechazado.
+Vota quien tenga cuenta anterior a la votación o de más de un día; nunca lo propio. Mientras se vota
+no hay resultados. La puntuación es una media bayesiana (cada juego empieza con 3 votos imaginarios de
+3 estrellas): `score = (suma + 9) / (votos + 3)`; el puesto va por `score` y, a igualdad, por votos.
+Se publican también la media real y el número de votos. Quién votó qué no se publica nunca.
+
+Errores: `bad_slug`, `bad_dates`, `slug_taken`, `jam_closed`, `jam_needs_game`, `jam_rejected`,
+`jam_one_entry`, `jam_removed`, `jam_not_voting`, `jam_own_vote`, `jam_account_too_new`, `note_required`.
+
 ## 10. Códigos de error
 
 `bad_message` · `unsupported_version` · `unauthorized` · `forbidden` · `not_found` · `version_conflict` · `budget_exceeded` · `unknown_component` · `rate_limited` · `duplicate`

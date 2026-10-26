@@ -567,6 +567,16 @@ export default {
         return g ? json({ project: g }, 200, { ...h, "Cache-Control": "public, max-age=30" }) : json({ error: "not_found", message: "ese juego no existe" }, 404, h);
       }
 
+      /* --- Jams (lectura pública: convocatorias, juegos y, al acabar, resultados) --- */
+      if (path === "/jams" && req.method === "GET") {
+        return json({ jams: await dir.listJams() }, 200, { ...h, "Cache-Control": "public, max-age=30" });
+      }
+      const jamPath = path.match(/^\/jams\/([a-z0-9-]{3,40})(?:\/(mine|entries|votes)(?:\/([a-zA-Z0-9_-]{4,40}))?)?$/);
+      if (jamPath && !jamPath[2] && req.method === "GET") {
+        const r = await dir.jam(jamPath[1]!);
+        return r.ok ? json(r.data, 200, { ...h, "Cache-Control": "public, max-age=15" }) : failure(r, h);
+      }
+
       /* --- Carné de jugador (lectura pública; solo los que su dueño hizo públicos) --- */
       const pcard = path.match(/^\/players\/(0|[1-9]\d{0,8})$/);
       if (pcard && req.method === "GET") {
@@ -735,6 +745,30 @@ export default {
         }
       }
 
+      /* --- Jams: lo tuyo, apuntar o quitar un juego propio y votar (con cuenta) --- */
+      if (jamPath && jamPath[2]) {
+        if (!uid) return json({ error: "unauthorized", message: "inicia sesión con tu cuenta" }, 401, h);
+        const [, slug, what, pid] = jamPath as unknown as [string, string, string, string | undefined];
+        const noStore = { ...h, "Cache-Control": "no-store" };
+        if (what === "mine" && !pid && req.method === "GET") {
+          const r = await dir.jamMine(uid, slug);
+          return r.ok ? json(r.data, 200, noStore) : failure(r, h);
+        }
+        if (what === "entries" && !pid && req.method === "POST") {
+          const r = await dir.enterJam(uid, slug, (await readJson(req)).project_id);
+          return r.ok ? json(r.data, 201, h) : failure(r, h);
+        }
+        if (what === "entries" && pid && req.method === "DELETE") {
+          const r = await dir.leaveJam(uid, slug, pid);
+          return r.ok ? json(r.data, 200, h) : failure(r, h);
+        }
+        if (what === "votes" && pid && req.method === "PUT") {
+          const r = await dir.voteJam(uid, slug, pid, (await readJson(req)).stars);
+          return r.ok ? json(r.data, 200, h) : failure(r, h);
+        }
+        return json({ error: "not_found" }, 404, h);
+      }
+
       if (path === "/projects" && req.method === "POST") {
         if (!uid) return json({ error: "unauthorized", message: "inicia sesión para publicar un proyecto" }, 401, h);
         const r = await dir.createProject(uid, await readJson(req));
@@ -834,6 +868,20 @@ export default {
           await clearParcel(env, place?.district, mhide[1]!, await dir.projectAgents(mhide[1]!));
           ctx.waitUntil(syncShowcase(env, dir));
           return json(r.data, 200, h);
+        }
+        if (path === "/mod/jams" && req.method === "POST") {
+          const r = await dir.createJam(modId, await readJson(req));
+          return r.ok ? json({ jam: r.data }, 201, h) : failure(r, h);
+        }
+        const mjam = path.match(/^\/mod\/jams\/([a-z0-9-]{3,40})$/);
+        if (mjam && req.method === "PATCH") {
+          const r = await dir.updateJam(modId, mjam[1]!, await readJson(req));
+          return r.ok ? json({ jam: r.data }, 200, h) : failure(r, h);
+        }
+        const mjamOut = path.match(/^\/mod\/jams\/([a-z0-9-]{3,40})\/entries\/([a-zA-Z0-9_-]{4,40})\/remove$/);
+        if (mjamOut && req.method === "POST") {
+          const r = await dir.modRemoveJamEntry(modId, mjamOut[1]!, mjamOut[2]!, (await readJson(req)).note);
+          return r.ok ? json(r.data, 200, h) : failure(r, h);
         }
         const mrep = path.match(/^\/mod\/reports\/(\d{1,12})$/);
         if (mrep && req.method === "POST") {

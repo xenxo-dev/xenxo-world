@@ -31,6 +31,7 @@ import {
 import { type ProjectCategory } from "@xenxo/protocol";
 import { DISTRICTS, districtById, PARCELS, parcelIndex, parcelRect } from "./districts";
 import { gameInfo, slugFrom, validSlug, type GameInfo } from "./games";
+import { badJamDates, JAM_SCHEMA, jamPhase, jamRanking, jamText, jamTime, MAX_ENTRIES_PER_USER, validJamSlug, type Jam, type JamResult } from "./jam";
 import type { GameManifest } from "@xenxo/protocol";
 
 export const TERMS_VERSION = "2026-10";
@@ -212,6 +213,8 @@ export class Directory extends DurableObject<Env> {
         user_id TEXT NOT NULL, hash TEXT NOT NULL, format TEXT NOT NULL, label TEXT, created_at INTEGER NOT NULL,
         PRIMARY KEY (user_id, hash));
     `);
+    // Jams: convocatorias, juegos apuntados y votos (ver jam.ts).
+    this.sql.exec(JAM_SCHEMA);
     // Migración: tamaño de cada subida (para los topes de almacenamiento).
     const cols = this.sql.exec<{ name: string }>("PRAGMA table_info(uploads)").toArray().map((c) => c.name);
     if (!cols.includes("bytes")) this.sql.exec("ALTER TABLE uploads ADD COLUMN bytes INTEGER NOT NULL DEFAULT 0");
@@ -775,6 +778,9 @@ export class Directory extends DurableObject<Env> {
       connected_games: this.grantsOf(id),
       registered_games: this.clientsOf(id),
       reports_sent: this.sql.exec("SELECT ts, target_type, target_id, reason, details FROM reports WHERE reporter = ?", `usr_${id}`).toArray(),
+      // Jams: juegos que apuntaste y tus votos (solo tú los ves).
+      jam_entries: this.sql.exec("SELECT j.slug AS jam, e.project_id, e.joined_at, e.removed_note FROM jam_entries e JOIN jams j ON j.id = e.jam_id WHERE e.user_id = ?", id).toArray(),
+      jam_votes: this.sql.exec("SELECT j.slug AS jam, v.project_id, v.stars, v.created_at FROM jam_votes v JOIN jams j ON j.id = v.jam_id WHERE v.user_id = ?", id).toArray(),
       // Si moderas: tus decisiones (el registro que pide la DSA).
       moderation_decisions: this.sql.exec("SELECT ts, action, target_type, target_id, note FROM moderation_log WHERE moderator = ?", `usr_${id}`).toArray(),
     });
@@ -806,6 +812,9 @@ export class Directory extends DurableObject<Env> {
       this.sql.exec("DELETE FROM oidc_grants WHERE client_id IN (SELECT client_id FROM oidc_clients WHERE user_id = ?)", id);
       this.sql.exec("DELETE FROM oidc_clients WHERE user_id = ?", id);
       this.sql.exec("DELETE FROM oidc_pending WHERE json_extract(data, '$.user_id') = ?", id);
+      this.sql.exec("DELETE FROM jam_votes WHERE user_id = ? OR project_id IN (SELECT id FROM projects WHERE user_id = ?)", id, id);
+      this.sql.exec("DELETE FROM jam_entries WHERE user_id = ?", id);
+      this.sql.exec("UPDATE jams SET created_by = 'deleted' WHERE created_by = ?", sub);
       this.sql.exec("DELETE FROM projects WHERE user_id = ?", id);
       this.sql.exec("DELETE FROM uploads WHERE uploader = ?", sub);
       this.sql.exec("UPDATE reports SET reporter = 'deleted' WHERE reporter = ?", sub);
@@ -1159,6 +1168,220 @@ export class Directory extends DurableObject<Env> {
     return ok({ ok: true });
   }
 
+  /* --- Jams: convocatorias con tema y fechas (ver jam.ts) --- */
+
+  private jamRow(slug: string) {
+    return this.sql
+      .exec<{ id: number; slug: string; title: string; theme: string; about: string; starts_at: number; ends_at: number; voting_ends_at: number; cancelled: number }>(
+        "SELECT id, slug, title, theme, about, starts_at, ends_at, voting_ends_at, cancelled FROM jams WHERE slug = ?",
+        slug,
+      )
+      .toArray()[0];
+  }
+
+  private toJam(r: NonNullable<ReturnType<Directory["jamRow"]>>): Jam {
+    const entries = this.sql
+      .exec<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM jam_entries e JOIN projects p ON p.id = e.project_id WHERE e.jam_id = ? AND e.removed_note IS NULL AND p.status = 'published' AND p.review = 'approved'",
+        r.id,
+      )
+      .one().n;
+    return {
+      slug: r.slug,
+      title: JSON.parse(r.title),
+      theme: JSON.parse(r.theme),
+      about: JSON.parse(r.about),
+      starts_at: r.starts_at,
+      ends_at: r.ends_at,
+      voting_ends_at: r.voting_ends_at,
+      phase: jamPhase(r),
+      entries,
+      cancelled: !!r.cancelled,
+    };
+  }
+
+  /** Las jams que no se cancelaron, las más recientes primero. */
+  listJams(): Jam[] {
+    return this.sql
+      .exec<{ slug: string }>("SELECT slug FROM jams WHERE cancelled = 0 ORDER BY starts_at DESC LIMIT 20")
+      .toArray()
+      .map((r) => this.toJam(this.jamRow(r.slug)!));
+  }
+
+  /**
+   * Una jam con sus juegos (publicados y aprobados). Los resultados, solo cuando acaba la votación:
+   * mientras se vota no se enseña cómo va nadie.
+   */
+  jam(slug: string): Result<{ jam: Jam; entries: PublicProject[]; results: JamResult[] | null }> {
+    const r = validJamSlug(slug) ? this.jamRow(slug) : undefined;
+    if (!r || r.cancelled) return fail(404, "not_found", "esa jam no existe");
+    const jam = this.toJam(r);
+    const entries = this.projectRows(
+      "p.id IN (SELECT project_id FROM jam_entries WHERE jam_id = ? AND removed_note IS NULL) AND p.status = 'published' AND p.review = 'approved'",
+      [r.id],
+      false,
+      "ORDER BY p.created_at ASC",
+    );
+    let results: JamResult[] | null = null;
+    if (jam.phase === "results") {
+      const sums = new Map(
+        this.sql
+          .exec<{ project_id: string; votes: number; sum: number }>(
+            "SELECT project_id, COUNT(*) AS votes, SUM(stars) AS sum FROM jam_votes WHERE jam_id = ? GROUP BY project_id",
+            r.id,
+          )
+          .toArray()
+          .map((x) => [x.project_id, x]),
+      );
+      results = jamRanking(entries.map((p) => sums.get(p.id) ?? { project_id: p.id, votes: 0, sum: 0 }));
+    }
+    return ok({ jam, entries, results });
+  }
+
+  /** Lo de una persona en una jam: sus votos y sus juegos apuntados (aunque estén sin revisar). */
+  jamMine(
+    userId: string,
+    slug: string,
+  ): Result<{ votes: Record<string, number>; entries: { project_id: string; removed_note: string | null }[]; can_vote: boolean }> {
+    const r = validJamSlug(slug) ? this.jamRow(slug) : undefined;
+    if (!r || r.cancelled) return fail(404, "not_found", "esa jam no existe");
+    const votes: Record<string, number> = {};
+    for (const v of this.sql.exec<{ project_id: string; stars: number }>("SELECT project_id, stars FROM jam_votes WHERE jam_id = ? AND user_id = ?", r.id, userId)) {
+      votes[v.project_id] = v.stars;
+    }
+    // Si moderación sacó un juego, su autor ve el motivo (DSA, «exposición de motivos»).
+    const entries = this.sql
+      .exec<{ project_id: string; removed_note: string | null }>("SELECT project_id, removed_note FROM jam_entries WHERE jam_id = ? AND user_id = ?", r.id, userId)
+      .toArray();
+    return ok({ votes, entries, can_vote: this.canVoteIn(userId, r) === null });
+  }
+
+  /** Para que no se voten con cuentas hechas para la ocasión: cuenta anterior a la votación o de más de un día. */
+  private canVoteIn(userId: string, j: { ends_at: number }): string | null {
+    const u = this.sql.exec<{ created_at: number }>("SELECT created_at FROM users WHERE id = ?", userId).toArray()[0];
+    if (!u) return "la cuenta no existe";
+    if (u.created_at >= Math.max(j.ends_at, Date.now() - 86_400_000)) return "para votar, la cuenta tiene que ser anterior a la votación o tener más de un día";
+    return null;
+  }
+
+  /** Crear una jam (moderación). */
+  createJam(moderator: string, b: Record<string, unknown>): Result<Jam> {
+    if (!validJamSlug(b.slug)) return fail(400, "bad_slug", "slug: de 3 a 40 letras minúsculas, números o guiones");
+    const title = jamText(b.title, 3, 80);
+    const theme = jamText(b.theme, 2, 80);
+    const about = b.about === undefined ? { es: "", en: "" } : jamText(b.about, 0, 1000);
+    if (!title || !theme || !about) return fail(400, "bad_message", "título (3-80), tema (2-80) y descripción (hasta 1000), en ES y EN");
+    const starts = jamTime(b.starts_at);
+    const ends = jamTime(b.ends_at);
+    const votingEnds = jamTime(b.voting_ends_at);
+    if (starts === null || ends === null || votingEnds === null) return fail(400, "bad_dates", "starts_at, ends_at y voting_ends_at (ISO 8601 o milisegundos)");
+    const bad = badJamDates(starts, ends, votingEnds);
+    if (bad) return fail(400, "bad_dates", bad);
+    if (this.jamRow(b.slug)) return fail(409, "slug_taken", "ya hay una jam con ese slug");
+    this.sql.exec(
+      "INSERT INTO jams (slug, title, theme, about, starts_at, ends_at, voting_ends_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      b.slug, JSON.stringify(title), JSON.stringify(theme), JSON.stringify(about), starts, ends, votingEnds, moderator, Date.now(),
+    );
+    this.logDecision(moderator, "jam_create", "jam", b.slug, null);
+    return ok(this.toJam(this.jamRow(b.slug)!));
+  }
+
+  /** Cambiar textos, fechas o cancelar una jam (moderación). Cada cambio queda en el registro. */
+  updateJam(moderator: string, slug: string, b: Record<string, unknown>): Result<Jam> {
+    const r = validJamSlug(slug) ? this.jamRow(slug) : undefined;
+    if (!r) return fail(404, "not_found", "esa jam no existe");
+    const title = b.title === undefined ? JSON.parse(r.title) : jamText(b.title, 3, 80);
+    const theme = b.theme === undefined ? JSON.parse(r.theme) : jamText(b.theme, 2, 80);
+    const about = b.about === undefined ? JSON.parse(r.about) : jamText(b.about, 0, 1000);
+    if (!title || !theme || !about) return fail(400, "bad_message", "título (3-80), tema (2-80) y descripción (hasta 1000), en ES y EN");
+    const starts = b.starts_at === undefined ? r.starts_at : jamTime(b.starts_at);
+    const ends = b.ends_at === undefined ? r.ends_at : jamTime(b.ends_at);
+    const votingEnds = b.voting_ends_at === undefined ? r.voting_ends_at : jamTime(b.voting_ends_at);
+    if (starts === null || ends === null || votingEnds === null) return fail(400, "bad_dates", "fechas en ISO 8601 o milisegundos");
+    const bad = badJamDates(starts, ends, votingEnds);
+    if (bad) return fail(400, "bad_dates", bad);
+    const cancelled = b.cancelled === undefined ? r.cancelled : b.cancelled ? 1 : 0;
+    this.sql.exec(
+      "UPDATE jams SET title = ?, theme = ?, about = ?, starts_at = ?, ends_at = ?, voting_ends_at = ?, cancelled = ? WHERE id = ?",
+      JSON.stringify(title), JSON.stringify(theme), JSON.stringify(about), starts, ends, votingEnds, cancelled, r.id,
+    );
+    const note = typeof b.note === "string" ? b.note.trim().slice(0, 500) || null : null;
+    this.logDecision(moderator, cancelled && !r.cancelled ? "jam_cancel" : "jam_update", "jam", slug, note);
+    return ok(this.toJam(this.jamRow(slug)!));
+  }
+
+  /** Apuntar un juego propio (con ficha y publicado) mientras la convocatoria está abierta. */
+  enterJam(userId: string, slug: string, projectId: unknown): Result<{ entered: true }> {
+    const r = validJamSlug(slug) ? this.jamRow(slug) : undefined;
+    if (!r || r.cancelled) return fail(404, "not_found", "esa jam no existe");
+    if (jamPhase(r) !== "submissions") return fail(409, "jam_closed", "la inscripción de esta jam no está abierta");
+    if (typeof projectId !== "string") return fail(400, "bad_message", "project_id");
+    const p = this.sql
+      .exec<{ user_id: string; status: string; game: string | null; review: string }>("SELECT user_id, status, game, review FROM projects WHERE id = ?", projectId)
+      .toArray()[0];
+    if (!p || p.user_id !== userId || p.status !== "published") return fail(404, "not_found", "ese proyecto no es tuyo o no existe");
+    if (!p.game) return fail(400, "jam_needs_game", "solo se apuntan juegos con su ficha (xenxo.json)");
+    if (p.review === "rejected") return fail(409, "jam_rejected", "ese juego no pasó la revisión");
+    const had = this.sql.exec<{ removed_note: string | null }>("SELECT removed_note FROM jam_entries WHERE jam_id = ? AND project_id = ?", r.id, projectId).toArray()[0];
+    if (had) return had.removed_note === null ? ok({ entered: true }) : fail(409, "jam_removed", "moderación sacó este juego de la jam");
+    const mine = this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM jam_entries WHERE jam_id = ? AND user_id = ? AND removed_note IS NULL", r.id, userId).one().n;
+    if (mine >= MAX_ENTRIES_PER_USER) return fail(409, "jam_one_entry", "ya tienes un juego en esta jam: quítalo antes de apuntar otro");
+    this.sql.exec("INSERT INTO jam_entries (jam_id, project_id, user_id, joined_at) VALUES (?, ?, ?, ?)", r.id, projectId, userId, Date.now());
+    return ok({ entered: true });
+  }
+
+  /** Quitar un juego propio (solo mientras la inscripción está abierta: después ya se vota). */
+  leaveJam(userId: string, slug: string, projectId: string): Result<{ left: true }> {
+    const r = validJamSlug(slug) ? this.jamRow(slug) : undefined;
+    if (!r || r.cancelled) return fail(404, "not_found", "esa jam no existe");
+    if (jamPhase(r) !== "submissions") return fail(409, "jam_closed", "solo se puede quitar mientras la inscripción está abierta");
+    if (!this.sql.exec("DELETE FROM jam_entries WHERE jam_id = ? AND project_id = ? AND user_id = ? AND removed_note IS NULL", r.id, projectId, userId).rowsWritten) {
+      return fail(404, "not_found", "ese juego no está en esta jam");
+    }
+    return ok({ left: true });
+  }
+
+  /** Votar de 1 a 5 (o 0 para retirar el voto) mientras dura la votación. Nunca lo propio. */
+  voteJam(userId: string, slug: string, projectId: string, rawStars: unknown): Result<{ stars: number }> {
+    const r = validJamSlug(slug) ? this.jamRow(slug) : undefined;
+    if (!r || r.cancelled) return fail(404, "not_found", "esa jam no existe");
+    if (jamPhase(r) !== "voting") return fail(409, "jam_not_voting", "ahora no se vota en esta jam");
+    const stars = typeof rawStars === "number" ? rawStars : NaN;
+    if (!Number.isInteger(stars) || stars < 0 || stars > 5) return fail(400, "bad_message", "stars: de 1 a 5 (0 retira el voto)");
+    const p = this.sql
+      .exec<{ user_id: string }>(
+        "SELECT p.user_id FROM jam_entries e JOIN projects p ON p.id = e.project_id WHERE e.jam_id = ? AND e.project_id = ? AND e.removed_note IS NULL AND p.status = 'published' AND p.review = 'approved'",
+        r.id, projectId,
+      )
+      .toArray()[0];
+    if (!p) return fail(404, "not_found", "ese juego no está en esta jam");
+    if (p.user_id === userId) return fail(403, "jam_own_vote", "no puedes votar tu propio juego");
+    const why = this.canVoteIn(userId, r);
+    if (why) return fail(403, "jam_account_too_new", why);
+    if (stars === 0) {
+      this.sql.exec("DELETE FROM jam_votes WHERE jam_id = ? AND project_id = ? AND user_id = ?", r.id, projectId, userId);
+    } else {
+      this.sql.exec(
+        "INSERT INTO jam_votes (jam_id, project_id, user_id, stars, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (jam_id, project_id, user_id) DO UPDATE SET stars = excluded.stars, created_at = excluded.created_at",
+        r.id, projectId, userId, stars, Date.now(),
+      );
+    }
+    return ok({ stars });
+  }
+
+  /** Sacar un juego de una jam (moderación), con su motivo y en el registro. Sus votos se borran. */
+  modRemoveJamEntry(moderator: string, slug: string, projectId: string, rawNote: unknown): Result<{ removed: true }> {
+    const note = typeof rawNote === "string" ? rawNote.trim().slice(0, 500) : "";
+    if (note.length < 3) return fail(400, "note_required", "explica el motivo: lo verá su autor");
+    const r = validJamSlug(slug) ? this.jamRow(slug) : undefined;
+    if (!r) return fail(404, "not_found", "esa jam no existe");
+    const n = this.sql.exec("UPDATE jam_entries SET removed_note = ? WHERE jam_id = ? AND project_id = ? AND removed_note IS NULL", note, r.id, projectId).rowsWritten;
+    if (!n) return fail(404, "not_found", "ese juego no está en esta jam");
+    this.sql.exec("DELETE FROM jam_votes WHERE jam_id = ? AND project_id = ?", r.id, projectId);
+    this.logDecision(moderator, "jam_remove_entry", "project", projectId, `${slug}: ${note}`);
+    return ok({ removed: true });
+  }
+
   moderationLog(limit = 200) {
     return this.sql.exec("SELECT * FROM moderation_log ORDER BY id DESC LIMIT ?", limit).toArray();
   }
@@ -1173,6 +1396,8 @@ export class Directory extends DurableObject<Env> {
     const hashes = this.sql.exec<{ hash: string }>("SELECT hash FROM uploads WHERE uploader = ?", up).toArray().map((r) => r.hash);
     this.ctx.storage.transactionSync(() => {
       this.sql.exec("DELETE FROM agent_keys WHERE project_id = ?", id);
+      this.sql.exec("DELETE FROM jam_entries WHERE project_id = ?", id);
+      this.sql.exec("DELETE FROM jam_votes WHERE project_id = ?", id);
       this.sql.exec("DELETE FROM uploads WHERE uploader = ?", up);
       this.sql.exec("DELETE FROM projects WHERE id = ?", id);
     });

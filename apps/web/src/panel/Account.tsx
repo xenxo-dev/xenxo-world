@@ -31,6 +31,7 @@ import { reconnect } from "../net/session";
 import { AVATAR_PRESETS, presetByHash, setChosenPreset, useChosenPreset } from "../world/presets";
 import type { PreviewPose } from "./AvatarPreview";
 import { CardSettings } from "./CardSettings";
+import { JamAdmin } from "./JamAdmin";
 import { Moderation, useModerator } from "./Moderation";
 import { ConnectedGames } from "./Games";
 import { ModelPicker } from "./ModelPicker";
@@ -64,6 +65,11 @@ export function AccountSection(props: CustomizeProps) {
       {moderator && (
         <Block title={t("mod.title")}>
           <Moderation />
+        </Block>
+      )}
+      {moderator && (
+        <Block title={t("jamAdmin.title")}>
+          <JamAdmin />
         </Block>
       )}
 
