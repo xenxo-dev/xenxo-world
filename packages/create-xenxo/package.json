@@ -1,9 +1,9 @@
 {
   "name": "create-xenxo",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "MIT",
   "type": "module",
-  "description": "Crea un juego web listo para xenxo.io: 2D o 3D, «Entrar con xenxo», simulador local y AGENTS.md para tu IA",
+  "description": "Crea un juego web listo para xenxo.io: 2D o 3D, «Entrar con xenxo», simulador local, sala multijugador opcional y AGENTS.md para tu IA",
   "bin": {
     "create-xenxo": "index.mjs"
   },
@@ -22,7 +22,16 @@
     "directory": "packages/create-xenxo"
   },
   "homepage": "https://xenxo.io",
-  "keywords": ["xenxo", "create", "template", "web-games", "vibecoding", "threejs", "vrm"],
+  "keywords": [
+    "xenxo",
+    "create",
+    "template",
+    "web-games",
+    "vibecoding",
+    "threejs",
+    "vrm",
+    "multiplayer"
+  ],
   "publishConfig": {
     "access": "public",
     "provenance": true

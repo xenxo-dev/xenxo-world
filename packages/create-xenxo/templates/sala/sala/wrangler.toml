@@ -1,0 +1,23 @@
+# Sala multijugador de {{title}}: un Worker y un Durable Object en TU cuenta gratuita de Cloudflare.
+#   npm run sala          → en tu equipo (ws://localhost:8788)
+#   npm run deploy:sala   → publicada (https://{{name}}-sala.<tu-subdominio>.workers.dev)
+name = "{{name}}-sala"
+main = "index.js"
+compatibility_date = "2026-10-01"
+
+[[durable_objects.bindings]]
+name = "SALAS"
+class_name = "Sala"
+
+# En el plan gratuito los Durable Objects tienen que ser de los de SQLite.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Sala"]
+
+[vars]
+# Webs que pueden conectarse (separadas por comas). En localhost siempre se puede.
+ORIGENES = "https://{{name}}.pages.dev"
+# Quién firma las identidades de «Entrar con xenxo» y para qué juego (tu client_id, xg_…).
+# Sin XENXO_CLIENT_ID, todos entran como invitados (con el nombre que digan, sin verificar).
+XENXO_EMISOR = "https://api.xenxo.io"
+XENXO_CLIENT_ID = ""

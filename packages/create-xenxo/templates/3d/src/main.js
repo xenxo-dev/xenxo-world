@@ -6,10 +6,12 @@
  *
  *   src/xenxo-hud.js  → la parte de xenxo (quién juega, entrar, volver)
  *   src/avatar.js     → carga el VRM del jugador y lo anima sin archivos de animación
+ *   src/multijugador.js → los demás jugadores (si el juego tiene sala; si no, no aparece nadie)
  *   public/xenxo.json → la ficha del juego para xenxo
  */
 import * as THREE from "three";
 import { cargarAvatar } from "./avatar.js";
+import { iniciarMultijugador } from "./multijugador.js";
 import { conectar, idioma, marcador } from "./xenxo-hud.js";
 import "./estilo.css";
 
@@ -43,6 +45,55 @@ scene.add(rejilla);
 /* --- El jugador --- */
 const yo = await cargarAvatar(jugador?.avatar?.url);
 scene.add(yo.object);
+
+/* --- Los demás jugadores (con sala multijugador; sin ella, `otros` siempre está vacío) --- */
+const sala = iniciarMultijugador({ jugador });
+const demas = new Map(); // id → { avatar, etiqueta, colocado }
+const miEstado = { x: 0, z: 0, r: 0, v: 0 }; // se reutiliza: nada de objetos nuevos en el bucle
+
+/** Cartel con el nombre (y el número de xenxo si viene comprobado) encima de la cabeza. */
+function cartel(j) {
+  const c = document.createElement("canvas");
+  c.width = 512;
+  c.height = 96;
+  const g = c.getContext("2d");
+  g.font = "600 44px system-ui, sans-serif";
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+  g.shadowColor = "#000";
+  g.shadowBlur = 8;
+  g.fillStyle = j.verificado ? "#f6f1e7" : "#c9c4d6";
+  g.fillText(j.numero !== null && j.numero !== undefined ? `${j.nombre} #${j.numero}` : j.nombre, 256, 48);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthWrite: false }));
+  s.scale.set(2, 0.375, 1);
+  s.position.y = 2.1;
+  return s;
+}
+
+sala.on("entra", async (j) => {
+  if (demas.has(j.id)) return;
+  const d = { avatar: null, etiqueta: cartel(j), colocado: false };
+  demas.set(j.id, d);
+  const avatar = await cargarAvatar(j.avatar);
+  if (demas.get(j.id) !== d) return; // se fue mientras cargaba
+  d.avatar = avatar;
+  avatar.object.add(d.etiqueta);
+  avatar.object.visible = false; // hasta que llegue su primera posición
+  scene.add(avatar.object);
+});
+sala.on("sale", (id) => {
+  const d = demas.get(id);
+  if (!d) return;
+  demas.delete(id);
+  if (d.avatar) scene.remove(d.avatar.object);
+  d.etiqueta.material.map.dispose();
+  d.etiqueta.material.dispose();
+});
+
+const num = (v, lim) => (Number.isFinite(v) ? Math.max(-lim, Math.min(lim, v)) : 0);
+const r2 = (v) => Math.round(v * 100) / 100;
 
 /* --- Orbes para recoger (una geometría y un material compartidos) --- */
 const ORBES = 12;
@@ -109,6 +160,30 @@ renderer.setAnimationLoop((ahora) => {
     yo.object.rotation.y += giro * Math.min(1, dt * 10);
   }
   yo.update(dt, velocidad / VELOCIDAD);
+
+  // Mi estado para la sala (redondeado: menos bytes) y los demás, suavizados hacia el suyo.
+  miEstado.x = r2(yo.object.position.x);
+  miEstado.z = r2(yo.object.position.z);
+  miEstado.r = r2(yo.object.rotation.y);
+  miEstado.v = r2(velocidad / VELOCIDAD);
+  sala.enviar(miEstado);
+  for (const [id, d] of demas) {
+    const e = sala.otros.get(id)?.estado;
+    if (!d.avatar || !e) continue;
+    const o = d.avatar.object;
+    const x = num(e.x, 40), z = num(e.z, 40);
+    if (!d.colocado) {
+      o.position.set(x, 0, z);
+      o.visible = d.colocado = true;
+    }
+    const k = Math.min(1, dt * 10);
+    o.position.x += (x - o.position.x) * k;
+    o.position.z += (z - o.position.z) * k;
+    let giro = num(e.r, 10) - o.rotation.y;
+    giro = Math.atan2(Math.sin(giro), Math.cos(giro));
+    o.rotation.y += giro * k;
+    d.avatar.update(dt, num(e.v, 1));
+  }
 
   for (const o of orbes) {
     if (!o.visible) continue;

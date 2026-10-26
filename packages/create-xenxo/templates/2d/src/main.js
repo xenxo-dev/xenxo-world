@@ -5,8 +5,10 @@
  * (en el móvil, arrastra el dedo). Un canvas y nada más: cámbialo todo, es tu juego.
  *
  *   src/xenxo-hud.js  → la parte de xenxo (quién juega, entrar, volver)
+ *   src/multijugador.js → los demás jugadores (si el juego tiene sala; si no, no aparece nadie)
  *   public/xenxo.json → la ficha del juego para xenxo
  */
+import { iniciarMultijugador } from "./multijugador.js";
 import { conectar, idioma, marcador } from "./xenxo-hud.js";
 import "./estilo.css";
 
@@ -32,6 +34,14 @@ medir();
 addEventListener("resize", medir);
 
 const yo = { x: innerWidth / 2, y: innerHeight / 2, r: 22 };
+
+// Los demás jugadores (con sala multijugador; sin ella, `otros` siempre está vacío). Las posiciones
+// viajan de 0 a 1 para que cuadren aunque cada uno tenga una pantalla distinta.
+const sala = iniciarMultijugador({ jugador });
+const miEstado = { x: 0.5, y: 0.5 };
+const suaves = new Map(); // id → { x, y } en píxeles, suavizado
+const num01 = (v) => (Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.5);
+sala.on("sale", (id) => suaves.delete(id));
 const ESTRELLAS = 10;
 const estrellas = Array.from({ length: ESTRELLAS }, () => ({ x: 40 + Math.random() * (W - 80), y: 90 + Math.random() * (H - 140), viva: true }));
 let recogidas = 0;
@@ -91,6 +101,31 @@ function bucle(ahora) {
   ctx.lineWidth = 1;
   for (let x = 0; x < W; x += 40) (ctx.beginPath(), ctx.moveTo(x, 0), ctx.lineTo(x, H), ctx.stroke());
   for (let y = 0; y < H; y += 40) (ctx.beginPath(), ctx.moveTo(0, y), ctx.lineTo(W, y), ctx.stroke());
+
+  miEstado.x = Math.round((yo.x / W) * 1000) / 1000;
+  miEstado.y = Math.round((yo.y / H) * 1000) / 1000;
+  sala.enviar(miEstado);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  for (const [id, o] of sala.otros) {
+    if (!o.estado) continue;
+    const tx = num01(o.estado.x) * W, ty = num01(o.estado.y) * H;
+    const p = suaves.get(id) ?? { x: tx, y: ty };
+    p.x += (tx - p.x) * Math.min(1, dt * 10);
+    p.y += (ty - p.y) * Math.min(1, dt * 10);
+    suaves.set(id, p);
+    const j = o.jugador;
+    ctx.fillStyle = j.verificado ? "#b98cff" : "#8a86a6";
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, yo.r * 0.9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#12142b";
+    ctx.font = "700 18px system-ui, sans-serif";
+    ctx.fillText((j.nombre.trim().charAt(0) || "?").toUpperCase(), p.x, p.y + 1);
+    ctx.fillStyle = "#f6f1e7";
+    ctx.font = "600 12px system-ui, sans-serif";
+    ctx.fillText(j.numero !== null && j.numero !== undefined ? `${j.nombre} #${j.numero}` : j.nombre, p.x, p.y - yo.r - 10);
+  }
 
   const t = ahora / 1000;
   ctx.fillStyle = "#ff4fd8";

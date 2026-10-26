@@ -5,17 +5,19 @@
  *   npm create xenxo@latest                 (pregunta carpeta y tipo)
  *   npm create xenxo@latest mi-juego -- --3d
  *   npm create xenxo@latest mi-juego -- --2d --lang en
+ *   npm create xenxo@latest mi-juego -- --3d --multi   (con sala multijugador en tu Cloudflare)
  *
  * Sin dependencias: copia la plantilla, pone el nombre y explica los siguientes pasos.
  * Licencia MIT: lo que crees con ella es tuyo.
  */
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SDK_VERSION = "^0.2.0";
+const WRANGLER_VERSION = "^4.150.0";
 
 const args = process.argv.slice(2);
 const flag = (f) => args.includes(f);
@@ -30,9 +32,12 @@ const T = {
     hello: "\n  xenxo · crea tu juego\n",
     folder: "  Carpeta del juego",
     kind: "  ¿2D o 3D? (2d/3d)",
+    multi: "  ¿Multijugador, con sala propia en tu Cloudflare gratuito? (s/n)",
+    yes: /^(s|si|sí|y|yes)$/i,
     exists: (d) => `\n  La carpeta «${d}» ya existe y no está vacía. Elige otra.\n`,
     badName: "\n  Nombre no válido: usa letras minúsculas, números y guiones (p. ej. mi-juego).\n",
-    done: (d, k) => `\n  Listo: juego ${k.toUpperCase()} en ./${d}\n`,
+    done: (d, k, m) => `\n  Listo: juego ${k.toUpperCase()}${m ? " multijugador" : ""} en ./${d}\n`,
+    nextMulti: "  Multijugador: en otra terminal, npm run sala (la sala en tu equipo). README.md → Multijugador.\n",
     next: (d) =>
       `  Siguientes pasos:\n\n    cd ${d}\n    npm install\n    npm run dev\n\n` +
       "  Se abre con un jugador de prueba (el simulador de xenxo, abajo a la izquierda).\n" +
@@ -43,9 +48,12 @@ const T = {
     hello: "\n  xenxo · create your game\n",
     folder: "  Game folder",
     kind: "  2D or 3D? (2d/3d)",
+    multi: "  Multiplayer, with its own room on your free Cloudflare? (y/n)",
+    yes: /^(y|yes|s|si|sí)$/i,
     exists: (d) => `\n  Folder "${d}" already exists and isn't empty. Pick another one.\n`,
     badName: "\n  Invalid name: use lowercase letters, numbers and dashes (e.g. my-game).\n",
-    done: (d, k) => `\n  Done: ${k.toUpperCase()} game in ./${d}\n`,
+    done: (d, k, m) => `\n  Done: ${k.toUpperCase()}${m ? " multiplayer" : ""} game in ./${d}\n`,
+    nextMulti: "  Multiplayer: in another terminal, npm run sala (the room on your machine). README.md → Multiplayer.\n",
     next: (d) =>
       `  Next steps:\n\n    cd ${d}\n    npm install\n    npm run dev\n\n` +
       "  It opens with a test player (the xenxo simulator, bottom left).\n" +
@@ -71,6 +79,7 @@ async function main() {
     let dir = positional[0] ?? (await ask(rl, t.folder, lang === "en" ? "my-xenxo-game" : "mi-juego-xenxo"));
     let kind = flag("--2d") ? "2d" : flag("--3d") ? "3d" : value("--plantilla") ?? value("--template");
     if (kind !== "2d" && kind !== "3d") kind = (await ask(rl, t.kind, "3d")).toLowerCase() === "2d" ? "2d" : "3d";
+    const multi = flag("--multi") || flag("--multijugador") || (!flag("--solo") && rl ? t.yes.test(await ask(rl, t.multi, "n")) : false);
 
     const target = resolve(process.cwd(), dir);
     const name = basename(target).toLowerCase();
@@ -86,6 +95,27 @@ async function main() {
     mkdirSync(target, { recursive: true });
     cpSync(join(here, "templates", "common"), target, { recursive: true });
     cpSync(join(here, "templates", kind), target, { recursive: true });
+    if (multi) {
+      // La sala: servidor en sala/, cliente real en src/multijugador.js y su parte de README y AGENTS.
+      cpSync(join(here, "templates", "sala"), target, { recursive: true });
+      for (const doc of ["README", "AGENTS"]) {
+        const extra = join(target, `${doc}.append.md`);
+        const base = readFileSync(join(target, `${doc}.md`), "utf8");
+        const add = readFileSync(extra, "utf8");
+        // Antes de la licencia, si la hay; si no, al final.
+        const at = base.lastIndexOf("\n## Licencia");
+        writeFileSync(join(target, `${doc}.md`), at >= 0 ? `${base.slice(0, at)}${add}${base.slice(at)}` : base + add);
+        rmSync(extra);
+      }
+      const pkgPath = join(target, "package.json");
+      const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+      pkg.scripts.sala = "wrangler dev --config sala/wrangler.toml --port 8788";
+      pkg.scripts["deploy:sala"] = "wrangler deploy --config sala/wrangler.toml";
+      pkg.devDependencies = { ...pkg.devDependencies, wrangler: WRANGLER_VERSION };
+      writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+      const fichaPath = join(target, "public", "xenxo.json");
+      writeFileSync(fichaPath, readFileSync(fichaPath, "utf8").replace('"multiplayer": false', '"multiplayer": true'));
+    }
     // npm quita los .gitignore al publicar: la plantilla lo lleva como _gitignore.
     if (existsSync(join(target, "_gitignore"))) renameSync(join(target, "_gitignore"), join(target, ".gitignore"));
 
@@ -102,7 +132,7 @@ async function main() {
       for (const f of readdirSync(d)) {
         const p = join(d, f);
         if (statSync(p).isDirectory()) walk(p);
-        else if (/\.(json|md|html|js|ts|css|txt)$/.test(f) || f === ".gitignore") {
+        else if (/\.(json|md|html|js|ts|css|txt|toml)$/.test(f) || f === ".gitignore") {
           let s = readFileSync(p, "utf8");
           for (const [k, v] of Object.entries(vars)) s = s.split(k).join(v);
           writeFileSync(p, s);
@@ -112,8 +142,9 @@ async function main() {
     walk(target);
 
     const shown = relative(process.cwd(), target) || ".";
-    console.log(t.done(shown, kind));
+    console.log(t.done(shown, kind, multi));
     console.log(t.next(shown));
+    if (multi) console.log(t.nextMulti);
   } finally {
     rl?.close();
   }

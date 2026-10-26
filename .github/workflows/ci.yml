@@ -28,12 +28,15 @@ jobs:
           npm pack -w @xenxo/sdk --pack-destination "$T" > /dev/null
           SDK=$(ls "$T"/xenxo-sdk-*.tgz)
           cd "$T"
-          for k in 2d 3d; do
-            node "$GITHUB_WORKSPACE/packages/create-xenxo/index.mjs" "juego-$k" --$k --yes
-            cd "juego-$k"
+          for v in "2d" "3d" "2d --multi" "3d --multi"; do
+            d="juego-${v// /}"; d="${d//--/-}"
+            node "$GITHUB_WORKSPACE/packages/create-xenxo/index.mjs" "$d" --$v --yes
+            cd "$d"
             node -e 'const f=require("fs");const p=JSON.parse(f.readFileSync("package.json"));p.dependencies["@xenxo/sdk"]="file:"+process.argv[1];f.writeFileSync("package.json",JSON.stringify(p,null,2))' "$SDK"
             npm install --no-audit --no-fund
             npm run build
+            # Con sala: que el Worker compile (sin desplegar nada).
+            if [ -f sala/wrangler.toml ]; then npx wrangler deploy --dry-run --config sala/wrangler.toml --outdir /tmp/sala-$d; fi
             cd ..
           done
 

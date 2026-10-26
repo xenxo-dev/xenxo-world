@@ -20,7 +20,7 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 | `apps/headless` | Cliente sin render: banco de conformidad, prueba del MCP y agente de ejemplo |
 | `packages/mcp` | Servidor MCP (MIT): el agente de una persona construye en su parcela con su clave `xk_` |
 | `packages/sdk` | `@xenxo/sdk` (MIT): «Entrar con xenxo», simulador local y `xenxo.back()` para juegos web; se sirve en `xenxo.io/sdk/` con un juego de ejemplo y se publica en npm |
-| `packages/create-xenxo` | Plantilla (MIT): `npm create xenxo` crea un juego 2D o 3D con el SDK, `xenxo.json` y `AGENTS.md` |
+| `packages/create-xenxo` | Plantilla (MIT): `npm create xenxo` crea un juego 2D o 3D con el SDK, `xenxo.json` y `AGENTS.md`; con `--multi`, una sala (Worker + Durable Object) para la cuenta de Cloudflare del creador |
 | `docs/PROTOCOL.md` | Explicación del contrato |
 
 ## Antes de dar algo por terminado
@@ -78,7 +78,7 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 ## Licencias
 
 - AGPL-3.0 por defecto (`LICENSE`). MIT en lo que usan los creadores: `packages/protocol`, `packages/assets`, `apps/headless`, `packages/mcp`, `packages/sdk` y `packages/create-xenxo` (cada uno con su `LICENSE`).
-- `@xenxo/sdk` y `create-xenxo` se publican en npm a mano (Actions → «Publicar en npm», secreto `NPM_TOKEN`). Sube su versión antes; si el SDK cambia de versión mayor o menor, actualiza `SDK_VERSION` en `packages/create-xenxo/index.mjs`. La plantilla se compila en CI: si la tocas, que siga compilando en 2D y 3D y que su `xenxo.json` valide contra `GameManifest`.
+- `@xenxo/sdk` y `create-xenxo` se publican en npm a mano (Actions → «Publicar en npm», secreto `NPM_TOKEN`). Sube su versión antes; si el SDK cambia de versión mayor o menor, actualiza `SDK_VERSION` en `packages/create-xenxo/index.mjs`. La plantilla se compila en CI: si la tocas, que siga compilando en 2D y 3D, con y sin `--multi` (la sala se compila con `wrangler deploy --dry-run`), y que su `xenxo.json` valide contra `GameManifest`. La sala nunca va en la cuenta de xenxo: es del creador.
 - Lo MIT nunca importa código AGPL (`apps/realtime`, `apps/web`, `tools/`). Al revés sí. Excepción: los datos de prueba del banco de conformidad.
 - La web enlaza su código fuente (AGPL §13): no quites el enlace «Código».
 
