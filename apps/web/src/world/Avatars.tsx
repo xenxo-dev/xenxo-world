@@ -198,7 +198,13 @@ export function Avatars() {
           key={`${p.session_id}:${p.avatar?.hash ?? ""}`}
           sessionId={p.session_id}
           avatar={p.avatar}
-          name={p.kind === "agent" ? `${t("agents.agentPrefix")} · ${p.display_name}` : p.display_name}
+          name={
+            p.kind === "agent"
+              ? `${t("agents.agentPrefix")} · ${p.display_name}`
+              : p.player_no != null
+                ? `#${p.player_no} · ${p.display_name}`
+                : p.display_name
+          }
         />
       ))}
     </>

@@ -16,6 +16,8 @@ export interface User {
   avatar_hash: string | null;
   avatar_format: "glb" | "vrm" | null;
   created_at: number;
+  /** Número de jugador (por orden de alta; el 0 es el fundador). */
+  player_no?: number | null;
 }
 
 export interface Project {

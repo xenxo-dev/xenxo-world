@@ -52,6 +52,8 @@ export type UserRow = {
   avatar_hash: string | null;
   avatar_format: "glb" | "vrm" | null;
   created_at: number;
+  /** Número de jugador: por orden de alta desde el 1; el 0 es el fundador. */
+  player_no: number | null;
 };
 
 export type PublicProject = {
@@ -111,6 +113,20 @@ export class Directory extends DurableObject<Env> {
     // Migración: tamaño de cada subida (para los topes de almacenamiento).
     const cols = this.sql.exec<{ name: string }>("PRAGMA table_info(uploads)").toArray().map((c) => c.name);
     if (!cols.includes("bytes")) this.sql.exec("ALTER TABLE uploads ADD COLUMN bytes INTEGER NOT NULL DEFAULT 0");
+    // Migración: número de jugador. Las cuentas que ya existían se numeran por orden de alta.
+    const ucols = this.sql.exec<{ name: string }>("PRAGMA table_info(users)").toArray().map((c) => c.name);
+    if (!ucols.includes("player_no")) {
+      this.sql.exec("ALTER TABLE users ADD COLUMN player_no INTEGER");
+      const ids = this.sql.exec<{ id: string }>("SELECT id FROM users ORDER BY created_at, id").toArray();
+      ids.forEach((r, i) => this.sql.exec("UPDATE users SET player_no = ? WHERE id = ?", i + 1, r.id));
+    }
+    this.sql.exec("CREATE UNIQUE INDEX IF NOT EXISTS users_player_no ON users(player_no)");
+    // El fundador es el jugador 0 (su cuenta se indica en FOUNDER_USER_ID).
+    const founder = (env.FOUNDER_USER_ID ?? "").replace(/^usr_/, "").trim();
+    if (founder) {
+      this.sql.exec("UPDATE users SET player_no = NULL WHERE player_no = 0 AND id != ?", founder);
+      this.sql.exec("UPDATE users SET player_no = 0 WHERE id = ?", founder);
+    }
   }
 
   private get rpID() {
@@ -187,7 +203,7 @@ export class Directory extends DurableObject<Env> {
     const now = Date.now();
     this.ctx.storage.transactionSync(() => {
       this.sql.exec(
-        "INSERT INTO users (id, display_name, created_at, terms_version, age_confirmed) VALUES (?, ?, ?, ?, 1)",
+        "INSERT INTO users (id, display_name, created_at, terms_version, age_confirmed, player_no) VALUES (?, ?, ?, ?, 1, (SELECT COALESCE(MAX(player_no), 0) + 1 FROM users))",
         flow.user_id,
         flow.display_name,
         now,
@@ -260,7 +276,7 @@ export class Directory extends DurableObject<Env> {
   user(id: string): UserRow | null {
     return (
       this.sql
-        .exec<UserRow>("SELECT id, display_name, avatar_hash, avatar_format, created_at FROM users WHERE id = ?", id)
+        .exec<UserRow>("SELECT id, display_name, avatar_hash, avatar_format, created_at, player_no FROM users WHERE id = ?", id)
         .toArray()[0] ?? null
     );
   }

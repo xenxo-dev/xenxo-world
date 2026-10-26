@@ -17,6 +17,8 @@ export interface Principal {
   /** Personas registradas: nombre visible y avatar, fijados por el servidor. */
   name?: string;
   avatar?: { hash: string; format: "glb" | "vrm" };
+  /** Número de jugador (personas registradas). */
+  no?: number;
 }
 
 const enc = new TextEncoder();

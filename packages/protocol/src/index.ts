@@ -328,6 +328,8 @@ export const Peer = z.object({
   client_type: ClientType,
   /** Opcional: si falta, el cliente dibuja el avatar por defecto. */
   avatar: AvatarRef.optional(),
+  /** Número de jugador de una persona registrada (por orden de alta; el 0 es el fundador). */
+  player_no: z.number().int().min(0).optional(),
 });
 export type Peer = z.infer<typeof Peer>;
 

@@ -79,6 +79,7 @@ jobs:
             --domain "api.$WEB_DOMAIN" \
             --var "RP_ID:$WEB_DOMAIN" \
             --var "ALLOWED_ORIGINS:https://$WEB_DOMAIN,https://www.$WEB_DOMAIN" \
+            --var "FOUNDER_USER_ID:${{ vars.FOUNDER_USER_ID }}" \
             --secrets-file "$RUNNER_TEMP/secrets.env"
           rm -f "$RUNNER_TEMP/secrets.env"
 

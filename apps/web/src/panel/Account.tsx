@@ -226,7 +226,14 @@ function SignedIn() {
 
   return (
     <div className={`${card} p-4`}>
-      <p className="text-sm text-cal/80">{t("account.signedAs", { name: user.display_name })}</p>
+      <p className="text-sm text-cal/80">
+        {t("account.signedAs", { name: user.display_name })}
+        {user.player_no != null && (
+          <span className="ml-2 rounded-md border border-neon/40 px-1.5 py-0.5 font-mono text-xs text-neon">
+            {t("account.playerNo", { n: String(user.player_no) })}
+          </span>
+        )}
+      </p>
       <form
         className="mt-3 flex max-w-md gap-2"
         onSubmit={(e) => {

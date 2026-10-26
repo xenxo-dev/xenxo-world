@@ -90,7 +90,7 @@ Lectura pública sin WebSocket: `GET /chunk/<chunk_id>/state` (contadores y últ
 | `SNAPSHOT` | `entities[]`, `peers[]`, `poses[]`, `chat[]?` (últimos 30 mensajes) |
 | `DELTA` | `changes[]`: `{kind: "upsert", entity}` o `{kind: "remove", entity_id}` |
 | `POSES` | `t` (hora del servidor), `poses[]` (cada una con su `emote?`) — lote por tick (10 Hz) |
-| `PEER_JOIN` / `PEER_LEAVE` | datos del peer (`session_id`, `kind`, `display_name`, `client_type`, `avatar?`) / `session_id` |
+| `PEER_JOIN` / `PEER_LEAVE` | datos del peer (`session_id`, `kind`, `display_name`, `client_type`, `avatar?`, `player_no?`) / `session_id`. `player_no` es el número de jugador de una persona registrada: se asigna por orden de alta desde el 1 y no cambia; el 0 es el fundador (la cuenta de `FOUNDER_USER_ID`) |
 | `ACK` | `ref`, `entity_id`, `rev`, `replayed` |
 | `ERROR` | `ref`, `code`, `message`, `detail?` |
 | `PONG` | `t`, `server_time` |
@@ -146,7 +146,7 @@ El mundo solo se escribe por WebSocket (`MUTATE_WORLD`). Lo que no es mundo va p
 | `POST /assets?kind=avatar\|model` | persona o agente | Sube un GLB/VRM. El servidor lo inspecciona, aplica el presupuesto, calcula el hash y lo guarda en R2 |
 | | | Topes: 30 subidas al día y 100 MB por persona (`413 quota_exceeded`), 1000 subidas al día entre todos (`429 storage_busy`); el almacén entero tiene un tope de 8 GB para no salir del plan gratuito de R2 (`507 storage_full`). Las lecturas `GET /assets/<hash>` pasan por la caché de Cloudflare |
 | `GET /assets/<sha256-hex>` | público | Sirve el asset, inmutable y cacheable para siempre. Los **assets del sistema** (la plaza y los avatares de serie, generados por la forja) se sirven desde los recursos estáticos del Worker con la misma ruta |
-| `GET /me` · `PATCH /me` · `POST /me/avatar` | persona | Perfil, nombre visible y personaje (uno subido o uno de serie). Devuelven un token nuevo con nombre y avatar |
+| `GET /me` · `PATCH /me` · `POST /me/avatar` | persona | Perfil (con `player_no`), nombre visible y personaje (uno subido o uno de serie). Devuelven un token nuevo con nombre, avatar y número |
 | `GET /me/export` · `DELETE /me` | persona | RGPD: exportar todos tus datos; borrar la cuenta y todo su contenido |
 | `GET /projects` · `POST /projects` · `DELETE /projects/<id>` | público / persona | Proyectos. Al publicar, el chunk coloca su stand (pedestal, modelo y cartel) |
 | `POST /reports` | cualquiera con token | Denuncia (DSA): `target_type` (`project`, `avatar`, `user`, `chat`…), `target_id`, `reason`, `details?`. Si es un mensaje de chat, el servidor adjunta una copia: el chat caduca a los 7 días, la denuncia no |

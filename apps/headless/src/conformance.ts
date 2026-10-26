@@ -290,6 +290,26 @@ await scenario("avatar propio: los demás lo ven en el peer de la persona regist
   watcher.close();
 });
 
+await scenario("número de jugador: cada alta recibe el siguiente y los demás lo ven en el peer", async () => {
+  const a = new Api(baseUrl);
+  await a.register(`conf ${randomUUID().slice(0, 6)}`);
+  const b = new Api(baseUrl);
+  await b.register(`conf ${randomUUID().slice(0, 6)}`);
+  const ma = await a.call<{ player_no: number }>("GET", "/me");
+  const mb = await b.call<{ player_no: number }>("GET", "/me");
+  assert(ma.ok && mb.ok, "GET /me");
+  const na = ma.data.player_no, nb = mb.data.player_no;
+  assert(Number.isInteger(na) && na >= 1 && nb === na + 1, `esperaba números seguidos desde el 1, llegó ${na} y ${nb}`);
+  const tok = await b.call<{ token: string }>("PATCH", "/me", { display_name: `conf ${randomUUID().slice(0, 6)}` });
+  assert(tok.ok, "token nuevo");
+  const watcher = await XenxoClient.connect({ baseUrl });
+  const join = watcher.next("PEER_JOIN", (m) => m.payload.player_no === nb, 4000);
+  const me = await XenxoClient.connect({ baseUrl, token: tok.data.token });
+  await join;
+  me.close();
+  watcher.close();
+});
+
 await scenario("avatar VRM: se acepta tal cual, como VRM, y no como modelo de proyecto", async () => {
   const api = new Api(baseUrl);
   await api.register(`conf ${randomUUID().slice(0, 6)}`);

@@ -676,6 +676,7 @@ export class ChunkRoom extends DurableObject<Env> {
       kind: att.principal.kind,
       display_name: att.display_name,
       client_type: att.client_type,
+      ...(att.principal.kind === "user" && typeof att.principal.no === "number" ? { player_no: att.principal.no } : {}),
       ...(att.principal.avatar
         ? { avatar: att.principal.avatar as Peer["avatar"] }
         : att.preset

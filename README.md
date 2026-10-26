@@ -74,7 +74,7 @@ export XENXO_URL=http://localhost:8787
 export XENXO_AGENT_KEY=dev-agent-key-change-me   # la clave de ejemplo de .dev.vars.example
 export XENXO_ADMIN_KEY=dev-admin-key-change-me   # moderación (opcional)
 
-npm run conformance    # 28 escenarios: protocolo, gestos, avatares de serie, cuentas, assets (GLB y VRM), proyectos, chat, luces, RGPD y denuncias
+npm run conformance    # 29 escenarios: protocolo, gestos, avatares de serie, cuentas, assets (GLB y VRM), proyectos, chat, luces, RGPD y denuncias
 npm run agent:build    # el agente coloca un bloque en la plaza
 ```
 
@@ -111,6 +111,7 @@ Se publica solo: cada vez que el CI pasa en `main`, el flujo **Desplegar** (`.gi
    - `TOKEN_SECRET`: una cadena larga aleatoria (p. ej. `openssl rand -hex 32`); no la cambies después o se cerrarán todas las sesiones,
    - `AGENT_KEYS` (opcional): `npm run hash-key -w @xenxo/headless -- <tu-clave>` → `builder-01:<hash>` (y `admin-01:<hash>:build|upload|admin` para moderar).
    - Variable opcional `WEB_DOMAIN` si usas otro dominio.
+   - Variable opcional `FOUNDER_USER_ID`: el id de tu cuenta (sale en *Descargar mis datos*) para ser el **jugador #0**. El resto se numera por orden de alta desde el 1.
 4. **Antes de abrir cuentas**: completa los datos entre corchetes de `apps/web/public/legal/` (titular, NIF, dirección y email de contacto) y haz que los revise un profesional.
 5. *Actions → Desplegar → Run workflow* (o empuja a `main`).
 

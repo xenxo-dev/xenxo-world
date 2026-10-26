@@ -21,6 +21,8 @@ export interface Env {
   RP_ID?: string;
   /** "eu" para que los datos se guarden y procesen solo en la UE. Vacío = sin restricción. */
   DO_JURISDICTION?: string;
+  /** Id de la cuenta del fundador (sin "usr_"): es el jugador número 0. */
+  FOUNDER_USER_ID?: string;
   /** Cuenta de GitHub cuyos repos públicos muestra el panel. */
   GITHUB_OWNER?: string;
 }
@@ -123,6 +125,7 @@ async function userToken(u: UserRow, env: Env) {
     exp: Date.now() + USER_TTL_MS,
     name: u.display_name,
     ...(u.avatar_hash ? { avatar: { hash: u.avatar_hash, format: u.avatar_format ?? "glb" } } : {}),
+    ...(u.player_no != null ? { no: u.player_no } : {}),
   };
   return { token: await signToken(p, env.TOKEN_SECRET), principal: p, user: u };
 }
