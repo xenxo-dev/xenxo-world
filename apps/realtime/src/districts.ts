@@ -47,6 +47,14 @@ export function parcelIndex(id: unknown): number {
   return PARCELS.findIndex((p) => p.id === id);
 }
 
+/** Rectángulo de una parcela en el chunk (metros): donde puede construir su agente. */
+export function parcelRect(i: number) {
+  const q = PARCELS[i]!;
+  const hw = L.parcel.w / 2, hd = L.parcel.d / 2;
+  // Las parcelas miran a norte o sur (0/180): el ancho va en X y el fondo en Z.
+  return { x0: q.x - hw, z0: q.z - hd, x1: q.x + hw, z1: q.z + hd };
+}
+
 /** Base del marco del portal de una parcela: al fondo, mirando a la calle. */
 export function parcelSlot(i: number): Slot {
   const q = PARCELS[i]!;

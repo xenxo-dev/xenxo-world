@@ -58,6 +58,12 @@ export const BUDGETS = {
   maxChatPer10s: 5,
 } as const;
 
+/**
+ * Lo que puede construir el agente de una parcela (10 × 10 m, hasta maxHeight m de alto). Cuenta
+ * lo de su proyecto, no lo del chunk: 16 parcelas llenas caben en un distrito y en unas gafas.
+ */
+export const PARCEL_BUDGETS = { maxEntities: 32, maxTris: 16_000, maxLights: 1, maxHeight: 12 } as const;
+
 /* ------------------------------------------------------------------ */
 /* Componentes (versionados: "<nombre>@<versión>")                      */
 /* ------------------------------------------------------------------ */

@@ -322,6 +322,30 @@ export async function setAvatar(hash: string | null, label?: string) {
   emitSkins();
 }
 
+/* --- Claves de agente: construir en la parcela de un proyecto --- */
+
+export interface AgentKey {
+  id: string;
+  project_id: string;
+  project_title: string;
+  label: string | null;
+  created_at: number;
+  last_used: number | null;
+}
+
+export async function listAgentKeys(): Promise<{ keys: AgentKey[]; max_per_project: number }> {
+  return api("GET", "/me/agent-keys");
+}
+
+/** Crea una clave; la clave en claro solo llega aquí, una vez. */
+export async function createAgentKey(projectId: string, label: string): Promise<{ key: string; info: AgentKey }> {
+  return api("POST", "/me/agent-keys", { project_id: projectId, label });
+}
+
+export async function revokeAgentKey(id: string) {
+  await api("DELETE", `/me/agent-keys/${id}`);
+}
+
 /* --- El armario: personajes propios guardados (máximo 3) --- */
 
 export interface Skin {

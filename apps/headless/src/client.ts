@@ -29,6 +29,10 @@ export class XenxoClient {
   private ws!: WebSocket;
   private waiters: { match: (m: ServerMessage) => boolean; resolve: (m: ServerMessage) => void }[] = [];
   readonly received: ServerMessage[] = [];
+  private listeners = new Set<(m: ServerMessage) => void>();
+  /** Tope de mensajes sin reclamar que se guardan (las poses llegan sin parar). */
+  maxReceived = 2000;
+  closed = false;
   welcome!: MessageOf<ServerMessage, "WELCOME">["payload"];
   snapshot!: MessageOf<ServerMessage, "SNAPSHOT">["payload"];
 
@@ -62,10 +66,17 @@ export class XenxoClient {
     this.ws.onmessage = (e) => {
       const m = parseServerMessage(String(e.data));
       if (!m) return;
+      for (const fn of this.listeners) fn(m);
       const i = this.waiters.findIndex((w) => w.match(m));
       if (i >= 0) this.waiters.splice(i, 1)[0]!.resolve(m);
-      else this.received.push(m);
+      else {
+        this.received.push(m);
+        if (this.received.length > this.maxReceived) this.received.splice(0, this.received.length - this.maxReceived);
+      }
     };
+    this.ws.addEventListener("close", () => {
+      this.closed = true;
+    });
 
     const welcome = this.next("WELCOME");
     const snapshot = this.next("SNAPSHOT");
@@ -111,6 +122,12 @@ export class XenxoClient {
       }, timeoutMs);
       this.waiters.push(waiter);
     });
+  }
+
+  /** Escucha todos los mensajes del servidor (p. ej. para llevar el estado del mundo al día). */
+  onMessage(fn: (m: ServerMessage) => void): () => void {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
   }
 
   sendRaw(m: unknown) {

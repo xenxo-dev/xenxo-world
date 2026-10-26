@@ -17,6 +17,7 @@ import {
   type Project,
 } from "../net/account";
 import { refreshProjects } from "../net/projects";
+import { AgentKeys } from "./AgentKeys";
 import { ModelPicker } from "./ModelPicker";
 import { ReportButton } from "./ReportButton";
 import { Block, Button, card, input, Label, Notice } from "./ui";
@@ -53,6 +54,7 @@ export function ProjectsSection({ onGoToAccount }: { onGoToAccount: () => void }
   const { repos, owner } = useRepos();
 
   const [mine, setMine] = useState<Set<string>>(new Set());
+  const [building, setBuilding] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     listProjects()
@@ -105,6 +107,11 @@ export function ProjectsSection({ onGoToAccount }: { onGoToAccount: () => void }
                     {t("projects.visit")} ↗
                   </a>
                 )}
+                {mine.has(p.id) && p.in_world && (
+                  <Button variant={building === p.id ? "primary" : "secondary"} onClick={() => setBuilding(building === p.id ? null : p.id)}>
+                    {t("agentKeys.open")}
+                  </Button>
+                )}
                 {mine.has(p.id) ? (
                   <button
                     className="text-xs text-red-200/70 hover:text-red-200"
@@ -119,6 +126,7 @@ export function ProjectsSection({ onGoToAccount }: { onGoToAccount: () => void }
                   <ReportButton targetType="project" targetId={p.id} />
                 )}
               </div>
+              {building === p.id && mine.has(p.id) && <AgentKeys projectId={p.id} />}
             </li>
           ))}
         </ul>

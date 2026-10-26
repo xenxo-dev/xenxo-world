@@ -17,7 +17,8 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 | `packages/assets` | Validación GLB sin dependencias (servidor) y optimización con gltf-transform (navegador y Node) |
 | `apps/realtime` | Worker + Durable Object por chunk (autoridad, SQLite, WebSocket Hibernation) + `Directory` (cuentas con passkey, proyectos, denuncias) + R2 (assets) |
 | `apps/web` | Panel 2D (HTML) + mundo 3D: nexo, plaza y distritos (React Three Fiber, WebXR) |
-| `apps/headless` | Cliente sin render: banco de conformidad y agente de ejemplo |
+| `apps/headless` | Cliente sin render: banco de conformidad, prueba del MCP y agente de ejemplo |
+| `packages/mcp` | Servidor MCP (MIT): el agente de una persona construye en su parcela con su clave `xk_` |
 | `docs/PROTOCOL.md` | Explicación del contrato |
 
 ## Antes de dar algo por terminado
@@ -34,6 +35,7 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 - Se entra por el **nexo** (`PLACES.nexo`, `apps/realtime/src/nexo.ts` + `nexo-layout.json`); la plaza (`PLACES.plaza`) y los distritos (`districts.ts` + `districts.json`, única fuente también para la forja y la web) se alcanzan por portal (`portal@1`). Los proyectos viven en una parcela de un distrito; el nexo solo los enseña en su escaparate.
 - La plaza es `apps/realtime/src/seed.ts` + `plaza-layout.json` (única fuente de la disposición, también para la forja). Si cambia su contenido, el servidor vuelve a sembrar solo; sube `SEED_VERSION` (o `NEXO_SEED_VERSION`) si cambias el significado.
 - Publicar un proyecto exige nombre, enlace, distrito y parcela libre, portada y monumento, por cualquier vía (web, agente, MCP): la regla vive en `directory.ts`, no en el cliente.
+- Construir en una parcela: solo con su clave `xk_` (zona en el token) y con las reglas de `chunk-room.ts` (`checkZone`, `checkParcel`, `PARCEL_BUDGETS`). Lo construido es de `prj_<id>`. Si cambias las herramientas del MCP, pasa `npm run mcp-e2e -w @xenxo/headless`.
 - Los modelos del sistema (plaza y avatares de serie) **se generan**, no se editan: `npm run forge` (ver `tools/forge/README.md`) y `tools/avatars/`. No toques a mano `apps/realtime/seed-assets/`, `seed-assets.ts`, `seed-covers.ts` (lo genera `tools/covers/`) ni `avatar-presets.*`. Para rehacer solo el nexo o los distritos: `npm run forge:nexo` / `npm run forge:districts`.
 - Materiales de los modelos: `xenxo:<biblioteca>.<tinte>` (lista en `docs/PROTOCOL.md` §12 bis). Texturas y recursos nuevos: CC0 de las plataformas de `docs/RECURSOS.md` (Poly Haven y ambientCG van automáticas por `tools/materials/fetch.py`) o **generadas con IA** (Higgsfield o plataformas parecidas) siguiendo `tools/materials/generated/README.md`: la plataforma da la propiedad y el uso comercial, sin marca de agua, con su `meta.json` (plataforma, modelo, fecha, plan, prompt) y su línea en `CREDITS.md`, sin marcas ni personas reales en el prompt, y pidiendo permiso antes de gastar créditos. Siempre se guardan en el repo y se sirven desde xenxo.
 - `DO_JURISDICTION = "eu"` en `wrangler.toml`: no lo cambies tras el primer despliegue (los datos quedarían en otros objetos).
@@ -63,7 +65,7 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 
 ## Licencias
 
-- AGPL-3.0 por defecto (`LICENSE`). MIT en lo que usan los creadores: `packages/protocol`, `packages/assets`, `apps/headless` y el futuro SDK, plantilla y servidor MCP (cada uno con su `LICENSE`).
+- AGPL-3.0 por defecto (`LICENSE`). MIT en lo que usan los creadores: `packages/protocol`, `packages/assets`, `apps/headless`, `packages/mcp` y el futuro SDK y plantilla (cada uno con su `LICENSE`).
 - Lo MIT nunca importa código AGPL (`apps/realtime`, `apps/web`, `tools/`). Al revés sí. Excepción: los datos de prueba del banco de conformidad.
 - La web enlaza su código fuente (AGPL §13): no quites el enlace «Código».
 

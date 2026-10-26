@@ -24,13 +24,15 @@ import { randomId } from "./auth";
 import { isAvatarPreset } from "./avatar-presets-check";
 import { assetKey } from "./assets";
 import { type ProjectCategory } from "@xenxo/protocol";
-import { DISTRICTS, districtById, PARCELS, parcelIndex } from "./districts";
+import { DISTRICTS, districtById, PARCELS, parcelIndex, parcelRect } from "./districts";
 
 export const TERMS_VERSION = "2026-10";
 const FLOW_TTL_MS = 5 * 60 * 1000;
 const MAX_PROJECTS_PER_USER = 3;
 /** Personajes propios guardados por cuenta (el armario). Los de serie no cuentan. */
 export const MAX_SKINS = 3;
+/** Claves de agente por proyecto (para construir en su parcela). */
+export const MAX_AGENT_KEYS_PER_PROJECT = 3;
 /** Un archivo subido por una persona que nada usa se borra pasados estos días. */
 export const ORPHAN_GRACE_MS = 7 * 86_400_000;
 const CLEANUP_EVERY_MS = 86_400_000;
@@ -54,6 +56,10 @@ export type Result<T> = Ok<T> | Fail;
 
 const ok = <T>(data: T): Ok<T> => ({ ok: true, data });
 const fail = (status: number, error: string, message: string, detail?: unknown): Fail => ({ ok: false, status, error, message, detail });
+
+export type AgentKeyRow = { id: string; project_id: string; project_title: string; label: string | null; created_at: number; last_used: number | null };
+export type AgentZone = { chunk_id: string; district: string; parcel: string; owner: string; x0: number; z0: number; x1: number; z1: number; facing: number };
+export type AgentZoneGrant = { key_id: string; user_id: string; name: string; zone: AgentZone };
 
 export type SkinRow = { hash: string; format: string; label: string | null; created_at: number };
 
@@ -143,6 +149,10 @@ export class Directory extends DurableObject<Env> {
         provider TEXT NOT NULL, subject TEXT NOT NULL, user_id TEXT NOT NULL, created_at INTEGER NOT NULL, last_used INTEGER,
         PRIMARY KEY (provider, subject));
       CREATE TABLE IF NOT EXISTS counters (k TEXT PRIMARY KEY, v INTEGER NOT NULL);
+      -- Claves de agente de una parcela: solo se guarda la huella (sha256) de la clave.
+      CREATE TABLE IF NOT EXISTS agent_keys (
+        id TEXT PRIMARY KEY, user_id TEXT NOT NULL, project_id TEXT NOT NULL, hash TEXT NOT NULL UNIQUE,
+        label TEXT, created_at INTEGER NOT NULL, last_used INTEGER);
       -- El armario: hasta MAX_SKINS personajes propios por cuenta (archivos que subió esa persona).
       CREATE TABLE IF NOT EXISTS skins (
         user_id TEXT NOT NULL, hash TEXT NOT NULL, format TEXT NOT NULL, label TEXT, created_at INTEGER NOT NULL,
@@ -612,6 +622,8 @@ export class Directory extends DurableObject<Env> {
       projects: this.sql.exec("SELECT * FROM projects WHERE user_id = ?", id).toArray(),
       uploads: this.sql.exec("SELECT hash, kind, ts FROM uploads WHERE uploader = ?", `usr_${id}`).toArray(),
       skins: this.skins(id),
+      // De cada clave de agente solo guardamos su huella; aquí van sus datos, nunca la huella.
+      agent_keys: this.agentKeys(id),
       reports_sent: this.sql.exec("SELECT ts, target_type, target_id, reason, details FROM reports WHERE reporter = ?", `usr_${id}`).toArray(),
     });
   }
@@ -620,24 +632,30 @@ export class Directory extends DurableObject<Env> {
    * Derecho de supresión (RGPD art. 17). Devuelve los assets que solo subió
    * esta persona, para que el Worker los borre de R2, y sus proyectos, para retirar los stands.
    */
-  deleteAccount(id: string): Result<{ orphanHashes: string[]; projects: { id: string; district: string | null }[] }> {
+  deleteAccount(id: string): Result<{ orphanHashes: string[]; projects: { id: string; district: string | null }[]; agents: string[] }> {
     const sub = `usr_${id}`;
     if (!this.user(id)) return fail(404, "not_found", "la cuenta no existe");
     const projects = this.sql.exec<{ id: string; district: string | null }>("SELECT id, district FROM projects WHERE user_id = ?", id).toArray();
-    const mine = this.sql.exec<{ hash: string }>("SELECT hash FROM uploads WHERE uploader = ?", sub).toArray().map((r) => r.hash);
+    const agents = this.sql.exec<{ id: string }>("SELECT id FROM agent_keys WHERE user_id = ?", id).toArray().map((r) => `agt_${r.id}`);
+    // Lo subido por la persona y por los agentes de sus parcelas (prj_<id>).
+    const uploaders = [sub, ...projects.map((p) => `prj_${p.id}`)];
+    const marks = uploaders.map(() => "?").join(",");
+    const mine = this.sql.exec<{ hash: string }>(`SELECT DISTINCT hash FROM uploads WHERE uploader IN (${marks})`, ...uploaders).toArray().map((r) => r.hash);
     const orphanHashes = mine.filter(
-      (h) => this.sql.exec("SELECT 1 FROM uploads WHERE hash = ? AND uploader != ? AND kind != 'removed'", h, sub).toArray().length === 0,
+      (h) => this.sql.exec(`SELECT 1 FROM uploads WHERE hash = ? AND uploader NOT IN (${marks}) AND kind != 'removed'`, h, ...uploaders).toArray().length === 0,
     );
     this.ctx.storage.transactionSync(() => {
+      this.sql.exec(`DELETE FROM uploads WHERE uploader IN (${marks})`, ...uploaders);
       this.sql.exec("DELETE FROM credentials WHERE user_id = ?", id);
       this.sql.exec("DELETE FROM logins WHERE user_id = ?", id);
       this.sql.exec("DELETE FROM skins WHERE user_id = ?", id);
+      this.sql.exec("DELETE FROM agent_keys WHERE user_id = ?", id);
       this.sql.exec("DELETE FROM projects WHERE user_id = ?", id);
       this.sql.exec("DELETE FROM uploads WHERE uploader = ?", sub);
       this.sql.exec("UPDATE reports SET reporter = 'deleted' WHERE reporter = ?", sub);
       this.sql.exec("DELETE FROM users WHERE id = ?", id);
     });
-    return ok({ orphanHashes, projects });
+    return ok({ orphanHashes, projects, agents });
   }
 
   async alarm() {
@@ -826,8 +844,95 @@ export class Directory extends DurableObject<Env> {
     return this.listProjects().filter((p) => this.projectOwner(p.id) === userId);
   }
 
-  deleteProject(id: string): void {
-    this.sql.exec("DELETE FROM projects WHERE id = ?", id);
+  /**
+   * Borra un proyecto, sus claves de agente y lo que subieron esos agentes. Devuelve los agentes
+   * a expulsar (`agt_<id>`) y los archivos que ya nadie tiene, para borrarlos de R2.
+   */
+  deleteProject(id: string): { agents: string[]; orphanHashes: string[] } {
+    const agents = this.projectAgents(id);
+    const up = `prj_${id}`;
+    const hashes = this.sql.exec<{ hash: string }>("SELECT hash FROM uploads WHERE uploader = ?", up).toArray().map((r) => r.hash);
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec("DELETE FROM agent_keys WHERE project_id = ?", id);
+      this.sql.exec("DELETE FROM uploads WHERE uploader = ?", up);
+      this.sql.exec("DELETE FROM projects WHERE id = ?", id);
+    });
+    const orphanHashes = hashes.filter((h) => this.sql.exec("SELECT 1 FROM uploads WHERE hash = ? AND kind != 'removed'", h).toArray().length === 0);
+    return { agents, orphanHashes };
+  }
+
+  /* --- Claves de agente: construir en la parcela de un proyecto --- */
+
+  /**
+   * Crea una clave para que el agente de alguien construya en la parcela de su proyecto.
+   * Devuelve la clave en claro una sola vez; aquí solo queda su huella.
+   */
+  async createAgentKey(userId: string, projectId: unknown, label: unknown): Promise<Result<{ key: string; info: AgentKeyRow }>> {
+    if (typeof projectId !== "string") return fail(400, "bad_message", "falta el proyecto");
+    const p = this.sql
+      .exec<{ id: string; user_id: string; status: string; district: string | null }>("SELECT id, user_id, status, district FROM projects WHERE id = ?", projectId)
+      .toArray()[0];
+    if (!p || p.user_id !== userId) return fail(404, "not_found", "ese proyecto no es tuyo");
+    if (p.status !== "published" || !p.district) return fail(409, "not_published", "el proyecto necesita estar publicado en una parcela");
+    const n = this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM agent_keys WHERE project_id = ?", projectId).one().n;
+    if (n >= MAX_AGENT_KEYS_PER_PROJECT) {
+      return fail(409, "too_many_keys", `máximo ${MAX_AGENT_KEYS_PER_PROJECT} claves por proyecto; revoca una`, { max: MAX_AGENT_KEYS_PER_PROJECT });
+    }
+    const id = randomId("k", 6).replace(/[^a-zA-Z0-9]/g, "x");
+    const key = randomId("xk_", 24);
+    const name = typeof label === "string" ? label.trim().replace(/\s+/g, " ").slice(0, 40) : "";
+    this.sql.exec(
+      "INSERT INTO agent_keys (id, user_id, project_id, hash, label, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      id, userId, projectId, await sha256Hex(key), name || null, Date.now(),
+    );
+    return ok({ key, info: this.agentKeys(userId).find((k) => k.id === id)! });
+  }
+
+  agentKeys(userId: string): AgentKeyRow[] {
+    return this.sql
+      .exec<AgentKeyRow>(
+        `SELECT k.id, k.project_id, p.title AS project_title, k.label, k.created_at, k.last_used
+         FROM agent_keys k JOIN projects p ON p.id = k.project_id WHERE k.user_id = ? ORDER BY k.created_at`,
+        userId,
+      )
+      .toArray();
+  }
+
+  /** Agentes con clave de un proyecto (para expulsarlos si se oculta). */
+  projectAgents(projectId: string): string[] {
+    return this.sql.exec<{ id: string }>("SELECT id FROM agent_keys WHERE project_id = ?", projectId).toArray().map((r) => `agt_${r.id}`);
+  }
+
+  /** Revoca una clave; devuelve el agente a expulsar. */
+  revokeAgentKey(userId: string, id: string): Result<{ sub: string }> {
+    const n = this.sql.exec("DELETE FROM agent_keys WHERE id = ? AND user_id = ?", id, userId).rowsWritten;
+    return n ? ok({ sub: `agt_${id}` }) : fail(404, "not_found", "esa clave no existe");
+  }
+
+  /**
+   * Para /auth/agent: de una clave `xk_…` a su zona (chunk del distrito, rectángulo de la parcela
+   * y dueño de lo que construya, `prj_<id>`). Solo vale si el proyecto sigue publicado.
+   */
+  async resolveAgentKey(key: string): Promise<AgentZoneGrant | null> {
+    if (!key.startsWith("xk_")) return null;
+    const row = this.sql
+      .exec<{ id: string; user_id: string; project_id: string; label: string | null; district: string | null; parcel: string | null; status: string; title: string }>(
+        `SELECT k.id, k.user_id, k.project_id, k.label, p.district, p.parcel, p.status, p.title
+         FROM agent_keys k JOIN projects p ON p.id = k.project_id WHERE k.hash = ?`,
+        await sha256Hex(key),
+      )
+      .toArray()[0];
+    if (!row || row.status !== "published") return null;
+    const d = districtById(row.district);
+    const i = parcelIndex(row.parcel);
+    if (!d || i < 0) return null;
+    this.sql.exec("UPDATE agent_keys SET last_used = ? WHERE id = ?", Date.now(), row.id);
+    return {
+      key_id: row.id,
+      user_id: row.user_id,
+      name: row.label || row.title,
+      zone: { chunk_id: d.chunk, district: d.id, parcel: row.parcel!, owner: `prj_${row.project_id}`, ...parcelRect(i), facing: PARCELS[i]!.facing },
+    };
   }
 
   /** Distrito y parcela de un proyecto (para retirar su portal). */

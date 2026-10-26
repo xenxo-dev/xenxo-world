@@ -66,6 +66,9 @@ Este documento y [`packages/protocol/src/index.ts`](../packages/protocol/src/ind
 1. `POST /auth/guest` → token de invitado (1 h, sin permiso de construcción).
    `POST /auth/agent` con `Authorization: Bearer <clave>` → token de agente (15 min, scope `build`).
    La clave larga del agente **nunca** viaja por el WebSocket.
+   Con una **clave de parcela** (`xk_…`, la crea la dueña de un proyecto) el token lleva su `zone`
+   (chunk del distrito, rectángulo de la parcela, `facing` y `owner: "prj_<id>"`) y la respuesta trae
+   `budgets` (los de la parcela, §9 bis). Si el proyecto deja de estar publicado, la clave deja de valer.
 2. `GET /chunk/<chunk_id>/ws?token=<token>` → WebSocket.
 3. El cliente envía `HELLO`. El servidor responde `WELCOME` y `SNAPSHOT`, y avisa al resto con `PEER_JOIN`.
 
@@ -130,6 +133,30 @@ Lectura pública sin WebSocket: `GET /chunk/<chunk_id>/state` (contadores y últ
 | Poses por segundo y sesión | 15 |
 | Luces (`light@1`) por chunk | 16 |
 
+## 9 bis. Parcelas (agentes con clave de parcela)
+
+Un agente con `zone` es un cliente normal con tres límites que pone el servidor:
+
+- Solo construye en su chunk (`forbidden` en cualquier otro).
+- Todo lo que coloca tiene que **caber entero** en la parcela: la caja de la entidad (primitiva,
+  modelo con las medidas que tomó el servidor al subirlo, colisionador, rótulo o portal), girada y
+  escalada, dentro del rectángulo y entre `y = -0,5` y la altura máxima. Si no cabe:
+  `budget_exceeded` con `detail.reason = "out_of_zone"`, la parcela y la caja que ocupaba. Sin padre
+  (`parent: null`) por ahora.
+- Lo que construye es del proyecto (`owner: "prj_<id>"`), no de la clave: revocarla no lo borra;
+  borrar u ocultar el proyecto vacía la parcela. Cuenta en el presupuesto de la parcela
+  (`PARCEL_BUDGETS`), no en el del chunk:
+
+| Límite por parcela | Valor |
+|---|---|
+| Entidades | 32 |
+| Triángulos | 16.000 |
+| Luces | 1 |
+| Altura | 12 m |
+
+El servidor MCP (`packages/mcp`, MIT) es un cliente así: lo usa Claude Code, Cursor o cualquier
+cliente MCP para construir en la parcela con coordenadas de la parcela (ver su README).
+
 ## 10. Códigos de error
 
 `bad_message` · `unsupported_version` · `unauthorized` · `forbidden` · `not_found` · `version_conflict` · `budget_exceeded` · `unknown_component` · `rate_limited` · `duplicate`
@@ -153,6 +180,7 @@ El mundo solo se escribe por WebSocket (`MUTATE_WORLD`). Lo que no es mundo va p
 | | | Topes: 30 subidas al día y 100 MB por persona (`413 quota_exceeded`), 1000 subidas al día entre todos (`429 storage_busy`); el almacén entero tiene un tope de 8 GB para no salir del plan gratuito de R2 (`507 storage_full`). Las lecturas `GET /assets/<hash>` pasan por la caché de Cloudflare |
 | `GET /assets/<sha256-hex>` | público | Sirve el asset, inmutable y cacheable para siempre. Los **assets del sistema** (la plaza y los avatares de serie, generados por la forja) se sirven desde los recursos estáticos del Worker con la misma ruta |
 | `GET /me` · `PATCH /me` · `POST /me/avatar` | persona | Perfil (con `player_no`), nombre visible y personaje (uno subido o uno de serie). Devuelven un token nuevo con nombre, avatar y número |
+| `GET /me/agent-keys` · `POST /me/agent-keys { project_id, label? }` · `DELETE /me/agent-keys/<id>` | persona | Claves de parcela de sus proyectos publicados (máximo 3 por proyecto). La clave en claro solo llega al crearla (`{ key, info }`); se guarda su huella. Revocar corta al momento las conexiones de ese agente |
 | `GET /me/skins` · `DELETE /me/skins/<hash>` | persona | El armario: hasta 3 personajes propios guardados (`{ skins, max }`). `POST /me/avatar { hash, label? }` viste uno de serie o uno propio; si es propio y no está guardado, entra en el armario (`skins_full` si ya hay 3). Quitar uno que llevas puesto te devuelve a uno de serie; si nadie más subió ese archivo, se borra |
 | `POST /me/session` | persona | Renueva la sesión con los datos de ahora (número, nombre, personaje); la web lo llama al abrirse |
 | `GET /me/export` · `DELETE /me` | persona | RGPD: exportar todos tus datos; borrar la cuenta y todo su contenido |

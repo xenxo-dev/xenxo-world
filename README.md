@@ -7,7 +7,7 @@ Se está construyendo en público. Esto es la v0.5.
 ## Publicar en xenxo.io (si no vas a tocar el código)
 
 - **Tu personaje y tu proyecto:** entra en [xenxo.io](https://xenxo.io), *Cuenta → Crear cuenta* con passkey o Google (sin email). Desde ahí subes tu personaje (`.vrm` o `.glb`) y en *Proyectos → Publicar el mío* tu proyecto. Eliges **distrito** (Arcade, Píxel, Ágora, Taller o Frontera) y una **parcela libre** en su plano, y das **nombre, enlace, una portada (imagen 16:9) y un monumento 3D** (`.glb`, ≤ 10.000 triángulos): tu proyecto aparece como un **portal en tu parcela**, con la portada en la pantalla y el monumento (hasta 1,6 m) en la peana de delante, en el escaparate del nexo y como tarjeta en el nexo 2D. Guía de modelos: [`docs/CREAR-MODELOS.md`](docs/CREAR-MODELOS.md).
-- **Construir con un agente de IA:** hoy hace falta una clave de agente que da el equipo de xenxo (escribe a contact@xenxo.io). Están en camino las parcelas propias y un servidor MCP para conectar Claude Code o Cursor sin pedir nada a nadie.
+- **Construir con un agente de IA:** publica tu proyecto, crea una clave de parcela en *Proyectos → Construir con tu agente* y conecta el servidor MCP de xenxo a Claude Code o Cursor (ver abajo). Para construir fuera de una parcela hace falta una clave que da el equipo (contact@xenxo.io).
 - **Tu propia copia del mundo:** sigue *Arrancar en local* y *Desplegar*.
 
 ## Arquitectura
@@ -89,6 +89,15 @@ Para quien no quiera moverse en 3D, el panel tiene el **nexo 2D**: las mismas po
 
 La disposición está en `apps/realtime/src/nexo-layout.json` y `districts.json` (las usan el servidor, la forja y la web); sus piezas se forjan con `npm run forge:nexo` y `npm run forge:districts`. Para sacar recursos (texturas, modelos, avatares, sonido) mira [`docs/RECURSOS.md`](docs/RECURSOS.md).
 
+## Construye en tu parcela con tu agente (MCP)
+
+Quien publica un proyecto puede dejar que su agente (Claude Code, Cursor o cualquier cliente MCP)
+construya en su parcela: en *Proyectos → Construir con tu agente* crea una **clave de parcela**
+(`xk_…`), descarga el servidor MCP (`xenxo.io/mcp/xenxo-mcp.mjs`, un solo archivo) y se lo conecta
+a su agente. El agente es un cliente más del protocolo: todo pasa por `MUTATE_WORLD` y el servidor
+comprueba que cada pieza quepa entera en la parcela (10 × 10 m, 12 m de alto) y su presupuesto
+(32 piezas, 16.000 triángulos, 1 luz). Detalles en [`packages/mcp/README.md`](packages/mcp/README.md).
+
 ## La Plaza (distrito) y las personas
 
 - **Arquitectura generada por código** (`tools/forge`, Blender sin pantalla): casas con soportales, balcones de forja, persianas y tejas, campanario con cúpula de azulejo, fuente, puerta monumental con neón, farolas, bancos y naranjos. La oclusión ambiental se hornea en su sitio y cada pieza tiene dos niveles de detalle.
@@ -148,7 +157,7 @@ El agente de ejemplo usa la variable `XENXO_URL=https://api.xenxo.io` y el secre
 - [ ] Agente con LLM y servidor MCP del mundo ("trae tu propio agente")
 - [x] Nexo de entrada con portales (3D y 2D) y paso de un lugar a otro
 - [x] Distritos temáticos con 16 parcelas: cada proyecto elige la suya
-- [ ] Construir en tu parcela con tu agente (MCP) — fase 2
+- [x] Construir en tu parcela con tu agente (MCP): clave de parcela y servidor MCP
 - [x] Arquitectura generada (forja), texturas escaneadas y cielo real en lugar de primitivas
 - [x] Personas realistas de serie con animaciones VRMA, gestos en red y colisiones
 - [x] Chat de cada lugar con bocadillos, límites, denuncias y moderación
@@ -161,5 +170,5 @@ El agente de ejemplo usa la variable `XENXO_URL=https://api.xenxo.io` y el secre
 ## Licencia
 
 - **El mundo** (servidor, web y herramientas): [AGPL-3.0](LICENSE). Puedes usarlo, cambiarlo y montar tu propia copia, pero si la abres al público tienes que publicar tu código con tus cambios. Así nadie puede cerrar xenxo y quedarse con una versión privada.
-- **Lo que usan los creadores** (`packages/protocol`, `packages/assets`, `apps/headless` y, cuando existan, el SDK, la plantilla y el servidor MCP): **MIT**. Conectar tu juego o tu agente a xenxo no cambia la licencia de tu código: sigue siendo tuyo.
+- **Lo que usan los creadores** (`packages/protocol`, `packages/assets`, `apps/headless`, `packages/mcp` y, cuando existan, el SDK y la plantilla): **MIT**. Conectar tu juego o tu agente a xenxo no cambia la licencia de tu código: sigue siendo tuyo.
 - **Recursos gráficos**: ver [`CREDITS.md`](CREDITS.md).

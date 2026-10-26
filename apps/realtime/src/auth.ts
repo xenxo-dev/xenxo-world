@@ -19,6 +19,16 @@ export interface Principal {
   avatar?: { hash: string; format: "glb" | "vrm" };
   /** Número de jugador (personas registradas). */
   no?: number;
+  /**
+   * Agentes de una parcela: solo construyen en este chunk, dentro de este rectángulo, y lo que
+   * hacen es del proyecto (`owner`, `prj_<id>`), no de la clave: revocarla no borra lo construido.
+   */
+  zone?: {
+    chunk_id: string; district: string; parcel: string; owner: string;
+    x0: number; z0: number; x1: number; z1: number;
+    /** Hacia dónde mira la parcela (grados: 0 = su calle está al sur, +Z; 180 = al norte). */
+    facing: number;
+  };
 }
 
 const enc = new TextEncoder();

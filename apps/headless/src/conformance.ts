@@ -672,6 +672,85 @@ await scenario("chat: denunciar un mensaje guarda una copia y moderación puede 
   me.close();
 });
 
+await scenario("parcela: la clave de agente de un proyecto construye solo dentro de su parcela", async () => {
+  const api = new Api(baseUrl);
+  await api.register(`conf ${randomUUID().slice(0, 6)}`);
+  const parcel = await freeParcel("pixel");
+  const cover = await api.upload(makeCoverPng(), "cover");
+  const mon = await api.upload(await makeBoxGlb({ segments: 2, color: [Math.random(), Math.random(), Math.random(), 1] }), "monument");
+  assert(cover.ok && mon.ok, "subidas");
+  const created = await api.call<{ project: { id: string } }>("POST", "/projects", {
+    title: "Parcela de prueba", url: "https://github.com/xenxo-dev/xenxo-world", district: "pixel", parcel,
+    cover_hash: cover.data.hash, mesh_hash: mon.data.hash,
+  });
+  assert(created.ok, `publicar: ${JSON.stringify(created)}`);
+  const pid = created.data.project.id;
+
+  const stranger = new Api(baseUrl);
+  await stranger.register(`conf ${randomUUID().slice(0, 6)}`);
+  const notMine = await stranger.call("POST", "/me/agent-keys", { project_id: pid });
+  assert(!notMine.ok && notMine.error === "not_found", "nadie más puede crear claves para tu parcela");
+  const k = await api.call<{ key: string; info: { id: string } }>("POST", "/me/agent-keys", { project_id: pid, label: "mi agente" });
+  assert(k.ok && k.data.key.startsWith("xk_"), `crear clave: ${JSON.stringify(k)}`);
+
+  const auth = await (await fetch(new URL("/auth/agent", baseUrl), { method: "POST", headers: { Authorization: `Bearer ${k.data.key}` } })).json() as {
+    principal: { zone: { chunk_id: string; owner: string; x0: number; z0: number; x1: number; z1: number } };
+    budgets: { maxEntities: number; maxHeight: number };
+  };
+  const z = auth.principal.zone;
+  assert(z?.chunk_id === "c_-1_0" && z.owner === `prj_${pid}` && z.x1 - z.x0 === 10, `zona: ${JSON.stringify(z)}`);
+  const cx = (z.x0 + z.x1) / 2, cz = (z.z0 + z.z1) / 2;
+  const box = (p: number[], size = [1, 1, 1]) => ({
+    "transform@1": { p, r: [0, 0, 0, 1], s: [1, 1, 1], parent: null },
+    "primitive@1": { shape: "box", size, color: "#44ccff" },
+  });
+
+  const agent = await XenxoClient.connect({ baseUrl, chunkId: "c_-1_0", agentKey: k.data.key });
+  const ok1 = await agent.mutate({ op: "SPAWN", components: box([cx, 0.5, cz]) });
+  assert(ok1.type === "ACK", `dentro de la parcela: ${JSON.stringify(ok1.payload)}`);
+  const eid = (ok1.payload as { entity_id: string }).entity_id;
+  const edge = await agent.mutate({ op: "SPAWN", components: box([z.x1 - 0.2, 0.5, cz]) });
+  assert(edge.type === "ERROR" && (edge.payload.detail as { reason?: string })?.reason === "out_of_zone", "medio fuera → out_of_zone");
+  const tall = await agent.mutate({ op: "SPAWN", components: box([cx, auth.budgets.maxHeight, cz]) });
+  assert(tall.type === "ERROR", "por encima de la altura máxima → error");
+  const moveOut = await agent.mutate({ op: "PATCH", entity_id: eid, base_rev: 1, components: { "transform@1": { p: [z.x1 + 3, 0.5, cz], r: [0, 0, 0, 1], s: [1, 1, 1], parent: null } } });
+  assert(moveOut.type === "ERROR", "moverlo fuera de la parcela → error");
+  const moveIn = await agent.mutate({ op: "PATCH", entity_id: eid, base_rev: 1, components: { "transform@1": { p: [cx + 2, 0.5, cz], r: [0, 0, 0, 1], s: [1, 1, 1], parent: null } } });
+  assert(moveIn.type === "ACK", "moverlo dentro → ACK");
+  const stand = await agent.mutate({ op: "DESPAWN", entity_id: `stand_${pid}`, base_rev: 1 });
+  assert(stand.type === "ERROR" && stand.payload.code === "forbidden", "no puede tocar el portal de su parcela");
+  const light = (dx: number) => ({ ...box([cx + dx, 2, cz], [0.2, 0.2, 0.2]), "light@1": { type: "point", color: "#ffffff", intensity: 1, range: 4, when: "always" } });
+  assert((await agent.mutate({ op: "SPAWN", components: light(-1) })).type === "ACK", "una luz cabe");
+  const light2 = await agent.mutate({ op: "SPAWN", components: light(1) });
+  assert(light2.type === "ERROR" && light2.payload.code === "budget_exceeded", "la segunda luz supera el presupuesto de la parcela");
+
+  const watcher = await XenxoClient.connect({ baseUrl, chunkId: "c_-1_0" });
+  const mine = watcher.snapshot.entities.find((e) => e.entity_id === eid);
+  assert(mine?.owner === `prj_${pid}`, `lo construido es del proyecto, no de la clave (${mine?.owner})`);
+
+  const plaza = await XenxoClient.connect({ baseUrl, chunkId: PLACES.plaza, agentKey: k.data.key });
+  const away = await plaza.mutate({ op: "SPAWN", components: box([32, 0.5, 32]) });
+  assert(away.type === "ERROR" && away.payload.code === "forbidden", "en otro chunk → forbidden");
+  plaza.close();
+
+  const list = await api.call<{ keys: { id: string }[] }>("GET", "/me/agent-keys");
+  assert(list.ok && list.data.keys.length === 1, "GET /me/agent-keys");
+  const exp = await api.call<{ agent_keys: unknown[] }>("GET", "/me/export");
+  assert(exp.ok && exp.data.agent_keys.length === 1 && !JSON.stringify(exp.data).includes(k.data.key), "la exportación lista la clave sin enseñarla");
+  const revoked = await api.call("DELETE", `/me/agent-keys/${k.data.info.id}`);
+  assert(revoked.ok, "revocar");
+  const after = await fetch(new URL("/auth/agent", baseUrl), { method: "POST", headers: { Authorization: `Bearer ${k.data.key}` } });
+  await after.arrayBuffer();
+  assert(after.status === 401, "una clave revocada ya no entra");
+  agent.close();
+
+  // Borrar el proyecto vacía la parcela.
+  const removed = watcher.next("DELTA", (m) => m.payload.changes.some((c) => c.kind === "remove" && c.entity_id === eid), 5000);
+  assert((await api.call("DELETE", `/projects/${pid}`)).ok, "borrar el proyecto");
+  await removed;
+  watcher.close();
+});
+
 await scenario("limpieza: lo subido que nada usa se borra pasados 7 días; lo que se usa, no", async () => {
   if (!adminKey) return console.log("    (sin XENXO_ADMIN_KEY: se omite)");
   const user = new Api(baseUrl);
@@ -679,7 +758,8 @@ await scenario("limpieza: lo subido que nada usa se borra pasados 7 días; lo qu
   const color = (): [number, number, number, number] => [Math.random(), Math.random(), Math.random(), 1];
   const worn = await user.upload(await makeBoxGlb({ color: color() }), "avatar");
   const loose = await user.upload(await makeBoxGlb({ segments: 3, color: color() }), "avatar");
-  const cover = await user.upload(await makeCoverPng(), "cover");
+  // Portada única: una igual podría ser la de un proyecto que sí existe (y entonces no se toca).
+  const cover = await user.upload(makeCoverPng(320, 180, [Math.floor(Math.random() * 255), Math.floor(Math.random() * 255), 77]), "cover");
   assert(worn.ok && loose.ok && cover.ok, "subidas");
   assert((await user.call("POST", "/me/avatar", { hash: worn.data.hash })).ok, "ponerse el primero");
   const admin = new Api(baseUrl);

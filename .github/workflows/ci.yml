@@ -37,5 +37,9 @@ jobs:
       - run: npm run conformance
         env:
           XENXO_URL: http://localhost:8787
+      - name: Servidor MCP de punta a punta
+        run: npm run build -w @xenxo/mcp && npm run mcp-e2e -w @xenxo/headless
+        env:
+          XENXO_URL: http://localhost:8787
       - if: failure()
         run: cat apps/realtime/wrangler.log

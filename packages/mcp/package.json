@@ -1,0 +1,35 @@
+{
+  "name": "@xenxo/mcp",
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "description": "Servidor MCP de xenxo: tu agente (Claude Code, Cursor…) construye en la parcela de tu proyecto",
+  "bin": {
+    "xenxo-mcp": "dist/xenxo-mcp.mjs"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/xenxo-mcp.mjs --banner:js=\"import { createRequire as __xenxoRequire } from 'node:module'; const require = __xenxoRequire(import.meta.url);\"",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@xenxo/assets": "*",
+    "@xenxo/headless": "*",
+    "@xenxo/protocol": "*",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.20.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

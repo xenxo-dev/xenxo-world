@@ -91,6 +91,9 @@ jobs:
         if: env.SKIP != '1'
         run: |
           VITE_REALTIME_URL="https://api.$WEB_DOMAIN" npm run build -w @xenxo/web
+          # El servidor MCP (un solo archivo) se sirve desde la web: xenxo.io/mcp/xenxo-mcp.mjs
+          npm run build -w @xenxo/mcp
+          mkdir -p apps/web/dist/mcp && cp packages/mcp/dist/xenxo-mcp.mjs apps/web/dist/mcp/
           cd apps/web && npx wrangler deploy --domain "$WEB_DOMAIN" --domain "www.$WEB_DOMAIN"
 
       - name: Comprobación

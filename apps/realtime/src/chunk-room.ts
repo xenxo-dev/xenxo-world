@@ -16,6 +16,7 @@ import {
   ENTITY_SCHEMA,
   estimateTris,
   msg,
+  PARCEL_BUDGETS,
   PLACES,
   PROTOCOL_VERSION,
   type AvatarPose,
@@ -30,7 +31,8 @@ import { randomId, type Principal } from "./auth";
 import { plazaSeed, SEED_VERSION } from "./seed";
 import { districtByChunk, districtSeed, DISTRICT_SEED_VERSION, PARCELS, parcelSlot } from "./districts";
 import { nexoArrival, NEXO_SEED_VERSION, nexoSeed, SHOWCASE_SLOTS } from "./nexo";
-import { portalEntities, type Seeded } from "./places";
+import { portalEntities, r3, type Seeded } from "./places";
+import { fitsZone, localBox, worldBox, type Zone } from "./zone";
 import { assetKey } from "./assets";
 import { SEED_ASSETS } from "./seed-assets";
 import { isAvatarPreset } from "./avatar-presets-check";
@@ -39,6 +41,18 @@ const TICK_HZ = 8;
 
 /** Triángulos de cada LOD de las piezas de la forja (para usarlas sin pasar por R2). */
 const SYSTEM_LODS = new Map(Object.values(SEED_ASSETS).flatMap((a) => a.lods.map((l) => [l.hash, l.tris] as const)));
+/** Medidas guardadas al subir un modelo (customMetadata.bounds), o null si no se pueden leer. */
+function parseBounds(raw: string | undefined): { min: number[]; max: number[] } | null {
+  try {
+    const b = raw ? (JSON.parse(raw) as { min?: number[]; max?: number[] }) : null;
+    return b && Array.isArray(b.min) && Array.isArray(b.max) && b.min.length === 3 && b.max.length === 3 ? { min: b.min, max: b.max } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Medidas de las piezas del sistema (para comprobar que caben en una parcela). */
+const SYSTEM_BOUNDS = new Map(Object.values(SEED_ASSETS).flatMap((a) => a.lods.map((l) => [l.hash, a.lods[0]!.bounds] as const)));
 
 /** Ids de las entidades del portal de un proyecto en su parcela. */
 function standIds(projectId: string) {
@@ -321,10 +335,17 @@ export class ChunkRoom extends DurableObject<Env> {
     p: { idempotency_key: string; target: "commit" | "proposal"; mutation: MutationOp },
   ) {
     const actor = att.principal.sub;
+    const zone = att.principal.zone;
     try {
       // Los triángulos de un modelo NO se creen al cliente: se leen de lo que midió el servidor al subirlo.
-      p.mutation = await this.resolveAssets(p.mutation);
+      const resolved = await this.resolveAssets(p.mutation);
+      p.mutation = resolved.mu;
+      // Un PATCH en una parcela que no cambia el modelo: sus medidas, las del que ya lleva.
+      if (zone && p.mutation.op === "PATCH" && !p.mutation.components["mesh@1"]) resolved.meshBounds = await this.boundsOfEntity(p.mutation.entity_id);
       if (!att.principal.scopes.includes("build")) throw new MutationError("forbidden", "esta sesión no tiene permiso de construcción");
+      if (zone && zone.chunk_id !== this.chunkId) {
+        throw new MutationError("forbidden", `esta clave solo construye en su parcela (${zone.district} ${zone.parcel})`, { zone });
+      }
       if (p.target === "proposal") throw new MutationError("bad_message", "las propuestas (ramas) llegan en una versión futura; usa target: commit");
 
       const idemKey = `${actor}:${p.idempotency_key}`;
@@ -336,7 +357,7 @@ export class ChunkRoom extends DurableObject<Env> {
 
       this.rateLimit(actor);
       const result = this.ctx.storage.transactionSync(() => {
-        const r = this.applyMutation(actor, att.principal.scopes.includes("admin"), p.mutation);
+        const r = this.applyMutation(actor, att.principal.scopes.includes("admin"), p.mutation, zone ? { ...zone, meshBounds: resolved.meshBounds } : null);
         this.sql.exec("INSERT INTO idem (key, result, ts) VALUES (?, ?, ?)", idemKey, JSON.stringify({ entity_id: r.entity_id, rev: r.rev }), Date.now());
         return r;
       });
@@ -350,23 +371,34 @@ export class ChunkRoom extends DurableObject<Env> {
     }
   }
 
-  private applyMutation(actor: string, isAdmin: boolean, mu: MutationOp) {
+  /**
+   * Aplica una mutación ya validada en forma. Con `zone` (agente de una parcela), lo construido es
+   * del proyecto (`zone.owner`), tiene que caber entero en la parcela y cuenta en el presupuesto
+   * de la parcela, no en el del chunk.
+   */
+  private applyMutation(actor: string, isAdmin: boolean, mu: MutationOp, zone: (Zone & { meshBounds: { min: number[]; max: number[] } | null }) | null) {
+    const owner = zone?.owner ?? actor;
     if (mu.op === "SPAWN") {
       const components = this.validateComponents(mu.components);
       const entity_id = mu.entity_id ?? randomId("e_");
       if (this.getRow(entity_id)) throw new MutationError("duplicate", "ya existe una entidad con ese id");
-      const count = this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM entities").one().n;
-      if (count >= BUDGETS.maxEntitiesPerChunk) throw new MutationError("budget_exceeded", "chunk lleno de entidades", { max: BUDGETS.maxEntitiesPerChunk });
-      if (components["light@1"]) this.checkLights(1);
-      this.checkTris(estimateTris(components), 0);
-      const entity = this.insertEntity(entity_id, actor, components);
+      if (zone) {
+        this.checkZone(components, zone);
+        this.checkParcel(zone.owner, { entities: 1, tris: estimateTris(components), lights: components["light@1"] ? 1 : 0 });
+      } else {
+        const count = this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM entities").one().n;
+        if (count >= BUDGETS.maxEntitiesPerChunk) throw new MutationError("budget_exceeded", "chunk lleno de entidades", { max: BUDGETS.maxEntitiesPerChunk });
+        if (components["light@1"]) this.checkLights(1);
+        this.checkTris(estimateTris(components), 0);
+      }
+      const entity = this.insertEntity(entity_id, owner, components);
       this.logEvent(actor, "SPAWN", entity_id, 1, components);
       return { entity_id, rev: 1, change: { kind: "upsert" as const, entity } };
     }
 
     const row = this.getRow(mu.entity_id);
     if (!row) throw new MutationError("not_found", "la entidad no existe");
-    if (row.owner !== actor && !isAdmin) throw new MutationError("forbidden", "solo el dueño puede modificar esta entidad");
+    if (row.owner !== owner && !isAdmin) throw new MutationError("forbidden", "solo el dueño puede modificar esta entidad");
     if (row.rev !== mu.base_rev) throw new MutationError("version_conflict", "la entidad cambió desde que la leíste", { current_rev: row.rev });
 
     if (mu.op === "DESPAWN") {
@@ -383,9 +415,16 @@ export class ChunkRoom extends DurableObject<Env> {
       else merged[k] = v;
     }
     const components = this.validateComponents(merged);
-    if (components["light@1"] && !(JSON.parse(row.data) as Entity).components["light@1"]) this.checkLights(1);
+    const hadLight = !!(JSON.parse(row.data) as Entity).components["light@1"];
     const tris = estimateTris(components);
-    this.checkTris(tris, row.tris);
+    if (zone) {
+      // Un PATCH sin mesh@1 nuevo no trae medidas: se usan las del modelo que ya tiene.
+      this.checkZone(components, zone);
+      this.checkParcel(zone.owner, { entities: 0, tris: tris - row.tris, lights: components["light@1"] && !hadLight ? 1 : 0 });
+    } else {
+      if (components["light@1"] && !hadLight) this.checkLights(1);
+      this.checkTris(tris, row.tris);
+    }
     const rev = row.rev + 1;
     const entity = this.entityOf(mu.entity_id, row.owner, rev, components);
     this.sql.exec("UPDATE entities SET rev = ?, tris = ?, data = ? WHERE entity_id = ?", rev, tris, JSON.stringify(entity), mu.entity_id);
@@ -393,11 +432,15 @@ export class ChunkRoom extends DurableObject<Env> {
     return { entity_id: mu.entity_id, rev, change: { kind: "upsert" as const, entity } };
   }
 
-  /** Sustituye los datos de cada LOD de mesh@1 por los medidos al subirlo; falla si el asset no existe. */
-  private async resolveAssets(mu: MutationOp): Promise<MutationOp> {
-    if (mu.op === "DESPAWN") return mu;
+  /**
+   * Sustituye los datos de cada LOD de mesh@1 por los medidos al subirlo; falla si el asset no existe.
+   * Devuelve también las medidas del modelo (del primer LOD), para comprobar que cabe en una parcela.
+   */
+  private async resolveAssets(mu: MutationOp): Promise<{ mu: MutationOp; meshBounds: { min: number[]; max: number[] } | null }> {
+    if (mu.op === "DESPAWN") return { mu, meshBounds: null };
     const mesh = mu.components["mesh@1"] as { lods?: { hash?: unknown }[] } | null | undefined;
-    if (!mesh || !Array.isArray(mesh.lods)) return mu;
+    if (!mesh || !Array.isArray(mesh.lods)) return { mu, meshBounds: null };
+    let meshBounds: { min: number[]; max: number[] } | null = null;
     const lods = [];
     for (const lod of mesh.lods) {
       if (typeof lod?.hash !== "string") throw new MutationError("bad_message", "cada LOD necesita un hash");
@@ -405,13 +448,55 @@ export class ChunkRoom extends DurableObject<Env> {
       const system = SYSTEM_LODS.get(lod.hash);
       if (system !== undefined) {
         lods.push({ hash: lod.hash, media: "model/gltf-binary", tris: system });
+        if (lods.length === 1) meshBounds = SYSTEM_BOUNDS.get(lod.hash) ?? null;
         continue;
       }
       const meta = await this.env.ASSETS.head(assetKey(lod.hash));
       if (!meta) throw new MutationError("not_found", `el asset ${lod.hash} no existe; súbelo antes a /assets`);
       lods.push({ hash: lod.hash, media: "model/gltf-binary", tris: Number(meta.customMetadata?.tris ?? 0) });
+      if (lods.length === 1) meshBounds = parseBounds(meta.customMetadata?.bounds);
     }
-    return { ...mu, components: { ...mu.components, "mesh@1": { ...mesh, lods } } };
+    return { mu: { ...mu, components: { ...mu.components, "mesh@1": { ...mesh, lods } } }, meshBounds };
+  }
+
+  /** Medidas del modelo que ya lleva una entidad (para un PATCH en una parcela que solo la mueve). */
+  private async boundsOfEntity(entityId: string): Promise<{ min: number[]; max: number[] } | null> {
+    const row = this.getRow(entityId);
+    const mesh = row ? ((JSON.parse(row.data) as Entity).components["mesh@1"] as { lods?: { hash?: string }[] } | undefined) : undefined;
+    const hash = mesh?.lods?.[0]?.hash;
+    if (!hash) return null;
+    if (SYSTEM_BOUNDS.has(hash)) return SYSTEM_BOUNDS.get(hash) ?? null;
+    const meta = await this.env.ASSETS.head(assetKey(hash));
+    return parseBounds(meta?.customMetadata?.bounds);
+  }
+
+  /** Que lo de una parcela quepa entero en ella (sin padre: su posición es la del chunk). */
+  private checkZone(c: Components, zone: Zone & { meshBounds: { min: number[]; max: number[] } | null }) {
+    if (c["transform@1"].parent) throw new MutationError("bad_message", "en una parcela, las entidades van sin padre (parent: null) por ahora");
+    const local = localBox(c, zone.meshBounds);
+    if (!local) throw new MutationError("bad_message", "no se pudieron leer las medidas del modelo; vuelve a subirlo");
+    const box = worldBox(c["transform@1"], local);
+    if (!fitsZone(box, zone)) {
+      throw new MutationError("budget_exceeded", "no cabe entero en tu parcela", {
+        reason: "out_of_zone",
+        parcel: { x0: zone.x0, z0: zone.z0, x1: zone.x1, z1: zone.z1, max_height: PARCEL_BUDGETS.maxHeight },
+        box: { min: box.min.map(r3), max: box.max.map(r3) },
+      });
+    }
+  }
+
+  /** Presupuesto de una parcela: lo que ya tiene su proyecto más lo que se añade. */
+  private checkParcel(owner: string, add: { entities: number; tris: number; lights: number }) {
+    const now = this.sql
+      .exec<{ n: number; t: number | null; l: number }>(
+        `SELECT COUNT(*) AS n, SUM(tris) AS t, SUM(CASE WHEN data LIKE '%"light@1"%' THEN 1 ELSE 0 END) AS l FROM entities WHERE owner = ?`,
+        owner,
+      )
+      .one();
+    const B = PARCEL_BUDGETS;
+    if (now.n + add.entities > B.maxEntities) throw new MutationError("budget_exceeded", "tu parcela ya tiene todas las piezas que caben", { max: B.maxEntities, used: now.n });
+    if ((now.t ?? 0) + add.tris > B.maxTris) throw new MutationError("budget_exceeded", "tu parcela superaría su presupuesto de triángulos", { max: B.maxTris, used: now.t ?? 0, add: add.tris });
+    if (now.l + add.lights > B.maxLights) throw new MutationError("budget_exceeded", "tu parcela ya tiene todas las luces que caben", { max: B.maxLights });
   }
 
   /* ---------------------------------------------------------------- */
@@ -471,9 +556,9 @@ export class ChunkRoom extends DurableObject<Env> {
   /** Crea varias entidades en una sola transacción (con la misma validación que MUTATE_WORLD). */
   private async spawnAll(owner: string, entities: Seeded[], also?: () => void) {
     const resolved: MutationOp[] = [];
-    for (const e of entities) resolved.push(await this.resolveAssets({ op: "SPAWN", entity_id: e.id, components: e.components }));
+    for (const e of entities) resolved.push((await this.resolveAssets({ op: "SPAWN", entity_id: e.id, components: e.components })).mu);
     return this.ctx.storage.transactionSync(() => {
-      const out = resolved.map((op) => this.applyMutation(owner, false, op).change);
+      const out = resolved.map((op) => this.applyMutation(owner, false, op, null).change);
       also?.();
       return out;
     });
@@ -556,6 +641,20 @@ export class ChunkRoom extends DurableObject<Env> {
   }
 
   /** Supresión (RGPD): elimina todo lo que pertenece a un actor en este chunk (entidades y chat). */
+  /** Corta las conexiones de estos agentes (clave revocada o proyecto retirado). */
+  async kick(subs: string[]): Promise<number> {
+    let n = 0;
+    for (const ws of this.ctx.getWebSockets()) {
+      const att = ws.deserializeAttachment() as Attachment | null;
+      if (att && subs.includes(att.principal.sub)) {
+        this.sendError(ws, undefined, "unauthorized", "tu clave de agente ya no vale");
+        ws.close(4001, "revoked");
+        n++;
+      }
+    }
+    return n;
+  }
+
   async purgeOwner(owner: string): Promise<number> {
     this.ensureChunk(null);
     const ids = this.sql.exec<{ entity_id: string }>("SELECT entity_id FROM entities WHERE owner = ?", owner).toArray().map((r) => r.entity_id);

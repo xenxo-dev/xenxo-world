@@ -1,12 +1,12 @@
 import { ASSET_BUDGETS } from "@xenxo/assets";
-import { ChunkId, PLACES } from "@xenxo/protocol";
+import { ChunkId, PARCEL_BUDGETS, PLACES } from "@xenxo/protocol";
 import { assetMeta, assetKey, forgetAssets, handleGet, handleUpload } from "./assets";
 import { isAvatarPreset } from "./avatar-presets-check";
 import { randomId, resolveAgent, signToken, verifyToken, type Principal } from "./auth";
 import type { ChunkRoom, ShowcaseItem } from "./chunk-room";
 import { DISTRICTS, districtById, parcelIndex, parcelSpawn } from "./districts";
 import { SHOWCASE_SLOTS } from "./nexo";
-import { MAX_SKINS, type Directory, type UserRow } from "./directory";
+import { MAX_AGENT_KEYS_PER_PROJECT, MAX_SKINS, type Directory, type UserRow } from "./directory";
 
 export { ChunkRoom } from "./chunk-room";
 export { Directory } from "./directory";
@@ -199,6 +199,16 @@ function chunk(env: Env, id: string) {
   });
 }
 
+/** Vacía la parcela de un proyecto: su portal, lo que construyeron sus agentes y los agentes conectados. */
+async function clearParcel(env: Env, district: string | null | undefined, projectId: string, agents: string[]) {
+  const c = districtChunk(district);
+  if (!c) return;
+  const room = chunk(env, c);
+  await room.removeStand(projectId);
+  await room.purgeOwner(`prj_${projectId}`);
+  if (agents.length) await room.kick(agents);
+}
+
 function directory(env: Env) {
   const ns = inJurisdiction(env, env.DIRECTORY);
   return ns.get(ns.idFromName("directory")) as unknown as Api<Directory>;
@@ -281,6 +291,20 @@ export default {
       }
       if (path === "/auth/agent" && req.method === "POST") {
         const key = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
+        // Clave de parcela (la crea su dueño en la web): construye solo ahí.
+        if (key.startsWith("xk_")) {
+          const g = await directory(env).resolveAgentKey(key);
+          if (!g) return json({ error: "unauthorized", message: "clave no válida o revocada (o el proyecto ya no está publicado)" }, 401, h);
+          const p: Principal = {
+            sub: `agt_${g.key_id}`,
+            kind: "agent",
+            scopes: ["build", "upload"],
+            exp: Date.now() + AGENT_TTL_MS,
+            name: g.name,
+            zone: g.zone,
+          };
+          return json({ token: await signToken(p, env.TOKEN_SECRET), principal: p, budgets: PARCEL_BUDGETS }, 200, h);
+        }
         const agent = await resolveAgent(key, env.AGENT_KEYS);
         if (!agent) return json({ error: "unauthorized" }, 401, h);
         const p: Principal = { sub: `agt_${agent.id}`, kind: "agent", scopes: agent.scopes, exp: Date.now() + AGENT_TTL_MS };
@@ -347,11 +371,13 @@ export default {
       if (path === "/assets" && req.method === "POST") {
         const p = await bearer(req, env);
         if (!p) return json({ error: "unauthorized", message: "inicia sesión para subir modelos" }, 401, h);
-        const allowed = await dir.canUpload(p.sub);
+        // Lo que sube el agente de una parcela cuenta para su proyecto (cuota propia, y no lo toca la limpieza).
+        const uploader = p.zone?.owner ?? p.sub;
+        const allowed = await dir.canUpload(uploader);
         if (!allowed.ok) return failure(allowed, h);
         const r = await handleUpload(req, p, env.ASSETS);
         if (!r.ok) return failure(r, h);
-        await dir.recordUpload(p.sub, r.data.hash, r.data.kind, r.data.bytes);
+        await dir.recordUpload(uploader, r.data.hash, r.data.kind, r.data.bytes);
         return json(r.data, 201, h);
       }
 
@@ -414,6 +440,23 @@ export default {
           const r = await dir.setAvatar(uid, hash, format, label);
           return r.ok ? json(await userToken(r.data, env), 200, h) : failure(r, h);
         }
+        /* Claves de agente: construir en la parcela de un proyecto */
+        if (path === "/me/agent-keys" && req.method === "GET") {
+          return json({ keys: await dir.agentKeys(uid), max_per_project: MAX_AGENT_KEYS_PER_PROJECT, budgets: PARCEL_BUDGETS }, 200, h);
+        }
+        if (path === "/me/agent-keys" && req.method === "POST") {
+          const body = await readJson(req);
+          const r = await dir.createAgentKey(uid, body.project_id, body.label);
+          return r.ok ? json(r.data, 201, h) : failure(r, h);
+        }
+        const akey = path.match(/^\/me\/agent-keys\/([a-zA-Z0-9]{4,20})$/);
+        if (akey && req.method === "DELETE") {
+          const r = await dir.revokeAgentKey(uid, akey[1]!);
+          if (!r.ok) return failure(r, h);
+          // Fuera ya: su token deja de valer en cuanto caduca, pero la conexión abierta se corta ahora.
+          for (const d of DISTRICTS) await chunk(env, d.chunk).kick([r.data.sub]);
+          return json({ revoked: true }, 200, h);
+        }
         /* El armario: personajes propios guardados (máximo MAX_SKINS) */
         if (path === "/me/skins" && req.method === "GET") {
           return json({ skins: await dir.skins(uid), max: MAX_SKINS }, 200, h);
@@ -460,10 +503,7 @@ export default {
         if (path === "/me" && req.method === "DELETE") {
           const r = await dir.deleteAccount(uid);
           if (!r.ok) return failure(r, h);
-          for (const p of r.data.projects) {
-            const c = districtChunk(p.district);
-            if (c) await chunk(env, c).removeStand(p.id);
-          }
+          for (const p of r.data.projects) await clearParcel(env, p.district, p.id, r.data.agents);
           for (const c of CHAT_CHUNKS) await chunk(env, c).purgeOwner(`usr_${uid}`);
           await syncShowcase(env, dir);
           await forgetAssets(env.ASSETS, req.url, r.data.orphanHashes);
@@ -508,9 +548,9 @@ export default {
         if (!owner) return json({ error: "not_found" }, 404, h);
         if (owner !== uid && !isAdmin) return json({ error: "forbidden", message: "solo su autor puede borrarlo" }, 403, h);
         const place = await dir.projectPlace(proj[1]!);
-        const c = districtChunk(place?.district);
-        if (c) await chunk(env, c).removeStand(proj[1]!);
-        await dir.deleteProject(proj[1]!);
+        const gone = await dir.deleteProject(proj[1]!);
+        await clearParcel(env, place?.district, proj[1]!, gone.agents);
+        await forgetAssets(env.ASSETS, req.url, gone.orphanHashes);
         ctx.waitUntil(syncShowcase(env, dir));
         return json({ deleted: true }, 200, h);
       }
@@ -546,8 +586,7 @@ export default {
         const hide = path.match(/^\/admin\/projects\/([a-zA-Z0-9_-]{4,40})\/hide$/);
         if (hide && req.method === "POST") {
           const place = await dir.projectPlace(hide[1]!);
-          const c = districtChunk(place?.district);
-          if (c) await chunk(env, c).removeStand(hide[1]!);
+          await clearParcel(env, place?.district, hide[1]!, await dir.projectAgents(hide[1]!));
           const hidden = await dir.hideProject(hide[1]!);
           ctx.waitUntil(syncShowcase(env, dir));
           return json({ hidden }, 200, h);
