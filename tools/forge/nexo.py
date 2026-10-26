@@ -61,13 +61,11 @@ def floor(lay: dict, detail: int = 1):
     cyan = lay["colors"]["line"]
     plat = mat("panel", "#2a3242")
     core = mat("panel", "#3a4558")
-    void = mat("oscuro", "#04060a")
     neon = mat("neon", cyan)
     seg = 128 if detail else 64
     R = lay["platform"]
     p = Part("nexo_floor")
-    # Vacío alrededor (todo el chunk) y la plataforma con canto.
-    p.box((-32, -32, -0.62), (32, 32, -0.6), void, skip=("-z",))
+    # La plataforma con canto (alrededor, nada: se ve la ciudad de abajo, que pinta el cliente).
     p.lathe((0, 0, 0), [(R, -0.6), (R, 0.0)], plat, segments=seg, smooth=False)
     p.lathe((0, 0, 0), [(R, 0.0), (0.0001, 0.0)], plat, segments=seg, smooth=False)
     # Círculo central un tono más claro, enrasado

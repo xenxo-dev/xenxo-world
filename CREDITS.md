@@ -17,6 +17,8 @@ plan y prompt). Son de xenxo según las condiciones de cada plataforma, que dan 
 uso comercial de lo generado, pero **no son CC0**: las condiciones de Higgsfield prohíben usar sus
 resultados para entrenar modelos de IA, y esa restricción acompaña a estas imágenes.
 
-Todavía no hay ninguna en uso.
+- **Fondo panorámico del nexo** (`tools/materials/generated/nexo-panorama/`, servido como
+  `apps/web/public/sky/nexo-*.webp`): megaciudad cyberpunk y espacio, de noche y de día. Seis
+  paneles generados con Higgsfield (GPT Image 2.5, plan Plus, 26-10-2026) y unidos con `stitch.py`.
 
 Herramientas: Blender, VRM Add-on for Blender, glTF-Transform, meshoptimizer, three.js, @pixiv/three-vrm.

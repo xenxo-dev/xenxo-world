@@ -1,0 +1,21 @@
+{
+ "platform": "Higgsfield",
+ "model": "gpt_image_2_5",
+ "date": "2026-10-26",
+ "plan": "plus",
+ "settings": {
+  "aspect_ratio": "21:9",
+  "resolution": "4k",
+  "quality": "high"
+ },
+ "use": "Fondo panorámico del nexo (apps/web/public/sky/nexo-{night,day}-{4,8}k.webp), unido con stitch.py",
+ "panels": {
+  "night-a": "Ultra-wide photorealistic panoramic photograph at night, seen from a platform floating high above a vast futuristic cyberpunk megacity. Horizon at the vertical middle. Dense skyscrapers with glowing windows, neon accents in cyan, magenta and violet, holographic billboards with abstract shapes and no readable text, light trails of flying traffic, haze. Deep starry sky with a faint purple nebula, a huge ringed gas giant planet with violet and teal bands upper left and a small pale moon. No foreground, no people, no text, no logos, no watermark.",
+  "night-b": "Same scene description: arcologies and a few colossal towers, starry sky with the Milky Way, faint teal aurora-like glow, an orbital space station high on the right. No planet, no people, no text, no logos, no watermark.",
+  "night-c": "Same scene description: elevated maglev rail lines, neon in magenta, cyan and amber, rain-wet reflections and haze, starry sky with violet nebula clouds, a small ringed planet low on the left. No people, no text, no logos, no watermark.",
+  "day-a": "Edit of night-a (image reference): the exact same view in bright daytime, clear blue sky with soft high clouds, planet and moon pale like a daytime moon, glass and steel facades, neon dimmer. No people, no text, no logos, no watermark.",
+  "day-b": "Edit of night-b (image reference): the same view in bright daytime, station as a pale silhouette.",
+  "day-c": "Edit of night-c (image reference): the same view in bright daytime, small ringed planet as a pale silhouette."
+ },
+ "credits_spent": 25.5
+}

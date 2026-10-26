@@ -264,7 +264,8 @@ function Scene({ active }: { active: boolean }) {
   const ambience: Ambience = inPlaza || inNexo ? g.ambience : "night";
   const profile: LightProfile = inPlaza ? ambience : inNexo && ambience === "day" ? "nexoDay" : "nexo";
   const sky = SKY[ambience];
-  const realSky = ambience === "day" && f.pbr;
+  // El cielo de nubes (HDRI) es de la plaza; el nexo lleva su panorámica.
+  const realSky = ambience === "day" && f.pbr && !inNexo;
   const daySky = useDaySky(realSky);
   const dayEnv = daySky?.env ?? null;
   const skyReady = !!daySky;
@@ -276,7 +277,7 @@ function Scene({ active }: { active: boolean }) {
       <fog attach="fog" args={[sky.fog, ambience === "night" ? 45 : 70, ambience === "night" ? 230 : 260]} />
       {!skyReady && <Sky ambience={ambience} />}
       {inPlaza && <Skyline count={f.skyline} ambience={ambience} pbr={f.pbr} />}
-      {inNexo && <NexoBackdrop count={f.skyline} ambience={ambience} />}
+      {inNexo && <NexoBackdrop ambience={ambience} hd={f.textures >= 1024} />}
       <Lighting profile={profile} features={f} />
       <Environment ambience={ambience} profile={profile} probe={f.probe} sky={dayEnv} />
       {/* Los textos cargan su fuente de forma asíncrona: que nunca bloqueen la escena ni el panel. */}
