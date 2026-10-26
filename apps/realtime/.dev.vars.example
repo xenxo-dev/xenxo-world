@@ -16,3 +16,8 @@ DO_JURISDICTION=
 
 # Las passkeys en local funcionan con el dominio localhost.
 RP_ID=localhost
+
+# Entrar con Google (opcional). Cliente OAuth web de Google Cloud con el redirect
+# http://localhost:8787/auth/google/callback. Sin estas dos, el botón no aparece.
+# GOOGLE_CLIENT_ID=xxxxxxxx.apps.googleusercontent.com
+# GOOGLE_CLIENT_SECRET=...

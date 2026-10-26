@@ -6,7 +6,7 @@ Se está construyendo en público. Esto es la v0.5.
 
 ## Publicar en xenxo.io (si no vas a tocar el código)
 
-- **Tu personaje y tu proyecto:** entra en [xenxo.io](https://xenxo.io), *Personalizar → Crear cuenta con passkey* (sin email). Desde ahí subes tu personaje (`.vrm` o `.glb`) y en *Proyectos → Publicar el mío* tu proyecto. Para publicar hacen falta **nombre, enlace, categoría, una portada (imagen 16:9) y un monumento 3D** (`.glb`, ≤ 10.000 triángulos): tu proyecto aparece como un **portal en el nexo**, con la portada en la pantalla y el monumento (hasta 1,6 m) en la peana de delante, y como tarjeta en el nexo 2D. Guía de modelos: [`docs/CREAR-MODELOS.md`](docs/CREAR-MODELOS.md).
+- **Tu personaje y tu proyecto:** entra en [xenxo.io](https://xenxo.io), *Personalizar → Crear cuenta con passkey* (sin email). Desde ahí subes tu personaje (`.vrm` o `.glb`) y en *Proyectos → Publicar el mío* tu proyecto. Eliges **distrito** (Arcade, Píxel, Ágora, Taller o Frontera) y una **parcela libre** en su plano, y das **nombre, enlace, una portada (imagen 16:9) y un monumento 3D** (`.glb`, ≤ 10.000 triángulos): tu proyecto aparece como un **portal en tu parcela**, con la portada en la pantalla y el monumento (hasta 1,6 m) en la peana de delante, en el escaparate del nexo y como tarjeta en el nexo 2D. Guía de modelos: [`docs/CREAR-MODELOS.md`](docs/CREAR-MODELOS.md).
 - **Construir con un agente de IA:** hoy hace falta una clave de agente que da el equipo de xenxo (escribe a contact@xenxo.io). Están en camino las parcelas propias y un servidor MCP para conectar Claude Code o Cursor sin pedir nada a nadie.
 - **Tu propia copia del mundo:** sigue *Arrancar en local* y *Desplegar*.
 
@@ -53,7 +53,7 @@ Para probar en las Quest 3 en la misma red, abre `http://<IP-de-tu-PC>:5173` en 
 Cualquiera que se dé de alta (con una passkey) puede, desde **Personalizar** y **Proyectos**:
 
 - Subir su **personaje** en `.glb` (Blender o lo que quiera) o `.vrm` (VRoid Studio y similares). Se valida y se optimiza en su propio navegador antes de subirlo, y los demás lo ven en la plaza.
-- **Publicar un proyecto** con nombre, enlace, categoría, portada y monumento 3D (descripción opcional). Aparece como portal en el nexo y como tarjeta en el nexo 2D.
+- **Publicar un proyecto** en la parcela que elija de un distrito, con nombre, enlace, portada y monumento 3D (descripción opcional). Aparece como portal en su parcela, en el escaparate del nexo y como tarjeta en el nexo 2D.
 - Escribir en el **chat de la plaza** (los invitados lo leen); los mensajes salen también como bocadillos sobre los personajes y se pueden denunciar.
 - Descargar todos sus datos o borrar la cuenta (y todo su contenido) en un clic.
 
@@ -80,11 +80,14 @@ npm run agent:build    # el agente coloca un bloque en la plaza
 
 ## El nexo: la entrada
 
-Al entrar en xenxo se aparece en el **nexo**, un vestíbulo minimalista fuera del mapa: suelo oscuro con líneas de luz cian, «xenxo» escrito con luz en el suelo del círculo central, un faro fino y un anillo de 24 portales mirando al centro. Uno lleva a **la plaza** (un distrito con historia; su arco devuelve al nexo) y 23 son para los proyectos de la comunidad: portada en la pantalla, banda con el color de su categoría y su monumento en la peana. Al acercarte se abre su ficha con el enlace (nunca se abre nada sin pulsar).
+Al entrar en xenxo se aparece en el **nexo**, un vestíbulo minimalista fuera del mapa: suelo oscuro con líneas de luz cian, «xenxo» escrito con luz en el suelo del círculo central, un faro fino y un anillo de 24 portales mirando al centro. Seis llevan a los **distritos** y 18 son el **escaparate** de los proyectos más nuevos.
+
+- **La Plaza**: el distrito con historia (su arco devuelve al nexo).
+- **Arcade** (juegos 3D), **Píxel** (juegos 2D), **Ágora** (social), **Taller** (herramientas) y **Frontera** (lo demás): cada uno con una avenida, dos calles y **16 parcelas** de 10×10 m. Quien publica elige distrito y parcela libre; su portal va al fondo de la parcela con su portada, su monumento en la peana y su nombre en neón. Al acercarte se abre su ficha con el enlace (nunca se abre nada sin pulsar). En la fase 2, la parcela será también el terreno que su dueño o su agente pueda construir.
 
 Para quien no quiera moverse en 3D, el panel tiene el **nexo 2D**: las mismas portadas en tarjetas grandes, filtro por categoría, *Abrir* el proyecto o *Ver su portal* (te lleva delante de él).
 
-La disposición está en `apps/realtime/src/nexo-layout.json` (la usan el servidor y la forja); sus piezas se forjan con `npm run forge:nexo`.
+La disposición está en `apps/realtime/src/nexo-layout.json` y `districts.json` (las usan el servidor, la forja y la web); sus piezas se forjan con `npm run forge:nexo` y `npm run forge:districts`. Para sacar recursos (texturas, modelos, avatares, sonido) mira [`docs/RECURSOS.md`](docs/RECURSOS.md).
 
 ## La plaza y las personas
 
@@ -144,7 +147,8 @@ El agente de ejemplo usa la variable `XENXO_URL=https://api.xenxo.io` y el secre
 - [x] Exportar y borrar datos (RGPD), denuncias y moderación (DSA), páginas legales en borrador
 - [ ] Agente con LLM y servidor MCP del mundo ("trae tu propio agente")
 - [x] Nexo de entrada con portales (3D y 2D) y paso de un lugar a otro
-- [ ] Parcelas y distritos de la comunidad (fase 2)
+- [x] Distritos temáticos con 16 parcelas: cada proyecto elige la suya
+- [ ] Construir en tu parcela con tu agente (MCP) — fase 2
 - [x] Arquitectura generada (forja), texturas escaneadas y cielo real en lugar de primitivas
 - [x] Personas realistas de serie con animaciones VRMA, gestos en red y colisiones
 - [x] Chat de la plaza con bocadillos, límites, denuncias y moderación

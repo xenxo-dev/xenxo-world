@@ -78,5 +78,15 @@
   "tile": 2.0,
   "source": "Poly Haven · Leafy Grass (CC0)",
   "asset": "leafy_grass"
+ },
+ "panel": {
+  "tile": 2.0,
+  "source": "ambientCG · MetalPlates004 (CC0)",
+  "asset": "MetalPlates004"
+ },
+ "scifi": {
+  "tile": 2.0,
+  "source": "ambientCG · MetalPlates015A (CC0)",
+  "asset": "MetalPlates015A"
  }
 }

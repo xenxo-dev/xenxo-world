@@ -43,8 +43,8 @@ def _annulus(p: Part, r0: float, r1: float, z: float, m, segments: int) -> None:
 def floor(lay: dict, detail: int = 1):
     """Plataforma circular con anillos de luz y líneas hacia cada portal. Centrada en el origen."""
     cyan = lay["colors"]["line"]
-    plat = mat("losa", "#2a3242")
-    core = mat("losa", "#364156")
+    plat = mat("panel", "#2a3242")
+    core = mat("panel", "#3a4558")
     void = mat("oscuro", "#04060a")
     neon = mat("neon", cyan)
     seg = 128 if detail else 64

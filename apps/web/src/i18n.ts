@@ -44,7 +44,7 @@ const es = {
   "projects.publish": "Publicar el mío",
   "projects.empty": "Todavía no hay proyectos. ¡Publica el primero!",
   "projects.by": "por {name}",
-  "projects.inWorld": "En el nexo",
+  "projects.inWorld": "En su parcela",
   "projects.visit": "Visitar",
   "projects.report": "Denunciar",
   "projects.delete": "Borrar",
@@ -55,7 +55,7 @@ const es = {
   "projects.modelHint": "Se optimiza en tu navegador antes de subirlo (máx. 10.000 triángulos y 2 MB) y se coloca sobre la peana de delante de tu portal, a escala de hasta 1,6 m.",
   "projects.submit": "Publicar",
   "projects.publishing": "Publicando…",
-  "projects.published": "¡Publicado! Tu portal ya está en el nexo.",
+  "projects.published": "¡Publicado! Tu portal ya está en tu parcela y en el escaparate del nexo.",
   "account.title": "Tu cuenta",
   "account.intro": "Sin email ni contraseña: entras con una passkey (huella, cara o PIN de tu dispositivo).",
   "account.age": "Tengo 14 años o más",
@@ -191,7 +191,7 @@ const es = {
   "portal.open": "Abrir",
   "portal.close": "Cerrar",
   "portal.external": "Se abre en una pestaña nueva. Es la web de su autor, no de xenxo.",
-  "nexo.intro": "La entrada a xenxo. Elige adónde ir: en 3D caminando hasta su portal, o desde aquí con un toque.",
+  "nexo.intro": "La entrada a xenxo. Cada distrito tiene 16 parcelas con los proyectos de la comunidad. Ve caminando hasta su portal en 3D, o desde aquí con un toque.",
   "nexo.districts": "Distritos",
   "nexo.plaza": "La Plaza",
   "nexo.plazaDesc": "La plaza mediterránea de neón donde empezó todo: chat, gestos y los edificios de la comunidad.",
@@ -199,8 +199,17 @@ const es = {
   "nexo.seePortal": "Ver su portal",
   "nexo.projects": "Proyectos de la comunidad",
   "nexo.all": "Todos",
-  "nexo.empty": "Aún no hay proyectos. Hay 23 portales esperando al primero.",
+  "nexo.empty": "Aún no hay proyectos. Hay 80 parcelas esperando al primero.",
   "nexo.free": "{n} portales libres",
+  "nexo.freeParcels": "{n} parcelas libres de 16",
+  "projects.district": "Distrito",
+  "projects.parcel": "Parcela",
+  "projects.parcelHint": "Tu portal va al fondo de la parcela, mirando a su calle (la raya de color). En la fase 2 podrás construir dentro de ella.",
+  "projects.gate": "puerta al nexo",
+  "err.bad_district": "Elige un distrito.",
+  "err.bad_parcel": "Elige una parcela libre.",
+  "err.parcel_taken": "Alguien acaba de ocupar esa parcela. Elige otra.",
+  "err.district_full": "Ese distrito está lleno. Elige otro.",
   "cat.game3d": "Juego 3D",
   "cat.game2d": "Juego 2D",
   "cat.social": "Social",
@@ -212,7 +221,7 @@ const es = {
   "projects.coverChoose": "Elegir imagen",
   "projects.coverHint": "Se ve en la pantalla de tu portal y en el nexo 2D. Tu navegador la convierte a WebP (máx. 300 KB).",
   "projects.monument": "Monumento 3D (.glb)",
-  "projects.requirements": "Para publicar hacen falta nombre, enlace, categoría, portada y un monumento 3D: es lo que verá la gente en el nexo, en 3D y en 2D.",
+  "projects.requirements": "Para publicar hacen falta nombre, enlace, un distrito y una parcela libre, portada y un monumento 3D: es lo que verá la gente en tu parcela, en el nexo y en el nexo 2D.",
   "err.cover_required": "Falta la portada del proyecto.",
   "err.monument_required": "Falta el monumento 3D del proyecto.",
   "err.bad_category": "Elige una categoría.",
@@ -262,7 +271,7 @@ const en: Record<Key, string> = {
   "projects.publish": "Publish mine",
   "projects.empty": "No projects yet. Be the first to publish one!",
   "projects.by": "by {name}",
-  "projects.inWorld": "In the Nexus",
+  "projects.inWorld": "On its plot",
   "projects.visit": "Visit",
   "projects.report": "Report",
   "projects.delete": "Delete",
@@ -273,7 +282,7 @@ const en: Record<Key, string> = {
   "projects.modelHint": "It's optimised in your browser before uploading (max 10,000 triangles and 2 MB) and placed on the pedestal in front of your portal, scaled to at most 1.6 m.",
   "projects.submit": "Publish",
   "projects.publishing": "Publishing…",
-  "projects.published": "Published! Your portal is now in the Nexus.",
+  "projects.published": "Published! Your portal is now on your plot and in the Nexus showcase.",
   "account.title": "Your account",
   "account.intro": "No email, no password: you sign in with a passkey (your device's fingerprint, face or PIN).",
   "account.age": "I am 14 or older",
@@ -409,7 +418,7 @@ const en: Record<Key, string> = {
   "portal.open": "Open",
   "portal.close": "Close",
   "portal.external": "Opens in a new tab. It's the author's site, not xenxo's.",
-  "nexo.intro": "The way into xenxo. Choose where to go: in 3D by walking up to its portal, or from here with one tap.",
+  "nexo.intro": "The way into xenxo. Each district has 16 plots with the community's projects. Walk up to its portal in 3D, or go from here with one tap.",
   "nexo.districts": "Districts",
   "nexo.plaza": "The Plaza",
   "nexo.plazaDesc": "The neon Mediterranean square where it all began: chat, emotes and the community's buildings.",
@@ -417,8 +426,17 @@ const en: Record<Key, string> = {
   "nexo.seePortal": "See its portal",
   "nexo.projects": "Community projects",
   "nexo.all": "All",
-  "nexo.empty": "No projects yet. 23 portals are waiting for the first one.",
+  "nexo.empty": "No projects yet. 80 plots are waiting for the first one.",
   "nexo.free": "{n} free portals",
+  "nexo.freeParcels": "{n} of 16 plots free",
+  "projects.district": "District",
+  "projects.parcel": "Plot",
+  "projects.parcelHint": "Your portal goes at the back of the plot, facing its street (the coloured line). In phase 2 you'll be able to build inside it.",
+  "projects.gate": "gate to the Nexus",
+  "err.bad_district": "Choose a district.",
+  "err.bad_parcel": "Choose a free plot.",
+  "err.parcel_taken": "Someone just took that plot. Choose another one.",
+  "err.district_full": "That district is full. Choose another one.",
   "cat.game3d": "3D game",
   "cat.game2d": "2D game",
   "cat.social": "Social",
@@ -430,7 +448,7 @@ const en: Record<Key, string> = {
   "projects.coverChoose": "Choose image",
   "projects.coverHint": "Shown on your portal's screen and in the 2D Nexus. Your browser converts it to WebP (max 300 KB).",
   "projects.monument": "3D monument (.glb)",
-  "projects.requirements": "To publish you need a name, link, category, cover and a 3D monument: that's what people will see in the Nexus, in 3D and in 2D.",
+  "projects.requirements": "To publish you need a name, link, a district and a free plot, a cover and a 3D monument: that's what people will see on your plot, in the Nexus and in the 2D Nexus.",
   "err.cover_required": "The project cover is missing.",
   "err.monument_required": "The project's 3D monument is missing.",
   "err.bad_category": "Choose a category.",
@@ -507,8 +525,16 @@ export function useLang(): Lang {
   );
 }
 
-/** Nombre de un lugar del mundo por su chunk ("el nexo", "la plaza"…). */
+/** Nombres de lugares que llegan como datos (los distritos, de GET /districts). */
+const placeNames = new Map<string, Record<string, string>>();
+export function registerPlaceName(chunkId: string, names: Record<string, string>) {
+  placeNames.set(chunkId, names);
+}
+
+/** Nombre de un lugar del mundo por su chunk ("el nexo", "la plaza", "Arcade"…). */
 export function placeName(chunkId: string): string {
   const key = `place.${chunkId}`;
-  return key in DICTS[lang] ? t(key as Key) : t("place.other");
+  if (key in DICTS[lang]) return t(key as Key);
+  const n = placeNames.get(chunkId);
+  return n ? (n[lang] ?? n.en ?? Object.values(n)[0]!) : t("place.other");
 }

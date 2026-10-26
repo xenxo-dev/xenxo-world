@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 import bpy  # noqa: E402
 
+import district  # noqa: E402
 import kit  # noqa: E402
 import nexo  # noqa: E402
 import pieces  # noqa: E402
@@ -31,7 +32,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 DEFAULT_OUT = os.path.join(ROOT, "tools", "forge", "out")
 
 # Tamaño del mapa de oclusión por pieza: [detallado, ligero]
-AO_SIZE = {"nexo": (1024, 512), "building": (1024, 512), "tower": (1024, 512), "fountain": (512, 256), "ground": (2048, 1024), "prop": (256, 128)}
+AO_SIZE = {"district": (1024, 512), "nexo": (1024, 512), "building": (1024, 512), "tower": (1024, 512), "fountain": (512, 256), "ground": (2048, 1024), "prop": (256, 128)}
 
 
 def place(ob, x: float, z: float, facing_deg: float = 0.0) -> None:
@@ -86,6 +87,13 @@ def main() -> None:
     add("nexo_floor", "nexo", lambda d: nexo.floor(nx, d), [(cx + far, cz, 0)])
     add("nexo_beacon", "prop", lambda d: nexo.beacon(nx, d), [(cx + far, cz, 0)])
     add("nexo_frame", "prop", lambda d: nexo.frame(nx, d), [(x + far, z, f) for x, z, f in nexo.slots(nx)])
+
+    # Distritos: cada uno en su sitio lejano (también para hornear sin vecinos) y su emblema.
+    dl = district.layout()
+    for i, dd in enumerate(dl["districts"]):
+        ox = 2000.0 + i * 100.0
+        add(f"district_{dd['id']}", "district", lambda d, dd=dd: district.ground(dl, dd, d), [(ox + 32.0, 32.0, 0)])
+        add(f"emblem_{dd['id']}", "prop", lambda d, dd=dd: district.emblem(dd, d), [(ox + 32.0, -40.0, 0)])
 
     # Colocar: la primera instancia es el propio objeto; el resto, copias enlazadas (solo como oclusores).
     for name, item in catalog.items():

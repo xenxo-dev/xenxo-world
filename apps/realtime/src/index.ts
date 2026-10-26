@@ -3,7 +3,9 @@ import { ChunkId, PLACES } from "@xenxo/protocol";
 import { assetMeta, assetKey, handleGet, handleUpload } from "./assets";
 import { isAvatarPreset } from "./avatar-presets-check";
 import { randomId, resolveAgent, signToken, verifyToken, type Principal } from "./auth";
-import type { ChunkRoom } from "./chunk-room";
+import type { ChunkRoom, ShowcaseItem } from "./chunk-room";
+import { DISTRICTS, districtById, parcelIndex, parcelSpawn } from "./districts";
+import { SHOWCASE_SLOTS } from "./nexo";
 import type { Directory, UserRow } from "./directory";
 
 export { ChunkRoom } from "./chunk-room";
@@ -26,6 +28,82 @@ export interface Env {
   FOUNDER_USER_ID?: string;
   /** Cuenta de GitHub cuyos repos públicos muestra el panel. */
   GITHUB_OWNER?: string;
+  /** Entrar con Google (opcional): cliente OAuth web. El secreto va en un secreto, nunca en el código. */
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+}
+
+/* ------------------------------------------------------------------ */
+/* Entrar con Google (OpenID Connect, flujo de código + PKCE)           */
+/* ------------------------------------------------------------------ */
+
+const GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth";
+const GOOGLE_TOKEN = "https://oauth2.googleapis.com/token";
+
+function googleEnabled(env: Env) {
+  return !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
+}
+
+/** Origen de la web al que volver: solo uno de los permitidos (nada de redirecciones abiertas). */
+function webOrigin(env: Env, wanted: string | null): string {
+  const allowed = (env.ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (wanted && allowed.includes(wanted)) return wanted;
+  return allowed.find((o) => o.startsWith("https://")) ?? allowed[0] ?? "https://xenxo.io";
+}
+
+function back(origin: string, params: Record<string, string>) {
+  const u = new URL("/", origin);
+  for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
+  return new Response(null, { status: 302, headers: { Location: u.toString(), "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
+}
+
+function googleUrl(env: Env, req: Request, start: { state: string; nonce: string; code_challenge: string }) {
+  const u = new URL(GOOGLE_AUTH);
+  u.searchParams.set("client_id", env.GOOGLE_CLIENT_ID!);
+  u.searchParams.set("redirect_uri", new URL("/auth/google/callback", req.url).toString());
+  u.searchParams.set("response_type", "code");
+  // Solo "openid": Google nos da un identificador de la cuenta y nada más (ni email ni nombre).
+  u.searchParams.set("scope", "openid");
+  u.searchParams.set("state", start.state);
+  u.searchParams.set("nonce", start.nonce);
+  u.searchParams.set("code_challenge", start.code_challenge);
+  u.searchParams.set("code_challenge_method", "S256");
+  u.searchParams.set("prompt", "select_account");
+  return u.toString();
+}
+
+/**
+ * Cambia el código de Google por su id_token y devuelve el identificador de la cuenta.
+ * El token llega directamente de Google por TLS, así que (OpenID Connect §3.1.3.7) basta con
+ * comprobar emisor, audiencia, caducidad y nonce.
+ */
+async function googleSubject(env: Env, req: Request, code: string, verifier: string, nonce: string): Promise<string | null> {
+  const r = await fetch(GOOGLE_TOKEN, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      code,
+      client_id: env.GOOGLE_CLIENT_ID!,
+      client_secret: env.GOOGLE_CLIENT_SECRET!,
+      redirect_uri: new URL("/auth/google/callback", req.url).toString(),
+      grant_type: "authorization_code",
+      code_verifier: verifier,
+    }),
+  });
+  if (!r.ok) return null;
+  const { id_token } = (await r.json()) as { id_token?: string };
+  const part = id_token?.split(".")[1];
+  if (!part) return null;
+  const claims = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(part.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0)))) as {
+    iss?: string;
+    aud?: string;
+    exp?: number;
+    nonce?: string;
+    sub?: string;
+  };
+  const issOk = claims.iss === "https://accounts.google.com" || claims.iss === "accounts.google.com";
+  if (!issOk || claims.aud !== env.GOOGLE_CLIENT_ID || !claims.exp || claims.exp * 1000 < Date.now() || claims.nonce !== nonce || !claims.sub) return null;
+  return claims.sub;
 }
 
 /**
@@ -60,10 +138,37 @@ async function githubRepos(env: Env, ctx: ExecutionContext): Promise<Response> {
 const GUEST_TTL_MS = 60 * 60 * 1000;
 const AGENT_TTL_MS = 15 * 60 * 1000;
 const USER_TTL_MS = 12 * 60 * 60 * 1000;
-/** Los portales de los proyectos viven en el nexo. */
-const EXPO_CHUNK = PLACES.nexo;
-/** Lugares con chat (para denuncias, exportación y baja de una cuenta). */
-const CHAT_CHUNKS = [PLACES.nexo, PLACES.plaza];
+/** Lugares del mundo (para denuncias de chat, exportación y baja de una cuenta). */
+const CHAT_CHUNKS = [PLACES.nexo, PLACES.plaza, ...DISTRICTS.map((d) => d.chunk)];
+
+/** Chunk del distrito donde vive el portal de un proyecto (null si es antiguo, sin parcela). */
+function districtChunk(districtId: string | null | undefined): string | null {
+  return districtById(districtId)?.chunk ?? null;
+}
+
+/** Deja el escaparate del nexo con los proyectos más nuevos (tras publicar, borrar u ocultar). */
+async function syncShowcase(env: Env, dir: ReturnType<typeof directory>) {
+  const rows = await dir.showcase(SHOWCASE_SLOTS.length);
+  const items: ShowcaseItem[] = [];
+  for (const r of rows) {
+    const d = districtById(r.district);
+    const i = parcelIndex(r.parcel);
+    if (!d || i < 0) continue;
+    const meta = await assetMeta(env.ASSETS, r.mesh_hash);
+    const at = parcelSpawn(i);
+    items.push({
+      projectId: r.id,
+      title: r.title,
+      category: r.category,
+      cover: r.cover_hash,
+      mesh: meta && meta.triangles <= ASSET_BUDGETS.monument.maxTriangles ? { hash: r.mesh_hash, bounds: meta.bounds } : null,
+      chunk: d.chunk,
+      spawn: at.p,
+      yaw: at.yaw,
+    });
+  }
+  await chunk(env, PLACES.nexo).syncShowcase(items);
+}
 
 function inJurisdiction<T extends Rpc.DurableObjectBranded | undefined>(env: Env, ns: DurableObjectNamespace<T>): DurableObjectNamespace<T> {
   return env.DO_JURISDICTION === "eu" || env.DO_JURISDICTION === "fedramp" ? ns.jurisdiction(env.DO_JURISDICTION) : ns;
@@ -184,6 +289,41 @@ export default {
         return r.ok ? json(await userToken(r.data, env), 200, h) : failure(r, h);
       }
 
+      /* --- Entrar con Google (opcional) --- */
+      if (path === "/auth/methods" && req.method === "GET") {
+        return json({ passkey: true, google: googleEnabled(env) }, 200, { ...h, "Cache-Control": "public, max-age=60" });
+      }
+      if (path === "/auth/google/start" && req.method === "GET") {
+        const q = url.searchParams;
+        const origin = webOrigin(env, q.get("origin"));
+        if (!googleEnabled(env)) return back(origin, { auth_error: "google_disabled" });
+        const r = await dir.googleStart({
+          mode: q.get("mode"),
+          display_name: q.get("name"),
+          age_confirmed: q.get("age") === "1",
+          accept_terms: q.get("terms"),
+          origin,
+        });
+        if (!r.ok) return back(origin, { auth_error: r.error });
+        return new Response(null, { status: 302, headers: { Location: googleUrl(env, req, r.data), "Cache-Control": "no-store" } });
+      }
+      if (path === "/auth/google/callback" && req.method === "GET") {
+        const q = url.searchParams;
+        const flow = await dir.googleFlow(q.get("state"));
+        if (!flow) return back(webOrigin(env, null), { auth_error: "flow_expired" });
+        const code = q.get("code");
+        if (!code || !googleEnabled(env)) return back(flow.origin, { auth_error: q.get("error") === "access_denied" ? "google_cancelled" : "google_failed" });
+        const subject = await googleSubject(env, req, code, flow.verifier, flow.nonce);
+        if (!subject) return back(flow.origin, { auth_error: "google_failed" });
+        const r = await dir.googleComplete(flow, subject);
+        if (!r.ok) return back(flow.origin, { auth_error: r.error });
+        return back(flow.origin, r.data.linked ? { google_linked: "1" } : { google: r.data.code! });
+      }
+      if (path === "/auth/google/finish" && req.method === "POST") {
+        const r = await dir.googleRedeem((await readJson(req)).code);
+        return r.ok ? json(await userToken(r.data, env), 200, h) : failure(r, h);
+      }
+
       /* --- Assets --- */
       const asset = path.match(/^\/assets\/([0-9a-f]{64})$/);
       if (asset && (req.method === "GET" || req.method === "HEAD")) return handleGet(asset[1]!, env.ASSETS, req, ctx, env.STATIC);
@@ -196,6 +336,11 @@ export default {
         if (!r.ok) return failure(r, h);
         await dir.recordUpload(p.sub, r.data.hash, r.data.kind, r.data.bytes);
         return json(r.data, 201, h);
+      }
+
+      /* --- Distritos y parcelas (lectura pública) --- */
+      if (path === "/districts" && req.method === "GET") {
+        return json({ districts: await dir.districts() }, 200, { ...h, "Cache-Control": "public, max-age=10" });
       }
 
       /* --- Proyectos (lectura pública) --- */
@@ -245,6 +390,27 @@ export default {
           const r = await dir.setAvatar(uid, hash, format);
           return r.ok ? json(await userToken(r.data, env), 200, h) : failure(r, h);
         }
+        /* Formas de entrar: más passkeys, Google */
+        if (path === "/me/logins" && req.method === "GET") {
+          return json({ ...(await dir.logins(uid)), google_available: googleEnabled(env) }, 200, h);
+        }
+        if (path === "/me/logins/google" && req.method === "POST") {
+          if (!googleEnabled(env)) return json({ error: "google_disabled", message: "Entrar con Google no está activado" }, 503, h);
+          const r = await dir.googleStart({ mode: "link", userId: uid, origin: webOrigin(env, req.headers.get("Origin")) });
+          return r.ok ? json({ url: googleUrl(env, req, r.data) }, 200, h) : failure(r, h);
+        }
+        if (path === "/me/logins/google" && req.method === "DELETE") {
+          const r = await dir.unlinkGoogle(uid);
+          return r.ok ? json(r.data, 200, h) : failure(r, h);
+        }
+        if (path === "/me/passkeys/options" && req.method === "POST") {
+          const r = await dir.addPasskeyOptions(uid);
+          return r.ok ? json(r.data, 200, h) : failure(r, h);
+        }
+        if (path === "/me/passkeys/verify" && req.method === "POST") {
+          const r = await dir.addPasskeyVerify(uid, await readJson(req));
+          return r.ok ? json(r.data, 200, h) : failure(r, h);
+        }
         if (path === "/me/export" && req.method === "GET") {
           const r = await dir.exportData(uid);
           if (!r.ok) return failure(r, h);
@@ -258,9 +424,12 @@ export default {
         if (path === "/me" && req.method === "DELETE") {
           const r = await dir.deleteAccount(uid);
           if (!r.ok) return failure(r, h);
-          const room = chunk(env, EXPO_CHUNK);
-          for (const id of r.data.projectIds) await room.removeStand(id);
+          for (const p of r.data.projects) {
+            const c = districtChunk(p.district);
+            if (c) await chunk(env, c).removeStand(p.id);
+          }
           for (const c of CHAT_CHUNKS) await chunk(env, c).purgeOwner(`usr_${uid}`);
+          await syncShowcase(env, dir);
           for (const hash of r.data.orphanHashes) await env.ASSETS.delete(assetKey(hash));
           return json({ deleted: true, assets_removed: r.data.orphanHashes.length }, 200, h);
         }
@@ -274,22 +443,25 @@ export default {
         const meta = await assetMeta(env.ASSETS, project.mesh_hash!);
         const placed =
           meta && meta.triangles <= ASSET_BUDGETS.monument.maxTriangles
-            ? await chunk(env, EXPO_CHUNK).placeStand({
+            ? await chunk(env, districtChunk(project.district)!).placeStand({
                 projectId: project.id,
                 owner: `usr_${uid}`,
                 title: project.title,
                 category: project.category,
                 cover: project.cover_hash!,
+                parcel: parcelIndex(project.parcel),
                 mesh: { hash: project.mesh_hash!, bounds: meta.bounds },
               })
             : ({ ok: false, code: "monument_too_big", message: `el monumento debe tener como mucho ${ASSET_BUDGETS.monument.maxTriangles} triángulos` } as const);
         if (!placed.ok) {
           // Sin portal no hay proyecto: se deshace el alta y se explica por qué.
           await dir.deleteProject(project.id);
-          const status = placed.code === "nexo_full" || placed.code === "budget_exceeded" ? 409 : placed.code === "monument_too_big" ? 422 : 400;
-          return json({ error: placed.code === "budget_exceeded" ? "nexo_full" : placed.code, message: placed.message }, status, h);
+          const code = placed.code === "budget_exceeded" ? "district_full" : placed.code;
+          const status = code === "parcel_taken" || code === "district_full" ? 409 : code === "monument_too_big" ? 422 : 400;
+          return json({ error: code, message: placed.message }, status, h);
         }
         await dir.setInWorld(project.id, true);
+        ctx.waitUntil(syncShowcase(env, dir));
         return json({ project: { ...project, in_world: true }, stand: placed }, 201, h);
       }
 
@@ -299,8 +471,11 @@ export default {
         const owner = await dir.projectOwner(proj[1]!);
         if (!owner) return json({ error: "not_found" }, 404, h);
         if (owner !== uid && !isAdmin) return json({ error: "forbidden", message: "solo su autor puede borrarlo" }, 403, h);
-        await chunk(env, EXPO_CHUNK).removeStand(proj[1]!);
+        const place = await dir.projectPlace(proj[1]!);
+        const c = districtChunk(place?.district);
+        if (c) await chunk(env, c).removeStand(proj[1]!);
         await dir.deleteProject(proj[1]!);
+        ctx.waitUntil(syncShowcase(env, dir));
         return json({ deleted: true }, 200, h);
       }
 
@@ -325,8 +500,12 @@ export default {
         }
         const hide = path.match(/^\/admin\/projects\/([a-zA-Z0-9_-]{4,40})\/hide$/);
         if (hide && req.method === "POST") {
-          await chunk(env, EXPO_CHUNK).removeStand(hide[1]!);
-          return json({ hidden: await dir.hideProject(hide[1]!) }, 200, h);
+          const place = await dir.projectPlace(hide[1]!);
+          const c = districtChunk(place?.district);
+          if (c) await chunk(env, c).removeStand(hide[1]!);
+          const hidden = await dir.hideProject(hide[1]!);
+          ctx.waitUntil(syncShowcase(env, dir));
+          return json({ hidden }, 200, h);
         }
       }
 

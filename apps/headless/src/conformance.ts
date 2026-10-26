@@ -17,6 +17,15 @@ const baseUrl = process.env.XENXO_URL ?? "http://localhost:8787";
 const agentKey = process.env.XENXO_AGENT_KEY;
 const adminKey = process.env.XENXO_ADMIN_KEY;
 
+/** Primera parcela libre de un distrito (para publicar en las pruebas). */
+async function freeParcel(district = "frontera"): Promise<string> {
+  const r = await fetch(new URL("/districts", baseUrl));
+  const { districts } = (await r.json()) as { districts: { id: string; parcels: { id: string; project_id: string | null }[] }[] };
+  const q = districts.find((d) => d.id === district)?.parcels.find((p) => !p.project_id);
+  if (!q) throw new Error(`no quedan parcelas libres en ${district}`);
+  return q.id;
+}
+
 let failed = 0;
 async function scenario(name: string, fn: () => Promise<void>) {
   try {
@@ -338,7 +347,7 @@ await scenario("avatar VRM: se acepta tal cual, como VRM, y no como modelo de pr
   assert(set.ok && set.data.user.avatar_format === "vrm", "el perfil debería guardar el formato VRM");
 });
 
-await scenario("nexo: se entra por el nexo; su portal lleva a la plaza y el arco de la plaza, de vuelta", async () => {
+await scenario("nexo y distritos: el nexo lleva a la plaza y a los distritos, y sus puertas devuelven al nexo", async () => {
   const c = await XenxoClient.connect({ baseUrl, chunkId: PLACES.nexo });
   assert(c.welcome.chunk_id === PLACES.nexo, "el WELCOME debería decir el chunk del nexo");
   const toPlaza = c.snapshot.entities.find((e) => e.entity_id === "nexo_portal_plaza")?.components["portal@1"] as
@@ -346,7 +355,14 @@ await scenario("nexo: se entra por el nexo; su portal lleva a la plaza y el arco
     | undefined;
   assert(toPlaza?.to.kind === "chunk" && toPlaza.to.chunk_id === PLACES.plaza, "falta el portal del nexo a la plaza");
   assert(c.snapshot.entities.some((e) => e.entity_id === "nexo_letters"), "faltan las letras del suelo del nexo");
+  const toArcade = c.snapshot.entities.find((e) => e.entity_id === "nexo_portal_arcade")?.components["portal@1"] as { to: { chunk_id?: string } } | undefined;
+  assert(toArcade?.to.chunk_id === "c_1_0", "falta el portal del nexo al distrito Arcade");
   c.close();
+  const d = await XenxoClient.connect({ baseUrl, chunkId: "c_1_0" });
+  const gate = d.snapshot.entities.find((e) => e.entity_id === "arcade_gate_portal")?.components["portal@1"] as { to: { chunk_id?: string } } | undefined;
+  assert(gate?.to.chunk_id === PLACES.nexo, "la puerta del distrito debería llevar al nexo");
+  assert(d.snapshot.entities.some((e) => e.entity_id === "arcade_parcel_A1"), "faltan los números de parcela del distrito");
+  d.close();
   const p = await XenxoClient.connect({ baseUrl });
   const back = p.snapshot.entities.find((e) => e.entity_id === "gate_portal")?.components["portal@1"] as { to: { chunk_id?: string } } | undefined;
   assert(back?.to.chunk_id === PLACES.nexo, "el arco de la plaza debería llevar al nexo");
@@ -366,56 +382,73 @@ await scenario("portada: solo imágenes de verdad y con medidas razonables", asy
   assert(!tiny.ok && tiny.error === "bad_image", "una portada diminuta se rechaza");
 });
 
-await scenario("proyecto: exige portada y monumento; su portal aparece en el nexo y al borrarlo desaparece", async () => {
+await scenario("proyecto: exige portada, monumento, distrito y parcela libre; su portal va a la parcela y al escaparate del nexo", async () => {
   const api = new Api(baseUrl);
   await api.register(`conf ${randomUUID().slice(0, 6)}`);
-  const base = { title: "Proyecto de prueba", summary: "Creado por el banco de conformidad", url: "https://github.com/xenxo-dev/xenxo-world", category: "game3d" };
+  const parcel = await freeParcel("frontera");
+  const base = { title: "Proyecto de prueba", summary: "Creado por el banco de conformidad", url: "https://github.com/xenxo-dev/xenxo-world", district: "frontera", parcel };
   const noCover = await api.call("POST", "/projects", base);
   assert(!noCover.ok && noCover.error === "cover_required", `sin portada → cover_required (${!noCover.ok && noCover.error})`);
   const cover = await api.upload(makeCoverPng(), "cover");
   const model = await api.upload(await makeBoxGlb({ segments: 3 }), "monument");
   assert(cover.ok && model.ok, "subidas de portada y monumento");
-  const noUrl = await api.call("POST", "/projects", { ...base, url: "", cover_hash: cover.data.hash, mesh_hash: model.data.hash });
+  const full = { ...base, cover_hash: cover.data.hash, mesh_hash: model.data.hash };
+  const noUrl = await api.call("POST", "/projects", { ...full, url: "" });
   assert(!noUrl.ok && noUrl.error === "bad_url", "sin enlace → bad_url");
-  const badCat = await api.call("POST", "/projects", { ...base, category: "casino", cover_hash: cover.data.hash, mesh_hash: model.data.hash });
-  assert(!badCat.ok && badCat.error === "bad_category", "categoría desconocida → bad_category");
+  const badDistrict = await api.call("POST", "/projects", { ...full, district: "casino" });
+  assert(!badDistrict.ok && badDistrict.error === "bad_district", "distrito desconocido → bad_district");
+  const badParcel = await api.call("POST", "/projects", { ...full, parcel: "Z9" });
+  assert(!badParcel.ok && badParcel.error === "bad_parcel", "parcela inexistente → bad_parcel");
 
-  const watcher = await XenxoClient.connect({ baseUrl, chunkId: PLACES.nexo });
-  const delta = watcher.next("DELTA", (m) => m.payload.changes.some((c) => c.kind === "upsert" && c.entity.entity_id.startsWith("standm_")), 4000);
-  const created = await api.call<{ project: { id: string; in_world: boolean; cover_hash: string; category: string } }>("POST", "/projects", {
-    ...base,
-    cover_hash: cover.data.hash,
-    mesh_hash: model.data.hash,
-  });
+  const district = await XenxoClient.connect({ baseUrl, chunkId: "c_1_-1" });
+  const nexo = await XenxoClient.connect({ baseUrl, chunkId: PLACES.nexo });
+  const delta = district.next("DELTA", (m) => m.payload.changes.some((c) => c.kind === "upsert" && c.entity.entity_id.startsWith("standm_")), 4000);
+  const shown = nexo.next("DELTA", (m) => m.payload.changes.some((c) => c.kind === "upsert" && c.entity.entity_id.startsWith("show_")), 6000);
+  const created = await api.call<{ project: { id: string; in_world: boolean; category: string; district: string; parcel: string } }>("POST", "/projects", full);
   assert(created.ok && created.data.project.in_world, `el proyecto debería tener portal: ${JSON.stringify(created)}`);
-  assert(created.data.project.cover_hash === cover.data.hash && created.data.project.category === "game3d", "portada y categoría en el proyecto");
+  assert(created.data.project.category === "other" && created.data.project.parcel === parcel, "categoría del distrito y parcela elegida");
   const d = await delta;
   const id = created.data.project.id;
   const up = (eid: string) => d.payload.changes.find((c) => c.kind === "upsert" && c.entity.entity_id === eid);
   const portal = up(`stand_${id}`);
   const pc = portal && portal.kind === "upsert" ? (portal.entity.components["portal@1"] as { to: { kind: string; project_id: string }; cover: string }) : null;
-  assert(pc?.to.kind === "project" && pc.to.project_id === id && pc.cover === cover.data.hash, "el portal lleva a la ficha del proyecto con su portada");
+  assert(pc?.to.kind === "project" && pc.to.project_id === id && pc.cover === cover.data.hash, "el portal de la parcela lleva a la ficha con su portada");
+  assert(!!up(`standf_${id}`), "la parcela recibe su marco");
   const meshEntity = up(`standm_${id}`);
   const lods = meshEntity && meshEntity.kind === "upsert" ? (meshEntity.entity.components["mesh@1"] as { lods: { tris: number }[] }).lods : [];
   assert(lods[0]?.tris === 108, `los triángulos deberían venir medidos por el servidor (108), llegaron ${lods[0]?.tris}`);
-  const removed = watcher.next("DELTA", (m) => m.payload.changes.some((c) => c.kind === "remove" && c.entity_id === `stand_${id}`), 4000);
+  const s = await shown;
+  const show = s.payload.changes.find((c) => c.kind === "upsert" && c.entity.entity_id === `show_${id}`);
+  const sc = show && show.kind === "upsert" ? (show.entity.components["portal@1"] as { to: { chunk_id?: string } }) : null;
+  assert(sc?.to.chunk_id === "c_1_-1", "el escaparate del nexo lleva al distrito del proyecto");
+
+  const other = new Api(baseUrl);
+  await other.register(`conf ${randomUUID().slice(0, 6)}`);
+  const c2 = await other.upload(makeCoverPng(321, 181), "cover");
+  const m2 = await other.upload(await makeBoxGlb({ segments: 2 }), "monument");
+  const twice = await other.call("POST", "/projects", { ...full, cover_hash: c2.ok ? c2.data.hash : "", mesh_hash: m2.ok ? m2.data.hash : "" });
+  assert(!twice.ok && twice.error === "parcel_taken", `una parcela ocupada → parcel_taken (${!twice.ok && twice.error})`);
+
+  const removed = district.next("DELTA", (m) => m.payload.changes.some((c) => c.kind === "remove" && c.entity_id === `stand_${id}`), 4000);
   const del = await api.call("DELETE", `/projects/${id}`);
   assert(del.ok, "borrar el proyecto");
   await removed;
-  watcher.close();
+  district.close();
+  nexo.close();
 });
 
 await scenario("RGPD: exportar mis datos y borrar la cuenta retira su contenido", async () => {
   const api = new Api(baseUrl);
   const { passkey } = await api.register(`conf ${randomUUID().slice(0, 6)}`);
-  const model = await api.upload(await makeBoxGlb({ segments: 2, color: [0.1, 0.6, 0.3, 1] }), "model");
-  const cover = await api.upload(makeCoverPng(330, 186, [255, 80, 200]), "cover");
+  const model = await api.upload(await makeBoxGlb({ segments: 2, color: [Math.random(), 0.6, 0.3, 1] }), "model"); // único: nadie más lo ha subido
+  const cover = await api.upload(makeCoverPng(330, 186, [Math.floor(Math.random() * 255), 80, 200]), "cover");
   assert(model.ok && cover.ok, "subidas");
   const created = await api.call<{ project: { id: string } }>("POST", "/projects", {
     title: "Para borrar",
     summary: "",
     url: "https://example.org",
-    category: "other",
+    district: "frontera",
+    parcel: await freeParcel("frontera"),
     cover_hash: cover.data.hash,
     mesh_hash: model.data.hash,
   });
@@ -435,7 +468,7 @@ await scenario("RGPD: exportar mis datos y borrar la cuenta retira su contenido"
     loginFailed = true;
   }
   assert(loginFailed, "la passkey de una cuenta borrada no debería servir");
-  const c = await XenxoClient.connect({ baseUrl, chunkId: PLACES.nexo });
+  const c = await XenxoClient.connect({ baseUrl, chunkId: "c_1_-1" });
   assert(!c.snapshot.entities.some((e) => e.entity_id === `stand_${created.data.project.id}`), "el portal debería haber desaparecido");
   c.close();
 });
