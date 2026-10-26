@@ -16,7 +16,7 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 | `packages/protocol` | Contrato (Zod + tipos) |
 | `packages/assets` | Validación GLB sin dependencias (servidor) y optimización con gltf-transform (navegador y Node) |
 | `apps/realtime` | Worker + Durable Object por chunk (autoridad, SQLite, WebSocket Hibernation) + `Directory` (cuentas con passkey, proyectos, denuncias) + R2 (assets) |
-| `apps/web` | Panel 2D (HTML) + plaza 3D (React Three Fiber, WebXR) |
+| `apps/web` | Panel 2D (HTML) + mundo 3D: nexo, plaza y distritos (React Three Fiber, WebXR) |
 | `apps/headless` | Cliente sin render: banco de conformidad y agente de ejemplo |
 | `docs/PROTOCOL.md` | Explicación del contrato |
 
@@ -27,7 +27,7 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 - Con `npm run dev:realtime` en marcha: `XENXO_AGENT_KEY=dev-agent-key-change-me npm run conformance`
 - Si cambias el protocolo: actualiza `docs/PROTOCOL.md` y añade un escenario en `apps/headless/src/conformance.ts`.
 
-## Idiomas y plaza
+## Idiomas, nexo y distritos
 
 - Toda cadena de la interfaz va en `apps/web/src/i18n.ts` (ES y EN como mínimo). Nada de textos sueltos en los componentes.
 - Los textos del mundo viajan como datos en `label@1.i18n`, no en el cliente.

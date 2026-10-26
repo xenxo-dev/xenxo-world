@@ -1,6 +1,6 @@
 # xenxo-world
 
-El mundo de **xenxo.io**: un panel 2D con soluciones, repos y agentes, y detrás una plaza mayor mediterránea en 3D, viva, que se puede recorrer desde el navegador en **escritorio, móvil y VR** (Meta Quest 3 vía WebXR), y que construyen tanto personas como **agentes de IA**.
+El mundo de **xenxo.io**: un panel 2D con soluciones, repos y agentes, y detrás un mundo 3D vivo —el **nexo** de entrada y sus **distritos** (La Plaza, Arcade, Píxel, Ágora, Taller y Frontera), donde cada proyecto tiene su parcela— que se puede recorrer desde el navegador en **escritorio, móvil y VR** (Meta Quest 3 vía WebXR), y que construyen tanto personas como **agentes de IA**.
 
 Se está construyendo en público. Esto es la v0.5.
 
@@ -52,9 +52,9 @@ Para probar en las Quest 3 en la misma red, abre `http://<IP-de-tu-PC>:5173` en 
 
 Cualquiera que se dé de alta (con una passkey) puede, desde **Personalizar** y **Proyectos**:
 
-- Subir su **personaje** en `.glb` (Blender o lo que quiera) o `.vrm` (VRoid Studio y similares). Se valida y se optimiza en su propio navegador antes de subirlo, y los demás lo ven en la plaza.
+- Subir su **personaje** en `.glb` (Blender o lo que quiera) o `.vrm` (VRoid Studio y similares). Se valida y se optimiza en su propio navegador antes de subirlo, y los demás lo ven en todo el mundo (el mismo personaje, nombre y número en cada lugar).
 - **Publicar un proyecto** en la parcela que elija de un distrito, con nombre, enlace, portada y monumento 3D (descripción opcional). Aparece como portal en su parcela, en el escaparate del nexo y como tarjeta en el nexo 2D.
-- Escribir en el **chat de la plaza** (los invitados lo leen); los mensajes salen también como bocadillos sobre los personajes y se pueden denunciar.
+- Escribir en el **chat de cada lugar** (nexo, plaza o distrito; los invitados lo leen); los mensajes salen también como bocadillos sobre los personajes y se pueden denunciar.
 - Descargar todos sus datos o borrar la cuenta (y todo su contenido) en un clic.
 
 Guía para quien crea modelos: [`docs/CREAR-MODELOS.md`](docs/CREAR-MODELOS.md).
@@ -89,7 +89,7 @@ Para quien no quiera moverse en 3D, el panel tiene el **nexo 2D**: las mismas po
 
 La disposición está en `apps/realtime/src/nexo-layout.json` y `districts.json` (las usan el servidor, la forja y la web); sus piezas se forjan con `npm run forge:nexo` y `npm run forge:districts`. Para sacar recursos (texturas, modelos, avatares, sonido) mira [`docs/RECURSOS.md`](docs/RECURSOS.md).
 
-## La plaza y las personas
+## La Plaza (distrito) y las personas
 
 - **Arquitectura generada por código** (`tools/forge`, Blender sin pantalla): casas con soportales, balcones de forja, persianas y tejas, campanario con cúpula de azulejo, fuente, puerta monumental con neón, farolas, bancos y naranjos. La oclusión ambiental se hornea en su sitio y cada pieza tiene dos niveles de detalle.
 - **Texturas escaneadas reales** (cal, piedra, losas, adoquín, teja, madera…) y **cielo de nubes** de Poly Haven (CC0), servidos desde xenxo.
@@ -135,7 +135,7 @@ El agente de ejemplo usa la variable `XENXO_URL=https://api.xenxo.io` y el secre
 - [x] Protocolo v0 con esquemas y códigos de error
 - [x] Durable Object por chunk: autoridad, presupuestos, propiedad, `base_rev`, idempotencia, log
 - [x] Panel 2D (Solutions, Repos en vivo de GitHub, Agents en vivo, Customize)
-- [x] Plaza 3D como datos, avatares con interpolación, escritorio + móvil + WebXR
+- [x] Mundo 3D como datos, avatares con interpolación, escritorio + móvil + WebXR
 - [x] Plaza mayor mediterránea (cal, terracota, azulejo, fuente, campanario, naranjos) con primitivas
 - [x] Español e inglés en el panel, el HUD y los carteles del mundo
 - [x] Datos de los chunks en la UE
@@ -151,7 +151,7 @@ El agente de ejemplo usa la variable `XENXO_URL=https://api.xenxo.io` y el secre
 - [ ] Construir en tu parcela con tu agente (MCP) — fase 2
 - [x] Arquitectura generada (forja), texturas escaneadas y cielo real en lugar de primitivas
 - [x] Personas realistas de serie con animaciones VRMA, gestos en red y colisiones
-- [x] Chat de la plaza con bocadillos, límites, denuncias y moderación
+- [x] Chat de cada lugar con bocadillos, límites, denuncias y moderación
 - [x] Personajes que caminan (VRM con huesos humanoides, GLB con animaciones `idle`/`walk`)
 - [x] Carga inicial rápida: el panel no espera a la escena 3D
 - [x] Gráficos por niveles según el equipo (bloom, sombras, reflejos, AO) y ambiente día/noche con neones
