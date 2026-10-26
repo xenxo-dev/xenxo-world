@@ -18,6 +18,7 @@ import {
 } from "../net/account";
 import { refreshProjects } from "../net/projects";
 import { AgentKeys } from "./AgentKeys";
+import { GameCard } from "./GameCard";
 import { MyGames } from "./Games";
 import { ModelPicker } from "./ModelPicker";
 import { ReportButton } from "./ReportButton";
@@ -54,8 +55,10 @@ export function ProjectsSection({ onGoToAccount }: { onGoToAccount: () => void }
   const [publishing, setPublishing] = useState(false);
   const { repos, owner } = useRepos();
 
-  const [mine, setMine] = useState<Set<string>>(new Set());
+  const [own, setOwn] = useState<Project[]>([]);
+  const mine = new Set(own.map((p) => p.id));
   const [building, setBuilding] = useState<string | null>(null);
+  const [carding, setCarding] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     listProjects()
@@ -63,14 +66,67 @@ export function ProjectsSection({ onGoToAccount }: { onGoToAccount: () => void }
       .catch(() => setProjects([]));
     if (currentUser())
       myProjects()
-        .then((list) => setMine(new Set(list.map((p) => p.id))))
-        .catch(() => setMine(new Set()));
-    else setMine(new Set());
+        .then(setOwn)
+        .catch(() => setOwn([]));
+    else setOwn([]);
   }, []);
   useEffect(refresh, [refresh, user?.id]);
 
   return (
     <>
+      {user && own.length > 0 && (
+        <Block title={t("projects.mine")}>
+          <ul className="flex flex-col gap-2">
+            {own.map((p) => {
+              const hidden = p.status === "hidden";
+              const tone = hidden || p.review === "rejected" ? "border-red-400/40 bg-red-500/10 text-red-100" : p.review === "approved" ? "border-huerta/40 bg-huerta/15 text-lime-100" : "border-ocre/40 bg-ocre/10 text-amber-100";
+              const label = hidden ? t("review.hidden") : t(p.review === "approved" ? "review.approved" : p.review === "rejected" ? "review.rejected" : "review.pending");
+              return (
+                <li key={p.id} className={`${card} p-4`}>
+                  <div className="flex flex-wrap items-start gap-x-4 gap-y-1">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-cal">{p.title}</p>
+                      {p.summary && <p className="mt-1.5 text-sm text-cal/65">{p.summary}</p>}
+                    </div>
+                    <span className={`rounded-full border px-2 py-0.5 text-xs ${tone}`}>{label}</span>
+                  </div>
+                  {p.review_note && (hidden || p.review === "rejected") && <Notice tone="error">{t("review.note", { note: p.review_note })}</Notice>}
+                  {!hidden && p.review === "pending" && <p className="mt-2 text-xs text-cal/45">{t("review.pendingNote")}</p>}
+                  {!hidden && (
+                    <div className="mt-3 flex flex-wrap items-center gap-3">
+                      {p.url && (
+                        <a href={p.url} target="_blank" rel="noreferrer noopener nofollow ugc" className="text-sm text-azulejo-claro underline-offset-2 hover:underline">
+                          {t("projects.visit")} ↗
+                        </a>
+                      )}
+                      <Button variant={carding === p.id ? "primary" : "secondary"} onClick={() => setCarding(carding === p.id ? null : p.id)}>
+                        {p.game ? t("gameCard.open") : t("gameCard.make")}
+                      </Button>
+                      {p.in_world && (
+                        <Button variant={building === p.id ? "primary" : "secondary"} onClick={() => setBuilding(building === p.id ? null : p.id)}>
+                          {t("agentKeys.open")}
+                        </Button>
+                      )}
+                      <button
+                        className="text-xs text-red-200/70 hover:text-red-200"
+                        onClick={async () => {
+                          await deleteProject(p.id);
+                          refresh();
+                        }}
+                      >
+                        {t("projects.delete")}
+                      </button>
+                    </div>
+                  )}
+                  {carding === p.id && <GameCard project={p} onChange={refresh} />}
+                  {building === p.id && <AgentKeys projectId={p.id} />}
+                </li>
+              );
+            })}
+          </ul>
+        </Block>
+      )}
+
       <Block
         title={t("projects.community")}
         aside={
@@ -108,26 +164,8 @@ export function ProjectsSection({ onGoToAccount }: { onGoToAccount: () => void }
                     {t("projects.visit")} ↗
                   </a>
                 )}
-                {mine.has(p.id) && p.in_world && (
-                  <Button variant={building === p.id ? "primary" : "secondary"} onClick={() => setBuilding(building === p.id ? null : p.id)}>
-                    {t("agentKeys.open")}
-                  </Button>
-                )}
-                {mine.has(p.id) ? (
-                  <button
-                    className="text-xs text-red-200/70 hover:text-red-200"
-                    onClick={async () => {
-                      await deleteProject(p.id);
-                      refresh();
-                    }}
-                  >
-                    {t("projects.delete")}
-                  </button>
-                ) : (
-                  <ReportButton targetType="project" targetId={p.id} />
-                )}
+                {!mine.has(p.id) && <ReportButton targetType="project" targetId={p.id} />}
               </div>
-              {building === p.id && mine.has(p.id) && <AgentKeys projectId={p.id} />}
             </li>
           ))}
         </ul>
@@ -136,7 +174,7 @@ export function ProjectsSection({ onGoToAccount }: { onGoToAccount: () => void }
 
       {user && (
         <Block title={t("games.title")}>
-          <MyGames projects={(projects ?? []).filter((p) => mine.has(p.id))} />
+          <MyGames projects={own} />
         </Block>
       )}
 

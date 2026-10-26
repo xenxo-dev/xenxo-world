@@ -30,6 +30,8 @@ import {
 } from "./oidc";
 import { type ProjectCategory } from "@xenxo/protocol";
 import { DISTRICTS, districtById, PARCELS, parcelIndex, parcelRect } from "./districts";
+import { gameInfo, slugFrom, validSlug, type GameInfo } from "./games";
+import type { GameManifest } from "@xenxo/protocol";
 
 export const TERMS_VERSION = "2026-10";
 const FLOW_TTL_MS = 5 * 60 * 1000;
@@ -102,7 +104,22 @@ export type PublicProject = {
   author: string;
   created_at: number;
   in_world: boolean;
+  /** xenxo.io/j/<slug>, si tiene ficha de juego. */
+  slug: string | null;
+  /** Revisión humana: solo los aprobados salen en el catálogo y en el escaparate del nexo. */
+  review: "pending" | "approved" | "rejected";
+  /** La ficha del juego (xenxo.json) tal como la guardó xenxo, si la tiene. */
+  game: GameInfo | null;
+  /** Solo para su autor: por qué se rechazó u ocultó (DSA, «exposición de motivos»). */
+  review_note?: string | null;
+  /** "published" u "hidden" (oculto por moderación: solo lo ve su autor). */
+  status?: string;
 };
+
+export type ReviewDecision = "approved" | "rejected";
+
+/** Respuesta a una petición de «Entrar con xenxo»: redirección o mensaje al juego incrustado. */
+export type OidcResponse = { redirect: string; web_message?: undefined } | { web_message: { origin: string; params: Record<string, string> }; redirect?: undefined };
 
 export function validDisplayName(raw: unknown, allowReserved = false): string | null {
   if (typeof raw !== "string") return null;
@@ -185,6 +202,11 @@ export class Directory extends DurableObject<Env> {
         id TEXT PRIMARY KEY, user_id TEXT NOT NULL, project_id TEXT NOT NULL, hash TEXT NOT NULL UNIQUE,
         label TEXT, created_at INTEGER NOT NULL, last_used INTEGER);
       -- El armario: hasta MAX_SKINS personajes propios por cuenta (archivos que subió esa persona).
+      -- Moderación: quién modera (el fundador siempre) y el registro de cada decisión (DSA).
+      CREATE TABLE IF NOT EXISTS moderators (user_id TEXT PRIMARY KEY, added_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS moderation_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, moderator TEXT NOT NULL, action TEXT NOT NULL,
+        target_type TEXT NOT NULL, target_id TEXT NOT NULL, note TEXT);
       CREATE TABLE IF NOT EXISTS skins (
         user_id TEXT NOT NULL, hash TEXT NOT NULL, format TEXT NOT NULL, label TEXT, created_at INTEGER NOT NULL,
         PRIMARY KEY (user_id, hash));
@@ -202,6 +224,18 @@ export class Directory extends DurableObject<Env> {
     this.sql.exec(
       "CREATE UNIQUE INDEX IF NOT EXISTS projects_parcel ON projects(district, parcel) WHERE status = 'published' AND district IS NOT NULL",
     );
+    // Migración: ficha de juego (xenxo.json), su enlace xenxo.io/j/<slug> y la revisión humana.
+    if (!pcols.includes("slug")) this.sql.exec("ALTER TABLE projects ADD COLUMN slug TEXT");
+    if (!pcols.includes("game")) this.sql.exec("ALTER TABLE projects ADD COLUMN game TEXT");
+    if (!pcols.includes("game_at")) this.sql.exec("ALTER TABLE projects ADD COLUMN game_at INTEGER");
+    if (!pcols.includes("review")) {
+      this.sql.exec("ALTER TABLE projects ADD COLUMN review TEXT NOT NULL DEFAULT 'pending'");
+      // Lo publicado antes de que existiera la revisión lo publicó el equipo de xenxo: aprobado.
+      this.sql.exec("UPDATE projects SET review = 'approved'");
+    }
+    if (!pcols.includes("review_note")) this.sql.exec("ALTER TABLE projects ADD COLUMN review_note TEXT");
+    if (!pcols.includes("reviewed_at")) this.sql.exec("ALTER TABLE projects ADD COLUMN reviewed_at INTEGER");
+    this.sql.exec("CREATE UNIQUE INDEX IF NOT EXISTS projects_slug ON projects(slug) WHERE slug IS NOT NULL");
     // Migración: número de jugador. Las cuentas que ya existían se numeran por orden de alta.
     const ucols = this.sql.exec<{ name: string }>("PRAGMA table_info(users)").toArray().map((c) => c.name);
     if (!ucols.includes("player_no")) {
@@ -600,7 +634,7 @@ export class Directory extends DurableObject<Env> {
   me(id: string): Result<UserRow & { projects: PublicProject[] }> {
     const u = this.user(id);
     if (!u) return fail(404, "not_found", "la cuenta no existe");
-    return ok({ ...u, projects: this.projectsOf(id) });
+    return ok({ ...u, projects: this.projectsOf(id, true) });
   }
 
   rename(id: string, raw: unknown): Result<UserRow> {
@@ -740,6 +774,8 @@ export class Directory extends DurableObject<Env> {
       connected_games: this.grantsOf(id),
       registered_games: this.clientsOf(id),
       reports_sent: this.sql.exec("SELECT ts, target_type, target_id, reason, details FROM reports WHERE reporter = ?", `usr_${id}`).toArray(),
+      // Si moderas: tus decisiones (el registro que pide la DSA).
+      moderation_decisions: this.sql.exec("SELECT ts, action, target_type, target_id, note FROM moderation_log WHERE moderator = ?", `usr_${id}`).toArray(),
     });
   }
 
@@ -772,6 +808,9 @@ export class Directory extends DurableObject<Env> {
       this.sql.exec("DELETE FROM projects WHERE user_id = ?", id);
       this.sql.exec("DELETE FROM uploads WHERE uploader = ?", sub);
       this.sql.exec("UPDATE reports SET reporter = 'deleted' WHERE reporter = ?", sub);
+      // El registro de moderación se conserva (DSA), sin decir quién moderó.
+      this.sql.exec("UPDATE moderation_log SET moderator = 'deleted' WHERE moderator = ?", sub);
+      this.sql.exec("DELETE FROM moderators WHERE user_id = ?", id);
       this.sql.exec("DELETE FROM users WHERE id = ?", id);
     });
     return ok({ orphanHashes, projects, agents });
@@ -782,6 +821,10 @@ export class Directory extends DurableObject<Env> {
       const r = this.findOrphans(Date.now());
       for (const hash of r.deleteFromR2) await this.env.ASSETS.delete(assetKey(hash));
       if (r.marked) console.log(`[xenxo] limpieza: ${r.marked} subidas sin usar, ${r.deleteFromR2.length} archivos borrados`);
+      // Plazos de la página de privacidad: denuncias resueltas, 12 meses; registro de moderación, 5 años.
+      const now = Date.now();
+      this.sql.exec("DELETE FROM reports WHERE status != 'open' AND ts < ?", now - 365 * 86_400_000);
+      this.sql.exec("DELETE FROM moderation_log WHERE ts < ?", now - 5 * 365 * 86_400_000);
     } finally {
       await this.ctx.storage.setAlarm(Date.now() + CLEANUP_EVERY_MS);
     }
@@ -896,7 +939,9 @@ export class Directory extends DurableObject<Env> {
     const summary = typeof body.summary === "string" ? body.summary.trim() : "";
     if (title.length < 3 || title.length > 60) return fail(400, "bad_title", "el título debe tener entre 3 y 60 caracteres");
     if (summary.length > 280) return fail(400, "bad_summary", "la descripción admite hasta 280 caracteres");
-    const url = validHttpsUrl(body.url);
+    // En local (RP_ID=localhost) vale también un juego en http://localhost, para probar de punta a punta.
+    const local = this.rpID === "localhost" && typeof body.url === "string" && /^http:\/\/(localhost|127\.0\.0\.1):\d{2,5}\/[^\s]*$/.test(body.url);
+    const url = local ? (body.url as string) : validHttpsUrl(body.url);
     if (!url) return fail(400, "bad_url", "el proyecto necesita un enlace que empiece por https://");
     const district = districtById(body.district);
     if (!district) return fail(400, "bad_district", `el distrito debe ser uno de: ${DISTRICTS.map((d) => d.id).join(", ")}`);
@@ -940,36 +985,151 @@ export class Directory extends DurableObject<Env> {
     this.sql.exec("UPDATE projects SET in_world = ? WHERE id = ?", inWorld ? 1 : 0, projectId);
   }
 
+  /** Proyectos con sus datos públicos (y la nota de revisión si `withNote`). */
+  private projectRows(where: string, args: unknown[], withNote = false, tail = ""): PublicProject[] {
+    return this.sql
+      .exec<Omit<PublicProject, "in_world" | "game"> & { in_world: number; game: string | null }>(
+        `SELECT p.id, p.title, p.summary, p.url, p.mesh_hash, p.cover_hash, p.category, p.district, p.parcel,
+                u.display_name AS author, p.created_at, p.in_world, p.slug, p.review, p.game${withNote ? ", p.review_note, p.status" : ""}
+         FROM projects p JOIN users u ON u.id = p.user_id WHERE ${where} ${tail}`,
+        ...args,
+      )
+      .toArray()
+      .map((r) => ({ ...r, in_world: !!r.in_world, game: r.game ? (JSON.parse(r.game) as GameInfo) : null }));
+  }
+
   project(id: string): PublicProject | null {
-    return (
-      this.sql
-        .exec<Omit<PublicProject, "in_world"> & { in_world: number }>(
-          `SELECT p.id, p.title, p.summary, p.url, p.mesh_hash, p.cover_hash, p.category, p.district, p.parcel, u.display_name AS author, p.created_at, p.in_world
-           FROM projects p JOIN users u ON u.id = p.user_id WHERE p.id = ?`,
-          id,
-        )
-        .toArray()
-        .map((r) => ({ ...r, in_world: !!r.in_world }))[0] ?? null
-    );
+    return this.projectRows("p.id = ?", [id])[0] ?? null;
+  }
+
+  projectStatus(id: string): string | null {
+    return this.sql.exec<{ status: string }>("SELECT status FROM projects WHERE id = ?", id).toArray()[0]?.status ?? null;
   }
 
   projectOwner(id: string): string | null {
     return this.sql.exec<{ user_id: string }>("SELECT user_id FROM projects WHERE id = ?", id).toArray()[0]?.user_id ?? null;
   }
 
+  /** El catálogo: lo publicado y aprobado en la revisión. */
   listProjects(): PublicProject[] {
-    return this.sql
-      .exec<Omit<PublicProject, "in_world"> & { in_world: number }>(
-        `SELECT p.id, p.title, p.summary, p.url, p.mesh_hash, p.cover_hash, p.category, p.district, p.parcel, u.display_name AS author, p.created_at, p.in_world
-         FROM projects p JOIN users u ON u.id = p.user_id WHERE p.status = 'published'
-         ORDER BY p.created_at DESC LIMIT 100`,
-      )
-      .toArray()
-      .map((r) => ({ ...r, in_world: !!r.in_world }));
+    return this.projectRows("p.status = 'published' AND p.review = 'approved'", [], false, "ORDER BY p.created_at DESC LIMIT 100");
   }
 
-  private projectsOf(userId: string): PublicProject[] {
-    return this.listProjects().filter((p) => this.projectOwner(p.id) === userId);
+  /** Los proyectos publicados de una persona (todos, revisados o no; con la nota de revisión). */
+  private projectsOf(userId: string, withNote = false): PublicProject[] {
+    // Su autor ve también lo que moderación ocultó, con el motivo.
+    const statuses = withNote ? "('published', 'hidden')" : "('published')";
+    return this.projectRows(`p.user_id = ? AND p.status IN ${statuses}`, [userId], withNote, "ORDER BY p.created_at DESC");
+  }
+
+  /** Un juego por su enlace (xenxo.io/j/<slug>): publicado, revisado o no. */
+  gameBySlug(slug: string): PublicProject | null {
+    return this.projectRows("p.slug = ? AND p.status = 'published' AND p.game IS NOT NULL", [slug])[0] ?? null;
+  }
+
+  /**
+   * Guarda la ficha de un juego (ya leída y comprobada por el Worker) y su enlace. Cambiar la ficha
+   * lo devuelve a revisión: lo que se aprobó era la ficha anterior.
+   */
+  setGame(userId: string, projectId: string, manifest: GameManifest, rawSlug: unknown): Result<PublicProject> {
+    const p = this.sql
+      .exec<{ user_id: string; url: string | null; slug: string | null; game: string | null; title: string; status: string }>(
+        "SELECT user_id, url, slug, game, title, status FROM projects WHERE id = ?",
+        projectId,
+      )
+      .toArray()[0];
+    if (!p || p.status !== "published") return fail(404, "not_found", "ese proyecto no existe");
+    if (p.user_id !== userId) return fail(403, "forbidden", "solo su autor puede registrar su juego");
+    if (!p.url) return fail(400, "bad_url", "el proyecto necesita el enlace del juego");
+    if (!manifest.privacy) return fail(400, "privacy_required", "la ficha necesita «privacy»: la página de privacidad del juego (https)");
+    if (manifest.xenxo?.project && manifest.xenxo.project !== projectId) {
+      return fail(400, "manifest_mismatch", "el xenxo.json dice que es de otro proyecto (xenxo.project)");
+    }
+    if (manifest.xenxo?.clientId) {
+      const c = this.sql.exec<{ user_id: string }>("SELECT user_id FROM oidc_clients WHERE client_id = ?", manifest.xenxo.clientId).toArray()[0];
+      if (!c || c.user_id !== userId) return fail(400, "manifest_mismatch", "el clientId del xenxo.json no es de un juego tuyo");
+    }
+    const founder = (this.env.FOUNDER_USER_ID ?? "").replace(/^usr_/, "").trim() === userId;
+    const wanted = rawSlug === undefined || rawSlug === null || rawSlug === "" ? (p.slug ?? slugFrom(manifest.name.es || p.title)) : rawSlug;
+    const slug = validSlug(wanted, founder);
+    if (!slug) return fail(400, "bad_slug", "nombre del enlace: 3–40 letras minúsculas, números o guiones (y no reservado)");
+    const taken = this.sql.exec("SELECT 1 FROM projects WHERE slug = ? AND id != ?", slug, projectId).toArray().length > 0;
+    if (taken) return fail(409, "slug_taken", "ese enlace ya lo usa otro juego; elige otro");
+    const info = JSON.stringify(gameInfo(manifest, p.url));
+    const changed = info !== p.game;
+    this.sql.exec(
+      `UPDATE projects SET slug = ?, game = ?, game_at = ?${changed ? ", review = 'pending', review_note = NULL, reviewed_at = NULL" : ""} WHERE id = ?`,
+      slug, info, Date.now(), projectId,
+    );
+    return ok(this.projectsOf(userId, true).find((x) => x.id === projectId)!);
+  }
+
+  /** Quita la ficha de juego (vuelve a ser un proyecto sin juego; su enlace /j/ deja de existir). */
+  clearGame(userId: string, projectId: string): Result<{ cleared: true }> {
+    const owner = this.projectOwner(projectId);
+    if (!owner) return fail(404, "not_found", "ese proyecto no existe");
+    if (owner !== userId) return fail(403, "forbidden", "solo su autor puede quitar su juego");
+    this.sql.exec("UPDATE projects SET slug = NULL, game = NULL, game_at = NULL WHERE id = ?", projectId);
+    return ok({ cleared: true });
+  }
+
+  /* --- Moderación (DSA): revisión de proyectos, denuncias y registro de decisiones --- */
+
+  isModerator(userId: string | null): boolean {
+    if (!userId) return false;
+    const founder = (this.env.FOUNDER_USER_ID ?? "").replace(/^usr_/, "").trim();
+    if (founder && userId === founder) return true;
+    return this.sql.exec("SELECT 1 FROM moderators WHERE user_id = ?", userId).toArray().length > 0;
+  }
+
+  private logDecision(moderator: string, action: string, targetType: string, targetId: string, note: string | null) {
+    this.sql.exec(
+      "INSERT INTO moderation_log (ts, moderator, action, target_type, target_id, note) VALUES (?, ?, ?, ?, ?, ?)",
+      Date.now(), moderator, action, targetType, targetId, note,
+    );
+  }
+
+  /** Lo pendiente: proyectos por revisar (con su autor) y denuncias abiertas. */
+  moderationQueue() {
+    const pending = this.projectRows("p.status = 'published' AND p.review = 'pending'", [], true, "ORDER BY p.created_at ASC LIMIT 100");
+    return { pending, reports: this.listReports("open") };
+  }
+
+  review(moderator: string, projectId: string, decision: unknown, rawNote: unknown): Result<PublicProject> {
+    if (decision !== "approved" && decision !== "rejected") return fail(400, "bad_message", "decision: approved o rejected");
+    const note = typeof rawNote === "string" ? rawNote.trim().slice(0, 500) : "";
+    if (decision === "rejected" && note.length < 3) return fail(400, "note_required", "explica el motivo: lo verá su autor");
+    const n = this.sql
+      .exec("UPDATE projects SET review = ?, review_note = ?, reviewed_at = ? WHERE id = ? AND status = 'published'", decision, note || null, Date.now(), projectId)
+      .rowsWritten;
+    if (!n) return fail(404, "not_found", "ese proyecto no existe");
+    this.logDecision(moderator, `review_${decision}`, "project", projectId, note || null);
+    return ok(this.project(projectId)!);
+  }
+
+  /** Ocultar en toda la plataforma (el interruptor), con su motivo para el autor y el registro. */
+  moderateHide(moderator: string, projectId: string, rawNote: unknown): Result<{ hidden: boolean }> {
+    const note = typeof rawNote === "string" ? rawNote.trim().slice(0, 500) : "";
+    if (note.length < 3) return fail(400, "note_required", "explica el motivo: lo verá su autor");
+    const hidden = this.hideProject(projectId);
+    if (!hidden) return fail(404, "not_found", "ese proyecto no existe");
+    this.sql.exec("UPDATE projects SET review_note = ?, reviewed_at = ? WHERE id = ?", note, Date.now(), projectId);
+    this.logDecision(moderator, "hide", "project", projectId, note);
+    return ok({ hidden });
+  }
+
+  moderateReport(moderator: string, id: number, status: unknown, rawNote: unknown): Result<{ ok: true }> {
+    if (status !== "actioned" && status !== "dismissed") return fail(400, "bad_message", "status: actioned o dismissed");
+    const note = typeof rawNote === "string" ? rawNote.trim().slice(0, 500) : null;
+    if (!this.sql.exec("UPDATE reports SET status = ? WHERE id = ? AND status = 'open'", status, id).rowsWritten) {
+      return fail(404, "not_found", "esa denuncia no existe o ya se resolvió");
+    }
+    this.logDecision(moderator, `report_${status}`, "report", String(id), note || null);
+    return ok({ ok: true });
+  }
+
+  moderationLog(limit = 200) {
+    return this.sql.exec("SELECT * FROM moderation_log ORDER BY id DESC LIMIT ?", limit).toArray();
   }
 
   /**
@@ -1114,7 +1274,7 @@ export class Directory extends DurableObject<Env> {
    * Valida una petición de /oidc/authorize. Si el juego o la dirección de vuelta no valen, NO se
    * redirige (`redirect: null`): xenxo enseña el error. Si valen, los demás errores vuelven al juego.
    */
-  async authorizeRequest(q: Record<string, string | null>): Promise<{ ok: true; request: string } | { ok: false; error: string; message: string; redirect: string | null }> {
+  async authorizeRequest(q: Record<string, string | null>, embedded = false): Promise<{ ok: true; request: string } | { ok: false; error: string; message: string; redirect: string | null }> {
     this.pruneOidc();
     const c = this.client(q.client_id);
     if (!c) return { ok: false, error: "invalid_client", message: "ese juego no está registrado en xenxo", redirect: null };
@@ -1148,7 +1308,15 @@ export class Directory extends DurableObject<Env> {
     // Solo se admite prompt=consent (preguntar siempre). none, login y max_age no: xenxo no sabe
     // cuándo entró la persona por última vez, y no prometemos lo que no podemos cumplir.
     if ((q.prompt && q.prompt !== "consent") || q.max_age != null) return problem("invalid_request", "prompt solo admite consent; max_age no se admite");
-    save({ scopes, nonce: q.nonce || null, code_challenge: q.code_challenge, prompt: q.prompt || null });
+    // web_message: el juego está dentro de xenxo (iframe); la respuesta va por postMessage al origen
+    // exacto de la dirección registrada, no por redirección.
+    if (q.response_mode && q.response_mode !== "query" && q.response_mode !== "web_message") {
+      return problem("invalid_request", "response_mode: query o web_message");
+    }
+    // web_message solo lo pide la web de xenxo para el juego que tiene abierto dentro; y desde ahí, siempre.
+    if (q.response_mode === "web_message" && !embedded) return problem("invalid_request", "web_message solo vale con el juego abierto dentro de xenxo");
+    if (embedded) q = { ...q, response_mode: "web_message" };
+    save({ scopes, nonce: q.nonce || null, code_challenge: q.code_challenge, prompt: q.prompt || null, response_mode: q.response_mode === "web_message" ? "web_message" : "query" });
     return { ok: true, request: id };
   }
 
@@ -1163,18 +1331,19 @@ export class Directory extends DurableObject<Env> {
   requestInfo(
     id: unknown,
     userId: string | null,
-  ): Result<{ client: { name: string; owner: string; host: string }; scopes: string[]; granted: boolean; prompt: string | null; error?: string; message?: string }> {
-    const r = this.pending<{ client_id: string; redirect_uri: string; scopes?: string[]; prompt?: string | null; error?: string; message?: string }>(id, "request");
+  ): Result<{ client: { name: string; owner: string; host: string }; scopes: string[]; granted: boolean; prompt: string | null; embedded: boolean; error?: string; message?: string }> {
+    const r = this.pending<{ client_id: string; redirect_uri: string; scopes?: string[]; prompt?: string | null; response_mode?: string; error?: string; message?: string }>(id, "request");
     if (!r) return fail(404, "request_expired", "la petición caducó; vuelve a pulsar «Entrar con xenxo» en el juego");
     const c = this.client(r.client_id);
     if (!c) return fail(404, "invalid_client", "ese juego ya no está registrado");
     const owner = this.user(c.user_id);
     const client = { name: c.name, owner: owner ? `${owner.display_name}${owner.player_no != null ? ` #${owner.player_no}` : ""}` : "?", host: new URL(r.redirect_uri).host };
-    if (r.error) return ok({ client, scopes: [], granted: false, prompt: null, error: r.error, message: r.message });
+    const embedded = r.response_mode === "web_message";
+    if (r.error) return ok({ client, scopes: [], granted: false, prompt: null, embedded, error: r.error, message: r.message });
     const scopes = r.scopes ?? [];
     // Entrar sin preguntar solo si ya lo permitió y lo usó hace poco; si no, un clic otra vez.
     const granted = userId ? this.grantCovers(userId, r.client_id, scopes, Date.now() - SILENT_GRANT_MS) : false;
-    return ok({ client, scopes, granted, prompt: r.prompt ?? null });
+    return ok({ client, scopes, granted, prompt: r.prompt ?? null, embedded });
   }
 
   private grantCovers(userId: string, clientId: string, scopes: string[], usedSince = 0): boolean {
@@ -1190,19 +1359,26 @@ export class Directory extends DurableObject<Env> {
    * La persona responde en la pantalla de permiso. Devuelve a dónde ir: al juego con un código
    * de un uso (o con error=access_denied si dijo que no).
    */
-  async decide(id: unknown, userId: string | null, approve: boolean, authTime: number, issuer: string): Promise<Result<{ redirect: string }>> {
-    const r = this.pending<{ client_id: string; redirect_uri: string; scopes: string[]; state: string | null; nonce: string | null; code_challenge: string; error?: string; message?: string }>(id, "request");
+  async decide(id: unknown, userId: string | null, approve: boolean, authTime: number, issuer: string): Promise<Result<OidcResponse>> {
+    const r = this.pending<{ client_id: string; redirect_uri: string; scopes: string[]; state: string | null; nonce: string | null; code_challenge: string; response_mode?: string; error?: string; message?: string }>(id, "request");
     if (!r) return fail(404, "request_expired", "la petición caducó; vuelve a pulsar «Entrar con xenxo» en el juego");
+    // Redirección (lo normal) o postMessage al origen exacto registrado (juego dentro de xenxo).
+    const respond = (params: Record<string, string | undefined>): OidcResponse => {
+      if (r.response_mode !== "web_message") return { redirect: withParams(r.redirect_uri, params) };
+      const clean: Record<string, string> = {};
+      for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== "") clean[k] = v;
+      return { web_message: { origin: new URL(r.redirect_uri).origin, params: clean } };
+    };
     // Volver al juego con su error: no hace falta sesión (no se comparte nada de nadie).
     if (r.error) {
       this.sql.exec("DELETE FROM oidc_pending WHERE id = ?", id as string);
-      return ok({ redirect: withParams(r.redirect_uri, { error: r.error, error_description: r.message, state: r.state ?? undefined, iss: issuer }) });
+      return ok(respond({ error: r.error, error_description: r.message, state: r.state ?? undefined, iss: issuer }));
     }
     if (!userId) return fail(401, "unauthorized", "entra en tu cuenta de xenxo para dar permiso");
     this.sql.exec("DELETE FROM oidc_pending WHERE id = ?", id as string); // un solo uso
     if (!this.client(r.client_id) || !this.user(userId)) return fail(404, "invalid_client", "ese juego ya no está registrado");
     if (!approve) {
-      return ok({ redirect: withParams(r.redirect_uri, { error: "access_denied", error_description: "la persona no dio permiso", state: r.state ?? undefined, iss: issuer }) });
+      return ok(respond({ error: "access_denied", error_description: "la persona no dio permiso", state: r.state ?? undefined, iss: issuer }));
     }
     const now = Date.now();
     this.sql.exec(
@@ -1217,7 +1393,7 @@ export class Directory extends DurableObject<Env> {
       JSON.stringify({ user_id: userId, client_id: r.client_id, redirect_uri: r.redirect_uri, scopes: r.scopes, nonce: r.nonce, code_challenge: r.code_challenge, auth_time: Math.floor(authTime / 1000) }),
       now + CODE_TTL_MS,
     );
-    return ok({ redirect: withParams(r.redirect_uri, { code, state: r.state ?? undefined, iss: issuer }) });
+    return ok(respond({ code, state: r.state ?? undefined, iss: issuer }));
   }
 
   /** Lo que un juego sabe de una persona, según lo permitido. */
@@ -1422,7 +1598,7 @@ export class Directory extends DurableObject<Env> {
     return this.sql
       .exec<{ id: string; title: string; category: string; cover_hash: string; mesh_hash: string; district: string; parcel: string }>(
         `SELECT id, title, category, cover_hash, mesh_hash, district, parcel FROM projects
-         WHERE status = 'published' AND district IS NOT NULL AND cover_hash IS NOT NULL AND in_world = 1
+         WHERE status = 'published' AND review = 'approved' AND district IS NOT NULL AND cover_hash IS NOT NULL AND in_world = 1
          ORDER BY created_at DESC LIMIT ?`,
         limit,
       )

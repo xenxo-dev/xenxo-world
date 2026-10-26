@@ -10,6 +10,10 @@ import { completeGoogleReturn, refreshSession } from "./net/account";
 import { districtOf, parcelArrival, refreshDistricts } from "./net/districts";
 import { useWorldVersion, world } from "./net/world-store";
 import { Consent, pendingConsent } from "./panel/Consent";
+import { Gate } from "./games/Gate";
+import { Player as GamePlayer } from "./games/Player";
+import { closeGame, openGame, useOpenGame } from "./games/state";
+import { gameBySlug, gameRoute } from "./net/games";
 import { Panel, type Section } from "./panel/Panel";
 import { TouchJoystick } from "./world/TouchJoystick";
 
@@ -57,6 +61,7 @@ export function App() {
   const touch = matchMedia("(pointer: coarse)").matches;
   useWorldVersion();
   useLang();
+  const game = useOpenGame();
 
   // La plaza se ve viva detrás del panel desde el primer segundo.
   // Vuelta de Google: termina el acceso y abre Personalizar con el resultado.
@@ -79,6 +84,23 @@ export function App() {
 
   useEffect(() => {
     void startSession(name);
+    // xenxo.io/j/<juego>: delante de su portal y con su aviso previo abierto.
+    const slug = gameRoute(location.pathname);
+    if (slug) {
+      history.replaceState(history.state, "", `/${location.search}${location.hash}`);
+      void gameBySlug(slug).then(async (p) => {
+        if (!p) return setAuthNotice({ tone: "error", text: t("gate.notFound") });
+        const districts = await refreshDistricts(true);
+        const d = districts.find((x) => x.id === p.district);
+        const parcel = d?.parcels.find((x) => x.project_id === p.id);
+        if (d && parcel) {
+          const a = parcelArrival(parcel);
+          travel(d.chunk_id, a.p, a.yaw);
+          setInWorld(true);
+        }
+        openGame(p);
+      });
+    }
     // Vuelta desde un juego (xenxo.back() del SDK): ?volver=<proyecto> → delante de su portal.
     const q = new URLSearchParams(location.search);
     const back = q.get("volver");
@@ -110,8 +132,20 @@ export function App() {
   return (
     <div className="relative h-dvh w-full overflow-hidden bg-noche text-cal">
       <Suspense fallback={null}>
-        <World active={inWorld} />
+        <World active={inWorld && !game} paused={game?.stage === "play"} />
       </Suspense>
+
+      {game?.stage === "gate" && game.project.game && (
+        <Gate
+          open={game}
+          onSignIn={() => {
+            closeGame();
+            setPanelSection("account");
+            setInWorld(false);
+          }}
+        />
+      )}
+      {game?.stage === "play" && <GamePlayer open={game} />}
 
       {consent && <Consent request={consent.request} error={consent.error} onClose={() => setConsent(null)} />}
 

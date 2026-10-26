@@ -61,6 +61,13 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 - El número de jugador sale de un contador (`counters.next_player`): nunca se reutiliza.
 - «Entrar con xenxo» (OIDC, `oidc.ts` + `directory.ts`): solo clientes públicos con PKCE S256, `redirect_uri` exacta, códigos de un uso, `sub` distinto por juego y nunca el id interno. La clave privada Ed25519 se crea y vive en el `Directory`: no se exporta, no va a secretos ni al código. La pantalla de permiso no se puede incrustar (`_headers`). Si tocas el flujo, el escenario «Entrar con xenxo» de la conformidad tiene que seguir pasando.
 
+## Juegos de fuera (fase 4)
+
+- La ficha `xenxo.json` la lee el **servidor** (`games.ts`: https a dominio público, sin redirecciones, 5 s, 32 KB); el navegador del visitante no la pide.
+- Lo que se abre de terceros va en el `iframe` aislado de `games/Player.tsx` (sin `allow-top-navigation`), con aviso previo (`games/Gate.tsx`). Solo se habla con su origen exacto. Un juego en xenxo.io nunca se incrusta (`embed` lo apaga el servidor).
+- Catálogo y escaparate: solo `review = 'approved'`. Rechazar u ocultar exige motivo, que ve su autor, y queda en `moderation_log` (DSA). Sin cuenta solo se abren juegos `all` y aprobados.
+- Si tocas el puente (`xenxo:*`) o `web_message`, cambia a la vez el SDK, `games/Player.tsx` y `docs/PROTOCOL.md` §9 quater, y que pasen los escenarios «juegos de fuera» y «Entrar con xenxo dentro de xenxo».
+
 ## Gasto (cero sorpresas en Cloudflare)
 
 - Se diseña para el plan gratuito: en Workers Free los límites cortan, no cobran. R2 sí factura si pasa de su capa gratis, por eso hay topes en `directory.ts` (`STORAGE_CAP_BYTES`, `USER_QUOTA_BYTES`, subidas al día) y los GET de assets van por la caché.

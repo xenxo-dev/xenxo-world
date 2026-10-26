@@ -188,7 +188,7 @@ Otras defensas: los flujos que se empiezan sin cuenta (passkey, Google, permisos
 el `state` de «Entrar con Google» queda atado al navegador con una cookie `HttpOnly; Secure; SameSite=Lax`;
 un agente de parcela con la clave revocada no vuelve a entrar aunque su token no haya caducado.
 
-## 9 quater. `xenxo.json`: la ficha de un juego
+## 9 quater. Juegos de fuera: `xenxo.json`, revisión y el juego dentro de xenxo
 
 Cada juego publica en la raíz de su web un `xenxo.json` con el esquema `xenxo.game/0`
 (`GameManifest` en `packages/protocol`; estricto: un campo desconocido invalida la ficha). La
@@ -206,6 +206,48 @@ plantilla `create-xenxo` la trae rellena; el registro de juegos (fase 4) la leer
 | `privacy` · `thumbnail` | https · `/ruta` o https. Opcionales al desarrollar, obligatorios al publicar |
 | `embed` | ¿Se puede abrir dentro de xenxo (iframe aislado)? Por defecto `true` |
 | `xenxo` | `{ clientId?: "xg_…", project?: "<id del proyecto>" }` |
+
+**Registrar la ficha.** `POST /projects/<id>/game { slug? }` (su autor): el servidor lee
+`xenxo.json` junto al enlace del proyecto (solo https a un dominio público, sin seguir
+redirecciones, 5 s y 32 KB como mucho), la valida con `GameManifest` y exige `privacy`. Si trae
+`xenxo.project`, tiene que ser ese proyecto; si trae `xenxo.clientId`, un juego de su autor. Da el
+enlace `xenxo.io/j/<slug>` (3–40, minúsculas, números y guiones; no reservado). Cambiar la ficha
+devuelve el proyecto a revisión. `DELETE /projects/<id>/game` la quita. Errores: `manifest_unreachable`,
+`manifest_redirect`, `manifest_too_big`, `manifest_invalid` (con `detail.issues`), `privacy_required`,
+`manifest_mismatch`, `bad_slug`, `slug_taken`. En local (`RP_ID=localhost`) se puede leer de localhost.
+
+**Lectura pública.** `GET /games/<slug>` y `GET /projects/<id>`: lo publicado (revisado o no; lo
+oculto, nunca). `GET /projects` (el catálogo) y el escaparate solo llevan lo aprobado. Cada proyecto
+lleva `slug`, `review` (`pending`, `approved`, `rejected`) y `game` (la ficha guardada, con `host` y
+`embed`; `embed` es `false` si el juego vive en xenxo.io).
+
+**Moderación** (fundador, personas en `moderators` o clave de administración): `GET /mod/queue`
+(pendientes y denuncias abiertas) · `POST /mod/projects/<id>/review { decision, note }` (rechazar exige
+motivo) · `POST /mod/projects/<id>/hide { note }` · `POST /mod/reports/<id> { status, note }` ·
+`GET /mod/log`. Cada decisión queda en `moderation_log`; el motivo lo ve su autor (`review_note` en
+`GET /me`). `GET /me/roles` → `{ moderator }`.
+
+**Abrir un juego.** La web enseña un aviso previo (autor, dominio, edad, anuncios o compras, si está
+revisado, que el navegador hablará con esa web). Sin cuenta solo se abren juegos `all` y aprobados.
+Dentro de xenxo va en un `iframe` con `sandbox="allow-scripts allow-same-origin allow-forms
+allow-pointer-lock allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals"` (nunca
+`allow-top-navigation`) en su propio dominio, y con `?xenxo_lang=` (y `?xenxo_origin=` si xenxo no es
+`https://xenxo.io`). En VR se sale de la VR y se abre su ficha.
+
+**Puente con el juego (postMessage, solo con el origen exacto del juego):**
+
+| Mensaje | Sentido | Qué |
+|---|---|---|
+| `xenxo:hello { v: 0 }` | juego → xenxo | Saludo del SDK al conectar |
+| `xenxo:welcome { v, lang, account, guest }` | xenxo → juego | Idioma, si tiene cuenta y, si es invitado, su nombre de invitado |
+| `xenxo:login { params }` | juego → xenxo | Parámetros de autorización (PKCE); `redirect_uri` tiene que ser de ese origen |
+| `xenxo:authorization { params }` | xenxo → juego | `code`, `state`, `iss` (o `error`): la respuesta `web_message` |
+| `xenxo:back { project }` | juego → xenxo | Cerrar el juego y volver al mundo |
+
+`POST /oidc/embedded` (solo desde la web de xenxo, por CORS) crea la petición con
+`response_mode=web_message`; la decisión (`POST /oidc/request/<id>`) devuelve
+`{ web_message: { origin, params } }` en vez de `{ redirect }`, y la web lo manda al juego con
+`postMessage(…, origin)`. Por `GET /oidc/authorize`, `web_message` no se admite.
 
 **Volver a xenxo.** `xenxo.back()` del SDK lleva a `https://xenxo.io/?volver=<id del proyecto>`: la
 web busca la parcela de ese proyecto y deja a la persona en el mundo, delante de su portal (si el id

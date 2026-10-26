@@ -55,6 +55,9 @@ const KEY = "xenxo:sdk";
 let opts: Resolved | null = null;
 let lastError: string | null = null;
 let simulating = false;
+/** La web de xenxo que tiene abierto el juego dentro (iframe), si contestó al saludo. */
+let parentOrigin: string | null = null;
+let welcome: { lang?: string; account: boolean; guest: { name: string } | null } | null = null;
 
 /** Un personaje de serie de xenxo (Alba, CC0) para el jugador de prueba del simulador. */
 const SIM_AVATAR = "927ec08956aae9186f4b0585645d2124d3586ab9f05ed0bf63848e439a0e2cf4";
@@ -186,6 +189,49 @@ function simPanel(mode: SimMode) {
   document.body.append(host);
 }
 
+/**
+ * ¿Quién podría ser xenxo alrededor? Su web (www incluida, o, para desarrollar, un xenxo en
+ * localhost que lo diga con ?xenxo_origin=). Solo se habla con ese origen y solo se escucha a ese origen.
+ */
+function parentCandidate(o: XenxoOptions): string | null {
+  if (window.parent === window) return null;
+  const home = new URL(homeOf(o)).origin;
+  const q = new URLSearchParams(location.search).get("xenxo_origin");
+  if (q && q !== home && (q === "https://www.xenxo.io" || /^http:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/.test(q))) return q;
+  return home;
+}
+
+/** Saludo al xenxo de alrededor: si contesta, el juego está dentro de xenxo. */
+function greet(origin: string): Promise<typeof welcome> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      removeEventListener("message", on);
+      resolve(null);
+    }, 1500);
+    function on(e: MessageEvent) {
+      if (e.source !== window.parent || e.origin !== origin) return;
+      const d = e.data as { type?: string; lang?: unknown; account?: unknown; guest?: { name?: unknown } | null } | null;
+      if (!d || d.type !== "xenxo:welcome") return;
+      clearTimeout(timer);
+      removeEventListener("message", on);
+      resolve({
+        lang: typeof d.lang === "string" && /^[a-z]{2}$/.test(d.lang) ? d.lang : undefined,
+        account: d.account === true,
+        guest: d.guest && typeof d.guest.name === "string" ? { name: d.guest.name.slice(0, 32) } : null,
+      });
+    }
+    addEventListener("message", on);
+    window.parent.postMessage({ type: "xenxo:hello", v: 0 }, origin);
+  });
+}
+
+/** Un invitado de xenxo (solo su nombre visible; el id vale para esta pestaña). */
+function guestPlayer(name: string): XenxoPlayer {
+  let id = read<string>("guest");
+  if (!id) store("guest", (id = `guest_${random(9)}`));
+  return { id, name, playerNo: null, avatar: null, idToken: "", expiresAt: Date.now() + 3600_000, signatureChecked: false, guest: true };
+}
+
 export const xenxo = {
   /**
    * Prepara el SDK y devuelve el jugador si ya entró (o si vuelve ahora de xenxo con su permiso).
@@ -239,8 +285,18 @@ export const xenxo = {
         return null;
       }
     }
+    // ¿Dentro de xenxo? Entonces se habla con xenxo por postMessage (sin salir del juego).
+    const candidate = parentCandidate(o);
+    if (candidate) {
+      welcome = await greet(candidate);
+      parentOrigin = welcome ? candidate : null;
+      // Un xenxo de desarrollo (localhost) usa su servidor local de identidad, salvo que digas otro.
+      if (parentOrigin?.startsWith("http://") && !options.issuer) o.issuer = "http://localhost:8787";
+    }
     const saved = read<XenxoPlayer>("player");
-    return saved && saved.expiresAt > Date.now() ? saved : null;
+    if (saved && saved.expiresAt > Date.now()) return saved;
+    if (welcome?.guest) return guestPlayer(welcome.guest.name);
+    return null;
   },
 
   /** Lleva a la persona a xenxo para que dé permiso (vuelve a `redirectUri`). */
@@ -254,6 +310,50 @@ export const xenxo = {
     const challenge = b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
     const pending = { state: random(16), nonce: random(16), verifier };
     store("pending", pending);
+    const params: Record<string, string> = {
+      response_type: "code",
+      client_id: opts.clientId,
+      redirect_uri: opts.redirectUri,
+      scope: ["openid", ...(opts.scopes ?? ["profile", "player", "avatar"])].join(" "),
+      state: pending.state,
+      nonce: pending.nonce,
+      code_challenge: challenge,
+      code_challenge_method: "S256",
+      ...(prompt ? { prompt } : {}),
+    };
+    if (parentOrigin) {
+      // Dentro de xenxo: xenxo enseña el permiso encima del juego y devuelve el código por postMessage.
+      const from = parentOrigin;
+      const res = await new Promise<Record<string, unknown>>((resolve) => {
+        function on(e: MessageEvent) {
+          if (e.source !== window.parent || e.origin !== from) return;
+          const d = e.data as { type?: string; params?: unknown } | null;
+          if (!d || d.type !== "xenxo:authorization" || !d.params || typeof d.params !== "object") return;
+          removeEventListener("message", on);
+          resolve(d.params as Record<string, unknown>);
+        }
+        addEventListener("message", on);
+        window.parent.postMessage({ type: "xenxo:login", params }, from);
+      });
+      const str = (k: string) => (typeof res[k] === "string" ? (res[k] as string) : null);
+      if (str("error")) {
+        store("pending", null);
+        lastError = str("error");
+        return;
+      }
+      if (str("iss") !== issuerOf(opts) || !str("code") || !str("state")) {
+        store("pending", null);
+        lastError = "la respuesta no viene de xenxo";
+        return;
+      }
+      try {
+        store("player", await finish(opts, str("code")!, str("state")!));
+        location.reload();
+      } catch (e) {
+        lastError = (e as Error).message;
+      }
+      return;
+    }
     const q = new URLSearchParams({
       response_type: "code",
       client_id: opts.clientId,
@@ -283,12 +383,21 @@ export const xenxo = {
     const home = homeOf(opts);
     const url = opts?.project ? `${home}/?volver=${encodeURIComponent(opts.project)}` : `${home}/`;
     if (simulating) return toast(`xenxo.back() → ${url}`);
-    const origin = new URL(home).origin;
-    if (window.parent !== window && document.referrer.startsWith(origin)) {
-      window.parent.postMessage({ type: "xenxo:back", project: opts?.project ?? null }, origin);
+    if (parentOrigin) {
+      window.parent.postMessage({ type: "xenxo:back", project: opts?.project ?? null }, parentOrigin);
       return;
     }
     location.assign(url);
+  },
+
+  /** ¿Está el juego abierto dentro de xenxo? (tras `connect()`) */
+  get embedded() {
+    return parentOrigin !== null;
+  },
+
+  /** Dentro de xenxo: ¿tiene la persona cuenta en xenxo? (si no, es invitada). */
+  get hasXenxoAccount() {
+    return welcome?.account ?? false;
   },
 
   /** ¿Es el simulador local? */
@@ -298,6 +407,7 @@ export const xenxo = {
 
   /** Idioma de la persona: el que diga xenxo al abrir el juego (`?xenxo_lang=`) o el del navegador. */
   get lang(): string {
+    if (welcome?.lang) return welcome.lang;
     const q = new URLSearchParams(location.search).get("xenxo_lang");
     return (q && /^[a-z]{2}$/.test(q) ? q : navigator.language.slice(0, 2).toLowerCase()) || "es";
   },

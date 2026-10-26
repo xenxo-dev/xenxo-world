@@ -287,7 +287,7 @@ function Scene({ active }: { active: boolean }) {
   );
 }
 
-export function World({ active }: { active: boolean }) {
+export function World({ active, paused = false }: { active: boolean; paused?: boolean }) {
   const g = useGraphics();
   const f = g.features;
 
@@ -299,6 +299,8 @@ export function World({ active }: { active: boolean }) {
       dpr={f.dpr}
       shadows
       gl={{ antialias: f.antialias, powerPreference: "high-performance" }}
+      // Con un juego abierto encima, el mundo no se dibuja (la GPU es para el juego).
+      frameloop={paused ? "never" : "always"}
       camera={{ fov: 70, near: 0.1, far: 400, position: [32, 14, 66] }}
     >
       <XR store={xrStore}>

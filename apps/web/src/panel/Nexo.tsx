@@ -5,6 +5,7 @@ import { t, useLang } from "../i18n";
 import { DISTRICT_SPAWN, districtOf, parcelArrival, refreshDistricts, useDistricts, type DistrictInfo } from "../net/districts";
 import { refreshProjects, useProjects } from "../net/projects";
 import { travel } from "../net/session";
+import { gameName, openGame } from "../games/state";
 import { Block, card } from "./ui";
 
 /** Viaja al distrito de un proyecto y aparece delante de su portal, mirándolo. */
@@ -96,11 +97,19 @@ export function NexoSection({ onEnter }: { onEnter: () => void }) {
                       {name(d)} · {p.parcel}
                     </span>
                   )}
-                  <p className="display text-[17px] font-semibold text-cal">{p.title}</p>
+                  <p className="display text-[17px] font-semibold text-cal">{gameName(p, lang)}</p>
                   <p className="text-xs text-cal/50">{t("projects.by", { name: p.author })}</p>
                   {p.summary && <p className="line-clamp-3 text-sm leading-relaxed text-cal/65">{p.summary}</p>}
                   <div className="mt-auto flex flex-wrap gap-2 pt-3">
-                    {p.url && (
+                    {p.game && (
+                      <button
+                        onClick={() => openGame(p)}
+                        className="flex-1 rounded-xl bg-neon px-4 py-3 text-center text-base font-medium text-noche hover:bg-neon-suave"
+                      >
+                        {t("portal.play")}
+                      </button>
+                    )}
+                    {p.url && !p.game && (
                       <a
                         href={p.url}
                         target="_blank"

@@ -6,6 +6,7 @@ import { randomId, resolveAgent, signToken, verifyToken, type Principal } from "
 import type { ChunkRoom, ShowcaseItem } from "./chunk-room";
 import { DISTRICTS, districtById, parcelIndex, parcelSpawn } from "./districts";
 import { SHOWCASE_SLOTS } from "./nexo";
+import { fetchDevManifest, fetchManifest } from "./games";
 import { MAX_AGENT_KEYS_PER_PROJECT, MAX_SKINS, type Directory, type UserRow } from "./directory";
 
 export { ChunkRoom } from "./chunk-room";
@@ -259,6 +260,19 @@ async function oidcRoutes(req: Request, env: Env, url: URL, h: Record<string, st
     // Sin juego o sin dirección de vuelta válidos no se redirige a ningún sitio de fuera.
     if (!r.redirect) return back(web, { autorizar_error: r.error });
     return new Response(null, { status: 302, headers: { Location: r.redirect, ...noStore } });
+  }
+
+  // Juego abierto dentro de xenxo: la web de xenxo pide el permiso por él (respuesta por postMessage).
+  if (path === "/oidc/embedded" && req.method === "POST") {
+    if (!h["Access-Control-Allow-Origin"]) return json({ error: "forbidden" }, 403, noStore);
+    const body = await readJson(req).catch(() => ({}) as Record<string, unknown>);
+    const q: Record<string, string | null> = {};
+    for (const k of ["response_type", "client_id", "redirect_uri", "scope", "state", "nonce", "code_challenge", "code_challenge_method", "prompt", "max_age"]) {
+      const v = body[k];
+      q[k] = typeof v === "string" ? v.slice(0, 600) : null;
+    }
+    const r = await dir.authorizeRequest(q, true);
+    return r.ok ? json({ request: r.request }, 200, { ...h, ...noStore }) : json({ error: r.error, message: r.message }, 400, { ...h, ...noStore });
   }
 
   if (path === "/oidc/token" && req.method === "POST") {
@@ -542,6 +556,13 @@ export default {
         return json({ projects: await dir.listProjects() }, 200, { ...h, "Cache-Control": "public, max-age=10" });
       }
 
+      /* --- Juegos por su enlace (xenxo.io/j/<slug>): lectura pública --- */
+      const gslug = path.match(/^\/games\/([a-z0-9-]{3,40})$/);
+      if (gslug && req.method === "GET") {
+        const g = await dir.gameBySlug(gslug[1]!);
+        return g ? json({ project: g }, 200, { ...h, "Cache-Control": "public, max-age=30" }) : json({ error: "not_found", message: "ese juego no existe" }, 404, h);
+      }
+
       /* --- Carné de jugador (lectura pública; solo los que su dueño hizo públicos) --- */
       const pcard = path.match(/^\/players\/(0|[1-9]\d{0,8})$/);
       if (pcard && req.method === "GET") {
@@ -674,6 +695,9 @@ export default {
           const r = await dir.addPasskeyVerify(uid, await readJson(req));
           return r.ok ? json(r.data, 200, h) : failure(r, h);
         }
+        if (path === "/me/roles" && req.method === "GET") {
+          return json({ moderator: await dir.isModerator(uid) }, 200, h);
+        }
         if (path === "/me/card" && req.method === "GET") {
           const r = await dir.card(uid);
           return r.ok ? json(r.data, 200, h) : failure(r, h);
@@ -738,6 +762,12 @@ export default {
       }
 
       const proj = path.match(/^\/projects\/([a-zA-Z0-9_-]{4,40})$/);
+      if (proj && req.method === "GET") {
+        const p = await dir.project(proj[1]!);
+        // Solo lo publicado (revisado o no: su portal está en su parcela). Lo oculto, para nadie.
+        const visible = p && (await dir.projectPlace(proj[1]!)) && (await dir.projectStatus(proj[1]!)) === "published";
+        return visible ? json({ project: p }, 200, { ...h, "Cache-Control": "public, max-age=10" }) : json({ error: "not_found" }, 404, h);
+      }
       if (proj && req.method === "DELETE") {
         if (!principal) return json({ error: "unauthorized" }, 401, h);
         const owner = await dir.projectOwner(proj[1]!);
@@ -752,6 +782,62 @@ export default {
       }
 
       /* --- Moderación (agentes con scope admin) --- */
+      /* --- Ficha de juego de un proyecto (xenxo.json): la lee el servidor --- */
+      const pgame = path.match(/^\/projects\/([a-zA-Z0-9_-]{4,40})\/game$/);
+      if (pgame && (req.method === "POST" || req.method === "DELETE")) {
+        if (!uid) return json({ error: "unauthorized", message: "inicia sesión" }, 401, h);
+        const id = pgame[1]!;
+        if (req.method === "DELETE") {
+          const r = await dir.clearGame(uid, id);
+          return r.ok ? json(r.data, 200, h) : failure(r, h);
+        }
+        const body = await readJson(req).catch(() => ({}) as Record<string, unknown>);
+        const mine = await dir.me(uid);
+        const p = mine.ok ? mine.data.projects.find((x) => x.id === id && x.status === "published") : undefined;
+        if (!p) return json({ error: "not_found", message: "ese proyecto no es tuyo o no existe" }, 404, h);
+        if (!p.url) return json({ error: "bad_url", message: "el proyecto necesita el enlace del juego" }, 400, h);
+        // En local (RP_ID=localhost) se puede leer la ficha de un servidor de pruebas en localhost.
+        const localGame = env.RP_ID === "localhost" && /^http:\/\/(localhost|127\.0\.0\.1):/.test(p.url) ? new URL("xenxo.json", p.url).toString() : null;
+        const devUrl = env.RP_ID === "localhost" ? (typeof body.manifest_url === "string" ? body.manifest_url : localGame) : null;
+        const read = devUrl ? await fetchDevManifest(devUrl) : await fetchManifest(p.url);
+        if (!read.ok) return json({ error: read.error, message: read.message, detail: read.detail }, 400, h);
+        const r = await dir.setGame(uid, id, read.manifest, body.slug);
+        return r.ok ? json({ project: r.data, manifest_url: read.at }, 200, h) : failure(r, h);
+      }
+
+      /* --- Moderación (personas moderadoras; el fundador siempre) --- */
+      if (path.startsWith("/mod/")) {
+        const modId = isAdmin ? `admin:${principal!.sub}` : uid && (await dir.isModerator(uid)) ? `usr_${uid}` : null;
+        if (!modId) return json({ error: "forbidden", message: "solo moderación" }, 403, h);
+        if (path === "/mod/queue" && req.method === "GET") return json(await dir.moderationQueue(), 200, { ...h, "Cache-Control": "no-store" });
+        if (path === "/mod/log" && req.method === "GET") return json({ log: await dir.moderationLog() }, 200, { ...h, "Cache-Control": "no-store" });
+        const rev = path.match(/^\/mod\/projects\/([a-zA-Z0-9_-]{4,40})\/review$/);
+        if (rev && req.method === "POST") {
+          const b = await readJson(req);
+          const r = await dir.review(modId, rev[1]!, b.decision, b.note);
+          if (!r.ok) return failure(r, h);
+          ctx.waitUntil(syncShowcase(env, dir));
+          return json({ project: r.data }, 200, h);
+        }
+        const mhide = path.match(/^\/mod\/projects\/([a-zA-Z0-9_-]{4,40})\/hide$/);
+        if (mhide && req.method === "POST") {
+          const b = await readJson(req);
+          const place = await dir.projectPlace(mhide[1]!);
+          const r = await dir.moderateHide(modId, mhide[1]!, b.note);
+          if (!r.ok) return failure(r, h);
+          await clearParcel(env, place?.district, mhide[1]!, await dir.projectAgents(mhide[1]!));
+          ctx.waitUntil(syncShowcase(env, dir));
+          return json(r.data, 200, h);
+        }
+        const mrep = path.match(/^\/mod\/reports\/(\d{1,12})$/);
+        if (mrep && req.method === "POST") {
+          const b = await readJson(req);
+          const r = await dir.moderateReport(modId, Number(mrep[1]), b.status, b.note);
+          return r.ok ? json(r.data, 200, h) : failure(r, h);
+        }
+        return json({ error: "not_found" }, 404, h);
+      }
+
       if (path.startsWith("/admin/")) {
         if (!isAdmin) return json({ error: "forbidden" }, 403, h);
         // Limpieza de archivos huérfanos ya (la diaria va sola). En local (RP_ID=localhost) se puede simular la fecha.

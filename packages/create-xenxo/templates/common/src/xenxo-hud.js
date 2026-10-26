@@ -60,7 +60,8 @@ function pintarBarra(jugador, puedeEntrar) {
   }
   barra.append(quien);
 
-  if (!jugador && puedeEntrar) barra.append(boton(textos.entrar, () => xenxo.login(), "principal"));
+  // Sin entrar, o como invitado de xenxo: se puede entrar con la cuenta (dentro de xenxo, sin salir del juego).
+  if ((!jugador || jugador.guest) && puedeEntrar) barra.append(boton(textos.entrar, () => xenxo.login(), "principal"));
   if (jugador && !jugador.guest) barra.append(boton(textos.salir, () => (xenxo.logout(), location.reload())));
   if (!jugador && xenxo.error) console.info("[xenxo]", textos.noEntro, xenxo.error);
 

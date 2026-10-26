@@ -3,7 +3,10 @@ import { assetUrl } from "../config";
 import { getLang, placeName, t, useLang, type Key } from "../i18n";
 import { usePlace } from "../net/world-store";
 import { districtOf } from "../net/districts";
-import { projectById, refreshProjects, useProjects } from "../net/projects";
+import { refreshProjects, useProjects } from "../net/projects";
+import type { Project } from "../net/account";
+import { projectByIdAny } from "../net/games";
+import { gameName, openGame } from "../games/state";
 import { ReportButton } from "../panel/ReportButton";
 import { categoryColor, usePortalHud } from "../world/portals-state";
 
@@ -18,11 +21,18 @@ export function PortalCard() {
   const hud = usePortalHud();
   useProjects();
   const card = hud.card;
+  const [p, setP] = useState<Project | null>(null);
   useEffect(() => {
-    if (card) void refreshProjects();
-  }, [card]);
+    setP(null);
+    if (!card) return;
+    let alive = true;
+    // Del catálogo, o se pide aparte (un proyecto aún sin revisar también tiene su portal).
+    void refreshProjects().then(() => projectByIdAny(card.projectId).then((x) => alive && setP(x)));
+    return () => {
+      alive = false;
+    };
+  }, [card?.projectId]);
   if (!card) return null;
-  const p = projectById(card.projectId);
   const cover = card.cover ?? p?.cover_hash ?? null;
   const cat = p?.category ?? card.category ?? "other";
   const d = districtOf(p?.district);
@@ -44,7 +54,7 @@ export function PortalCard() {
             >
               {chipText}
             </span>
-            <p className="display truncate text-lg font-semibold text-cal">{p?.title ?? card.title}</p>
+            <p className="display truncate text-lg font-semibold text-cal">{p ? gameName(p, getLang()) : card.title}</p>
             {p && <p className="text-xs text-cal/50">{t("projects.by", { name: p.author })}</p>}
           </div>
           <button onClick={() => hud.close()} className="text-cal/50 hover:text-cal" aria-label={t("portal.close")}>
@@ -52,7 +62,18 @@ export function PortalCard() {
           </button>
         </div>
         {p?.summary && <p className="mt-2 text-sm leading-relaxed text-cal/70">{p.summary}</p>}
-        {p?.url && (
+        {p?.game && (
+          <button
+            onClick={() => {
+              hud.close();
+              openGame(p);
+            }}
+            className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-neon px-4 py-3 text-base font-medium text-noche hover:bg-neon-suave"
+          >
+            {t("portal.play")}
+          </button>
+        )}
+        {p?.url && !p.game && (
           <>
             <a
               href={p.url}

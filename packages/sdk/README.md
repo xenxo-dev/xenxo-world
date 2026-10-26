@@ -84,6 +84,15 @@ const idioma = xenxo.lang;            // "es", "en"… (el que diga xenxo, o el 
 junto al `client_id`). Sin él, `back()` lleva a la portada de xenxo. Si xenxo abrió tu juego dentro
 de su página, `back()` se lo pide a xenxo en vez de navegar.
 
+## Dentro de xenxo
+
+Si tu ficha (`xenxo.json`) dice `"embed": true`, xenxo puede abrir tu juego dentro de su página
+(un iframe aislado en tu dominio). El SDK lo detecta solo: `xenxo.embedded` es `true`, `xenxo.lang`
+es el idioma de la persona, `xenxo.login()` enseña el permiso encima del juego **sin salir de él**
+(el código llega por `postMessage` a tu origen exacto) y `xenxo.back()` cierra el juego y devuelve
+a la persona al mundo. Si entra como invitado de xenxo, `connect()` devuelve `{ guest: true, name }`.
+No tienes que hacer nada distinto; solo que tu dirección de vuelta registrada sea la de esa página.
+
 ## Comprobarlo en tu servidor
 
 El `id_token` es un JWT firmado con **EdDSA (Ed25519)**. Claves públicas en

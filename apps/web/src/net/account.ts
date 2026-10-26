@@ -34,6 +34,32 @@ export interface Project {
   author: string;
   created_at: number;
   in_world: boolean;
+  /** xenxo.io/j/<slug>, si tiene ficha de juego. */
+  slug?: string | null;
+  /** Revisión humana: solo lo aprobado sale en el catálogo y en el escaparate. */
+  review?: "pending" | "approved" | "rejected";
+  /** La ficha del juego (xenxo.json) que guardó xenxo. */
+  game?: GameInfo | null;
+  /** Solo en tus proyectos: el motivo de un rechazo u ocultación. */
+  review_note?: string | null;
+  /** Solo en tus proyectos: "published" u "hidden". */
+  status?: string;
+}
+
+export interface GameInfo {
+  name: Record<string, string>;
+  description: Record<string, string>;
+  category: ProjectCategory;
+  devices: ("pc" | "mobile" | "vr")[];
+  multiplayer: boolean;
+  ageRating: "all" | "+14";
+  monetization: { hasAds: boolean; hasPurchases: boolean };
+  author: string;
+  contact: string;
+  privacy: string;
+  embed: boolean;
+  host: string;
+  url: string;
 }
 
 export class ApiError extends Error {
@@ -329,6 +355,8 @@ export interface OidcRequestInfo {
   scopes: string[];
   granted: boolean;
   prompt: string | null;
+  /** El juego está abierto dentro de xenxo: la respuesta va por postMessage, no por redirección. */
+  embedded?: boolean;
   /** El juego pidió algo que no vale: se enseña y se vuelve con un clic. */
   error?: string;
   message?: string;
@@ -339,8 +367,15 @@ export function oidcRequest(id: string): Promise<OidcRequestInfo> {
 }
 
 /** La respuesta de la persona; devuelve a dónde ir (el juego, con su código o con access_denied). */
-export async function oidcDecide(id: string, approve: boolean): Promise<string> {
-  return (await api<{ redirect: string }>("POST", `/oidc/request/${encodeURIComponent(id)}`, { approve })).redirect;
+export type OidcResponse = { redirect: string } | { web_message: { origin: string; params: Record<string, string> } };
+
+export function oidcDecide(id: string, approve: boolean): Promise<OidcResponse> {
+  return api<OidcResponse>("POST", `/oidc/request/${encodeURIComponent(id)}`, { approve });
+}
+
+/** Pide el permiso para el juego que está abierto dentro de xenxo (respuesta por postMessage). */
+export async function oidcEmbedded(params: Record<string, string>): Promise<string> {
+  return (await api<{ request: string }>("POST", "/oidc/embedded", params)).request;
 }
 
 export interface ConnectedGame {

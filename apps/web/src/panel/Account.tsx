@@ -30,6 +30,7 @@ import { reconnect } from "../net/session";
 import { AVATAR_PRESETS, presetByHash, setChosenPreset, useChosenPreset } from "../world/presets";
 import type { PreviewPose } from "./AvatarPreview";
 import { CardSettings } from "./CardSettings";
+import { Moderation, useModerator } from "./Moderation";
 import { ConnectedGames } from "./Games";
 import { ModelPicker } from "./ModelPicker";
 import { Block, Button, card, input, Label, Notice, Segmented } from "./ui";
@@ -47,6 +48,7 @@ const AvatarPreview = lazy(() => import("./AvatarPreview"));
 /** Cuenta: quién eres (cuenta o invitado), tu personaje con su vista previa y tu armario. */
 export function AccountSection(props: CustomizeProps) {
   const user = useAccount();
+  const moderator = useModerator(user?.id);
   return (
     <>
       <Block title={t("account.title")}>
@@ -57,6 +59,12 @@ export function AccountSection(props: CustomizeProps) {
       <Block title={t("avatar.title")}>
         <Wardrobe />
       </Block>
+
+      {moderator && (
+        <Block title={t("mod.title")}>
+          <Moderation />
+        </Block>
+      )}
 
       {user && (
         <Block title={t("card.mine")}>

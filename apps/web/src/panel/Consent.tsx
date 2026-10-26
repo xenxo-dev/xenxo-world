@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { errorText, t, type Key } from "../i18n";
-import { oidcDecide, oidcRequest, useAccount, type OidcRequestInfo } from "../net/account";
+import { oidcDecide, oidcRequest, useAccount, type OidcRequestInfo, type OidcResponse } from "../net/account";
 import { SignedOut } from "./Account";
 import { Button, card, Notice } from "./ui";
 
@@ -48,7 +48,19 @@ function clearQuery() {
  * a qué dominio vuelve y qué pide; nada se comparte sin pulsar «Permitir» (salvo que ya lo
  * hubiera permitido antes, y entonces se vuelve al juego sin preguntar).
  */
-export function Consent({ request, error, onClose }: { request: string | null; error: string | null; onClose: () => void }) {
+export function Consent({
+  request,
+  error,
+  onClose,
+  onWebMessage,
+}: {
+  request: string | null;
+  error: string | null;
+  onClose: () => void;
+  /** Juego incrustado: la respuesta se le entrega por postMessage (lo hace quien lo tiene abierto). */
+  onWebMessage?: (r: { origin: string; params: Record<string, string> }) => void;
+}) {
+  const embedded = !!onWebMessage;
   const user = useAccount();
   const [info, setInfo] = useState<OidcRequestInfo | null>(null);
   const [problem, setProblem] = useState<string>(error ? errorText({ code: error }) : "");
@@ -56,7 +68,7 @@ export function Consent({ request, error, onClose }: { request: string | null; e
 
   useEffect(() => {
     if (!request) return;
-    rememberConsent(request);
+    if (!embedded) rememberConsent(request);
     let alive = true;
     oidcRequest(request)
       .then((r) => alive && setInfo(r))
@@ -70,9 +82,16 @@ export function Consent({ request, error, onClose }: { request: string | null; e
     if (!request) return;
     setBusy(true);
     try {
-      const to = await oidcDecide(request, approve);
+      const r: OidcResponse = await oidcDecide(request, approve);
+      if ("web_message" in r) {
+        // Solo al juego que lo pidió: el que tiene abierto quien llamó (y a su origen exacto).
+        if (!onWebMessage) throw new Error("web_message");
+        onWebMessage(r.web_message);
+        onClose();
+        return;
+      }
       clearQuery();
-      location.assign(to);
+      location.assign(r.redirect);
     } catch (e) {
       setProblem(errorText(e));
       setBusy(false);

@@ -163,6 +163,7 @@ function inZone(z: Zone, x: number, pz: number) {
 
 function PortalSensor({ portals, active }: { portals: Entity[]; active: boolean }) {
   const inXR = useXR((s) => s.session != null);
+  const xrSession = useXR((s) => s.session);
   const zones = useMemo(() => zonesOf(portals), [portals]);
   // Al cargar un lugar, los portales en los que ya estás no se disparan hasta que sales.
   // Dos conjuntos que se alternan: nada de objetos nuevos por frame.
@@ -182,7 +183,11 @@ function PortalSensor({ portals, active }: { portals: Entity[]; active: boolean 
       for (const z of zones) {
         const was = st.before.has(z.id);
         const is = now.has(z.id);
-        if (is && !was) enter(z);
+        if (is && !was) {
+          // En las gafas, un proyecto se abre fuera de la VR: se sale y aparece su ficha.
+          if (inXR && z.portal.to.kind === "project") void xrSession?.end().catch(() => {});
+          enter(z);
+        }
         if (!is && was && z.portal.to.kind === "project") portalHud.close(z.portal.to.project_id);
       }
     }

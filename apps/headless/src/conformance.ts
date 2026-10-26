@@ -527,8 +527,7 @@ await scenario("proyecto: exige portada, monumento, distrito y parcela libre; su
   const district = await XenxoClient.connect({ baseUrl, chunkId: "c_1_-1" });
   const nexo = await XenxoClient.connect({ baseUrl, chunkId: PLACES.nexo });
   const delta = district.next("DELTA", (m) => m.payload.changes.some((c) => c.kind === "upsert" && c.entity.entity_id.startsWith("standm_")), 4000);
-  const shown = nexo.next("DELTA", (m) => m.payload.changes.some((c) => c.kind === "upsert" && c.entity.entity_id.startsWith("show_")), 6000);
-  const created = await api.call<{ project: { id: string; in_world: boolean; category: string; district: string; parcel: string } }>("POST", "/projects", full);
+  const created = await api.call<{ project: { id: string; in_world: boolean; category: string; district: string; parcel: string; review: string } }>("POST", "/projects", full);
   assert(created.ok && created.data.project.in_world, `el proyecto debería tener portal: ${JSON.stringify(created)}`);
   assert(created.data.project.category === "other" && created.data.project.parcel === parcel, "categoría del distrito y parcela elegida");
   const d = await delta;
@@ -541,10 +540,18 @@ await scenario("proyecto: exige portada, monumento, distrito y parcela libre; su
   const meshEntity = up(`standm_${id}`);
   const lods = meshEntity && meshEntity.kind === "upsert" ? (meshEntity.entity.components["mesh@1"] as { lods: { tris: number }[] }).lods : [];
   assert(lods[0]?.tris === 108, `los triángulos deberían venir medidos por el servidor (108), llegaron ${lods[0]?.tris}`);
-  const s = await shown;
-  const show = s.payload.changes.find((c) => c.kind === "upsert" && c.entity.entity_id === `show_${id}`);
-  const sc = show && show.kind === "upsert" ? (show.entity.components["portal@1"] as { to: { chunk_id?: string } }) : null;
-  assert(sc?.to.chunk_id === "c_1_-1", "el escaparate del nexo lleva al distrito del proyecto");
+  // Al escaparate del nexo solo llega lo revisado: se aprueba con la clave de administración.
+  assert(created.data.project.review === "pending", "publicar es inmediato, pero el escaparate espera la revisión");
+  if (adminKey) {
+    const mod = new Api(baseUrl);
+    await mod.agentToken(adminKey);
+    const shown = nexo.next("DELTA", (m) => m.payload.changes.some((c) => c.kind === "upsert" && c.entity.entity_id === `show_${id}`), 6000);
+    assert((await mod.call("POST", `/mod/projects/${id}/review`, { decision: "approved" })).ok, "aprobar");
+    const s = await shown;
+    const show = s.payload.changes.find((c) => c.kind === "upsert" && c.entity.entity_id === `show_${id}`);
+    const sc = show && show.kind === "upsert" ? (show.entity.components["portal@1"] as { to: { chunk_id?: string } }) : null;
+    assert(sc?.to.chunk_id === "c_1_-1", "el escaparate del nexo lleva al distrito del proyecto");
+  }
 
   const other = new Api(baseUrl);
   await other.register(`conf ${randomUUID().slice(0, 6)}`);
@@ -932,6 +939,128 @@ await scenario("Entrar con xenxo: OpenID Connect con PKCE, consentimiento, sub p
   const otherDev = await player.call("DELETE", `/me/games/${g.data.client_id}`);
   assert(!otherDev.ok, "nadie más puede borrar el juego de otro");
   assert((await dev.call("DELETE", `/me/games/${g.data.client_id}`)).ok && (await dev.call("DELETE", `/me/games/${g2.data.client_id}`)).ok, "su autor sí");
+});
+
+await scenario("juegos de fuera: ficha xenxo.json leída por el servidor, enlace /j/, revisión y moderación con motivos", async () => {
+  const { createServer } = await import("node:http");
+  const errOf = (r: { ok: boolean }) => (r.ok ? null : (r as unknown as { error: string }).error);
+  const statusOf = (r: { ok: boolean }) => (r.ok ? 200 : (r as unknown as { status: number }).status);
+  // Un «juego de fuera» de pruebas: sirve su xenxo.json (en local el servidor puede leer de localhost).
+  let manifest: Record<string, unknown> = {};
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(manifest));
+  });
+  await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+  const manifestUrl = `http://127.0.0.1:${(server.address() as { port: number }).port}/xenxo.json`;
+  try {
+    const dev = new Api(baseUrl);
+    await dev.register(`conf ${randomUUID().slice(0, 6)}`);
+    const model = await dev.upload(await makeBoxGlb({ segments: 2, color: [Math.random(), 0.3, 0.8, 1] }), "model");
+    const cover = await dev.upload(makeCoverPng(320, 180, [Math.floor(Math.random() * 255), 30, 160]), "cover");
+    assert(model.ok && cover.ok, "subidas");
+    const created = await dev.call<{ project: { id: string; review: string } }>("POST", "/projects", {
+      title: "Juego de fuera", summary: "", url: "https://juego-de-fuera.example.org/", district: "arcade",
+      parcel: await freeParcel("arcade"), cover_hash: cover.data.hash, mesh_hash: model.data.hash,
+    });
+    assert(created.ok && created.data.project.review === "pending", "un proyecto nuevo espera revisión");
+    const id = created.data.project.id;
+    const catalog = async () => ((await (await fetch(new URL("/projects", baseUrl))).json()) as { projects: { id: string }[] }).projects.some((p) => p.id === id);
+    assert(!(await catalog()), "sin revisar no sale en el catálogo");
+
+    const base = {
+      schema: "xenxo.game/0", name: { es: "Juego de fuera", en: "Outside game" }, description: { es: "Prueba", en: "Test" },
+      category: "game3d", devices: ["pc"], multiplayer: false, ageRating: "all", monetization: { hasAds: true, hasPurchases: false },
+      author: "Alguien", contact: "https://example.org", privacy: "https://juego-de-fuera.example.org/privacidad",
+    };
+    const slug = `fuera-${randomUUID().slice(0, 6)}`;
+    const register = (body: Record<string, unknown> = {}) => dev.call<{ project: { slug: string; review: string; game: { host: string; embed: boolean; ageRating: string } } }>("POST", `/projects/${id}/game`, { manifest_url: manifestUrl, slug, ...body });
+
+    manifest = { ...base, inventado: 1 };
+    const invalid = await register();
+    assert(!invalid.ok && invalid.error === "manifest_invalid", "una ficha con campos inventados se rechaza (con sus problemas)");
+    manifest = { ...base, privacy: undefined };
+    assert(errOf(await register()) === "privacy_required", "sin página de privacidad no se registra");
+    manifest = { ...base, xenxo: { project: "otroproyecto" } };
+    assert(errOf(await register()) === "manifest_mismatch", "una ficha que dice ser de otro proyecto se rechaza");
+    manifest = base;
+    assert(errOf(await register({ slug: "admin" })) === "bad_slug", "un enlace reservado no vale");
+    const okReg = await register();
+    assert(okReg.ok && okReg.data.project.slug === slug && okReg.data.project.game.host === "juego-de-fuera.example.org" && okReg.data.project.game.embed, `registrar la ficha: ${JSON.stringify(okReg)}`);
+    const other = new Api(baseUrl);
+    await other.register(`conf ${randomUUID().slice(0, 6)}`);
+    assert(statusOf(await other.call("POST", `/projects/${id}/game`, { manifest_url: manifestUrl })) === 404, "nadie más registra la ficha de tu proyecto");
+
+    const pub = await fetch(new URL(`/games/${slug}`, baseUrl));
+    const g = (await pub.json()) as { project: { id: string; review: string; game: { monetization: { hasAds: boolean } } } };
+    assert(pub.status === 200 && g.project.id === id && g.project.review === "pending" && g.project.game.monetization.hasAds, "xenxo.io/j/<slug> funciona al momento (como «no revisado»)");
+    assert(!("review_note" in g.project), "la nota de revisión no es pública");
+
+    // Moderación: solo moderadores (o la clave de administración).
+    assert(statusOf(await dev.call("GET", "/mod/queue")) === 403, "una persona cualquiera no modera");
+    const roles = await dev.call<{ moderator: boolean }>("GET", "/me/roles");
+    assert(roles.ok && roles.data.moderator === false, "GET /me/roles");
+    if (!adminKey) return console.log("    (sin XENXO_ADMIN_KEY: se omite la parte de moderación)");
+    const mod = new Api(baseUrl);
+    await mod.agentToken(adminKey);
+    const queue = await mod.call<{ pending: { id: string }[] }>("GET", "/mod/queue");
+    assert(queue.ok && queue.data.pending.some((p) => p.id === id), "el juego está en la cola de revisión");
+    assert(errOf(await mod.call("POST", `/mod/projects/${id}/review`, { decision: "rejected" })) === "note_required", "rechazar exige motivo");
+    assert((await mod.call("POST", `/mod/projects/${id}/review`, { decision: "approved" })).ok, "aprobar");
+    assert(await catalog(), "aprobado, sale en el catálogo");
+    manifest = { ...base, ageRating: "+14" };
+    const changed = await register();
+    assert(changed.ok && changed.data.project.review === "pending", "cambiar la ficha la devuelve a revisión");
+    assert(!(await catalog()), "y sale del catálogo hasta que se revise");
+    const hide = await mod.call("POST", `/mod/projects/${id}/hide`, { note: "Prueba de ocultar: contenido no permitido" });
+    assert(hide.ok, "ocultar con motivo");
+    assert((await fetch(new URL(`/games/${slug}`, baseUrl))).status === 404, "oculto, su enlace deja de funcionar");
+    const mine = await dev.call<{ projects: { id: string; status: string; review_note: string | null }[] }>("GET", "/me");
+    const p = mine.ok ? mine.data.projects.find((x) => x.id === id) : undefined;
+    assert(p?.status === "hidden" && p.review_note === "Prueba de ocultar: contenido no permitido", "su autor ve que está oculto y por qué");
+    const log = await mod.call<{ log: { action: string; target_id: string }[] }>("GET", "/mod/log");
+    assert(log.ok && ["review_approved", "hide"].every((a) => log.data.log.some((l) => l.action === a && l.target_id === id)), "cada decisión queda registrada");
+  } finally {
+    server.close();
+  }
+});
+
+await scenario("Entrar con xenxo dentro de xenxo: el permiso viaja por postMessage al origen exacto del juego", async () => {
+  const { createHash, randomBytes } = await import("node:crypto");
+  const b64u = (b: Buffer) => b.toString("base64url");
+  const dev = new Api(baseUrl);
+  await dev.register(`conf ${randomUUID().slice(0, 6)}`);
+  const cb = "https://juego.example/";
+  const g = await dev.call<{ client_id: string }>("POST", "/me/games", { name: "Incrustado", redirect_uris: [cb] });
+  assert(g.ok, "registrar juego");
+  const verifier = b64u(randomBytes(48));
+  const params = {
+    response_type: "code", client_id: g.data.client_id, redirect_uri: cb, scope: "openid profile", state: "st1", nonce: "n1",
+    code_challenge: b64u(createHash("sha256").update(verifier).digest()), code_challenge_method: "S256",
+  };
+  const embedded = (origin: string | null) =>
+    fetch(new URL("/oidc/embedded", baseUrl), { method: "POST", headers: { "Content-Type": "application/json", ...(origin ? { Origin: origin } : {}) }, body: JSON.stringify(params) });
+  assert((await embedded("https://evil.example")).status === 403, "solo la web de xenxo pide permisos para juegos incrustados");
+  const r = await embedded("http://localhost:5173");
+  const { request } = (await r.json()) as { request: string };
+  assert(r.status === 200 && request?.startsWith("ar_"), "la web de xenxo recibe la petición");
+  const player = new Api(baseUrl);
+  await player.register(`conf ${randomUUID().slice(0, 6)}`);
+  const info = await player.call<{ embedded: boolean; client: { host: string } }>("GET", `/oidc/request/${request}`);
+  assert(info.ok && info.data.embedded && info.data.client.host === "juego.example", "la pantalla sabe que es un juego incrustado");
+  const d = await player.call<{ redirect?: string; web_message?: { origin: string; params: Record<string, string> } }>("POST", `/oidc/request/${request}`, { approve: true });
+  assert(d.ok && !d.data.redirect && d.data.web_message?.origin === "https://juego.example" && !!d.data.web_message.params.code && d.data.web_message.params.state === "st1", `respuesta por postMessage: ${JSON.stringify(d)}`);
+  const tok = await fetch(new URL("/oidc/token", baseUrl), {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ grant_type: "authorization_code", code: d.data.web_message!.params.code!, redirect_uri: cb, client_id: g.data.client_id, code_verifier: verifier }),
+  });
+  assert(tok.status === 200, "el juego cambia el código por sus tokens");
+  // Por la puerta normal (navegación), web_message no se admite.
+  const u = new URL("/oidc/authorize", baseUrl);
+  for (const [k, v] of Object.entries({ ...params, response_mode: "web_message" })) u.searchParams.set(k, v);
+  const loc = new URL((await fetch(u, { redirect: "manual" })).headers.get("location") ?? "about:blank");
+  const bad = await new Api(baseUrl).call<{ error: string }>("GET", `/oidc/request/${loc.searchParams.get("autorizar")}`);
+  assert(bad.ok && bad.data.error === "invalid_request", "web_message fuera de xenxo → invalid_request");
 });
 
 await scenario("limpieza: lo subido que nada usa se borra pasados 7 días; lo que se usa, no", async () => {
