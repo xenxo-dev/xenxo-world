@@ -35,7 +35,7 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 - La plaza es `apps/realtime/src/seed.ts` + `plaza-layout.json` (única fuente de la disposición, también para la forja). Si cambia su contenido, el servidor vuelve a sembrar solo; sube `SEED_VERSION` (o `NEXO_SEED_VERSION`) si cambias el significado.
 - Publicar un proyecto exige nombre, enlace, categoría, portada y monumento, por cualquier vía (web, agente, MCP): la regla vive en `directory.ts`, no en el cliente.
 - Los modelos del sistema (plaza y avatares de serie) **se generan**, no se editan: `npm run forge` (ver `tools/forge/README.md`) y `tools/avatars/`. No toques a mano `apps/realtime/seed-assets/`, `seed-assets.ts`, `seed-covers.ts` (lo genera `tools/covers/`) ni `avatar-presets.*`. Para rehacer solo el nexo: `npm run forge:nexo`.
-- Materiales de los modelos: `xenxo:<biblioteca>.<tinte>` (lista en `docs/PROTOCOL.md` §12 bis). Texturas nuevas solo CC0, descargadas por `tools/materials/` y servidas desde xenxo.
+- Materiales de los modelos: `xenxo:<biblioteca>.<tinte>` (lista en `docs/PROTOCOL.md` §12 bis). Texturas nuevas: CC0 (Poly Haven, por `tools/materials/fetch.py`) o **generadas con IA** (Higgsfield o plataformas parecidas) siguiendo `tools/materials/generated/README.md`: la plataforma da la propiedad y el uso comercial, sin marca de agua, con su `meta.json` (plataforma, modelo, fecha, plan, prompt) y su línea en `CREDITS.md`, sin marcas ni personas reales en el prompt, y pidiendo permiso antes de gastar créditos. Siempre se guardan en el repo y se sirven desde xenxo.
 - `DO_JURISDICTION = "eu"` en `wrangler.toml`: no lo cambies tras el primer despliegue (los datos quedarían en otros objetos).
 
 ## Rendimiento (Quest 3 es el mínimo)

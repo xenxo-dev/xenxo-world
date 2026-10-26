@@ -1,9 +1,15 @@
 """
-Biblioteca de materiales de xenxo: descarga texturas escaneadas CC0 de Poly Haven,
-las prepara para la web y las deja en apps/web/public/materials/ (se sirven desde xenxo:
-el navegador del visitante nunca habla con Poly Haven).
+Biblioteca de materiales de xenxo: prepara las texturas para la web y las deja en
+apps/web/public/materials/ (se sirven desde xenxo: el navegador del visitante nunca habla
+con Poly Haven ni con ninguna plataforma de IA).
 
-  python3 tools/materials/fetch.py
+Dos orígenes:
+  - Poly Haven (CC0): escaneos reales que se descargan solos.
+  - Generadas con IA (Higgsfield u otras): la imagen vive en tools/materials/generated/<biblioteca>/
+    con su meta.json (plataforma, modelo, fecha, prompt, plan…). Ver generated/README.md.
+
+  python3 tools/materials/fetch.py            # todas
+  python3 tools/materials/fetch.py cal neon   # solo esas (el resto del índice se conserva)
 
 Por cada material:
   albedo  → color con la oclusión fina ya multiplicada. En modo "tinte" se desatura y
@@ -26,8 +32,10 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 OUT = os.path.join(ROOT, "apps", "web", "public", "materials")
 INDEX = os.path.join(ROOT, "apps", "web", "src", "world", "material-library.json")
 CACHE = os.path.join(ROOT, "tools", "materials", ".cache")
+GENERATED = os.path.join(ROOT, "tools", "materials", "generated")
 
-# biblioteca → (asset de Poly Haven, modo, saturación conservada)
+# biblioteca → (asset de Poly Haven, modo, saturación conservada).
+# Las generadas con IA no van aquí: se descubren solas en generated/<biblioteca>/meta.json.
 LIBRARY = {
     "cal": ("white_stucco", "tint", 0.1),
     "estuco": ("white_plaster_02", "tint", 0.1),
@@ -98,11 +106,87 @@ def prepare_albedo(diff: Image.Image, ao: Image.Image, mode: str, keep: float) -
     return diff
 
 
+def normal_from_height(img: Image.Image, strength: float = 2.0) -> Image.Image:
+    """Mapa de normales (OpenGL) a partir de la luminancia, para texturas que no traen el suyo."""
+    g = img.convert("L")
+    w, h = g.size
+    px = g.load()
+    out = Image.new("RGB", (w, h))
+    po = out.load()
+    for y in range(h):
+        for x in range(w):
+            dx = (px[(x + 1) % w, y] - px[(x - 1) % w, y]) / 255 * strength
+            dy = (px[x, (y + 1) % h] - px[x, (y - 1) % h]) / 255 * strength
+            nx, ny, nz = -dx, dy, 1.0
+            n = (nx * nx + ny * ny + nz * nz) ** 0.5
+            po[x, y] = (int((nx / n * 0.5 + 0.5) * 255), int((ny / n * 0.5 + 0.5) * 255), int((nz / n * 0.5 + 0.5) * 255))
+    return out
+
+
+def generated_libraries() -> dict[str, dict]:
+    """Texturas generadas con IA: generated/<biblioteca>/meta.json + albedo.png (y normal/rough opcionales)."""
+    found: dict[str, dict] = {}
+    if not os.path.isdir(GENERATED):
+        return found
+    for lib in sorted(os.listdir(GENERATED)):
+        meta_path = os.path.join(GENERATED, lib, "meta.json")
+        if not os.path.exists(meta_path):
+            continue
+        meta = json.load(open(meta_path, encoding="utf-8"))
+        for k in ("platform", "model", "date", "prompt", "plan", "tile"):
+            if k not in meta:
+                raise SystemExit(f"{meta_path}: falta «{k}» (ver generated/README.md)")
+        found[lib] = meta
+    return found
+
+
+def build_generated(lib: str, meta: dict) -> tuple[Image.Image, Image.Image, Image.Image]:
+    folder = os.path.join(GENERATED, lib)
+    base = Image.open(os.path.join(folder, "albedo.png"))
+    albedo = prepare_albedo(base, Image.new("L", base.size, 255), meta.get("mode", "tint"), meta.get("keep", 0.2))
+    normal_path = os.path.join(folder, "normal.png")
+    normal = Image.open(normal_path).convert("RGB") if os.path.exists(normal_path) else normal_from_height(base.resize((512, 512)))
+    rough_path = os.path.join(folder, "rough.png")
+    rough = (
+        Image.open(rough_path).convert("L").resize(base.size)
+        if os.path.exists(rough_path)
+        else Image.new("L", base.size, int(255 * meta.get("roughness", 0.8)))
+    )
+    metal = Image.new("L", base.size, int(255 * meta.get("metalness", 0.0)))
+    rm = Image.merge("RGB", (Image.new("L", base.size, 255), rough, metal))
+    return albedo, normal, rm
+
+
+def save(lib: str, albedo: Image.Image, normal: Image.Image, rm: Image.Image) -> None:
+    folder = os.path.join(OUT, lib)
+    os.makedirs(folder, exist_ok=True)
+    for size in SIZES:
+        albedo.resize((size, size), Image.LANCZOS).save(os.path.join(folder, f"albedo.{size}.webp"), "WEBP", quality=82, method=6)
+        normal.resize((size, size), Image.LANCZOS).save(os.path.join(folder, f"normal.{size}.webp"), "WEBP", quality=88, method=6)
+        rm.resize((size, size), Image.LANCZOS).save(os.path.join(folder, f"rm.{size}.webp"), "WEBP", quality=80, method=6)
+
+
 def main() -> None:
     os.makedirs(OUT, exist_ok=True)
-    index = {}
-    done: dict[str, dict] = {}
+    only = set(sys.argv[1:])
+    index = json.load(open(INDEX, encoding="utf-8")) if only and os.path.exists(INDEX) else {}
+    generated = generated_libraries()
+    clash = set(generated) & set(LIBRARY)
+    if clash:
+        raise SystemExit(f"bibliotecas repetidas (Poly Haven y generadas): {', '.join(sorted(clash))}")
+    for lib, meta in generated.items():
+        if only and lib not in only:
+            continue
+        save(lib, *build_generated(lib, meta))
+        index[lib] = {
+            "tile": meta["tile"],
+            "source": f"{meta['platform']} · {meta['model']} (generada con IA, {meta['date']}; ver CREDITS.md)",
+            "generated": True,
+        }
+        print(f"{lib:9} ← IA {meta['platform']} {meta['model']} {meta['tile']} m", flush=True)
     for lib, (asset, mode, keep) in LIBRARY.items():
+        if only and lib not in only:
+            continue
         info = api(f"info/{asset}")
         files = api(f"files/{asset}")
         tile = TILE_OVERRIDE.get(lib) or round(info.get("dimensions", [2000, 2000])[0] / 1000, 3)
@@ -112,12 +196,7 @@ def main() -> None:
         albedo = prepare_albedo(src["Diffuse"], r, mode, keep)
         rm = Image.merge("RGB", (Image.new("L", arm.size, 255), g, b))
         normal = src["nor_gl"].convert("RGB")
-        folder = os.path.join(OUT, lib)
-        os.makedirs(folder, exist_ok=True)
-        for size in SIZES:
-            albedo.resize((size, size), Image.LANCZOS).save(os.path.join(folder, f"albedo.{size}.webp"), "WEBP", quality=82, method=6)
-            normal.resize((size, size), Image.LANCZOS).save(os.path.join(folder, f"normal.{size}.webp"), "WEBP", quality=88, method=6)
-            rm.resize((size, size), Image.LANCZOS).save(os.path.join(folder, f"rm.{size}.webp"), "WEBP", quality=80, method=6)
+        save(lib, albedo, normal, rm)
         index[lib] = {"tile": tile, "source": f"Poly Haven · {info.get('name', asset)} (CC0)", "asset": asset}
         print(f"{lib:9} ← {asset:24} {tile} m", flush=True)
     with open(INDEX, "w", encoding="utf-8") as f:

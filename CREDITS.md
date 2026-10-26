@@ -1,6 +1,7 @@
 # Créditos
 
 Los recursos gráficos que no son propios son de dominio público (CC0): no hace falta atribuirlos, pero se agradece.
+La excepción son las texturas generadas con IA (abajo), que tienen su propia nota.
 
 - **Texturas y cielo**: [Poly Haven](https://polyhaven.com) (CC0). La lista exacta está en
   `apps/web/src/world/material-library.json` y `apps/web/src/world/sky-day.json`.
@@ -8,5 +9,14 @@ Los recursos gráficos que no son propios son de dominio público (CC0): no hace
   y sus paquetes de recursos CC0 (pieles, pelo, ropa).
 - **Animaciones**: [Universal Animation Library](https://quaternius.com) de Quaternius (CC0).
 - **Tipografías**: Inter, Archivo y Tilt Neon de Andy Clymer, para los rótulos de neón (SIL Open Font License), empaquetadas con la web.
+
+## Generado con IA
+
+Texturas en `tools/materials/generated/` (cada una con su `meta.json`: plataforma, modelo, fecha,
+plan y prompt). Son de xenxo según las condiciones de cada plataforma, que dan la propiedad y el
+uso comercial de lo generado, pero **no son CC0**: las condiciones de Higgsfield prohíben usar sus
+resultados para entrenar modelos de IA, y esa restricción acompaña a estas imágenes.
+
+Todavía no hay ninguna en uso.
 
 Herramientas: Blender, VRM Add-on for Blender, glTF-Transform, meshoptimizer, three.js, @pixiv/three-vrm.

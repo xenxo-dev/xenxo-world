@@ -172,7 +172,7 @@ El mundo solo se escribe por WebSocket (`MUTATE_WORLD`). Lo que no es mundo va p
 
 ## 12 bis. Convenciones de los modelos (no son protocolo, son pistas de render)
 
-Un GLB puede nombrar sus materiales `xenxo:<biblioteca>.<tinte>` (p. ej. `xenxo:teja.b5583a`). El cliente web los viste con su biblioteca de texturas escaneadas (CC0) según el nivel gráfico y el ambiente; cualquier otro cliente ve el color base del GLB, que ya es correcto.
+Un GLB puede nombrar sus materiales `xenxo:<biblioteca>.<tinte>` (p. ej. `xenxo:teja.b5583a`). El cliente web los viste con su biblioteca de texturas (escaneos CC0 y, desde ahora, también texturas generadas con IA; ver `CREDITS.md`) según el nivel gráfico y el ambiente; cualquier otro cliente ve el color base del GLB, que ya es correcto.
 
 | Biblioteca | Qué es |
 |---|---|
