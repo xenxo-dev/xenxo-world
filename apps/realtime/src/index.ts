@@ -177,9 +177,26 @@ function inJurisdiction<T extends Rpc.DurableObjectBranded | undefined>(env: Env
 /** Vista RPC con los tipos de retorno originales (sin los envoltorios de serialización de RPC). */
 type Api<T> = { [K in keyof T]: T[K] extends (...a: infer A) => infer R ? (...a: A) => Promise<Awaited<R>> : never };
 
+/**
+ * El objeto de un chunk. Antes de cada RPC le dice qué chunk es (bind): un objeto nuevo al que se
+ * llega por RPC, sin pasar por fetch, no tiene otra forma de saberlo. fetch lo lleva en X-Chunk-Id.
+ */
 function chunk(env: Env, id: string) {
   const ns = inJurisdiction(env, env.CHUNK);
-  return ns.get(ns.idFromName(id)) as unknown as Api<ChunkRoom> & { fetch(r: Request): Promise<Response> };
+  const stub = ns.get(ns.idFromName(id)) as unknown as Api<ChunkRoom> & { fetch(r: Request): Promise<Response> };
+  // Los métodos del stub se llaman siempre sobre el stub (con otro `this` fallan) y no tienen
+  // .apply/.call de verdad: cualquier propiedad de un stub es otra llamada RPC.
+  const any = stub as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>;
+  return new Proxy(stub, {
+    get(_target, prop) {
+      if (typeof prop !== "string") return undefined;
+      if (prop === "fetch") return (r: Request) => stub.fetch(r);
+      return async (...args: unknown[]) => {
+        await stub.bind(id);
+        return any[prop]!(...args);
+      };
+    },
+  });
 }
 
 function directory(env: Env) {

@@ -164,11 +164,19 @@ export class ChunkRoom extends DurableObject<Env> {
     return new Response("not found", { status: 404 });
   }
 
+  /**
+   * Fija qué chunk es este objeto. El nombre manda: el objeto se obtiene con idFromName(chunk_id),
+   * así que si llega un id distinto del guardado (un objeto creado antes por una llamada que no lo
+   * decía), se corrige y se vuelve a sembrar.
+   */
   private ensureChunk(id: string | null) {
-    if (this.chunkId) return;
+    if (this.chunkId && (!id || id === this.chunkId)) return;
     const stored = this.sql.exec<{ v: string }>("SELECT v FROM meta WHERE k = 'chunk_id'").toArray()[0]?.v;
-    this.chunkId = stored ?? id ?? PLACES.plaza;
-    if (!stored) this.sql.exec("INSERT INTO meta (k, v) VALUES ('chunk_id', ?)", this.chunkId);
+    this.chunkId = id ?? stored ?? PLACES.plaza;
+    if (stored !== this.chunkId) {
+      this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('chunk_id', ?)", this.chunkId);
+      if (stored) this.sql.exec("DELETE FROM meta WHERE k = 'seed_version'");
+    }
 
     if (this.chunkId === PLACES.plaza) this.applySeed("plaza", SEED_VERSION, plazaSeed());
     else if (this.chunkId === PLACES.nexo) this.applySeed("nexo", NEXO_SEED_VERSION, nexoSeed());
@@ -415,6 +423,11 @@ export class ChunkRoom extends DurableObject<Env> {
    * monumento en la peana, banda con el color del distrito y rótulo. Pasa por applyMutation:
    * mismos esquemas, presupuestos, log y DELTA que cualquier otra escritura.
    */
+  /** Lo llama el Worker antes de cada RPC (ver chunk() en index.ts): dice qué chunk es este objeto. */
+  async bind(id: string): Promise<void> {
+    this.ensureChunk(id);
+  }
+
   async placeStand(input: {
     projectId: string;
     owner: string;
