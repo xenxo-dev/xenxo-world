@@ -1,6 +1,8 @@
 /**
  * Colisiones sencillas con los collider@1 del mundo (cajas orientadas).
- * El jugador es un círculo en el plano XZ; la cámara se acerca si una pared se interpone.
+ * El jugador es un cilindro: un círculo en el plano XZ con pies y cabeza. Las cajas bajas
+ * (escalones, bordillos, bancos) se suben; sobre las demás se puede caminar si se llega
+ * saltando. La cámara se acerca si una pared se interpone.
  * Sin físicas ni objetos nuevos por frame: se recalcula solo cuando cambia el mundo.
  */
 import { CHUNK_SIZE, ColliderV1, TransformV1 } from "@xenxo/protocol";
@@ -102,6 +104,46 @@ export function resolveCircle(p: { x: number; z: number }, r: number, feet: numb
       p.z += wz * push;
     }
   }
+}
+
+/** Distancia al cuadrado del punto (x, z) al rectángulo de la caja en planta (0 si está dentro). */
+function planDist2(b: Box, x: number, z: number) {
+  const dx = x - b.x;
+  const dz = z - b.z;
+  const lx = dx * b.c - dz * b.s;
+  const lz = dx * b.s + dz * b.c;
+  const ox = Math.max(0, Math.abs(lx) - b.hx);
+  const oz = Math.max(0, Math.abs(lz) - b.hz);
+  return ox * ox + oz * oz;
+}
+
+/**
+ * Altura del suelo bajo un círculo: la cara de arriba más alta que no pase de `maxTop`
+ * (los pies más lo que se puede subir de un paso). Sin cajas debajo, el suelo del lugar (0).
+ */
+export function groundHeight(x: number, z: number, r: number, maxTop: number): number {
+  refresh();
+  let g = 0;
+  const r2 = r * r;
+  for (const b of boxes) {
+    const top = b.y + b.hy;
+    if (top <= g || top > maxTop) continue;
+    if (planDist2(b, x, z) < r2) g = top;
+  }
+  return g;
+}
+
+/** Techo sobre un círculo: la cara de abajo más baja por encima de `minBottom` (Infinity si no hay). */
+export function ceilingHeight(x: number, z: number, r: number, minBottom: number): number {
+  refresh();
+  let c = Infinity;
+  const r2 = r * r;
+  for (const b of boxes) {
+    const bottom = b.y - b.hy;
+    if (bottom >= c || bottom < minBottom) continue;
+    if (planDist2(b, x, z) < r2) c = bottom;
+  }
+  return c;
 }
 
 /** ¿Está el punto dentro de alguna caja (con margen)? */

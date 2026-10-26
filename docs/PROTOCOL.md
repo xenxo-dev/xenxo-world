@@ -81,7 +81,7 @@ Lectura pública sin WebSocket: `GET /chunk/<chunk_id>/state` (contadores y últ
 | Tipo | Payload | Notas |
 |---|---|---|
 | `HELLO` | `client_type`, `capabilities`, `display_name?`, `avatar?` | Obligatorio antes de cualquier otro. `avatar` = `{hash, format: "vrm"}` de un **avatar de serie** (invitados y agentes); cualquier otro hash se ignora, y las personas registradas llevan el de su cuenta |
-| `POSE` | `t`, `head {p, r}`, `hand_l?`, `hand_r?`, `emote?` | Sin `entity_id`: el servidor sabe de quién es. Máx. 15 Hz; el exceso se descarta. `emote` = gesto en curso (`^[a-z_]{1,24}$`; hoy `dance`, `wave`, `sit`, `talk`, `cheer`, `crouch`). Los clientes ignoran los que no conocen. La altura de la cabeza por encima de 1,6 m indica un salto |
+| `POSE` | `t`, `head {p, r}`, `hand_l?`, `hand_r?`, `emote?` | Sin `entity_id`: el servidor sabe de quién es. Máx. 15 Hz; el exceso se descarta. `emote` = gesto en curso (`^[a-z_]{1,24}$`; hoy `dance`, `wave`, `sit`, `talk`, `cheer`, `crouch`). Los clientes ignoran los que no conocen. La cabeza más de 1,6 m por encima de lo que se pisa (el suelo o la cara de arriba de un `collider@1`: se puede estar de pie en un banco) indica un salto |
 | `MUTATE_WORLD` | `idempotency_key`, `target`, `mutation` | Ver §8 |
 | `PING` | `t` | |
 | `CHAT` | `text` (1–280) | Solo personas registradas y agentes (los invitados reciben `forbidden`). Máx. 5 cada 10 s (`rate_limited`). El servidor quita caracteres de control y espacios de más |
@@ -316,6 +316,7 @@ Un GLB puede nombrar sus materiales `xenxo:<biblioteca>.<tinte>` (p. ej. `xenxo:
 | `neon` | Tubo de neón: brilla, mucho más de noche |
 | `farol` | Cristal de farolas y esferas de reloj: luz cálida de noche |
 | `ventana` | Vidrio: refleja de día; de noche se encienden unas sí y otras no |
+| `fachada` | Fachada de rascacielos con textura real (UV en metros): de noche se encienden sus ventanas |
 | `agua` | Superficie animada |
 | `oscuro`, `fruta`, `flor` | Colores sin textura |
 

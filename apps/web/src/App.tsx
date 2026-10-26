@@ -2,11 +2,13 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import type { XRStore } from "@react-three/xr";
 import { loadPref, savePref } from "./config";
 import { Chat } from "./hud/Chat";
+import { CameraTools } from "./hud/CameraTools";
 import { Emotes } from "./hud/Emotes";
+import { People } from "./hud/People";
 import { PortalCard, TravelToast } from "./hud/PortalCard";
 import { errorText, placeName, t, useLang } from "./i18n";
 import { setGuestName as setSessionGuestName, startSession, travel } from "./net/session";
-import { completeGoogleReturn, refreshSession } from "./net/account";
+import { completeGoogleReturn, refreshSession, useAccount } from "./net/account";
 import { districtOf, parcelArrival, refreshDistricts } from "./net/districts";
 import { useWorldVersion, world } from "./net/world-store";
 import { Consent, pendingConsent } from "./panel/Consent";
@@ -61,6 +63,7 @@ export function App() {
   const touch = matchMedia("(pointer: coarse)").matches;
   useWorldVersion();
   useLang();
+  const user = useAccount();
   const game = useOpenGame();
 
   // La plaza se ve viva detrás del panel desde el primer segundo.
@@ -168,10 +171,7 @@ export function App() {
               {t("hud.back")}
             </button>
             <span className="h-4 w-px bg-cal/15" />
-            <span className="flex items-center gap-1.5 text-cal/70">
-              <span className={`h-2 w-2 rounded-full ${world.status === "open" ? "bg-huerta" : "bg-ocre"}`} />
-              {world.status === "open" ? t("hud.inPlace", { n: world.peers.size + 1, place: placeName(world.chunkId) }) : t("hud.connecting")}
-            </span>
+            <People selfName={user?.display_name ?? name} selfNo={user?.player_no ?? null} />
           </div>
           {enterVR && (
             <button
@@ -190,7 +190,10 @@ export function App() {
           />
           <PortalCard />
           <TravelToast />
-          <Emotes className={`pointer-events-auto absolute right-4 ${touch ? "bottom-36" : "bottom-5"}`} />
+          <div className={`pointer-events-auto absolute right-4 flex flex-col items-end gap-1.5 ${touch ? "bottom-36" : "bottom-5"}`}>
+            <CameraTools touch={touch} />
+            <Emotes />
+          </div>
           {touch ? (
             <TouchJoystick />
           ) : (

@@ -56,6 +56,7 @@ LIBRARY = {
     "metal": (0.3, 0.9),
     "panel": (0.5, 0.0),       # paneles de metal grandes (ambientCG): suelos del nexo y los distritos
     "scifi": (0.55, 0.0),      # rejilla octogonal (ambientCG): parcelas
+    "fachada": (0.35, 0.0),    # fachada de rascacielos (ambientCG): ventanas que se encienden de noche
     "toldo": (0.95, 0.0),
     "ventana": (0.08, 0.0),    # vidrio de ventanas y escaparates: se encienden de noche
     "agua": (0.02, 0.0),

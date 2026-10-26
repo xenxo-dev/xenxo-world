@@ -10,6 +10,7 @@
  *   neon    → tubos que resplandecen (mucho más de noche)
  *   farol   → cristal de farolas y esferas: luz cálida de noche
  *   ventana → vidrio que refleja de día y se ilumina (no todas) de noche
+ *   fachada → rascacielos: sus ventanas (lo cálido y claro del albedo) se encienden de noche
  *   agua    → superficie animada
  */
 import * as THREE from "three";
@@ -126,6 +127,35 @@ function litWindows(material: THREE.Material, strength: number) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Fachadas: las ventanas del propio escaneo se encienden               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * El mapa emisivo es el mismo albedo, pero solo emite lo que parece una ventana encendida
+ * (colores cálidos o muy claros); la estructura gris y los cristales oscuros no.
+ */
+function facadeGlow(material: THREE.Material, strength: number) {
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uGlow = { value: strength };
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>", "#include <common>\nuniform float uGlow;")
+      .replace(
+        "#include <emissivemap_fragment>",
+        `#ifdef USE_EMISSIVEMAP
+        {
+          vec3 eC = texture2D(emissiveMap, vEmissiveMapUv).rgb;
+          float sat = max(eC.r, max(eC.g, eC.b)) - min(eC.r, min(eC.g, eC.b));
+          float lum = dot(eC, vec3(0.299, 0.587, 0.114));
+          float m = max(smoothstep(0.08, 0.22, sat) * smoothstep(0.06, 0.25, lum), smoothstep(0.5, 0.75, lum));
+          totalEmissiveRadiance *= eC * m * uGlow;
+        }
+        #endif`,
+      );
+  };
+  material.customProgramCacheKey = () => `xenxo-facade-${strength}`;
+}
+
+/* ------------------------------------------------------------------ */
 /* Construcción de materiales                                           */
 /* ------------------------------------------------------------------ */
 
@@ -186,12 +216,17 @@ export function libraryMaterial(ref: LibraryRef, f: Features, ambience: Ambience
   const size = f.textures;
   const map = size ? tex(lib, "albedo", size) : null;
   const metal = lib === "hierro" || lib === "metal";
+  // Fachadas: de noche se encienden sus ventanas (por encima de 1 solo con bloom; en VR y móvil, 1).
+  const glow = lib === "fachada" && map ? (night ? (f.bloom ? 2 : 1) : 0.12) : 0;
+  const lit = glow ? { emissive: new THREE.Color(0xffffff), emissiveMap: map } : {};
   if (!f.pbr) {
-    return new THREE.MeshLambertMaterial({ color: tint, map, aoMap: ao, aoMapIntensity: 1 });
+    const m = new THREE.MeshLambertMaterial({ color: tint, map, aoMap: ao, aoMapIntensity: 1, ...lit });
+    if (glow) facadeGlow(m, glow);
+    return m;
   }
   const normalMap = size && f.normalMaps ? tex(lib, "normal", size) : null;
   const rm = size && f.normalMaps ? tex(lib, "rm", size) : null;
-  return new THREE.MeshStandardMaterial({
+  const m = new THREE.MeshStandardMaterial({
     color: tint,
     map,
     normalMap,
@@ -201,7 +236,10 @@ export function libraryMaterial(ref: LibraryRef, f: Features, ambience: Ambience
     metalness: metal ? 1 : 0,
     aoMap: ao,
     aoMapIntensity: 1,
+    ...lit,
   });
+  if (glow) facadeGlow(m, glow);
+  return m;
 }
 
 /** Para modelos sin convención (los de la gente): en equipos ligeros, Lambert conservando color y texturas. */

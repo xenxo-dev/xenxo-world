@@ -7,6 +7,7 @@ import { assetUrl } from "../config";
 import { t } from "../i18n";
 import { BUBBLE_MS, chat, useChatVersion, useWorldVersion, world } from "../net/world-store";
 import { walkAmount } from "./avatar-model";
+import { groundHeight } from "./collision";
 import { CustomAvatar } from "./CustomAvatar";
 import { FONT_URL } from "./font";
 import { advance, createMotion, smoothSpeed, type Motion } from "./motion";
@@ -167,9 +168,10 @@ function RemoteAvatar({ sessionId, name, avatar }: { sessionId: string; name: st
     last.copy(_a);
     if (dt > 0) smoothSpeed(motion, step / dt, dt);
 
-    // Pies bajo la cabeza; el cuerpo solo sigue el giro horizontal.
+    // Pies bajo la cabeza; el cuerpo solo sigue el giro horizontal. Está en el aire si los pies
+    // quedan por encima de lo que pisa (el suelo o una caja: se puede estar de pie en un banco).
     const feet = Math.max(0, _a.y - EYE_HEIGHT);
-    motion.airborne = feet > 0.05;
+    motion.airborne = feet - groundHeight(_a.x, _a.z, 0.24, feet + 0.1) > 0.05;
     motion.emote = s1.emote ?? null;
     body.current.position.set(_a.x, feet, _a.z);
     body.current.rotation.set(0, _e.setFromQuaternion(_qa, "YXZ").y, 0);

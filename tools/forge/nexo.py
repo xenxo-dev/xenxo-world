@@ -238,11 +238,12 @@ def island(lay: dict, detail: int = 1):
 def spires(lay: dict, d: dict, detail: int = 1):
     """
     Agujas cyberpunk de la isla de un distrito: torres en corona alrededor del centro (donde va el
-    emblema), con franjas de neón del color del distrito y antenas. Centradas en el origen.
+    emblema), con fachada de rascacielos real (sus ventanas se encienden de noche), franjas de neón
+    del color del distrito y antenas. Centradas en el origen.
     """
     R = lay["islands"]["radius"]
     color = d["color"]
-    body = mat("metal", "#161c2a")
+    body = mat("fachada", "#b9c0cf")
     trim = mat("metal", "#262f44")
     neon = mat("neon", color)
     p = Part(f"nexo_spires_{d['id']}")

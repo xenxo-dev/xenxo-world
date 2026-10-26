@@ -50,6 +50,7 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 - Todo efecto nuevo entra en la tabla `FEATURES`, nunca con un `if` suelto. El mundo debe verse bien en `low`: lo de los niveles altos es un extra.
 - `Effects.tsx` (post-proceso) se carga aparte y nunca se monta en XR.
 - Textos 3D con la fuente empaquetada (`world/font.ts`) y siempre dentro de `<Suspense>`: si suspenden fuera, congelan toda la app.
+- El movimiento del personaje es `world/locomotion.ts` (subpasos, escalones, saltos) sobre `world/collision.ts`: sin objetos nuevos por frame. En VR manda el casco, pero las paredes también lo frenan.
 - Mide en las gafas, no en el escritorio.
 
 ## Cuentas, assets y privacidad

@@ -88,5 +88,10 @@
   "tile": 2.0,
   "source": "ambientCG · MetalPlates015A (CC0)",
   "asset": "MetalPlates015A"
+ },
+ "fachada": {
+  "tile": 3.0,
+  "source": "ambientCG · Facade017 (CC0)",
+  "asset": "Facade017"
  }
 }

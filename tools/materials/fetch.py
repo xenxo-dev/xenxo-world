@@ -57,10 +57,11 @@ LIBRARY = {
     # ambientCG (CC0)
     "panel": ("acg:MetalPlates004", "tint", 0.0),  # paneles de metal grandes (suelos del nexo y los distritos)
     "scifi": ("acg:MetalPlates015A", "tint", 0.0),  # rejilla octogonal (parcelas)
+    "fachada": ("acg:Facade017", "color", 1.0),  # rascacielos de oficinas con ventanas encendidas (agujas de las islas del nexo)
 }
 SIZES = (512, 1024)
 # Tamaño de repetición (m) cuando el real no sirve: las rayas del toldo miden 25 cm.
-TILE_OVERRIDE = {"toldo": 2.0, "tela": 0.5, "panel": 2.0, "scifi": 2.0}
+TILE_OVERRIDE = {"toldo": 2.0, "tela": 0.5, "panel": 2.0, "scifi": 2.0, "fachada": 3.0}
 UA = {"User-Agent": "xenxo-forge/1.0 (+https://github.com/xenxo-dev/xenxo-world)"}
 
 
@@ -153,6 +154,8 @@ def generated_libraries() -> dict[str, dict]:
         if not os.path.exists(meta_path):
             continue
         meta = json.load(open(meta_path, encoding="utf-8"))
+        if meta.get("kind") == "panorama":
+            continue  # fondos (p. ej. el del nexo): no son materiales
         for k in ("platform", "model", "date", "prompt", "plan", "tile"):
             if k not in meta:
                 raise SystemExit(f"{meta_path}: falta «{k}» (ver generated/README.md)")

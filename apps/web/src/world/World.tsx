@@ -10,6 +10,7 @@ import { Avatars } from "./Avatars";
 import { Entities } from "./Entities";
 import { graphics, useGraphics, type Ambience, type Features } from "./graphics";
 import { attachDesktopInput, input } from "./input";
+import { PhotoTaker } from "./Photo";
 import { setMaxAnisotropy, tickMaterials } from "./materials";
 import { Player } from "./Player";
 import { Portals } from "./Portals";
@@ -288,6 +289,7 @@ function Scene({ active }: { active: boolean }) {
       </Suspense>
       <Player active={active} />
       <InputBinder active={active} />
+      <PhotoTaker />
       <MaterialClock />
       {f.post && !g.inXR && (
         <Suspense fallback={null}>

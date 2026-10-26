@@ -111,3 +111,22 @@ body,
     transition: none;
   }
 }
+
+/* Destello del modo foto */
+@keyframes photo-flash {
+  from {
+    opacity: 0.6;
+  }
+  to {
+    opacity: 0;
+  }
+}
+.photo-flash {
+  opacity: 0;
+  animation: photo-flash 0.45s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .photo-flash {
+    display: none;
+  }
+}
