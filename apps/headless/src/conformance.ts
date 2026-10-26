@@ -361,6 +361,33 @@ await scenario("número de jugador: no se reutiliza aunque se borre la cuenta de
   await c.call("DELETE", "/me");
 });
 
+await scenario("carné: privado por defecto; al hacerlo público se ve sin el id interno; al quitarlo o borrar la cuenta, no", async () => {
+  const api = new Api(baseUrl);
+  const name = `conf ${randomUUID().slice(0, 6)}`;
+  await api.register(name);
+  const mine = await api.call<{ public: boolean; player_no: number }>("GET", "/me/card");
+  assert(mine.ok && mine.data.public === false && Number.isInteger(mine.data.player_no), "GET /me/card: privado por defecto");
+  const no = mine.data.player_no;
+  const card = () => fetch(new URL(`/players/${no}`, baseUrl));
+  assert((await card()).status === 404, "un carné privado no se ve (404)");
+  assert((await fetch(new URL(`/players/0${no}`, baseUrl))).status === 404, "con ceros a la izquierda tampoco");
+  const bad = await api.call("PUT", "/me/card", { public: "sí" });
+  assert(!bad.ok && bad.status === 400, "public tiene que ser true o false");
+  const on = await api.call<{ public: boolean }>("PUT", "/me/card", { public: true });
+  assert(on.ok && on.data.public, "hacerlo público");
+  const res = await card();
+  const body = (await res.json()) as Record<string, unknown> & { player_no: number; name: string; joined: number; projects: unknown[] };
+  assert(res.status === 200 && body.player_no === no && body.name === name && typeof body.joined === "number" && Array.isArray(body.projects), "el carné público lleva número, nombre, alta y proyectos");
+  assert(!("id" in body) && !JSON.stringify(body).includes("usr_"), "el carné nunca lleva el id interno");
+  const anon = await new Api(baseUrl).call("PUT", "/me/card", { public: true });
+  assert(!anon.ok && anon.status === 401, "sin sesión no se toca ningún carné");
+  assert((await api.call("PUT", "/me/card", { public: false })).ok, "hacerlo privado");
+  assert((await card()).status === 404, "al hacerlo privado deja de verse al momento");
+  assert((await api.call("PUT", "/me/card", { public: true })).ok && (await card()).status === 200, "público otra vez");
+  assert((await api.call("DELETE", "/me")).ok, "borrar la cuenta");
+  assert((await card()).status === 404, "al borrar la cuenta deja de verse al momento");
+});
+
 await scenario("formas de entrar: una segunda passkey en la misma cuenta sirve para entrar", async () => {
   const api = new Api(baseUrl);
   const { user } = await api.register(`conf ${randomUUID().slice(0, 6)}`);

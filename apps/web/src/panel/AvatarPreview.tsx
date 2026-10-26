@@ -61,11 +61,14 @@ export default function AvatarPreview({
   pose,
   color = "#3ee6ff",
   onState,
+  onCanvas,
 }: {
   url: string;
   pose: PreviewPose;
   color?: string;
   onState: (s: "loading" | "ready" | "error") => void;
+  /** Para sacar una foto del personaje (el carné como imagen): guarda el último fotograma. */
+  onCanvas?: (canvas: HTMLCanvasElement) => void;
 }) {
   const motion = useRef<Motion>(createMotion()).current;
   // Andar en el sitio: la animación de paso sin desplazarse.
@@ -77,8 +80,11 @@ export default function AvatarPreview({
       dpr={[1, 1.5]}
       // Los avatares miran a -Z: la cámara se pone delante, con sitio para cabeza y pies.
       camera={{ position: [0, 1.05, -3.9], fov: 30 }}
-      gl={{ antialias: true, alpha: true, powerPreference: "low-power" }}
-      onCreated={({ camera }) => camera.lookAt(0, 0.9, 0)}
+      gl={{ antialias: true, alpha: true, powerPreference: "low-power", preserveDrawingBuffer: !!onCanvas }}
+      onCreated={({ camera, gl }) => {
+        camera.lookAt(0, 0.9, 0);
+        onCanvas?.(gl.domElement);
+      }}
     >
       <hemisphereLight args={["#cfe8ff", "#1a1030", 1.1]} />
       <directionalLight position={[-2, 3, -2.5]} intensity={1.6} />

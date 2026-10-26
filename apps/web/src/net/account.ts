@@ -495,6 +495,21 @@ async function guestToken(): Promise<string> {
   return ((await r.json()) as { token: string }).token;
 }
 
+/* --- Carné de jugador --- */
+
+export interface CardState {
+  public: boolean;
+  player_no: number | null;
+}
+
+export function myCard(): Promise<CardState> {
+  return api<CardState>("GET", "/me/card");
+}
+
+export function setCardPublic(on: boolean): Promise<CardState> {
+  return api<CardState>("PUT", "/me/card", { public: on });
+}
+
 /* --- RGPD --- */
 
 export async function exportData() {

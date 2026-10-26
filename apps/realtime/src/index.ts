@@ -325,7 +325,7 @@ function cors(req: Request, env: Env): Record<string, string> {
   return allowed.includes(origin)
     ? {
         "Access-Control-Allow-Origin": origin,
-        "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
         "Access-Control-Allow-Headers": "Authorization, Content-Type",
         "Access-Control-Max-Age": "600",
         Vary: "Origin",
@@ -335,6 +335,27 @@ function cors(req: Request, env: Env): Record<string, string> {
 
 function json(data: unknown, status: number, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json", ...headers } });
+}
+
+/** Carné público (xenxo.io/p/<n>): un minuto en la caché del borde, también los «no existe». */
+const PLAYER_CARD_TTL = 60;
+
+function edgeCache(): Cache | undefined {
+  return (globalThis as unknown as { caches?: { default?: Cache } }).caches?.default;
+}
+
+function cardCacheKey(reqUrl: string, no: number): Request {
+  return new Request(new URL(`/players/${no}`, reqUrl).toString());
+}
+
+/** Al cambiar la visibilidad o borrar la cuenta, el carné deja de servirse desde la caché al momento. */
+async function purgeCard(reqUrl: string, no: number | null | undefined) {
+  if (no === null || no === undefined) return;
+  await edgeCache()?.delete(cardCacheKey(reqUrl, no)).catch(() => false);
+}
+
+function withHeaders(res: Response, h: Record<string, string>): Response {
+  return new Response(res.body, { status: res.status, headers: { ...Object.fromEntries(res.headers), ...h } });
 }
 
 function failure(r: { status: number; error: string; message: string; detail?: unknown }, h: Record<string, string>) {
@@ -521,6 +542,21 @@ export default {
         return json({ projects: await dir.listProjects() }, 200, { ...h, "Cache-Control": "public, max-age=10" });
       }
 
+      /* --- Carné de jugador (lectura pública; solo los que su dueño hizo públicos) --- */
+      const pcard = path.match(/^\/players\/(0|[1-9]\d{0,8})$/);
+      if (pcard && req.method === "GET") {
+        const no = Number(pcard[1]);
+        const cache = edgeCache();
+        const key = cardCacheKey(req.url, no);
+        const hit = await cache?.match(key);
+        if (hit) return withHeaders(hit, h);
+        const card = await dir.playerCard(no);
+        const cc = { "Cache-Control": `public, max-age=${PLAYER_CARD_TTL}` };
+        const res = card ? json(card, 200, cc) : json({ error: "not_found", message: "ese carné no existe o no es público" }, 404, cc);
+        if (cache) ctx.waitUntil(cache.put(key, res.clone()));
+        return withHeaders(res, h);
+      }
+
       /* --- Denuncias: cualquiera con un token, también invitados --- */
       if (path === "/reports" && req.method === "POST") {
         const p = await bearer(req, env);
@@ -638,6 +674,16 @@ export default {
           const r = await dir.addPasskeyVerify(uid, await readJson(req));
           return r.ok ? json(r.data, 200, h) : failure(r, h);
         }
+        if (path === "/me/card" && req.method === "GET") {
+          const r = await dir.card(uid);
+          return r.ok ? json(r.data, 200, h) : failure(r, h);
+        }
+        if (path === "/me/card" && req.method === "PUT") {
+          const r = await dir.setCardPublic(uid, (await readJson(req)).public);
+          if (!r.ok) return failure(r, h);
+          await purgeCard(req.url, r.data.player_no);
+          return json(r.data, 200, h);
+        }
         if (path === "/me/export" && req.method === "GET") {
           const r = await dir.exportData(uid);
           if (!r.ok) return failure(r, h);
@@ -649,12 +695,14 @@ export default {
           });
         }
         if (path === "/me" && req.method === "DELETE") {
+          const before = await dir.card(uid);
           const r = await dir.deleteAccount(uid);
           if (!r.ok) return failure(r, h);
           for (const p of r.data.projects) await clearParcel(env, p.district, p.id, r.data.agents);
           for (const c of CHAT_CHUNKS) await chunk(env, c).purgeOwner(`usr_${uid}`);
           await syncShowcase(env, dir);
           await forgetAssets(env.ASSETS, req.url, r.data.orphanHashes);
+          if (before.ok) await purgeCard(req.url, before.data.player_no);
           return json({ deleted: true, assets_removed: r.data.orphanHashes.length }, 200, h);
         }
       }

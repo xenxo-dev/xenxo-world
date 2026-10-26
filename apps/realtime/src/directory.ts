@@ -210,6 +210,8 @@ export class Directory extends DurableObject<Env> {
       ids.forEach((r, i) => this.sql.exec("UPDATE users SET player_no = ? WHERE id = ?", i + 1, r.id));
     }
     this.sql.exec("CREATE UNIQUE INDEX IF NOT EXISTS users_player_no ON users(player_no)");
+    // Migración: carné público (apagado por defecto; lo enciende cada persona).
+    if (!ucols.includes("card_public")) this.sql.exec("ALTER TABLE users ADD COLUMN card_public INTEGER NOT NULL DEFAULT 0");
     // Contador de números de jugador: nunca baja, así un número no se reutiliza aunque se borre la cuenta.
     this.sql.exec("INSERT OR IGNORE INTO counters (k, v) VALUES ('next_player', (SELECT COALESCE(MAX(player_no), 0) + 1 FROM users))");
     // Migración: el personaje propio que ya llevaba cada cuenta entra en su armario (una sola vez).
@@ -670,6 +672,53 @@ export class Directory extends DurableObject<Env> {
     });
     const orphan = this.sql.exec("SELECT 1 FROM uploads WHERE hash = ? AND kind != 'removed'", hash).toArray().length === 0 && !this.hashInUse(hash);
     return ok({ user: this.user(id)!, skins: this.skins(id), orphan });
+  }
+
+  /* --- El carné de jugador (xenxo.io/p/<número>) --- */
+
+  /** Si el carné de esta persona se ve en público, y su número. */
+  card(id: string): Result<{ public: boolean; player_no: number | null }> {
+    const r = this.sql
+      .exec<{ card_public: number; player_no: number | null }>("SELECT card_public, player_no FROM users WHERE id = ?", id)
+      .toArray()[0];
+    if (!r) return fail(404, "not_found", "la cuenta no existe");
+    return ok({ public: r.card_public === 1, player_no: r.player_no });
+  }
+
+  setCardPublic(id: string, on: unknown): Result<{ public: boolean; player_no: number | null }> {
+    if (typeof on !== "boolean") return fail(400, "bad_message", "falta «public» (true o false)");
+    this.sql.exec("UPDATE users SET card_public = ? WHERE id = ?", on ? 1 : 0, id);
+    return this.card(id);
+  }
+
+  /**
+   * Carné público de un número: solo si su dueño lo ha hecho público. Lleva lo que ya se ve en el
+   * mundo (número, nombre, personaje y proyectos publicados) y la fecha de alta; nunca el id interno.
+   */
+  playerCard(no: number) {
+    const u = this.sql
+      .exec<{ id: string; display_name: string; avatar_hash: string | null; avatar_format: string | null; created_at: number; player_no: number }>(
+        "SELECT id, display_name, avatar_hash, avatar_format, created_at, player_no FROM users WHERE player_no = ? AND card_public = 1",
+        no,
+      )
+      .toArray()[0];
+    if (!u) return null;
+    return {
+      player_no: u.player_no,
+      name: u.display_name,
+      avatar: u.avatar_hash ? { hash: u.avatar_hash, format: u.avatar_format ?? "glb" } : null,
+      joined: u.created_at,
+      projects: this.projectsOf(u.id).map((p) => ({
+        id: p.id,
+        title: p.title,
+        summary: p.summary,
+        url: p.url,
+        cover_hash: p.cover_hash,
+        category: p.category,
+        district: p.district,
+        parcel: p.parcel,
+      })),
+    };
   }
 
   /** Derecho de acceso y portabilidad (RGPD arts. 15 y 20). */

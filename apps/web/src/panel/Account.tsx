@@ -29,6 +29,7 @@ import {
 import { reconnect } from "../net/session";
 import { AVATAR_PRESETS, presetByHash, setChosenPreset, useChosenPreset } from "../world/presets";
 import type { PreviewPose } from "./AvatarPreview";
+import { CardSettings } from "./CardSettings";
 import { ConnectedGames } from "./Games";
 import { ModelPicker } from "./ModelPicker";
 import { Block, Button, card, input, Label, Notice, Segmented } from "./ui";
@@ -56,6 +57,12 @@ export function AccountSection(props: CustomizeProps) {
       <Block title={t("avatar.title")}>
         <Wardrobe />
       </Block>
+
+      {user && (
+        <Block title={t("card.mine")}>
+          <CardSettings />
+        </Block>
+      )}
 
       {user && (
         <Block title={t("connected.title")}>
