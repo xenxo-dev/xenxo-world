@@ -7,8 +7,9 @@
  * cualquier cambio (tuyo o de una IA) no rompa el contrato.
  */
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { AVATAR_PRESETS } from "../../realtime/src/avatar-presets";
-import { msg, PLACES } from "@xenxo/protocol";
+import { GameManifest, msg, PLACES } from "@xenxo/protocol";
 import { XenxoClient } from "./client";
 import { makeBoxGlb, makeCoverPng, makeVrmMannequin, withExternalImage } from "./fixtures";
 import { Api } from "./http";
@@ -594,6 +595,20 @@ await scenario("RGPD: exportar mis datos y borrar la cuenta retira su contenido"
   const c = await XenxoClient.connect({ baseUrl, chunkId: "c_1_-1" });
   assert(!c.snapshot.entities.some((e) => e.entity_id === `stand_${created.data.project.id}`), "el portal debería haber desaparecido");
   c.close();
+});
+
+await scenario("ficha xenxo.json: la de la plantilla create-xenxo es válida; una con campos inventados o sin inglés, no", async () => {
+  const raw = readFileSync(new URL("../../../packages/create-xenxo/templates/common/public/xenxo.json", import.meta.url), "utf8")
+    .replaceAll("{{title}}", "Mi juego")
+    .replaceAll("{{category}}", "game3d");
+  const ficha = JSON.parse(raw) as Record<string, unknown>;
+  const ok = GameManifest.safeParse(ficha);
+  assert(ok.success, `la ficha de la plantilla debería ser válida: ${ok.success ? "" : JSON.stringify(ok.error.issues)}`);
+  assert(!GameManifest.safeParse({ ...ficha, inventado: true }).success, "un campo que xenxo no conoce se rechaza");
+  assert(!GameManifest.safeParse({ ...ficha, name: { es: "Solo español" } }).success, "el nombre necesita español e inglés");
+  assert(!GameManifest.safeParse({ ...ficha, ageRating: "+18" }).success, "solo all o +14");
+  assert(!GameManifest.safeParse({ ...ficha, privacy: "http://inseguro.example" }).success, "la privacidad va por https");
+  assert(GameManifest.safeParse({ ...ficha, xenxo: { clientId: "xg_abcdef123", project: "pdB6auRPggN0" } }).success, "con client_id y proyecto");
 });
 
 await scenario("DSA: cualquiera puede denunciar un contenido", async () => {

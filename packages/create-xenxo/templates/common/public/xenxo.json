@@ -1,0 +1,17 @@
+{
+  "schema": "xenxo.game/0",
+  "name": { "es": "{{title}}", "en": "{{title}}" },
+  "description": {
+    "es": "Un juego hecho con la plantilla de xenxo. Cambia esta descripción.",
+    "en": "A game made with the xenxo template. Change this description."
+  },
+  "category": "{{category}}",
+  "devices": ["pc", "mobile"],
+  "multiplayer": false,
+  "ageRating": "all",
+  "monetization": { "hasAds": false, "hasPurchases": false },
+  "author": "Tu nombre",
+  "contact": "https://github.com/tu-usuario",
+  "embed": true,
+  "xenxo": {}
+}

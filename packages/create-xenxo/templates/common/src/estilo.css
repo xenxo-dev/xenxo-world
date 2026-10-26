@@ -1,0 +1,77 @@
+/* Estilo base de la plantilla: noche de neón de xenxo. Cámbialo a tu gusto. */
+:root {
+  color-scheme: dark;
+  --noche: #12142b;
+  --cal: #f6f1e7;
+  --neon: #4fa3ff;
+  --rosa: #ff4fd8;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--noche);
+  color: var(--cal);
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: none;
+}
+canvas {
+  display: block;
+}
+.hud {
+  position: fixed;
+  top: max(12px, env(safe-area-inset-top));
+  left: 12px;
+  right: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  pointer-events: none;
+  font-size: 14px;
+}
+.hud > * {
+  pointer-events: auto;
+}
+.chip {
+  background: rgb(18 20 43 / 0.8);
+  border: 1px solid rgb(246 241 231 / 0.15);
+  border-radius: 12px;
+  padding: 6px 10px;
+  backdrop-filter: blur(6px);
+}
+.numero {
+  color: #9cc9ff;
+  font-weight: 700;
+  margin-left: 6px;
+}
+.hud button {
+  font: inherit;
+  cursor: pointer;
+  border-radius: 12px;
+  padding: 6px 12px;
+  border: 1px solid rgb(246 241 231 / 0.2);
+  background: rgb(18 20 43 / 0.8);
+  color: var(--cal);
+}
+.hud button.principal {
+  background: var(--neon);
+  border-color: var(--neon);
+  color: var(--noche);
+  font-weight: 600;
+}
+.derecha {
+  margin-left: auto;
+}
+.ayuda {
+  position: fixed;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  opacity: 0.6;
+  text-align: center;
+  pointer-events: none;
+}

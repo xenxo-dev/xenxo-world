@@ -98,10 +98,22 @@ a su agente. El agente es un cliente más del protocolo: todo pasa por `MUTATE_W
 comprueba que cada pieza quepa entera en la parcela (10 × 10 m, 12 m de alto) y su presupuesto
 (32 piezas, 16.000 triángulos, 1 luz). Detalles en [`packages/mcp/README.md`](packages/mcp/README.md).
 
+## Haz tu juego: `npm create xenxo`
+
+```sh
+npm create xenxo@latest
+```
+
+Crea un juego **2D o 3D** listo para xenxo: «Entrar con xenxo», el personaje VRM del jugador, un
+**simulador local** (jugador de prueba sin cuenta ni conexión), la ficha `xenxo.json` y un
+`AGENTS.md` para que tu IA sepa integrarse desde el primer prompt. Se publica con `npm run deploy`
+en tu cuenta gratuita de Cloudflare (o cualquier alojamiento estático). Detalles en
+[`packages/create-xenxo/README.md`](packages/create-xenxo/README.md).
+
 ## «Entrar con xenxo» en tu juego
 
 xenxo es proveedor de identidad (OpenID Connect) para juegos web: registras tu juego en
-*Proyectos → «Entrar con xenxo» en tu juego*, pones el SDK (`https://xenxo.io/sdk/xenxo.mjs`, 5 KB,
+*Proyectos → «Entrar con xenxo» en tu juego*, pones el SDK (`npm install @xenxo/sdk` o `https://xenxo.io/sdk/xenxo.mjs`, 8 KB,
 MIT) y la gente entra con su cuenta. Con su permiso recibes su nombre, su número de jugador y su
 personaje (VRM), firmados con Ed25519; cada juego ve un identificador distinto de la misma persona
 y cada persona puede retirar el permiso en *Cuenta → Juegos conectados*. Juego de ejemplo:
@@ -180,5 +192,5 @@ El agente de ejemplo usa la variable `XENXO_URL=https://api.xenxo.io` y el secre
 ## Licencia
 
 - **El mundo** (servidor, web y herramientas): [AGPL-3.0](LICENSE). Puedes usarlo, cambiarlo y montar tu propia copia, pero si la abres al público tienes que publicar tu código con tus cambios. Así nadie puede cerrar xenxo y quedarse con una versión privada.
-- **Lo que usan los creadores** (`packages/protocol`, `packages/assets`, `apps/headless`, `packages/mcp`, `packages/sdk` y, cuando exista, la plantilla): **MIT**. Conectar tu juego o tu agente a xenxo no cambia la licencia de tu código: sigue siendo tuyo.
+- **Lo que usan los creadores** (`packages/protocol`, `packages/assets`, `apps/headless`, `packages/mcp`, `packages/sdk` y `packages/create-xenxo`): **MIT**. Conectar tu juego o tu agente a xenxo no cambia la licencia de tu código: sigue siendo tuyo.
 - **Recursos gráficos**: ver [`CREDITS.md`](CREDITS.md).

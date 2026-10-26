@@ -5,8 +5,9 @@ import { Chat } from "./hud/Chat";
 import { Emotes } from "./hud/Emotes";
 import { PortalCard, TravelToast } from "./hud/PortalCard";
 import { errorText, placeName, t, useLang } from "./i18n";
-import { setGuestName as setSessionGuestName, startSession } from "./net/session";
+import { setGuestName as setSessionGuestName, startSession, travel } from "./net/session";
 import { completeGoogleReturn, refreshSession } from "./net/account";
+import { districtOf, parcelArrival, refreshDistricts } from "./net/districts";
 import { useWorldVersion, world } from "./net/world-store";
 import { Consent, pendingConsent } from "./panel/Consent";
 import { Panel, type Section } from "./panel/Panel";
@@ -78,6 +79,25 @@ export function App() {
 
   useEffect(() => {
     void startSession(name);
+    // Vuelta desde un juego (xenxo.back() del SDK): ?volver=<proyecto> → delante de su portal.
+    const q = new URLSearchParams(location.search);
+    const back = q.get("volver");
+    if (back !== null) {
+      q.delete("volver");
+      history.replaceState(history.state, "", `${location.pathname}${q.size ? `?${q}` : ""}${location.hash}`);
+      if (/^[A-Za-z0-9_-]{4,40}$/.test(back)) {
+        void refreshDistricts(true).then((districts) => {
+          for (const d of districts) {
+            const parcel = d.parcels.find((p) => p.project_id === back);
+            if (!parcel || !districtOf(d.id)) continue;
+            const a = parcelArrival(parcel);
+            travel(d.chunk_id, a.p, a.yaw);
+            setInWorld(true);
+            return;
+          }
+        });
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

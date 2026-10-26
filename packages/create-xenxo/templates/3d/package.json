@@ -1,0 +1,20 @@
+{
+  "name": "{{name}}",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --open",
+    "build": "vite build",
+    "preview": "vite preview",
+    "deploy": "vite build && npx wrangler pages deploy dist --project-name {{name}}"
+  },
+  "dependencies": {
+    "@pixiv/three-vrm": "^3.5.5",
+    "@xenxo/sdk": "{{sdkVersion}}",
+    "three": "^0.186.0"
+  },
+  "devDependencies": {
+    "vite": "^8.3.0"
+  }
+}

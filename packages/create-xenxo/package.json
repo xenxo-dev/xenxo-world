@@ -1,0 +1,30 @@
+{
+  "name": "create-xenxo",
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "description": "Crea un juego web listo para xenxo.io: 2D o 3D, «Entrar con xenxo», simulador local y AGENTS.md para tu IA",
+  "bin": {
+    "create-xenxo": "index.mjs"
+  },
+  "files": [
+    "index.mjs",
+    "templates",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xenxo-dev/xenxo-world.git",
+    "directory": "packages/create-xenxo"
+  },
+  "homepage": "https://xenxo.io",
+  "keywords": ["xenxo", "create", "template", "web-games", "vibecoding", "threejs", "vrm"],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

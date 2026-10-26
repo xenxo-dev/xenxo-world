@@ -63,7 +63,11 @@ export function MyGames({ projects }: { projects: Project[] }) {
   }, []);
 
   const snippet = (g: MyGame) =>
-    `<script type="module">\n  import { xenxo } from "${SDK_URL}";\n  const jugador = await xenxo.connect({\n    clientId: "${g.client_id}",\n    redirectUri: "${g.redirect_uris[0]}",\n    scopes: ["profile", "player", "avatar"],${REALTIME_URL === "https://api.xenxo.io" ? "" : `\n    issuer: "${REALTIME_URL}",`}\n  });\n  // null = aún sin entrar: xenxo.login() lo manda a dar permiso.\n  if (!jugador) document.querySelector("#entrar").onclick = () => xenxo.login();\n  else console.log(jugador.name, jugador.playerNo, jugador.avatar?.url);\n</script>`;
+    `<script type="module">\n  import { xenxo } from "${SDK_URL}";\n  const jugador = await xenxo.connect({\n    clientId: "${g.client_id}",\n    redirectUri: "${g.redirect_uris[0]}",\n    scopes: ["profile", "player", "avatar"],${g.project_id ? `\n    project: "${g.project_id}", // xenxo.back() vuelve delante de su portal` : ""}${REALTIME_URL === "https://api.xenxo.io" ? "" : `\n    issuer: "${REALTIME_URL}",`}\n  });\n  // null = aún sin entrar: xenxo.login() lo manda a dar permiso.\n  if (!jugador) document.querySelector("#entrar").onclick = () => xenxo.login();\n  else console.log(jugador.name, jugador.playerNo, jugador.avatar?.url);\n</script>`;
+
+  // Con la plantilla (npm create xenxo), basta con esto en public/xenxo.json.
+  const manifest = (g: MyGame) =>
+    `"xenxo": {\n  "clientId": "${g.client_id}"${g.project_id ? `,\n  "project": "${g.project_id}"` : ""}\n}`;
 
   return (
     <div className={`${card} p-4`}>
@@ -80,7 +84,10 @@ export function MyGames({ projects }: { projects: Project[] }) {
           <p className="mt-1 break-all font-mono text-xs text-cal/50">{g.redirect_uris.join(" · ")}</p>
           <details className="mt-2">
             <summary className="cursor-pointer text-xs text-cal/70">{t("games.howto")}</summary>
-            <pre className="mt-2 overflow-x-auto whitespace-pre rounded-lg border border-cal/10 bg-noche/70 p-3 font-mono text-xs text-cal/85">{snippet(g)}</pre>
+            <p className="mt-2 text-xs text-cal/60">{t("games.template")}</p>
+            <pre className="mt-1 overflow-x-auto whitespace-pre rounded-lg border border-cal/10 bg-noche/70 p-3 font-mono text-xs text-cal/85">{manifest(g)}</pre>
+            <p className="mt-3 text-xs text-cal/60">{t("games.script")}</p>
+            <pre className="mt-1 overflow-x-auto whitespace-pre rounded-lg border border-cal/10 bg-noche/70 p-3 font-mono text-xs text-cal/85">{snippet(g)}</pre>
           </details>
         </div>
       ))}

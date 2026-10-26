@@ -1,0 +1,35 @@
+name: Publicar en npm
+
+# Publica a mano (Actions → «Publicar en npm» → Run workflow) uno de los paquetes MIT para
+# creadores. Necesita el secreto NPM_TOKEN (token «Automation» de la organización xenxo en npm).
+# Sube antes la versión en su package.json: npm no deja publicar dos veces la misma.
+on:
+  workflow_dispatch:
+    inputs:
+      paquete:
+        description: Paquete
+        required: true
+        type: choice
+        options:
+          - "@xenxo/sdk"
+          - create-xenxo
+
+permissions:
+  contents: read
+  id-token: write # procedencia (provenance): npm enseña que salió de este repositorio
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm publish -w "${{ inputs.paquete }}" --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

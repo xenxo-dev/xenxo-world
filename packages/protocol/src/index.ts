@@ -490,3 +490,56 @@ export function assetPath(hash: string): string {
 export function chunkOf(x: number, z: number): string {
   return `c_${Math.floor(x / CHUNK_SIZE)}_${Math.floor(z / CHUNK_SIZE)}`;
 }
+
+/* ------------------------------------------------------------------ */
+/* xenxo.json: la ficha de un juego (en la raíz de su web)              */
+/* ------------------------------------------------------------------ */
+
+export const GAME_MANIFEST_SCHEMA = "xenxo.game/0" as const;
+
+/** Texto en varios idiomas: español e inglés obligatorios; otros, opcionales (código de 2 letras). */
+const GameText = (max: number) =>
+  z
+    .object({ es: z.string().trim().min(1).max(max), en: z.string().trim().min(1).max(max) })
+    .catchall(z.string().trim().min(1).max(max))
+    .refine((o) => Object.keys(o).every((k) => /^[a-z]{2}$/.test(k)), "idiomas: códigos de 2 letras (es, en, ca…)");
+
+const HttpsUrl = z.string().max(300).regex(/^https:\/\/[^\s]+$/, "https://…");
+
+/**
+ * Ficha del juego (v0). El servidor la lee al registrar el juego (fase 4) y la plantilla
+ * `create-xenxo` la trae rellena. `privacy` y `thumbnail` se exigen al publicar, no al desarrollar.
+ */
+export const GameManifest = z
+  .object({
+    schema: z.literal(GAME_MANIFEST_SCHEMA),
+    name: GameText(60),
+    description: GameText(280),
+    category: z.enum(PROJECT_CATEGORIES),
+    /** En qué equipos funciona. */
+    devices: z.array(z.enum(["pc", "mobile", "vr"])).min(1).max(3),
+    multiplayer: z.boolean(),
+    /** "all" o "+14": los invitados solo abren juegos "all" y revisados. */
+    ageRating: z.enum(["all", "+14"]),
+    /** Anuncios o compras dentro del juego (se avisan antes de abrirlo). Nunca juego con dinero real. */
+    monetization: z.object({ hasAds: z.boolean(), hasPurchases: z.boolean() }).strict(),
+    author: z.string().trim().min(1).max(60),
+    /** Un email o una web de contacto. */
+    contact: z.string().trim().min(3).max(200),
+    /** Página de privacidad del juego (https). */
+    privacy: HttpsUrl.optional(),
+    /** Portada 16:9: ruta de la propia web ("/portada.webp") o https. */
+    thumbnail: z.string().max(300).regex(/^(\/[^\s]*|https:\/\/[^\s]+)$/, "/ruta o https://…").optional(),
+    /** ¿Se puede abrir dentro de xenxo (iframe aislado)? Si no, solo por portal. */
+    embed: z.boolean().default(true),
+    /** Lo que da xenxo al registrar: el juego para «Entrar con xenxo» y su proyecto (su parcela). */
+    xenxo: z
+      .object({
+        clientId: z.string().regex(/^xg_[A-Za-z0-9_]{6,30}$/).optional(),
+        project: z.string().regex(/^[A-Za-z0-9_-]{4,40}$/).optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type GameManifest = z.infer<typeof GameManifest>;

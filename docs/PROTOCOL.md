@@ -188,6 +188,30 @@ Otras defensas: los flujos que se empiezan sin cuenta (passkey, Google, permisos
 el `state` de «Entrar con Google» queda atado al navegador con una cookie `HttpOnly; Secure; SameSite=Lax`;
 un agente de parcela con la clave revocada no vuelve a entrar aunque su token no haya caducado.
 
+## 9 quater. `xenxo.json`: la ficha de un juego
+
+Cada juego publica en la raíz de su web un `xenxo.json` con el esquema `xenxo.game/0`
+(`GameManifest` en `packages/protocol`; estricto: un campo desconocido invalida la ficha). La
+plantilla `create-xenxo` la trae rellena; el registro de juegos (fase 4) la leerá desde el servidor.
+
+| Campo | Qué es |
+|---|---|
+| `schema` | `"xenxo.game/0"` |
+| `name` · `description` | `{ es, en, …otros }` (códigos de 2 letras; `es` y `en` obligatorios). ≤ 60 y ≤ 280 |
+| `category` | `game3d`, `game2d`, `social`, `tool`, `other` |
+| `devices` | `pc`, `mobile`, `vr` (1–3) |
+| `multiplayer` · `ageRating` | bool · `"all"` o `"+14"` |
+| `monetization` | `{ hasAds, hasPurchases }`. Prohibido el juego con dinero real |
+| `author` · `contact` | Texto (≤ 60) · email o web (≤ 200) |
+| `privacy` · `thumbnail` | https · `/ruta` o https. Opcionales al desarrollar, obligatorios al publicar |
+| `embed` | ¿Se puede abrir dentro de xenxo (iframe aislado)? Por defecto `true` |
+| `xenxo` | `{ clientId?: "xg_…", project?: "<id del proyecto>" }` |
+
+**Volver a xenxo.** `xenxo.back()` del SDK lleva a `https://xenxo.io/?volver=<id del proyecto>`: la
+web busca la parcela de ese proyecto y deja a la persona en el mundo, delante de su portal (si el id
+no existe, se queda en el panel). Si xenxo abrió el juego dentro de su página, el SDK manda
+`postMessage({ type: "xenxo:back", project })` a xenxo en vez de navegar. Idioma: `?xenxo_lang=`.
+
 ## 10. Códigos de error
 
 `bad_message` · `unsupported_version` · `unauthorized` · `forbidden` · `not_found` · `version_conflict` · `budget_exceeded` · `unknown_component` · `rate_limited` · `duplicate`

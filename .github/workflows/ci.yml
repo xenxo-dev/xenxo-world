@@ -21,6 +21,22 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
 
+      # La plantilla de juegos: crea uno 2D y otro 3D con el SDK empaquetado y los compila.
+      - name: Plantilla create-xenxo
+        run: |
+          T=$(mktemp -d)
+          npm pack -w @xenxo/sdk --pack-destination "$T" > /dev/null
+          SDK=$(ls "$T"/xenxo-sdk-*.tgz)
+          cd "$T"
+          for k in 2d 3d; do
+            node "$GITHUB_WORKSPACE/packages/create-xenxo/index.mjs" "juego-$k" --$k --yes
+            cd "juego-$k"
+            node -e 'const f=require("fs");const p=JSON.parse(f.readFileSync("package.json"));p.dependencies["@xenxo/sdk"]="file:"+process.argv[1];f.writeFileSync("package.json",JSON.stringify(p,null,2))' "$SDK"
+            npm install --no-audit --no-fund
+            npm run build
+            cd ..
+          done
+
       # Conformidad del protocolo contra el servidor real en local (wrangler dev).
       - name: Arrancar el servidor de tiempo real
         working-directory: apps/realtime

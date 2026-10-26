@@ -5,6 +5,9 @@
  *   const jugador = await xenxo.connect({ clientId: "xg_…", redirectUri: location.origin + "/" });
  *   if (!jugador) boton.onclick = () => xenxo.login();
  *
+ * En tu equipo (localhost, sin clientId) arranca el simulador: un jugador de prueba sin cuenta ni
+ * conexión con xenxo, y un panel para cambiar entre jugador, invitado y sin sesión.
+ *
  * Lo que hace por ti: OpenID Connect con PKCE (S256), `state` y `nonce`; comprueba la firma Ed25519
  * del id_token con la clave pública de xenxo (y su emisor, destinatario, caducidad y nonce), y te
  * da el jugador: id propio de tu juego, nombre, número y personaje (VRM). Nada se guarda fuera de
@@ -12,13 +15,20 @@
  */
 
 export interface XenxoOptions {
-  clientId: string;
-  /** Dirección de vuelta registrada en xenxo (exacta). */
-  redirectUri: string;
+  /** El `xg_…` que te da xenxo al registrar el juego. Sin él, en localhost, se usa el simulador. */
+  clientId?: string;
+  /** Dirección de vuelta registrada en xenxo (exacta). Por defecto, esta página sin `?…` ni `#…`. */
+  redirectUri?: string;
   /** Además de "openid": "profile" (nombre), "player" (número), "avatar" (personaje). */
   scopes?: ("profile" | "player" | "avatar")[];
   /** Servidor de identidad. Por defecto, https://api.xenxo.io. */
   issuer?: string;
+  /** Tu proyecto en xenxo (`id` de su ficha): `xenxo.back()` vuelve delante de su portal. */
+  project?: string;
+  /** Simulador local. Por defecto, solo en localhost y sin `clientId`. */
+  simulate?: boolean;
+  /** La web de xenxo a la que se vuelve. Por defecto, https://xenxo.io. */
+  home?: string;
 }
 
 export interface XenxoPlayer {
@@ -33,11 +43,22 @@ export interface XenxoPlayer {
   expiresAt: number;
   /** ¿Se comprobó la firma en este navegador? (los muy antiguos no tienen Ed25519 en WebCrypto). */
   signatureChecked: boolean;
+  /** Invitado de xenxo: tiene nombre pero no cuenta (sin número; su id cambia entre visitas). */
+  guest?: boolean;
+  /** Jugador del simulador local: no es una persona de verdad. */
+  simulated?: boolean;
 }
 
+type Resolved = XenxoOptions & { clientId: string; redirectUri: string };
+
 const KEY = "xenxo:sdk";
-let opts: XenxoOptions | null = null;
+let opts: Resolved | null = null;
 let lastError: string | null = null;
+let simulating = false;
+
+/** Un personaje de serie de xenxo (Alba, CC0) para el jugador de prueba del simulador. */
+const SIM_AVATAR = "927ec08956aae9186f4b0585645d2124d3586ab9f05ed0bf63848e439a0e2cf4";
+type SimMode = "player" | "guest" | "none";
 
 const b64url = (b: Uint8Array) => btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 const fromB64url = (s: string) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
@@ -60,7 +81,7 @@ function read<T>(key: string): T | null {
   }
 }
 
-function issuerOf(o: XenxoOptions) {
+function issuerOf(o: Pick<XenxoOptions, "issuer">) {
   return (o.issuer ?? "https://api.xenxo.io").replace(/\/+$/, "");
 }
 
@@ -82,7 +103,7 @@ async function verifySignature(idToken: string, issuer: string): Promise<boolean
   return crypto.subtle.verify({ name: "Ed25519" }, key, fromB64url(s), new TextEncoder().encode(`${h}.${p}`));
 }
 
-async function finish(o: XenxoOptions, code: string, state: string): Promise<XenxoPlayer> {
+async function finish(o: Resolved, code: string, state: string): Promise<XenxoPlayer> {
   const pending = read<{ state: string; nonce: string; verifier: string }>("pending");
   store("pending", null);
   if (!pending || pending.state !== state) throw new Error("state no coincide: inicia sesión otra vez");
@@ -112,14 +133,82 @@ async function finish(o: XenxoOptions, code: string, state: string): Promise<Xen
   };
 }
 
+function isLocal(): boolean {
+  const h = location.hostname;
+  return h === "localhost" || h === "127.0.0.1" || h === "[::1]" || h.endsWith(".localhost");
+}
+
+function homeOf(o: XenxoOptions | null): string {
+  return (o?.home ?? "https://xenxo.io").replace(/\/+$/, "");
+}
+
+function simPlayer(mode: SimMode, o: XenxoOptions): XenxoPlayer | null {
+  if (mode === "none") return null;
+  const avatar = { url: `${issuerOf(o)}/assets/${SIM_AVATAR}`, format: "vrm" as const, hash: `sha256:${SIM_AVATAR}` };
+  const base = { idToken: "", expiresAt: Date.now() + 3600_000, signatureChecked: false, simulated: true, avatar };
+  return mode === "guest"
+    ? { ...base, id: "sim_invitado", name: "Invitado-4821", playerNo: null, guest: true }
+    : { ...base, id: "sim_jugador", name: "Jugador de prueba", playerNo: 9999 };
+}
+
+/** Aviso pequeño del simulador (sin estilos del juego: va en su propia sombra). */
+function toast(text: string) {
+  const el = document.createElement("div");
+  el.textContent = text;
+  el.setAttribute("style", "position:fixed;left:50%;bottom:72px;transform:translateX(-50%);z-index:2147483647;background:#12142b;color:#f6f1e7;border:1px solid #4fa3ff;border-radius:10px;padding:8px 12px;font:13px system-ui,sans-serif;max-width:90vw");
+  document.body.append(el);
+  setTimeout(() => el.remove(), 3500);
+}
+
+/** Panel del simulador: elegir jugador de prueba, invitado o sin sesión (recarga la página). */
+function simPanel(mode: SimMode) {
+  if (document.getElementById("xenxo-sim")) return;
+  const host = document.createElement("div");
+  host.id = "xenxo-sim";
+  host.setAttribute("style", "position:fixed;left:12px;bottom:12px;z-index:2147483647");
+  const root = host.attachShadow({ mode: "open" });
+  const opt = (m: SimMode, label: string) =>
+    `<button data-m="${m}" aria-pressed="${m === mode}">${label}</button>`;
+  root.innerHTML = `<style>
+    .p{font:12px system-ui,sans-serif;color:#f6f1e7;background:rgba(18,20,43,.92);border:1px solid rgba(246,241,231,.15);border-radius:12px;padding:8px 10px;box-shadow:0 4px 20px rgba(0,0,0,.4)}
+    b{color:#9cc9ff;font-weight:600}
+    .r{display:flex;gap:4px;margin-top:6px}
+    button{font:inherit;color:rgba(246,241,231,.7);background:none;border:1px solid rgba(246,241,231,.15);border-radius:8px;padding:3px 8px;cursor:pointer}
+    button[aria-pressed=true]{background:#4fa3ff;color:#12142b;border-color:#4fa3ff}
+    small{display:block;margin-top:6px;color:rgba(246,241,231,.45)}
+  </style><div class="p"><b>xenxo</b> · simulador<div class="r">${opt("player", "Jugador")}${opt("guest", "Invitado")}${opt("none", "Sin sesión")}</div><small>Solo en tu equipo. En tu web se entra con xenxo.</small></div>`;
+  root.querySelectorAll<HTMLButtonElement>("button").forEach((b) =>
+    b.addEventListener("click", () => {
+      store("sim", b.dataset.m);
+      location.reload();
+    }),
+  );
+  document.body.append(host);
+}
+
 export const xenxo = {
   /**
    * Prepara el SDK y devuelve el jugador si ya entró (o si vuelve ahora de xenxo con su permiso).
    * Si vuelve sin permiso, devuelve null y `xenxo.error` dice por qué.
    */
-  async connect(o: XenxoOptions): Promise<XenxoPlayer | null> {
-    opts = o;
+  async connect(options: XenxoOptions = {}): Promise<XenxoPlayer | null> {
     lastError = null;
+    const project = options.project && /^[A-Za-z0-9_-]{4,40}$/.test(options.project) ? options.project : undefined;
+    simulating = options.simulate ?? (isLocal() && !options.clientId);
+    const o: Resolved = {
+      ...options,
+      project,
+      clientId: options.clientId ?? "",
+      redirectUri: options.redirectUri ?? `${location.origin}${location.pathname}`,
+    };
+    opts = o;
+    if (simulating) {
+      const mode = read<SimMode>("sim") ?? "player";
+      if (document.body) simPanel(mode);
+      else addEventListener("DOMContentLoaded", () => simPanel(mode), { once: true });
+      return simPlayer(mode, o);
+    }
+    if (!o.clientId) throw new Error("falta clientId: regístralo en xenxo.io → Proyectos (en localhost, sin él, se usa el simulador)");
     const u = new URL(location.href);
     const code = u.searchParams.get("code");
     const state = u.searchParams.get("state");
@@ -155,8 +244,12 @@ export const xenxo = {
   },
 
   /** Lleva a la persona a xenxo para que dé permiso (vuelve a `redirectUri`). */
-  async login(prompt?: "consent" | "login"): Promise<void> {
+  async login(prompt?: "consent"): Promise<void> {
     if (!opts) throw new Error("llama antes a xenxo.connect()");
+    if (simulating) {
+      store("sim", "player");
+      return location.reload();
+    }
     const verifier = random(48);
     const challenge = b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
     const pending = { state: random(16), nonce: random(16), verifier };
@@ -179,6 +272,34 @@ export const xenxo = {
   logout() {
     store("player", null);
     store("pending", null);
+    if (simulating) store("sim", "none");
+  },
+
+  /**
+   * Vuelve a xenxo, delante del portal de tu proyecto (si diste `project`). Si xenxo abrió el juego
+   * dentro de su página, se lo pide a xenxo; si no, navega. En el simulador solo lo enseña.
+   */
+  back() {
+    const home = homeOf(opts);
+    const url = opts?.project ? `${home}/?volver=${encodeURIComponent(opts.project)}` : `${home}/`;
+    if (simulating) return toast(`xenxo.back() → ${url}`);
+    const origin = new URL(home).origin;
+    if (window.parent !== window && document.referrer.startsWith(origin)) {
+      window.parent.postMessage({ type: "xenxo:back", project: opts?.project ?? null }, origin);
+      return;
+    }
+    location.assign(url);
+  },
+
+  /** ¿Es el simulador local? */
+  get simulated() {
+    return simulating;
+  },
+
+  /** Idioma de la persona: el que diga xenxo al abrir el juego (`?xenxo_lang=`) o el del navegador. */
+  get lang(): string {
+    const q = new URLSearchParams(location.search).get("xenxo_lang");
+    return (q && /^[a-z]{2}$/.test(q) ? q : navigator.language.slice(0, 2).toLowerCase()) || "es";
   },
 
   /** Último error al volver de xenxo ("access_denied" si dijo que no), o null. */
