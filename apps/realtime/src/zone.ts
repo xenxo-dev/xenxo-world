@@ -13,6 +13,8 @@ export interface Box {
 export interface Zone {
   chunk_id: string;
   owner: string;
+  /** Parcela ("A1"…"D4"): de ella sale lo reservado para su portal. */
+  parcel: string;
   x0: number;
   z0: number;
   x1: number;

@@ -3,7 +3,6 @@
  * llevar a alguien delante del portal de un proyecto.
  */
 import { useSyncExternalStore } from "react";
-import { PORTAL_ZONE_DEPTH } from "@xenxo/protocol";
 import { REALTIME_URL } from "../config";
 import { registerPlaceName } from "../i18n";
 
@@ -29,7 +28,7 @@ export interface DistrictInfo {
 /** Dónde se aparece al entrar en un distrito (junto a su puerta, mirando a la avenida). */
 export const DISTRICT_SPAWN: [number, number, number] = [32, 0, 57.5];
 /** Distancia del marco del portal al centro de la parcela, hacia el fondo (districts.json). */
-const FRAME_BACK = 3;
+const PARCEL_D = 10;
 
 let cache: DistrictInfo[] | null = null;
 let loadedAt = 0;
@@ -75,7 +74,8 @@ export function districtOf(id: string | null | undefined): DistrictInfo | null {
 export function parcelArrival(q: ParcelInfo): { p: [number, number, number]; yaw: number } {
   const a = (q.facing * Math.PI) / 180;
   const s = Math.sin(a), c = Math.cos(a);
-  const d = -FRAME_BACK + PORTAL_ZONE_DEPTH + 1.2;
+  // En la calle, delante de la parcela (dentro puede haber cosas construidas), mirando al portal.
+  const d = PARCEL_D / 2 + 1.6;
   return { p: [q.x + s * d, 0, q.z + c * d], yaw: q.facing };
 }
 

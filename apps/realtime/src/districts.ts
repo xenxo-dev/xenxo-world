@@ -1,6 +1,7 @@
 import { PLACES, type Components } from "@xenxo/protocol";
 import districtsLayout from "./districts.json";
-import { at, r3, spawnInFront, yaw, type Seeded, type Slot, type V3 } from "./places";
+import { at, FRAME, r3, yaw, type Seeded, type Slot, type V3 } from "./places";
+import { PORTAL_ZONE_DEPTH } from "@xenxo/protocol";
 import { SEED_ASSETS } from "./seed-assets";
 
 /**
@@ -62,9 +63,34 @@ export function parcelSlot(i: number): Slot {
   return { index: i, x, z, facing: q.facing };
 }
 
-/** Dónde aparecer para ver el portal de una parcela (mirándolo). */
-export function parcelSpawn(i: number) {
-  return spawnInFront(parcelSlot(i), true);
+/**
+ * Dónde aparecer para ver una parcela: en su calle, delante, mirando a su portal. No dentro de la
+ * parcela: ahí puede haber cosas construidas.
+ */
+export function parcelSpawn(i: number): { p: V3; yaw: number } {
+  const q = PARCELS[i]!;
+  const p = at(q.x, q.z, q.facing, 0, 0, L.parcel.d / 2 + PARCEL_STREET_STEP);
+  // El giro del protocolo (0 = norte) que mira hacia el portal es el mismo `facing` de la parcela.
+  return { p, yaw: q.facing };
+}
+
+/** Metros que se aparece fuera de la parcela, ya en la calle. */
+export const PARCEL_STREET_STEP = 1.6;
+
+/**
+ * Lo que una parcela guarda para su portal (no se construye ahí): el marco, la peana y la franja
+ * que abre la ficha, hasta 3,6 m de alto. En coordenadas del chunk.
+ */
+export function parcelReserved(i: number) {
+  const s = parcelSlot(i);
+  const q = PARCELS[i]!;
+  const hw = FRAME.w / 2 + 0.5;
+  // Del borde del fondo de la parcela hasta un poco más allá de la franja del portal.
+  const a = at(s.x, s.z, s.facing, -hw, 0, PORTAL_ZONE_DEPTH + 0.2);
+  const b = at(q.x, q.z, q.facing, hw, 0, -L.parcel.d / 2);
+  const bx = at(s.x, s.z, s.facing, hw, 0, 0);
+  const xs = [a[0], b[0], bx[0]], zs = [a[2], b[2]];
+  return { x0: Math.min(...xs), x1: Math.max(...xs), z0: Math.min(...zs), z1: Math.max(...zs), y1: 3.6 };
 }
 
 export function districtSeed(d: District, toNexo: { p: V3; yaw: number }): Seeded[] {

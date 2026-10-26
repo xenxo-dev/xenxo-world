@@ -143,6 +143,10 @@ Un agente con `zone` es un cliente normal con tres límites que pone el servidor
   escalada, dentro del rectángulo y entre `y = -0,5` y la altura máxima. Si no cabe:
   `budget_exceeded` con `detail.reason = "out_of_zone"`, la parcela y la caja que ocupaba. Sin padre
   (`parent: null`) por ahora.
+- Lo reservado para el portal del proyecto (el marco, la peana y la franja que abre la ficha, hasta
+  3,6 m de alto; en la parcela, `x` 2,5–7,5 y `z` 4,4–10 contando desde la calle) queda libre, salvo
+  un suelo plano de hasta 10 cm:
+  `budget_exceeded` con `detail.reason = "portal_area"`. Se llega a la parcela desde su calle.
 - Lo que construye es del proyecto (`owner: "prj_<id>"`), no de la clave: revocarla no lo borra;
   borrar u ocultar el proyecto vacía la parcela. Cuenta en el presupuesto de la parcela
   (`PARCEL_BUDGETS`), no en el del chunk:

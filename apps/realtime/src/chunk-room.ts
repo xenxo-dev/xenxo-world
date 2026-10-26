@@ -29,7 +29,7 @@ import {
 import type { Env } from "./index";
 import { randomId, type Principal } from "./auth";
 import { plazaSeed, SEED_VERSION } from "./seed";
-import { districtByChunk, districtSeed, DISTRICT_SEED_VERSION, PARCELS, parcelSlot } from "./districts";
+import { districtByChunk, districtSeed, DISTRICT_SEED_VERSION, PARCELS, parcelIndex, parcelReserved, parcelSlot } from "./districts";
 import { nexoArrival, NEXO_SEED_VERSION, nexoSeed, SHOWCASE_SLOTS } from "./nexo";
 import { portalEntities, r3, type Seeded } from "./places";
 import { fitsZone, localBox, worldBox, type Zone } from "./zone";
@@ -480,6 +480,17 @@ export class ChunkRoom extends DurableObject<Env> {
       throw new MutationError("budget_exceeded", "no cabe entero en tu parcela", {
         reason: "out_of_zone",
         parcel: { x0: zone.x0, z0: zone.z0, x1: zone.x1, z1: zone.z1, max_height: PARCEL_BUDGETS.maxHeight },
+        box: { min: box.min.map(r3), max: box.max.map(r3) },
+      });
+    }
+    // El portal del proyecto y la franja que abre su ficha quedan libres: si no, nadie llega a él.
+    const i = parcelIndex(zone.parcel);
+    const r = i >= 0 ? parcelReserved(i) : null;
+    // Un suelo plano (hasta 10 cm) sí puede pasar por debajo.
+    if (r && box.max[1] > 0.1 && box.min[0] < r.x1 && box.max[0] > r.x0 && box.min[2] < r.z1 && box.max[2] > r.z0 && box.min[1] < r.y1) {
+      throw new MutationError("budget_exceeded", "eso tapa el portal de tu proyecto o el sitio para llegar a él", {
+        reason: "portal_area",
+        reserved: { x0: r3(r.x0), z0: r3(r.z0), x1: r3(r.x1), z1: r3(r.z1), max_y: r.y1 },
         box: { min: box.min.map(r3), max: box.max.map(r3) },
       });
     }

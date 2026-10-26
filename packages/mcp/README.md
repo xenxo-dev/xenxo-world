@@ -57,7 +57,8 @@ que diga ABIERTO»*.
 
 Coordenadas en metros, de la parcela: `x` de 0 a 10 de izquierda a derecha mirando desde la calle,
 `z` de 0 (la calle) a 10 (el fondo, donde está el portal de tu proyecto) e `y` hacia arriba. El
-portal ocupa el fondo: deja libre la zona `x` 2,5–7,5, `z` 6–10.
+portal ocupa el fondo: el servidor deja libre la zona `x` 2,5–7,5, `z` 4,4–10 por debajo de 3,6 m (el
+marco, la peana y la franja que abre la ficha). Se llega desde la calle, mirando al portal.
 
 Presupuesto de una parcela: 32 piezas, 16.000 triángulos y 1 luz.
 

@@ -699,7 +699,8 @@ await scenario("parcela: la clave de agente de un proyecto construye solo dentro
   };
   const z = auth.principal.zone;
   assert(z?.chunk_id === "c_-1_0" && z.owner === `prj_${pid}` && z.x1 - z.x0 === 10, `zona: ${JSON.stringify(z)}`);
-  const cx = (z.x0 + z.x1) / 2, cz = (z.z0 + z.z1) / 2;
+  // A 1,5 m del lado de la parcela: fuera de lo reservado para el portal (el centro del fondo).
+  const cx = z.x0 + 1.5, cz = (z.z0 + z.z1) / 2;
   const box = (p: number[], size = [1, 1, 1]) => ({
     "transform@1": { p, r: [0, 0, 0, 1], s: [1, 1, 1], parent: null },
     "primitive@1": { shape: "box", size, color: "#44ccff" },
@@ -715,11 +716,13 @@ await scenario("parcela: la clave de agente de un proyecto construye solo dentro
   assert(tall.type === "ERROR", "por encima de la altura máxima → error");
   const moveOut = await agent.mutate({ op: "PATCH", entity_id: eid, base_rev: 1, components: { "transform@1": { p: [z.x1 + 3, 0.5, cz], r: [0, 0, 0, 1], s: [1, 1, 1], parent: null } } });
   assert(moveOut.type === "ERROR", "moverlo fuera de la parcela → error");
-  const moveIn = await agent.mutate({ op: "PATCH", entity_id: eid, base_rev: 1, components: { "transform@1": { p: [cx + 2, 0.5, cz], r: [0, 0, 0, 1], s: [1, 1, 1], parent: null } } });
+  const moveIn = await agent.mutate({ op: "PATCH", entity_id: eid, base_rev: 1, components: { "transform@1": { p: [cx, 0.5, cz + 2], r: [0, 0, 0, 1], s: [1, 1, 1], parent: null } } });
   assert(moveIn.type === "ACK", "moverlo dentro → ACK");
+  const portal = await agent.mutate({ op: "SPAWN", components: box([(z.x0 + z.x1) / 2, 0.5, (z.z0 + z.z1) / 2]) });
+  assert(portal.type === "ERROR" && (portal.payload.detail as { reason?: string })?.reason === "portal_area", "delante del portal → portal_area");
   const stand = await agent.mutate({ op: "DESPAWN", entity_id: `stand_${pid}`, base_rev: 1 });
   assert(stand.type === "ERROR" && stand.payload.code === "forbidden", "no puede tocar el portal de su parcela");
-  const light = (dx: number) => ({ ...box([cx + dx, 2, cz], [0.2, 0.2, 0.2]), "light@1": { type: "point", color: "#ffffff", intensity: 1, range: 4, when: "always" } });
+  const light = (dx: number) => ({ ...box([cx + dx, 4, cz], [0.2, 0.2, 0.2]), "light@1": { type: "point", color: "#ffffff", intensity: 1, range: 4, when: "always" } });
   assert((await agent.mutate({ op: "SPAWN", components: light(-1) })).type === "ACK", "una luz cabe");
   const light2 = await agent.mutate({ op: "SPAWN", components: light(1) });
   assert(light2.type === "ERROR" && light2.payload.code === "budget_exceeded", "la segunda luz supera el presupuesto de la parcela");

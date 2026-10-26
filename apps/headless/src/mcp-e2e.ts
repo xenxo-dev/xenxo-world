@@ -60,7 +60,7 @@ const expect = (cond: boolean, what: string) => {
   }
 };
 expect((await call("get_parcel")).ok, "get_parcel");
-const floor = await call("place_shape", { size: [6, 0.1, 4], position: [4, 0, 3], color: "#334455" });
+const floor = await call("place_shape", { size: [2, 1, 2], position: [1.5, 0, 6], color: "#334455" });
 expect(floor.ok, "suelo");
 const label = await call("place_label", { text: "Taller de prueba", position: [5, 2.5, 3], style: "neon", color: "#ffd54f" });
 expect(label.ok, "rótulo");
@@ -69,7 +69,7 @@ const up = await call("upload_model", { path: glb });
 console.log("   size:", JSON.stringify(up.data?.size));
 expect(up.ok, "subir modelo");
 if (up.data) expect((await call("place_model", { model: up.data.model, lods: up.data.lods.slice(1).map((l: { hash: string }) => l.hash), position: [8, 0, 2], yaw: 45 })).ok, "colocar modelo");
-expect((await call("update_piece", { id: floor.data?.placed, position: [4.5, 0, 3], color: "#556677" })).ok, "mover y pintar");
+expect((await call("update_piece", { id: floor.data?.placed, position: [1.5, 0, 2], color: "#556677" })).ok, "mover y pintar");
 const state = await call("get_parcel");
 expect(state.data?.pieces.length === 4, `4 piezas (suelo, rótulo, modelo y su colisionador) (hay ${state.data?.pieces.length})`);
 expect((await call("remove_pieces", { all: true })).ok, "quitar todo");
