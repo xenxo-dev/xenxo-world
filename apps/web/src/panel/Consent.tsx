@@ -79,11 +79,11 @@ export function Consent({ request, error, onClose }: { request: string | null; e
     }
   };
 
-  // Ya lo permitió antes: se vuelve al juego sin preguntar. Con prompt=none y sin poder, se le dice que no.
+  // Ya lo permitió (y lo usó hace poco): se vuelve al juego sin preguntar. Nada más es automático:
+  // ni los errores ni un «no» llevan a otra web sin que la persona pulse.
   useEffect(() => {
-    if (!info || busy || !request) return;
+    if (!info || busy || !request || info.error) return;
     if (user && info.granted && info.prompt !== "consent") void decide(true);
-    else if (info.prompt === "none") void decide(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [info, user?.id]);
 
@@ -108,7 +108,30 @@ export function Consent({ request, error, onClose }: { request: string | null; e
           </>
         )}
         {!problem && !info && <p className="text-sm text-cal/60">{t("repos.loading")}</p>}
-        {!problem && info && (
+        {!problem && info?.error && (
+          <>
+            <h2 id="consent-title" className="display text-lg font-semibold text-cal">
+              {t("consent.errorTitle", { game: info.client.name })}
+            </h2>
+            <Notice tone="error">{errorText({ code: info.error })}</Notice>
+            <p className="mt-3 text-sm text-cal/60">{t("consent.errorBack", { host: info.client.host })}</p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Button disabled={busy} onClick={() => void decide(false)}>
+                {t("consent.back", { host: info.client.host })}
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  clearQuery();
+                  onClose();
+                }}
+              >
+                {t("consent.close")}
+              </Button>
+            </div>
+          </>
+        )}
+        {!problem && info && !info.error && (
           <>
             <h2 id="consent-title" className="display text-lg font-semibold text-cal">
               {t("consent.title", { game: info.client.name })}

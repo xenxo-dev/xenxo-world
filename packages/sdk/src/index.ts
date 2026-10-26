@@ -124,6 +124,7 @@ export const xenxo = {
     const code = u.searchParams.get("code");
     const state = u.searchParams.get("state");
     const err = u.searchParams.get("error");
+    const iss = u.searchParams.get("iss");
     if (code || err) {
       for (const k of ["code", "state", "error", "error_description", "iss"]) u.searchParams.delete(k);
       history.replaceState(history.state, "", u.toString());
@@ -134,6 +135,12 @@ export const xenxo = {
       return null;
     }
     if (code && state) {
+      // RFC 9207: la respuesta dice quién la emite; si no es xenxo, no se sigue.
+      if (iss && iss !== issuerOf(o)) {
+        store("pending", null);
+        lastError = "la respuesta no viene de xenxo";
+        return null;
+      }
       try {
         const player = await finish(o, code, state);
         store("player", player);

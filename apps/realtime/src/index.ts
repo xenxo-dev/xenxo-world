@@ -199,10 +199,16 @@ function chunk(env: Env, id: string) {
   });
 }
 
+/** Huella del state de Google para la cookie que lo ata al navegador. */
+async function stateHash(state: string): Promise<string> {
+  const d = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`xg:${state}`)));
+  return btoa(String.fromCharCode(...d)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
 /** Página de xenxo donde la persona da (o no) permiso a un juego. En local, la web de desarrollo. */
 function consentOrigin(env: Env): string {
   const allowed = (env.ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-  if ((env.RP_ID ?? "localhost") === "localhost") return allowed[0] ?? "http://localhost:5173";
+  if (env.RP_ID === "localhost") return allowed[0] ?? "http://localhost:5173";
   return webOrigin(env, null);
 }
 
@@ -234,7 +240,8 @@ async function oidcRoutes(req: Request, env: Env, url: URL, h: Record<string, st
         claims_supported: ["sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "name", "player_no", "avatar"],
         code_challenge_methods_supported: ["S256"],
         token_endpoint_auth_methods_supported: ["none"],
-        prompt_values_supported: ["none", "consent", "login"],
+        prompt_values_supported: ["consent"],
+        authorization_response_iss_parameter_supported: true,
       },
       200,
       { ...open, "Cache-Control": "public, max-age=300" },
@@ -287,9 +294,10 @@ async function oidcRoutes(req: Request, env: Env, url: URL, h: Record<string, st
       return r.ok ? json(r.data, 200, { ...h, ...noStore }) : failure(r, { ...h, ...noStore });
     }
     if (req.method === "POST") {
-      if (!uid) return json({ error: "unauthorized", message: "entra en tu cuenta de xenxo para dar permiso" }, 401, h);
       const { approve } = await readJson(req);
-      const r = await dir.decide(reqm[1], uid, approve === true);
+      // auth_time: cuándo entró la persona en xenxo (lo dice su sesión), no cuándo pulsó «Permitir».
+      const authTime = p && p.kind === "user" ? p.exp - USER_TTL_MS : Date.now();
+      const r = await dir.decide(reqm[1], uid, approve === true, authTime, issuer);
       return r.ok ? json(r.data, 200, { ...h, ...noStore }) : failure(r, { ...h, ...noStore });
     }
   }
@@ -434,7 +442,7 @@ export default {
       }
       if (path === "/auth/passkey/login/options" && req.method === "POST") {
         const r = await dir.loginOptions();
-        return json(r.data, 200, h);
+        return r.ok ? json(r.data, 200, h) : failure(r, h);
       }
       if (path === "/auth/passkey/login/verify" && req.method === "POST") {
         const r = await dir.loginVerify(await readJson(req));
@@ -457,10 +465,20 @@ export default {
           origin,
         });
         if (!r.ok) return back(origin, { auth_error: r.error });
-        return new Response(null, { status: 302, headers: { Location: googleUrl(env, req, r.data), "Cache-Control": "no-store" } });
+        // El state queda atado a este navegador: un enlace de vuelta de Google que no empezó aquí no vale.
+        const cookie = `xg_state=${await stateHash(r.data.state)}; Path=/auth/google; Max-Age=600; HttpOnly; Secure; SameSite=Lax`;
+        return new Response(null, { status: 302, headers: { Location: googleUrl(env, req, r.data), "Cache-Control": "no-store", "Set-Cookie": cookie } });
+      }
+      if (path === "/auth/google/go" && req.method === "GET") {
+        const d = await dir.googleLinkPeek(url.searchParams.get("state"));
+        if (!d || !googleEnabled(env)) return back(webOrigin(env, null), { auth_error: "flow_expired" });
+        const cookie = `xg_state=${await stateHash(d.state)}; Path=/auth/google; Max-Age=600; HttpOnly; Secure; SameSite=Lax`;
+        return new Response(null, { status: 302, headers: { Location: googleUrl(env, req, d), "Cache-Control": "no-store", "Set-Cookie": cookie } });
       }
       if (path === "/auth/google/callback" && req.method === "GET") {
         const q = url.searchParams;
+        const bound = (req.headers.get("Cookie") ?? "").match(/(?:^|;\s*)xg_state=([A-Za-z0-9_-]{20,80})/)?.[1];
+        if (!bound || bound !== (await stateHash(q.get("state") ?? ""))) return back(webOrigin(env, null), { auth_error: "flow_expired" });
         const flow = await dir.googleFlow(q.get("state"));
         if (!flow) return back(webOrigin(env, null), { auth_error: "flow_expired" });
         const code = q.get("code");
@@ -483,6 +501,7 @@ export default {
         const p = await bearer(req, env);
         if (!p) return json({ error: "unauthorized", message: "inicia sesión para subir modelos" }, 401, h);
         // Lo que sube el agente de una parcela cuenta para su proyecto (cuota propia, y no lo toca la limpieza).
+        if (p.zone && !(await dir.agentKeyAlive(p.sub.replace(/^agt_/, "")))) return json({ error: "unauthorized", message: "tu clave de agente ya no vale" }, 401, h);
         const uploader = p.zone?.owner ?? p.sub;
         const allowed = await dir.canUpload(uploader);
         if (!allowed.ok) return failure(allowed, h);
@@ -604,7 +623,8 @@ export default {
         if (path === "/me/logins/google" && req.method === "POST") {
           if (!googleEnabled(env)) return json({ error: "google_disabled", message: "Entrar con Google no está activado" }, 503, h);
           const r = await dir.googleStart({ mode: "link", userId: uid, origin: webOrigin(env, req.headers.get("Origin")) });
-          return r.ok ? json({ url: googleUrl(env, req, r.data) }, 200, h) : failure(r, h);
+          // Se pasa por /auth/google/go (navegación normal) para dejar la cookie que ata el state.
+          return r.ok ? json({ url: new URL(`/auth/google/go?state=${encodeURIComponent(r.data.state)}`, req.url).toString() }, 200, h) : failure(r, h);
         }
         if (path === "/me/logins/google" && req.method === "DELETE") {
           const r = await dir.unlinkGoogle(uid);
@@ -689,7 +709,7 @@ export default {
         // Limpieza de archivos huérfanos ya (la diaria va sola). En local (RP_ID=localhost) se puede simular la fecha.
         if (path === "/admin/cleanup" && req.method === "POST") {
           const body: Record<string, unknown> = await readJson(req).catch(() => ({}));
-          const local = (env.RP_ID ?? "localhost") === "localhost";
+          const local = env.RP_ID === "localhost";
           const now = local && typeof body.now === "number" ? body.now : Date.now();
           const r = await dir.cleanupNow(now);
           await forgetAssets(env.ASSETS, req.url, r.deleteFromR2);
@@ -741,6 +761,11 @@ export default {
         // Es de vida corta y nunca es la clave del agente ni la passkey.
         const p = await verifyToken(url.searchParams.get("token") ?? "", env.TOKEN_SECRET);
         if (!p) return json({ error: "unauthorized" }, 401, h);
+        // Un agente de parcela con la clave revocada (o el proyecto retirado) no vuelve a entrar
+        // aunque su token aún no haya caducado.
+        if (p.zone && !(await directory(env).agentKeyAlive(p.sub.replace(/^agt_/, "")))) {
+          return json({ error: "unauthorized", message: "tu clave de agente ya no vale" }, 401, h);
+        }
         headers.set("X-Principal", JSON.stringify(p));
         headers.set("Upgrade", "websocket");
         return stub.fetch(new Request("https://do/ws", { headers }));

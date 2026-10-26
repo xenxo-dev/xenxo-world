@@ -168,7 +168,7 @@ xenxo es proveedor de identidad para juegos web (clientes públicos):
 | Ruta | Qué hace |
 |---|---|
 | `GET /.well-known/openid-configuration` · `GET /.well-known/jwks.json` | Descubrimiento y claves públicas (Ed25519, `alg: EdDSA`). Abiertos a cualquier origen |
-| `GET /oidc/authorize` | `response_type=code`, `client_id`, `redirect_uri` (exacta a una registrada), `scope` (`openid` y opcionales `profile`, `player`, `avatar`), `state`, `nonce`, `code_challenge` + `code_challenge_method=S256` (obligatorio). Lleva a la pantalla de permiso de xenxo. Si el juego o la dirección no valen, **no** redirige fuera |
+| `GET /oidc/authorize` | `response_type=code`, `client_id`, `redirect_uri` (exacta a una registrada), `scope` (`openid` y opcionales `profile`, `player`, `avatar`), `state`, `nonce`, `code_challenge` + `code_challenge_method=S256` (obligatorio). `prompt` solo admite `consent`; `max_age` no se admite. Lleva siempre a la pantalla de permiso de xenxo: si el juego o la dirección no valen, no se vuelve; si falla otra cosa, se enseña el error y se vuelve al juego con un clic (xenxo no redirige solo a webs de terceros). La respuesta lleva `state` e `iss` (RFC 9207). Sin preguntar solo si ya se permitió y se usó en los últimos 30 días |
 | `POST /oidc/token` | `grant_type=authorization_code`, `code`, `redirect_uri`, `client_id`, `code_verifier` → `id_token` (JWT EdDSA, 1 h), `access_token` (opaco, 1 h). Código de un uso y 60 s; se gasta aunque falle |
 | `GET /oidc/userinfo` | Con `Authorization: Bearer <access_token>`: los mismos datos que el id_token, mientras el permiso siga dado |
 
@@ -183,6 +183,10 @@ Cuenta: `GET /me/games` · `POST /me/games { name, redirect_uris[], project_id? 
 5 direcciones: `https://` o `http://localhost`, sin `#` ni usuario) · `DELETE /me/games/<client_id>` ·
 `GET /me/connected` · `DELETE /me/connected/<client_id>` (retirar el permiso corta sus tokens al
 momento). SDK de navegador: `packages/sdk` (`https://xenxo.io/sdk/xenxo.mjs`).
+
+Otras defensas: los flujos que se empiezan sin cuenta (passkey, Google, permisos) tienen topes de vivos;
+el `state` de «Entrar con Google» queda atado al navegador con una cookie `HttpOnly; Secure; SameSite=Lax`;
+un agente de parcela con la clave revocada no vuelve a entrar aunque su token no haya caducado.
 
 ## 10. Códigos de error
 

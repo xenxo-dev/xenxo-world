@@ -59,5 +59,11 @@ El `id_token` es un JWT firmado con **EdDSA (Ed25519)**. Claves públicas en
 - La dirección de vuelta tiene que ser exacta a la registrada: nadie puede llevarse el código a otra web.
 - Los códigos sirven una vez y 60 segundos; el id_token, una hora.
 - Lo que recuerda se guarda en `sessionStorage` de tu página y se borra al cerrar la pestaña.
+- Comprueba que la respuesta viene de xenxo (`iss`, RFC 9207) y la firma, el destinatario, la caducidad y el `nonce` del id_token.
+
+**Tu parte:** en la página de vuelta no cargues scripts de terceros (analíticas, anuncios) antes del
+SDK: la dirección lleva el código un instante, hasta que el SDK la limpia. Y si tu juego tiene
+servidor, que compruebe él mismo el `idToken` (firma, `aud`, `exp`) en vez de fiarse de
+`signatureChecked`.
 
 Juego de ejemplo: [xenxo.io/sdk/ejemplo.html](https://xenxo.io/sdk/ejemplo.html) (pon tu `client_id`).

@@ -33,6 +33,13 @@ import { DISTRICTS, districtById, PARCELS, parcelIndex, parcelRect } from "./dis
 
 export const TERMS_VERSION = "2026-10";
 const FLOW_TTL_MS = 5 * 60 * 1000;
+/** Flujos de alta y acceso vivos a la vez (todos los visitantes juntos). */
+const MAX_LIVE_FLOWS = 3000;
+/** Peticiones de «Entrar con xenxo» vivas: por juego y en total. */
+const MAX_PENDING_PER_CLIENT = 300;
+const MAX_PENDING_TOTAL = 5000;
+/** Un permiso usado hace más de esto vuelve a pedir un clic (no se entra solo). */
+const SILENT_GRANT_MS = 30 * 86_400_000;
 const MAX_PROJECTS_PER_USER = 3;
 /** Personajes propios guardados por cuenta (el armario). Los de serie no cuentan. */
 export const MAX_SKINS = 3;
@@ -171,6 +178,8 @@ export class Directory extends DurableObject<Env> {
       -- Peticiones en curso, códigos de un uso y tokens de acceso (de estos, solo su huella).
       CREATE TABLE IF NOT EXISTS oidc_pending (
         id TEXT PRIMARY KEY, kind TEXT NOT NULL, data TEXT NOT NULL, expires INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS oidc_pending_expires ON oidc_pending(expires);
+      CREATE INDEX IF NOT EXISTS flows_ts ON flows(ts);
       -- Claves de agente de una parcela: solo se guarda la huella (sha256) de la clave.
       CREATE TABLE IF NOT EXISTS agent_keys (
         id TEXT PRIMARY KEY, user_id TEXT NOT NULL, project_id TEXT NOT NULL, hash TEXT NOT NULL UNIQUE,
@@ -249,6 +258,16 @@ export class Directory extends DurableObject<Env> {
     );
   }
 
+  /**
+   * Los flujos de alta y acceso los puede empezar cualquiera sin cuenta: se limpian por índice y
+   * hay un tope de vivos para que nadie llene el Directory (y la cuota del día) a base de peticiones.
+   */
+  private flowsBusy(): Fail | null {
+    this.sql.exec("DELETE FROM flows WHERE ts < ?", Date.now() - FLOW_TTL_MS);
+    const n = this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM flows").one().n;
+    return n >= MAX_LIVE_FLOWS ? fail(503, "busy", "hay demasiadas entradas en curso; prueba en un minuto") : null;
+  }
+
   private takeFlow(id: unknown, kind: "register" | "login" | "addkey" | "google" | "gcode") {
     this.sql.exec("DELETE FROM flows WHERE ts < ?", Date.now() - FLOW_TTL_MS);
     if (typeof id !== "string") return null;
@@ -272,6 +291,8 @@ export class Directory extends DurableObject<Env> {
     if (!name) return badName(body.display_name);
     if (body.age_confirmed !== true) return fail(400, "age_required", "hace falta tener 14 años o más para crear una cuenta");
     if (body.accept_terms !== TERMS_VERSION) return fail(400, "terms_required", "acepta las condiciones y la política de privacidad vigentes", { terms_version: TERMS_VERSION });
+    const busy = this.flowsBusy();
+    if (busy) return busy;
 
     const userId = randomId("", 12);
     const options = await generateRegistrationOptions({
@@ -328,7 +349,9 @@ export class Directory extends DurableObject<Env> {
     return ok(this.user(flow.user_id!)!);
   }
 
-  async loginOptions() {
+  async loginOptions(): Promise<Result<{ flow_id: string; options: Awaited<ReturnType<typeof generateAuthenticationOptions>> }>> {
+    const busy = this.flowsBusy();
+    if (busy) return busy;
     const options = await generateAuthenticationOptions({ rpID: this.rpID, userVerification: "preferred" });
     const flow = randomId("f_");
     this.sql.exec("INSERT INTO flows (id, kind, challenge, ts) VALUES (?, 'login', ?, ?)", flow, options.challenge, Date.now());
@@ -449,6 +472,8 @@ export class Directory extends DurableObject<Env> {
   }): Promise<Result<{ state: string; nonce: string; code_challenge: string }>> {
     const mode = input.mode;
     if (mode !== "login" && mode !== "register" && mode !== "link") return fail(400, "bad_message", "mode: login, register o link");
+    const busy = this.flowsBusy();
+    if (busy) return busy;
     let name: string | null = null;
     if (mode === "register") {
       name = validDisplayName(input.display_name);
@@ -474,6 +499,22 @@ export class Directory extends DurableObject<Env> {
   }
 
   /** Recupera (y consume) el viaje a Google por su estado. */
+  /**
+   * Para vincular Google desde la web (que pide el enlace con fetch): sin gastar el flujo, los datos
+   * para mandar a Google desde una navegación normal, que es la que deja la cookie que lo ata.
+   */
+  async googleLinkPeek(state: unknown): Promise<{ state: string; nonce: string; code_challenge: string } | null> {
+    if (typeof state !== "string") return null;
+    const f = this.sql
+      .exec<{ challenge: string; ts: number }>("SELECT challenge, ts FROM flows WHERE id = ? AND kind = 'google'", state)
+      .toArray()[0];
+    if (!f || f.ts < Date.now() - FLOW_TTL_MS) return null;
+    const data = JSON.parse(f.challenge) as { verifier: string; nonce: string; mode: string };
+    if (data.mode !== "link") return null;
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(data.verifier)));
+    return { state, nonce: data.nonce, code_challenge: isoBase64URL.fromBuffer(digest) };
+  }
+
   googleFlow(state: unknown) {
     const f = this.takeFlow(state, "google");
     if (!f) return null;
@@ -627,7 +668,7 @@ export class Directory extends DurableObject<Env> {
       this.sql.exec("UPDATE users SET avatar_hash = NULL, avatar_format = NULL WHERE id = ? AND avatar_hash = ?", id, hash);
       this.sql.exec("UPDATE uploads SET kind = 'removed', bytes = 0 WHERE hash = ? AND uploader = ? AND kind = 'avatar'", hash, sub);
     });
-    const orphan = this.sql.exec("SELECT 1 FROM uploads WHERE hash = ? AND kind != 'removed'", hash).toArray().length === 0;
+    const orphan = this.sql.exec("SELECT 1 FROM uploads WHERE hash = ? AND kind != 'removed'", hash).toArray().length === 0 && !this.hashInUse(hash);
     return ok({ user: this.user(id)!, skins: this.skins(id), orphan });
   }
 
@@ -697,6 +738,15 @@ export class Directory extends DurableObject<Env> {
     }
   }
 
+  /** ¿Usa algo este archivo? (un proyecto, un personaje puesto o guardado). Si sí, no se borra de R2. */
+  hashInUse(hash: string): boolean {
+    return (
+      this.sql.exec("SELECT 1 FROM projects WHERE mesh_hash = ? OR cover_hash = ? LIMIT 1", hash, hash).toArray().length > 0 ||
+      this.sql.exec("SELECT 1 FROM users WHERE avatar_hash = ? LIMIT 1", hash).toArray().length > 0 ||
+      this.sql.exec("SELECT 1 FROM skins WHERE hash = ? LIMIT 1", hash).toArray().length > 0
+    );
+  }
+
   /**
    * Archivos que subió una persona y que nada usa pasados ORPHAN_GRACE_MS: un personaje que no está
    * en su armario ni puesto, una portada o un monumento que no es de ningún proyecto. Se marcan como
@@ -727,7 +777,7 @@ export class Directory extends DurableObject<Env> {
     const deleteFromR2: string[] = [];
     for (const r of orphans) {
       this.sql.exec("UPDATE uploads SET kind = 'removed', bytes = 0 WHERE hash = ? AND uploader = ?", r.hash, r.uploader);
-      const alive = this.sql.exec("SELECT 1 FROM uploads WHERE hash = ? AND kind != 'removed'", r.hash).toArray().length > 0;
+      const alive = this.sql.exec("SELECT 1 FROM uploads WHERE hash = ? AND kind != 'removed'", r.hash).toArray().length > 0 || this.hashInUse(r.hash);
       if (!alive && !deleteFromR2.includes(r.hash)) deleteFromR2.push(r.hash);
     }
     return { marked: orphans.length, deleteFromR2 };
@@ -886,7 +936,7 @@ export class Directory extends DurableObject<Env> {
       this.sql.exec("DELETE FROM uploads WHERE uploader = ?", up);
       this.sql.exec("DELETE FROM projects WHERE id = ?", id);
     });
-    const orphanHashes = hashes.filter((h) => this.sql.exec("SELECT 1 FROM uploads WHERE hash = ? AND kind != 'removed'", h).toArray().length === 0);
+    const orphanHashes = hashes.filter((h) => this.sql.exec("SELECT 1 FROM uploads WHERE hash = ? AND kind != 'removed'", h).toArray().length === 0 && !this.hashInUse(h));
     return { agents, orphanHashes };
   }
 
@@ -941,8 +991,12 @@ export class Directory extends DurableObject<Env> {
     return "x" + b64url(mac).slice(0, 31);
   }
 
+  private lastPrune = 0;
   private pruneOidc() {
-    this.sql.exec("DELETE FROM oidc_pending WHERE expires < ?", Date.now());
+    const now = Date.now();
+    if (now - this.lastPrune < 30_000) return;
+    this.lastPrune = now;
+    this.sql.exec("DELETE FROM oidc_pending WHERE expires < ?", now);
   }
 
   /* --- Juegos (clientes) --- */
@@ -950,6 +1004,11 @@ export class Directory extends DurableObject<Env> {
   async registerClient(userId: string, body: { name?: unknown; redirect_uris?: unknown; project_id?: unknown }): Promise<Result<OidcClientRow>> {
     const name = validClientName(body.name);
     if (!name) return fail(400, "bad_game_name", "el nombre del juego debe tener entre 2 y 40 caracteres");
+    // Nadie puede llamar a su juego «xenxo…» (en la pantalla de permiso parecería de xenxo), salvo el fundador.
+    const founder = (this.env.FOUNDER_USER_ID ?? "").replace(/^usr_/, "").trim();
+    if (/xenxo|xenx0|xemxo/i.test(name.replace(/[\s._-]/g, "")) && userId !== founder) {
+      return fail(400, "game_name_reserved", "el nombre de un juego no puede llevar «xenxo»");
+    }
     const list = Array.isArray(body.redirect_uris) ? body.redirect_uris : [];
     const uris = list.map(validRedirectUri);
     if (!uris.length || uris.length > MAX_REDIRECTS || uris.some((u) => !u)) {
@@ -1014,45 +1073,66 @@ export class Directory extends DurableObject<Env> {
     if (!c.redirect_uris.includes(redirect)) {
       return { ok: false, error: "invalid_redirect_uri", message: "esa dirección de vuelta no está registrada para este juego", redirect: null };
     }
-    const back = (error: string, message: string) => ({ ok: false as const, error, message, redirect: withParams(redirect, { error, error_description: message, state: q.state ?? undefined }) });
     if (!validState(q.state)) return { ok: false, error: "invalid_request", message: "state no válido", redirect: null };
-    if (q.response_type !== "code") return back("unsupported_response_type", "solo response_type=code");
-    const scopes = parseScopes(q.scope);
-    if (!scopes) return back("invalid_scope", "scope: openid y, si quieres, profile, player y avatar");
-    if (q.code_challenge_method !== "S256" || !validChallenge(q.code_challenge)) return back("invalid_request", "hace falta PKCE con code_challenge_method=S256");
-    if (!validNonce(q.nonce)) return back("invalid_request", "nonce no válido");
-    if (q.prompt && !["none", "consent", "login"].includes(q.prompt)) return back("invalid_request", "prompt no admitido");
+    // Tope de peticiones vivas: nadie llena el Directory a base de abrir pantallas de permiso.
+    const live = this.sql.exec<{ n: number; mine: number | null }>(
+      "SELECT COUNT(*) AS n, SUM(CASE WHEN json_extract(data, '$.client_id') = ? THEN 1 ELSE 0 END) AS mine FROM oidc_pending WHERE kind = 'request' AND expires > ?",
+      c.client_id, Date.now(),
+    ).one();
+    if (live.n >= MAX_PENDING_TOTAL || (live.mine ?? 0) >= MAX_PENDING_PER_CLIENT) {
+      return { ok: false, error: "temporarily_unavailable", message: "hay demasiadas peticiones en curso; prueba en un minuto", redirect: null };
+    }
     const id = randomId("ar_", 18);
-    this.sql.exec(
-      "INSERT INTO oidc_pending (id, kind, data, expires) VALUES (?, 'request', ?, ?)",
-      id,
-      JSON.stringify({ client_id: c.client_id, redirect_uri: redirect, scopes, state: q.state || null, nonce: q.nonce || null, code_challenge: q.code_challenge, prompt: q.prompt || null }),
-      Date.now() + REQUEST_TTL_MS,
-    );
+    const save = (data: Record<string, unknown>) =>
+      this.sql.exec("INSERT INTO oidc_pending (id, kind, data, expires) VALUES (?, 'request', ?, ?)", id, JSON.stringify({ client_id: c.client_id, redirect_uri: redirect, state: q.state || null, ...data }), Date.now() + REQUEST_TTL_MS);
+    // Un error del juego tampoco redirige solo: la persona lo ve en xenxo y vuelve con un clic.
+    // Así nadie usa xenxo como trampolín hacia su web (RFC 9700 §4.11).
+    const problem = (error: string, message: string) => {
+      save({ error, message });
+      return { ok: true as const, request: id };
+    };
+    if (q.response_type !== "code") return problem("unsupported_response_type", "solo response_type=code");
+    const scopes = parseScopes(q.scope);
+    if (!scopes) return problem("invalid_scope", "scope: openid y, si quieres, profile, player y avatar");
+    if (q.code_challenge_method !== "S256" || !validChallenge(q.code_challenge)) return problem("invalid_request", "hace falta PKCE con code_challenge_method=S256");
+    if (!validNonce(q.nonce)) return problem("invalid_request", "nonce no válido");
+    // Solo se admite prompt=consent (preguntar siempre). none, login y max_age no: xenxo no sabe
+    // cuándo entró la persona por última vez, y no prometemos lo que no podemos cumplir.
+    if ((q.prompt && q.prompt !== "consent") || q.max_age != null) return problem("invalid_request", "prompt solo admite consent; max_age no se admite");
+    save({ scopes, nonce: q.nonce || null, code_challenge: q.code_challenge, prompt: q.prompt || null });
     return { ok: true, request: id };
   }
 
   private pending<T>(id: unknown, kind: "request" | "code" | "access"): T | null {
     this.pruneOidc();
     if (typeof id !== "string" || id.length > 200) return null;
-    const r = this.sql.exec<{ data: string }>("SELECT data FROM oidc_pending WHERE id = ? AND kind = ?", id, kind).toArray()[0];
+    const r = this.sql.exec<{ data: string }>("SELECT data FROM oidc_pending WHERE id = ? AND kind = ? AND expires > ?", id, kind, Date.now()).toArray()[0];
     return r ? (JSON.parse(r.data) as T) : null;
   }
 
-  /** Lo que enseña la pantalla de permiso: qué juego, de quién, a dónde vuelve y qué pide. */
-  requestInfo(id: unknown, userId: string | null): Result<{ client: { name: string; owner: string; host: string }; scopes: string[]; granted: boolean; prompt: string | null }> {
-    const r = this.pending<{ client_id: string; redirect_uri: string; scopes: string[]; prompt: string | null }>(id, "request");
+  /** Lo que enseña la pantalla de permiso: qué juego, de quién, a dónde vuelve y qué pide (o qué falló). */
+  requestInfo(
+    id: unknown,
+    userId: string | null,
+  ): Result<{ client: { name: string; owner: string; host: string }; scopes: string[]; granted: boolean; prompt: string | null; error?: string; message?: string }> {
+    const r = this.pending<{ client_id: string; redirect_uri: string; scopes?: string[]; prompt?: string | null; error?: string; message?: string }>(id, "request");
     if (!r) return fail(404, "request_expired", "la petición caducó; vuelve a pulsar «Entrar con xenxo» en el juego");
     const c = this.client(r.client_id);
     if (!c) return fail(404, "invalid_client", "ese juego ya no está registrado");
     const owner = this.user(c.user_id);
-    const granted = userId ? this.grantCovers(userId, r.client_id, r.scopes) : false;
-    return ok({ client: { name: c.name, owner: owner ? `${owner.display_name}${owner.player_no != null ? ` #${owner.player_no}` : ""}` : "?", host: new URL(r.redirect_uri).host }, scopes: r.scopes, granted, prompt: r.prompt });
+    const client = { name: c.name, owner: owner ? `${owner.display_name}${owner.player_no != null ? ` #${owner.player_no}` : ""}` : "?", host: new URL(r.redirect_uri).host };
+    if (r.error) return ok({ client, scopes: [], granted: false, prompt: null, error: r.error, message: r.message });
+    const scopes = r.scopes ?? [];
+    // Entrar sin preguntar solo si ya lo permitió y lo usó hace poco; si no, un clic otra vez.
+    const granted = userId ? this.grantCovers(userId, r.client_id, scopes, Date.now() - SILENT_GRANT_MS) : false;
+    return ok({ client, scopes, granted, prompt: r.prompt ?? null });
   }
 
-  private grantCovers(userId: string, clientId: string, scopes: string[]): boolean {
-    const g = this.sql.exec<{ scopes: string }>("SELECT scopes FROM oidc_grants WHERE user_id = ? AND client_id = ?", userId, clientId).toArray()[0];
-    if (!g) return false;
+  private grantCovers(userId: string, clientId: string, scopes: string[], usedSince = 0): boolean {
+    const g = this.sql
+      .exec<{ scopes: string; last_used: number | null; created_at: number }>("SELECT scopes, last_used, created_at FROM oidc_grants WHERE user_id = ? AND client_id = ?", userId, clientId)
+      .toArray()[0];
+    if (!g || (g.last_used ?? g.created_at) < usedSince) return false;
     const have = g.scopes.split(" ");
     return scopes.every((s) => have.includes(s));
   }
@@ -1061,13 +1141,19 @@ export class Directory extends DurableObject<Env> {
    * La persona responde en la pantalla de permiso. Devuelve a dónde ir: al juego con un código
    * de un uso (o con error=access_denied si dijo que no).
    */
-  async decide(id: unknown, userId: string, approve: boolean): Promise<Result<{ redirect: string }>> {
-    const r = this.pending<{ client_id: string; redirect_uri: string; scopes: string[]; state: string | null; nonce: string | null; code_challenge: string }>(id, "request");
+  async decide(id: unknown, userId: string | null, approve: boolean, authTime: number, issuer: string): Promise<Result<{ redirect: string }>> {
+    const r = this.pending<{ client_id: string; redirect_uri: string; scopes: string[]; state: string | null; nonce: string | null; code_challenge: string; error?: string; message?: string }>(id, "request");
     if (!r) return fail(404, "request_expired", "la petición caducó; vuelve a pulsar «Entrar con xenxo» en el juego");
+    // Volver al juego con su error: no hace falta sesión (no se comparte nada de nadie).
+    if (r.error) {
+      this.sql.exec("DELETE FROM oidc_pending WHERE id = ?", id as string);
+      return ok({ redirect: withParams(r.redirect_uri, { error: r.error, error_description: r.message, state: r.state ?? undefined, iss: issuer }) });
+    }
+    if (!userId) return fail(401, "unauthorized", "entra en tu cuenta de xenxo para dar permiso");
     this.sql.exec("DELETE FROM oidc_pending WHERE id = ?", id as string); // un solo uso
     if (!this.client(r.client_id) || !this.user(userId)) return fail(404, "invalid_client", "ese juego ya no está registrado");
     if (!approve) {
-      return ok({ redirect: withParams(r.redirect_uri, { error: "access_denied", error_description: "la persona no dio permiso", state: r.state ?? undefined }) });
+      return ok({ redirect: withParams(r.redirect_uri, { error: "access_denied", error_description: "la persona no dio permiso", state: r.state ?? undefined, iss: issuer }) });
     }
     const now = Date.now();
     this.sql.exec(
@@ -1079,10 +1165,10 @@ export class Directory extends DurableObject<Env> {
     this.sql.exec(
       "INSERT INTO oidc_pending (id, kind, data, expires) VALUES (?, 'code', ?, ?)",
       await sha256b64url(code),
-      JSON.stringify({ user_id: userId, client_id: r.client_id, redirect_uri: r.redirect_uri, scopes: r.scopes, nonce: r.nonce, code_challenge: r.code_challenge, auth_time: Math.floor(now / 1000) }),
+      JSON.stringify({ user_id: userId, client_id: r.client_id, redirect_uri: r.redirect_uri, scopes: r.scopes, nonce: r.nonce, code_challenge: r.code_challenge, auth_time: Math.floor(authTime / 1000) }),
       now + CODE_TTL_MS,
     );
-    return ok({ redirect: withParams(r.redirect_uri, { code, state: r.state ?? undefined }) });
+    return ok({ redirect: withParams(r.redirect_uri, { code, state: r.state ?? undefined, iss: issuer }) });
   }
 
   /** Lo que un juego sabe de una persona, según lo permitido. */
@@ -1205,6 +1291,15 @@ export class Directory extends DurableObject<Env> {
         userId,
       )
       .toArray();
+  }
+
+  /** ¿Sigue valiendo la clave de este agente de parcela? (se mira al conectar y al subir). */
+  agentKeyAlive(keyId: string): boolean {
+    return (
+      this.sql
+        .exec("SELECT 1 FROM agent_keys k JOIN projects p ON p.id = k.project_id WHERE k.id = ? AND p.status = 'published'", keyId)
+        .toArray().length > 0
+    );
   }
 
   /** Agentes con clave de un proyecto (para expulsarlos si se oculta). */

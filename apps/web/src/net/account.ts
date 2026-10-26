@@ -329,6 +329,9 @@ export interface OidcRequestInfo {
   scopes: string[];
   granted: boolean;
   prompt: string | null;
+  /** El juego pidió algo que no vale: se enseña y se vuelve con un clic. */
+  error?: string;
+  message?: string;
 }
 
 export function oidcRequest(id: string): Promise<OidcRequestInfo> {

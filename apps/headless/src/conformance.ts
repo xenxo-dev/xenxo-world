@@ -740,8 +740,11 @@ await scenario("parcela: la clave de agente de un proyecto construye solo dentro
   assert(list.ok && list.data.keys.length === 1, "GET /me/agent-keys");
   const exp = await api.call<{ agent_keys: unknown[] }>("GET", "/me/export");
   assert(exp.ok && exp.data.agent_keys.length === 1 && !JSON.stringify(exp.data).includes(k.data.key), "la exportación lista la clave sin enseñarla");
+  const oldToken = ((await (await fetch(new URL("/auth/agent", baseUrl), { method: "POST", headers: { Authorization: `Bearer ${k.data.key}` } })).json()) as { token: string }).token;
   const revoked = await api.call("DELETE", `/me/agent-keys/${k.data.info.id}`);
   assert(revoked.ok, "revocar");
+  const back = await XenxoClient.connect({ baseUrl, chunkId: "c_-1_0", token: oldToken }).then(() => true, () => false);
+  assert(!back, "con el token de antes de revocar ya no se vuelve a entrar");
   const after = await fetch(new URL("/auth/agent", baseUrl), { method: "POST", headers: { Authorization: `Bearer ${k.data.key}` } });
   await after.arrayBuffer();
   assert(after.status === 401, "una clave revocada ya no entra");
@@ -795,7 +798,7 @@ await scenario("Entrar con xenxo: OpenID Connect con PKCE, consentimiento, sub p
     const d = await player.call<{ redirect: string }>("POST", `/oidc/request/${req}`, { approve });
     assert(d.ok, `decidir: ${JSON.stringify(d)}`);
     const back = new URL(d.data.redirect);
-    assert(back.origin + back.pathname === cb && back.searchParams.get("state") === state, "vuelve al juego con su state");
+    assert(back.origin + back.pathname === cb && back.searchParams.get("state") === state && back.searchParams.get("iss") === new URL(baseUrl).origin, "vuelve al juego con su state e iss");
     return { code: back.searchParams.get("code"), error: back.searchParams.get("error"), verifier: p.verifier, nonce };
   };
   const token = (body: Record<string, string>) =>
@@ -804,10 +807,23 @@ await scenario("Entrar con xenxo: OpenID Connect con PKCE, consentimiento, sub p
   // Lo que no debe pasar: dirección de vuelta ajena, sin PKCE, sin sesión.
   const evil = await authorize({ response_type: "code", client_id: g.data.client_id, redirect_uri: "https://evil.example/cb", scope: "openid", code_challenge: pkce().challenge, code_challenge_method: "S256" });
   assert(evil.searchParams.get("autorizar_error") === "invalid_redirect_uri" && evil.hostname !== "evil.example", "una dirección no registrada nunca recibe la redirección");
+  // Un error del juego no redirige solo (xenxo no es trampolín): se enseña en xenxo y se vuelve con un clic.
   const noPkce = await authorize({ response_type: "code", client_id: g.data.client_id, redirect_uri: cb, scope: "openid", state: "s1" });
-  assert(noPkce.hostname === "juego.example" && noPkce.searchParams.get("error") === "invalid_request", "sin PKCE → invalid_request al juego");
+  const errReq = noPkce.searchParams.get("autorizar");
+  assert(noPkce.hostname !== "juego.example" && !!errReq, "sin PKCE → pantalla de xenxo, no redirección directa");
+  const errInfo = await new Api(baseUrl).call<{ error: string }>("GET", `/oidc/request/${errReq}`);
+  assert(errInfo.ok && errInfo.data.error === "invalid_request", "la pantalla dice invalid_request");
+  const errBack = await new Api(baseUrl).call<{ redirect: string }>("POST", `/oidc/request/${errReq}`, { approve: false });
+  const eb = errBack.ok ? new URL(errBack.data.redirect) : null;
+  assert(eb?.searchParams.get("error") === "invalid_request" && eb.searchParams.get("state") === "s1" && eb.searchParams.get("iss") === new URL(baseUrl).origin, "al pulsar, vuelve al juego con el error, su state e iss");
   const plain = await authorize({ response_type: "code", client_id: g.data.client_id, redirect_uri: cb, scope: "openid", code_challenge: "a".repeat(43), code_challenge_method: "plain" });
-  assert(plain.searchParams.get("error") === "invalid_request", "PKCE plain → rechazado");
+  const plainInfo = await new Api(baseUrl).call<{ error: string }>("GET", `/oidc/request/${plain.searchParams.get("autorizar")}`);
+  assert(plainInfo.ok && plainInfo.data.error === "invalid_request", "PKCE plain → rechazado");
+  const relog = await authorize({ response_type: "code", client_id: g.data.client_id, redirect_uri: cb, scope: "openid", code_challenge: pkce().challenge, code_challenge_method: "S256", prompt: "login" });
+  const relogInfo = await new Api(baseUrl).call<{ error: string }>("GET", `/oidc/request/${relog.searchParams.get("autorizar")}`);
+  assert(relogInfo.ok && relogInfo.data.error === "invalid_request", "prompt=login no se admite (no se promete lo que no se cumple)");
+  const fake = await dev.call("POST", "/me/games", { name: "XENXO oficial", redirect_uris: [cb] });
+  assert(!fake.ok && fake.error === "game_name_reserved", "un juego no puede llamarse xenxo");
   const p0 = pkce();
   const loc0 = await authorize({ response_type: "code", client_id: g.data.client_id, redirect_uri: cb, scope: "openid", code_challenge: p0.challenge, code_challenge_method: "S256" });
   const anon = await new Api(baseUrl).call("POST", `/oidc/request/${loc0.searchParams.get("autorizar")}`, { approve: true });
