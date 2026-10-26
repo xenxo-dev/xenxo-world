@@ -73,7 +73,7 @@ export function CardPage({ no }: { no: number }) {
       const blob = await renderCardImage(
         c,
         {
-          title: t("card.title"),
+          title: c.player_no === 0 ? `${t("card.title")} · ${t("card.founder")}` : t("card.title"),
           since: t("card.since", { date: longDate(c.joined) }),
           projects: projectsLine(c.projects.length),
           link: cardLink(no).replace(/^https?:\/\//, ""),
@@ -169,7 +169,13 @@ export function CardPage({ no }: { no: number }) {
             </div>
 
             <div className="flex flex-col p-6 sm:p-8">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cal/50">{t("card.title")}</p>
+              <p className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-cal/50">
+                {t("card.title")}
+                {/* El 0 solo lo puede tener la cuenta fundadora (lo decide el servidor): no se falsifica. */}
+                {state.card.player_no === 0 && (
+                  <span className="rounded-md border border-rosa/40 bg-rosa/15 px-2 py-0.5 tracking-[0.15em] text-[#ffc2f1]">{t("card.founder")}</span>
+                )}
+              </p>
               <p className="display mt-2 text-7xl font-bold leading-none text-neon-suave [text-shadow:0_0_18px_rgb(79_163_255/0.6)] sm:text-8xl">
                 #{state.card.player_no}
               </p>
