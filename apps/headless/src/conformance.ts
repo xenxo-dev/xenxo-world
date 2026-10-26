@@ -12,6 +12,7 @@ import { msg, PLACES } from "@xenxo/protocol";
 import { XenxoClient } from "./client";
 import { makeBoxGlb, makeCoverPng, makeVrmMannequin, withExternalImage } from "./fixtures";
 import { Api } from "./http";
+import { SoftwarePasskey } from "./webauthn";
 
 const baseUrl = process.env.XENXO_URL ?? "http://localhost:8787";
 const agentKey = process.env.XENXO_AGENT_KEY;
@@ -333,6 +334,62 @@ await scenario("número de jugador: cada alta recibe el siguiente y los demás l
   await join;
   me.close();
   watcher.close();
+});
+
+await scenario("número de jugador: no se reutiliza aunque se borre la cuenta del último", async () => {
+  const no = async (api: Api) => {
+    const me = await api.call<{ player_no: number }>("GET", "/me");
+    if (!me.ok) throw new Error("GET /me");
+    return me.data.player_no;
+  };
+  const a = new Api(baseUrl);
+  await a.register(`conf ${randomUUID().slice(0, 6)}`);
+  const b = new Api(baseUrl);
+  await b.register(`conf ${randomUUID().slice(0, 6)}`);
+  const nb = await no(b);
+  assert((await b.call("DELETE", "/me")).ok, "borrar la cuenta del último");
+  const c = new Api(baseUrl);
+  await c.register(`conf ${randomUUID().slice(0, 6)}`);
+  assert((await no(c)) === nb + 1, `el siguiente debería ser ${nb + 1}, no reutilizar el ${nb}`);
+  await a.call("DELETE", "/me");
+  await c.call("DELETE", "/me");
+});
+
+await scenario("formas de entrar: una segunda passkey en la misma cuenta sirve para entrar", async () => {
+  const api = new Api(baseUrl);
+  const { user } = await api.register(`conf ${randomUUID().slice(0, 6)}`);
+  const opts = await api.call<{ flow_id: string; options: never }>("POST", "/me/passkeys/options");
+  assert(opts.ok, "opciones para otra passkey");
+  const second = new SoftwarePasskey(api.origin);
+  const added = await api.call<{ passkeys: number }>("POST", "/me/passkeys/verify", { flow_id: opts.data.flow_id, response: await second.create(opts.data.options) });
+  assert(added.ok && added.data.passkeys === 2, `debería tener 2 passkeys: ${JSON.stringify(added)}`);
+  const again = new Api(baseUrl);
+  await again.login(second);
+  const who = await again.call<{ id: string }>("GET", "/me");
+  assert(who.ok && who.data.id === user.id, "la segunda passkey entra en la misma cuenta");
+  const logins = await again.call<{ passkeys: unknown[]; google: unknown }>("GET", "/me/logins");
+  assert(logins.ok && logins.data.passkeys.length === 2 && logins.data.google === null, "GET /me/logins");
+  const unlink = await again.call("DELETE", "/me/logins/google");
+  assert(unlink.ok, "quitar Google sin tenerlo no rompe nada");
+  await again.call("DELETE", "/me");
+});
+
+await scenario("entrar con Google: sin configurar no se ofrece; un estado falso vuelve con error", async () => {
+  const m = (await (await fetch(new URL("/auth/methods", baseUrl))).json()) as { google: boolean };
+  const start = await fetch(new URL("/auth/google/start?mode=login&origin=http://localhost:5173", baseUrl), { redirect: "manual" });
+  const to = new URL(start.headers.get("Location") ?? "http://x/");
+  if (m.google) {
+    assert(to.host === "accounts.google.com" && to.searchParams.get("scope") === "openid", "debería ir a Google pidiendo solo openid");
+    assert(to.searchParams.get("code_challenge_method") === "S256" && !!to.searchParams.get("state"), "con PKCE y estado");
+  } else {
+    assert(start.status === 302 && to.searchParams.get("auth_error") === "google_disabled", "sin configurar → vuelve con google_disabled");
+  }
+  const evil = await fetch(new URL("/auth/google/start?mode=login&origin=https://malo.example", baseUrl), { redirect: "manual" });
+  assert(!(evil.headers.get("Location") ?? "").startsWith("https://malo.example"), "nunca redirige a un origen no permitido");
+  const cb = await fetch(new URL("/auth/google/callback?state=g_falso&code=x", baseUrl), { redirect: "manual" });
+  assert(new URL(cb.headers.get("Location") ?? "http://x/").searchParams.get("auth_error") === "flow_expired", "estado desconocido → flow_expired");
+  const fin = await new Api(baseUrl).call("POST", "/auth/google/finish", { code: "c_falso" });
+  assert(!fin.ok && fin.error === "flow_expired", "un código falso no da sesión");
 });
 
 await scenario("avatar VRM: se acepta tal cual, como VRM, y no como modelo de proyecto", async () => {

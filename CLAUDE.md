@@ -53,7 +53,8 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 - Datos mínimos: sin email, sin contraseña, sin IP guardada. Cualquier dato nuevo de una persona necesita actualizar las páginas legales (`apps/web/public/legal/`) y `exportData()`/`deleteAccount()` en `directory.ts`.
 - El servidor nunca se fía de lo que dice el cliente sobre un modelo: vuelve a inspeccionarlo (`inspectGlb`) y usa sus propias medidas.
 - Nada externo en los GLB (sin URIs, sin Draco): los clientes no descargan nada de terceros.
-- El navegador del visitante no habla con terceros (GitHub va por `/github/repos`; las fuentes van empaquetadas).
+- El navegador del visitante no habla con terceros (GitHub va por `/github/repos`; las fuentes van empaquetadas). Única excepción, elegida por la persona: «Entrar con Google», que es una redirección (sin scripts de Google en la web), pide solo `openid` y guarda la huella del identificador, nunca el identificador.
+- El número de jugador sale de un contador (`counters.next_player`): nunca se reutiliza.
 
 ## Gasto (cero sorpresas en Cloudflare)
 
