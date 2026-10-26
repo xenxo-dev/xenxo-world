@@ -3,7 +3,7 @@
 Los recursos gráficos que no son propios son de dominio público (CC0): no hace falta atribuirlos, pero se agradece.
 La excepción son las texturas generadas con IA (abajo), que tienen su propia nota.
 
-- **Texturas y cielo**: [Poly Haven](https://polyhaven.com) (CC0). La lista exacta está en
+- **Texturas y cielo**: [Poly Haven](https://polyhaven.com) y [ambientCG](https://ambientcg.com) (CC0). La lista exacta está en
   `apps/web/src/world/material-library.json` y `apps/web/src/world/sky-day.json`.
 - **Personas de serie**: generadas con [MPFB / MakeHuman](https://static.makehumancommunity.org)
   y sus paquetes de recursos CC0 (pieles, pelo, ropa).

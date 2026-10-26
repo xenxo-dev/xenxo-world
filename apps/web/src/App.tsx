@@ -4,8 +4,9 @@ import { loadPref, savePref } from "./config";
 import { Chat } from "./hud/Chat";
 import { Emotes } from "./hud/Emotes";
 import { PortalCard, TravelToast } from "./hud/PortalCard";
-import { placeName, t, useLang } from "./i18n";
+import { errorText, placeName, t, useLang } from "./i18n";
 import { setGuestName as setSessionGuestName, startSession } from "./net/session";
+import { completeGoogleReturn } from "./net/account";
 import { useWorldVersion, world } from "./net/world-store";
 import { Panel, type Section } from "./panel/Panel";
 import { TouchJoystick } from "./world/TouchJoystick";
@@ -56,6 +57,17 @@ export function App() {
   useLang();
 
   // La plaza se ve viva detrás del panel desde el primer segundo.
+  // Vuelta de Google: termina el acceso y abre Personalizar con el resultado.
+  const [authNotice, setAuthNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+  useEffect(() => {
+    void completeGoogleReturn().then((r) => {
+      if (!r.returned) return;
+      setPanelSection("customize");
+      if (r.error) setAuthNotice({ tone: "error", text: errorText({ code: r.error }) });
+      else if (r.linked) setAuthNotice({ tone: "ok", text: t("account.googleLinkedOk") });
+    });
+  }, []);
+
   useEffect(() => {
     void startSession(name);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -81,6 +93,7 @@ export function App() {
           onEnterVR={enterVR}
           guestName={name}
           setGuestName={setName}
+          authNotice={authNotice}
         />
       )}
 

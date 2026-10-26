@@ -31,11 +31,11 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 
 - Toda cadena de la interfaz va en `apps/web/src/i18n.ts` (ES y EN como mínimo). Nada de textos sueltos en los componentes.
 - Los textos del mundo viajan como datos en `label@1.i18n`, no en el cliente.
-- Se entra por el **nexo** (`PLACES.nexo`, `apps/realtime/src/nexo.ts` + `nexo-layout.json`); la plaza (`PLACES.plaza`) es un distrito al que se llega por portal (`portal@1`).
+- Se entra por el **nexo** (`PLACES.nexo`, `apps/realtime/src/nexo.ts` + `nexo-layout.json`); la plaza (`PLACES.plaza`) y los distritos (`districts.ts` + `districts.json`, única fuente también para la forja y la web) se alcanzan por portal (`portal@1`). Los proyectos viven en una parcela de un distrito; el nexo solo los enseña en su escaparate.
 - La plaza es `apps/realtime/src/seed.ts` + `plaza-layout.json` (única fuente de la disposición, también para la forja). Si cambia su contenido, el servidor vuelve a sembrar solo; sube `SEED_VERSION` (o `NEXO_SEED_VERSION`) si cambias el significado.
-- Publicar un proyecto exige nombre, enlace, categoría, portada y monumento, por cualquier vía (web, agente, MCP): la regla vive en `directory.ts`, no en el cliente.
-- Los modelos del sistema (plaza y avatares de serie) **se generan**, no se editan: `npm run forge` (ver `tools/forge/README.md`) y `tools/avatars/`. No toques a mano `apps/realtime/seed-assets/`, `seed-assets.ts`, `seed-covers.ts` (lo genera `tools/covers/`) ni `avatar-presets.*`. Para rehacer solo el nexo: `npm run forge:nexo`.
-- Materiales de los modelos: `xenxo:<biblioteca>.<tinte>` (lista en `docs/PROTOCOL.md` §12 bis). Texturas nuevas: CC0 (Poly Haven, por `tools/materials/fetch.py`) o **generadas con IA** (Higgsfield o plataformas parecidas) siguiendo `tools/materials/generated/README.md`: la plataforma da la propiedad y el uso comercial, sin marca de agua, con su `meta.json` (plataforma, modelo, fecha, plan, prompt) y su línea en `CREDITS.md`, sin marcas ni personas reales en el prompt, y pidiendo permiso antes de gastar créditos. Siempre se guardan en el repo y se sirven desde xenxo.
+- Publicar un proyecto exige nombre, enlace, distrito y parcela libre, portada y monumento, por cualquier vía (web, agente, MCP): la regla vive en `directory.ts`, no en el cliente.
+- Los modelos del sistema (plaza y avatares de serie) **se generan**, no se editan: `npm run forge` (ver `tools/forge/README.md`) y `tools/avatars/`. No toques a mano `apps/realtime/seed-assets/`, `seed-assets.ts`, `seed-covers.ts` (lo genera `tools/covers/`) ni `avatar-presets.*`. Para rehacer solo el nexo o los distritos: `npm run forge:nexo` / `npm run forge:districts`.
+- Materiales de los modelos: `xenxo:<biblioteca>.<tinte>` (lista en `docs/PROTOCOL.md` §12 bis). Texturas y recursos nuevos: CC0 de las plataformas de `docs/RECURSOS.md` (Poly Haven y ambientCG van automáticas por `tools/materials/fetch.py`) o **generadas con IA** (Higgsfield o plataformas parecidas) siguiendo `tools/materials/generated/README.md`: la plataforma da la propiedad y el uso comercial, sin marca de agua, con su `meta.json` (plataforma, modelo, fecha, plan, prompt) y su línea en `CREDITS.md`, sin marcas ni personas reales en el prompt, y pidiendo permiso antes de gastar créditos. Siempre se guardan en el repo y se sirven desde xenxo.
 - `DO_JURISDICTION = "eu"` en `wrangler.toml`: no lo cambies tras el primer despliegue (los datos quedarían en otros objetos).
 
 ## Rendimiento (Quest 3 es el mínimo)
@@ -53,7 +53,8 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 - Datos mínimos: sin email, sin contraseña, sin IP guardada. Cualquier dato nuevo de una persona necesita actualizar las páginas legales (`apps/web/public/legal/`) y `exportData()`/`deleteAccount()` en `directory.ts`.
 - El servidor nunca se fía de lo que dice el cliente sobre un modelo: vuelve a inspeccionarlo (`inspectGlb`) y usa sus propias medidas.
 - Nada externo en los GLB (sin URIs, sin Draco): los clientes no descargan nada de terceros.
-- El navegador del visitante no habla con terceros (GitHub va por `/github/repos`; las fuentes van empaquetadas).
+- El navegador del visitante no habla con terceros (GitHub va por `/github/repos`; las fuentes van empaquetadas). Única excepción, elegida por la persona: «Entrar con Google», que es una redirección (sin scripts de Google en la web), pide solo `openid` y guarda la huella del identificador, nunca el identificador.
+- El número de jugador sale de un contador (`counters.next_player`): nunca se reutiliza.
 
 ## Gasto (cero sorpresas en Cloudflare)
 

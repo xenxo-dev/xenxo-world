@@ -2,8 +2,10 @@
  * Fotos de la plaza para su portada en el nexo (cámara del paseo de fondo, sin panel ni HUD).
  * Necesita `npm run dev:realtime` y `npm run dev:web` en marcha.
  *
- *   node tools/covers/capture.cjs [carpeta]       → plaza_0.png … plaza_5.png
- *   python3 tools/covers/install.py <foto.png>   → la convierte e instala como portada
+ *   node tools/covers/capture.cjs [carpeta] [lugar=Plaza] [fotos=6]   → <lugar>_0.png …
+ *   python3 tools/covers/install.py <foto.png> [nombre=plaza]          → la instala como portada
+ *
+ * <lugar> es el título de su tarjeta en el nexo 2D (en español): "Plaza", "Arcade", "Píxel"…
  */
 const { chromium } = require("playwright");
 const { mkdirSync } = require("node:fs");
@@ -11,6 +13,9 @@ const { join } = require("node:path");
 
 (async () => {
   const out = process.argv[2] ?? join(__dirname, "out");
+  const place = process.argv[3] ?? "Plaza";
+  const shots = Number(process.argv[4] ?? 6);
+  const slug = place.normalize("NFD").replace(/[^a-zA-Z]/g, "").toLowerCase();
   mkdirSync(out, { recursive: true });
   const browser = await chromium.launch({ args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
@@ -22,13 +27,14 @@ const { join } = require("node:path");
   const page = await ctx.newPage();
   await page.goto(process.env.XENXO_WEB ?? "http://localhost:5173/");
   await page.waitForTimeout(5000);
-  await page.getByRole("button", { name: /^Ir/ }).first().click(); // nexo 2D → la plaza
+  // nexo 2D → el lugar (su tarjeta tiene el botón «Ir»)
+  await page.locator("li", { hasText: place }).first().getByRole("button", { name: /^Ir/ }).click();
   await page.waitForTimeout(4000);
   await page.getByRole("button", { name: /Volver al panel/ }).click();
   await page.addStyleTag({ content: ".pointer-events-auto.absolute.inset-0{display:none!important}" });
   await page.waitForTimeout(15000);
-  for (let i = 0; i < 6; i++) {
-    await page.screenshot({ path: join(out, `plaza_${i}.png`), timeout: 120000 });
+  for (let i = 0; i < shots; i++) {
+    await page.screenshot({ path: join(out, `${slug}_${i}.png`), timeout: 120000 });
     await page.waitForTimeout(6000);
   }
   await browser.close();

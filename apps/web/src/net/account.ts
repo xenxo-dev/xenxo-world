@@ -29,6 +29,8 @@ export interface Project {
   mesh_hash: string | null;
   cover_hash: string | null;
   category: ProjectCategory;
+  district: string | null;
+  parcel: string | null;
   author: string;
   created_at: number;
   in_world: boolean;
@@ -134,6 +136,80 @@ export async function login() {
   adopt(await api("POST", "/auth/passkey/login/verify", { flow_id, response }));
 }
 
+/* --- Entrar con Google (opcional) --- */
+
+let methods: Promise<{ google: boolean }> | null = null;
+/** ¿Está activado Entrar con Google en este servidor? */
+export function authMethods() {
+  methods ??= fetch(new URL("/auth/methods", REALTIME_URL))
+    .then((r) => (r.ok ? (r.json() as Promise<{ google: boolean }>) : { google: false }))
+    .catch(() => ({ google: false }));
+  return methods;
+}
+
+/** Va a Google (la página se va y vuelve con ?google=<código>). Para darse de alta se mandan nombre, edad y condiciones. */
+export function googleStart(mode: "login" | "register", reg?: { name: string; age: boolean; terms: boolean }) {
+  const u = new URL("/auth/google/start", REALTIME_URL);
+  u.searchParams.set("mode", mode);
+  u.searchParams.set("origin", location.origin);
+  if (reg) {
+    u.searchParams.set("name", reg.name);
+    if (reg.age) u.searchParams.set("age", "1");
+    if (reg.terms) u.searchParams.set("terms", TERMS_VERSION);
+  }
+  location.assign(u.toString());
+}
+
+/** Vincula Google a la cuenta abierta (pide la URL con la sesión y va a Google). */
+export async function googleLink() {
+  const { url } = await api<{ url: string }>("POST", "/me/logins/google");
+  location.assign(url);
+}
+
+export async function googleUnlink() {
+  await api("DELETE", "/me/logins/google");
+}
+
+/**
+ * Al volver de Google: cambia el código de un solo uso por la sesión y limpia la URL.
+ * Devuelve el error (código) si lo hubo, para enseñarlo en Personalizar.
+ */
+export async function completeGoogleReturn(): Promise<{ error: string | null; linked: boolean; returned: boolean }> {
+  const q = new URLSearchParams(location.search);
+  const code = q.get("google");
+  const error = q.get("auth_error");
+  const linked = q.get("google_linked") === "1";
+  if (!code && !error && !linked) return { error: null, linked: false, returned: false };
+  history.replaceState(null, "", location.pathname + location.hash);
+  if (code) {
+    try {
+      adopt(await api("POST", "/auth/google/finish", { code }));
+    } catch (e) {
+      return { error: (e as ApiError).code ?? "google_failed", linked: false, returned: true };
+    }
+  }
+  return { error, linked, returned: true };
+}
+
+export interface Logins {
+  passkeys: { created_at: number; last_used: number | null }[];
+  google: { created_at: number; last_used: number | null } | null;
+  google_available: boolean;
+}
+export async function myLogins(): Promise<Logins> {
+  return api<Logins>("GET", "/me/logins");
+}
+
+/** Añade otra passkey a la cuenta abierta (otro dispositivo, o la primera si entraste con Google). */
+export async function addPasskey() {
+  const { flow_id, options } = await api<{ flow_id: string; options: Parameters<typeof startRegistration>[0]["optionsJSON"] }>(
+    "POST",
+    "/me/passkeys/options",
+  );
+  const response = await startRegistration({ optionsJSON: options });
+  await api("POST", "/me/passkeys/verify", { flow_id, response });
+}
+
 export function logout() {
   store(null);
   reconnect();
@@ -235,7 +311,8 @@ export async function createProject(p: {
   title: string;
   summary: string;
   url: string;
-  category: ProjectCategory;
+  district: string;
+  parcel: string;
   cover_hash: string;
   mesh_hash: string;
 }) {

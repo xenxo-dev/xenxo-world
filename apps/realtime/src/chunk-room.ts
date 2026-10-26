@@ -28,15 +28,45 @@ import {
 import type { Env } from "./index";
 import { randomId, type Principal } from "./auth";
 import { plazaSeed, SEED_VERSION } from "./seed";
-import { NEXO_SEED_VERSION, nexoSeed, PROJECT_SLOTS, portalEntities, type Seeded } from "./nexo";
+import { districtByChunk, districtSeed, DISTRICT_SEED_VERSION, PARCELS, parcelSlot } from "./districts";
+import { nexoArrival, NEXO_SEED_VERSION, nexoSeed, SHOWCASE_SLOTS } from "./nexo";
+import { portalEntities, type Seeded } from "./places";
 import { assetKey } from "./assets";
+import { SEED_ASSETS } from "./seed-assets";
 import { isAvatarPreset } from "./avatar-presets-check";
 
 const TICK_HZ = 10;
 
-/** Ids de las entidades del portal de un proyecto. */
+/** Triángulos de cada LOD de las piezas de la forja (para usarlas sin pasar por R2). */
+const SYSTEM_LODS = new Map(Object.values(SEED_ASSETS).flatMap((a) => a.lods.map((l) => [l.hash, l.tris] as const)));
+
+/** Ids de las entidades del portal de un proyecto en su parcela. */
 function standIds(projectId: string) {
-  return { portal: `stand_${projectId}`, band: `standb_${projectId}`, monument: `standm_${projectId}`, label: `standl_${projectId}` };
+  return {
+    portal: `stand_${projectId}`,
+    band: `standb_${projectId}`,
+    monument: `standm_${projectId}`,
+    label: `standl_${projectId}`,
+    frame: `standf_${projectId}`,
+    pedestal: `standp_${projectId}`,
+  };
+}
+
+/** Ids de las entidades de un proyecto en el escaparate del nexo. */
+function showIds(projectId: string) {
+  return { portal: `show_${projectId}`, band: `showb_${projectId}`, monument: `showm_${projectId}`, label: `showl_${projectId}` };
+}
+
+/** Lo que el escaparate del nexo necesita de cada proyecto (lo manda el Worker desde el Directory). */
+export interface ShowcaseItem {
+  projectId: string;
+  title: string;
+  category: string;
+  cover: string;
+  mesh: { hash: string; bounds: { min: number[]; max: number[] } | null } | null;
+  chunk: string;
+  spawn: [number, number, number];
+  yaw: number;
 }
 
 /** Huella corta de un texto (FNV-1a de 32 bits). */
@@ -95,6 +125,7 @@ export class ChunkRoom extends DurableObject<Env> {
         op TEXT NOT NULL, entity_id TEXT NOT NULL, rev INTEGER NOT NULL, data TEXT);
       CREATE TABLE IF NOT EXISTS idem (key TEXT PRIMARY KEY, result TEXT NOT NULL, ts INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS stands (project_id TEXT PRIMARY KEY, slot INTEGER NOT NULL UNIQUE);
+      CREATE TABLE IF NOT EXISTS showcase (project_id TEXT PRIMARY KEY, slot INTEGER NOT NULL UNIQUE);
       CREATE TABLE IF NOT EXISTS chat (
         id TEXT PRIMARY KEY, ts INTEGER NOT NULL, sender TEXT NOT NULL, kind TEXT NOT NULL,
         display_name TEXT NOT NULL, session_id TEXT NOT NULL, text TEXT NOT NULL, hidden INTEGER NOT NULL DEFAULT 0);
@@ -141,6 +172,10 @@ export class ChunkRoom extends DurableObject<Env> {
 
     if (this.chunkId === PLACES.plaza) this.applySeed("plaza", SEED_VERSION, plazaSeed());
     else if (this.chunkId === PLACES.nexo) this.applySeed("nexo", NEXO_SEED_VERSION, nexoSeed());
+    else {
+      const d = districtByChunk(this.chunkId);
+      if (d) this.applySeed(`district_${d.id}`, DISTRICT_SEED_VERSION, districtSeed(d, nexoArrival(d.id)));
+    }
   }
 
   /**
@@ -358,6 +393,12 @@ export class ChunkRoom extends DurableObject<Env> {
     const lods = [];
     for (const lod of mesh.lods) {
       if (typeof lod?.hash !== "string") throw new MutationError("bad_message", "cada LOD necesita un hash");
+      // Piezas del sistema (las de la forja): vienen con el Worker, no de R2. Cualquiera puede usarlas.
+      const system = SYSTEM_LODS.get(lod.hash);
+      if (system !== undefined) {
+        lods.push({ hash: lod.hash, media: "model/gltf-binary", tris: system });
+        continue;
+      }
       const meta = await this.env.ASSETS.head(assetKey(lod.hash));
       if (!meta) throw new MutationError("not_found", `el asset ${lod.hash} no existe; súbelo antes a /assets`);
       lods.push({ hash: lod.hash, media: "model/gltf-binary", tris: Number(meta.customMetadata?.tris ?? 0) });
@@ -370,9 +411,9 @@ export class ChunkRoom extends DurableObject<Env> {
   /* ---------------------------------------------------------------- */
 
   /**
-   * Coloca el portal de un proyecto en el nexo: portada en la pantalla, monumento en la peana,
-   * banda con el color de su categoría y rótulo. Pasa por applyMutation: mismos esquemas,
-   * presupuestos, log y DELTA que cualquier otra escritura.
+   * Coloca el portal de un proyecto en su parcela del distrito: marco, portada en la pantalla,
+   * monumento en la peana, banda con el color del distrito y rótulo. Pasa por applyMutation:
+   * mismos esquemas, presupuestos, log y DELTA que cualquier otra escritura.
    */
   async placeStand(input: {
     projectId: string;
@@ -380,15 +421,17 @@ export class ChunkRoom extends DurableObject<Env> {
     title: string;
     category: string;
     cover: string;
+    parcel: number;
     mesh: { hash: string; bounds: { min: number[]; max: number[] } | null };
   }): Promise<{ ok: true; slot: number } | { ok: false; code: string; message: string }> {
     this.ensureChunk(null);
-    if (this.chunkId !== PLACES.nexo) return { ok: false, code: "forbidden", message: "los portales de proyecto van en el nexo" };
-    const used = new Set(this.sql.exec<{ slot: number }>("SELECT slot FROM stands").toArray().map((r) => r.slot));
-    const slot = PROJECT_SLOTS.find((s) => !used.has(s.index));
-    if (!slot) return { ok: false, code: "nexo_full", message: "el nexo no tiene portales libres" };
+    const district = districtByChunk(this.chunkId!);
+    if (!district) return { ok: false, code: "forbidden", message: "los proyectos van en una parcela de un distrito" };
+    if (!PARCELS[input.parcel]) return { ok: false, code: "bad_parcel", message: "esa parcela no existe" };
+    const taken = this.sql.exec("SELECT 1 FROM stands WHERE slot = ?", input.parcel).toArray().length > 0;
+    if (taken) return { ok: false, code: "parcel_taken", message: "esa parcela ya está ocupada" };
 
-    const entities = portalEntities(slot, standIds(input.projectId), {
+    const entities = portalEntities(parcelSlot(input.parcel), standIds(input.projectId), {
       portal: {
         to: { kind: "project", project_id: input.projectId },
         size: [4, 2.25],
@@ -397,39 +440,102 @@ export class ChunkRoom extends DurableObject<Env> {
         category: input.category,
       },
       title: input.title,
+      color: district.color,
       monument: { lods: [{ hash: input.mesh.hash, tris: 0 }], bounds: input.mesh.bounds },
     });
-    const ops: MutationOp[] = entities.map((e) => ({ op: "SPAWN", entity_id: e.id, components: e.components }));
-
     try {
-      const resolved: MutationOp[] = [];
-      for (const op of ops) resolved.push(await this.resolveAssets(op));
-      const changes = this.ctx.storage.transactionSync(() => {
-        const out = resolved.map((op) => this.applyMutation(input.owner, false, op).change);
-        this.sql.exec("INSERT INTO stands (project_id, slot) VALUES (?, ?)", input.projectId, slot.index);
-        return out;
-      });
+      const changes = await this.spawnAll(input.owner, entities, () =>
+        this.sql.exec("INSERT INTO stands (project_id, slot) VALUES (?, ?)", input.projectId, input.parcel),
+      );
       this.broadcast(msg("DELTA", { changes }));
-      return { ok: true, slot: slot.index };
+      return { ok: true, slot: input.parcel };
     } catch (e) {
       if (e instanceof MutationError) return { ok: false, code: e.code, message: e.message };
       throw e;
     }
   }
 
+  /** Crea varias entidades en una sola transacción (con la misma validación que MUTATE_WORLD). */
+  private async spawnAll(owner: string, entities: Seeded[], also?: () => void) {
+    const resolved: MutationOp[] = [];
+    for (const e of entities) resolved.push(await this.resolveAssets({ op: "SPAWN", entity_id: e.id, components: e.components }));
+    return this.ctx.storage.transactionSync(() => {
+      const out = resolved.map((op) => this.applyMutation(owner, false, op).change);
+      also?.();
+      return out;
+    });
+  }
+
+  /** Borra entidades por id sin pasar por el dueño (solo para el sistema: stands y escaparate). */
+  private despawnIds(ids: string[], reason: string) {
+    const out: { kind: "remove"; entity_id: string }[] = [];
+    for (const id of ids) {
+      const row = this.getRow(id);
+      if (!row) continue;
+      this.sql.exec("DELETE FROM entities WHERE entity_id = ?", id);
+      this.logEvent("system", "DESPAWN", id, row.rev + 1, { reason });
+      out.push({ kind: "remove", entity_id: id });
+    }
+    return out;
+  }
+
+  /**
+   * Escaparate del nexo: los proyectos más nuevos, cada uno en un portal que lleva a su parcela.
+   * Recibe la lista completa deseada (de más nuevo a más viejo) y deja el nexo igual que ella.
+   */
+  async syncShowcase(items: ShowcaseItem[]): Promise<{ shown: number }> {
+    this.ensureChunk(null);
+    if (this.chunkId !== PLACES.nexo) return { shown: 0 };
+    const want = items.slice(0, SHOWCASE_SLOTS.length);
+    const wantIds = new Set(want.map((i) => i.projectId));
+    const rows = this.sql.exec<{ project_id: string; slot: number }>("SELECT project_id, slot FROM showcase").toArray();
+    const changes: ({ kind: "remove"; entity_id: string } | { kind: "upsert"; entity: Entity })[] = [];
+    for (const r of rows) {
+      if (wantIds.has(r.project_id)) continue;
+      changes.push(...this.ctx.storage.transactionSync(() => {
+        const out = this.despawnIds(Object.values(showIds(r.project_id)), "showcase");
+        this.sql.exec("DELETE FROM showcase WHERE project_id = ?", r.project_id);
+        return out;
+      }));
+    }
+    const present = new Map(this.sql.exec<{ project_id: string; slot: number }>("SELECT project_id, slot FROM showcase").toArray().map((r) => [r.project_id, r.slot]));
+    const used = new Set(present.values());
+    for (const item of want) {
+      if (present.has(item.projectId)) continue;
+      const slot = SHOWCASE_SLOTS.find((s) => !used.has(s.index));
+      if (!slot) break;
+      used.add(slot.index);
+      const entities = portalEntities(slot, showIds(item.projectId), {
+        portal: {
+          to: { kind: "chunk", chunk_id: item.chunk, spawn: item.spawn, yaw: item.yaw },
+          size: [4, 2.25],
+          cover: item.cover,
+          title: item.title,
+          category: item.category,
+        },
+        title: item.title,
+        ...(item.mesh ? { monument: { lods: [{ hash: item.mesh.hash, tris: 0 }], bounds: item.mesh.bounds } } : {}),
+      });
+      try {
+        changes.push(
+          ...(await this.spawnAll("system", entities, () =>
+            this.sql.exec("INSERT INTO showcase (project_id, slot) VALUES (?, ?)", item.projectId, slot.index),
+          )),
+        );
+      } catch (e) {
+        if (!(e instanceof MutationError)) throw e;
+        console.warn("escaparate: no se pudo colocar", item.projectId, e.message);
+      }
+    }
+    if (changes.length) this.broadcast(msg("DELTA", { changes }));
+    return { shown: this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM showcase").one().n };
+  }
+
   /** Retira el stand de un proyecto (borrado por su dueño, moderación o baja de la cuenta). */
   async removeStand(projectId: string): Promise<void> {
     this.ensureChunk(null);
-    const ids = [...Object.values(standIds(projectId))];
     const changes = this.ctx.storage.transactionSync(() => {
-      const out: { kind: "remove"; entity_id: string }[] = [];
-      for (const id of ids) {
-        const row = this.getRow(id);
-        if (!row) continue;
-        this.sql.exec("DELETE FROM entities WHERE entity_id = ?", id);
-        this.logEvent("system", "DESPAWN", id, row.rev + 1, { reason: "stand_removed" });
-        out.push({ kind: "remove", entity_id: id });
-      }
+      const out = this.despawnIds(Object.values(standIds(projectId)), "stand_removed");
       this.sql.exec("DELETE FROM stands WHERE project_id = ?", projectId);
       return out;
     });

@@ -1,10 +1,17 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { errorText, LANGS, legalPath, setLang, t, useLang, type Key } from "../i18n";
 import { detectGpu, TIERS, useGraphics, type Tier } from "../world/graphics";
 import {
+  addPasskey,
+  authMethods,
   deleteAccount,
   exportData,
+  googleLink,
+  googleStart,
+  googleUnlink,
   login,
+  myLogins,
+  type Logins,
   logout,
   passkeysSupported,
   register,
@@ -22,6 +29,8 @@ import { Block, Button, card, input, Label, Notice, Segmented } from "./ui";
 export interface CustomizeProps {
   guestName: string;
   setGuestName: (n: string) => void;
+  /** Aviso al volver de Google (error o vinculado). */
+  authNotice?: { tone: "ok" | "error"; text: string } | null;
 }
 
 /** Personalizar: cuenta, personaje propio, nombre, calidad e idioma. */
@@ -31,7 +40,10 @@ export function CustomizeSection(props: CustomizeProps) {
 
   return (
     <>
-      <Block title={t("account.title")}>{user ? <SignedIn /> : <SignedOut />}</Block>
+      <Block title={t("account.title")}>
+        {props.authNotice && <Notice tone={props.authNotice.tone}>{props.authNotice.text}</Notice>}
+        {user ? <SignedIn /> : <SignedOut />}
+      </Block>
 
       <Block title={t("avatar.title")}>
         <AvatarPresets />
@@ -150,7 +162,9 @@ function SignedOut() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  if (!passkeysSupported()) return <Notice tone="error">{t("account.noPasskeys")}</Notice>;
+  const google = useGoogleEnabled();
+  const passkeys = passkeysSupported();
+  if (!passkeys && !google) return <Notice tone="error">{t("account.noPasskeys")}</Notice>;
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -193,15 +207,37 @@ function SignedOut() {
             </a>
           </span>
         </label>
-        <Button type="submit" variant="primary" className="mt-4" disabled={busy || !age || !terms || name.trim().length < 2}>
-          {t("account.create")}
-        </Button>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {passkeys && (
+            <Button type="submit" variant="primary" disabled={busy || !age || !terms || name.trim().length < 2}>
+              {t("account.create")}
+            </Button>
+          )}
+          {google && (
+            <Button
+              disabled={busy || !age || !terms || name.trim().length < 2}
+              onClick={() => googleStart("register", { name: name.trim(), age, terms })}
+            >
+              {t("account.createGoogle")}
+            </Button>
+          )}
+        </div>
       </form>
       <div className="mt-5 border-t border-cal/10 pt-4">
         <p className="text-sm text-cal/60">{t("account.haveOne")}</p>
-        <Button className="mt-2" disabled={busy} onClick={() => void run(login)}>
-          {t("account.login")}
-        </Button>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {passkeys && (
+            <Button disabled={busy} onClick={() => void run(login)}>
+              {t("account.login")}
+            </Button>
+          )}
+          {google && (
+            <Button disabled={busy} onClick={() => googleStart("login")}>
+              {t("account.loginGoogle")}
+            </Button>
+          )}
+        </div>
+        {google && <p className="mt-2 text-xs text-cal/40">{t("account.googleNote")}</p>}
       </div>
       {error && <Notice tone="error">{error}</Notice>}
     </div>
@@ -246,6 +282,7 @@ function SignedIn() {
           {t("account.save")}
         </Button>
       </form>
+      <LoginMethods onNote={setNote} />
       <div className="mt-4 flex flex-wrap gap-2">
         <Button onClick={() => void act(exportData)}>{t("account.export")}</Button>
         <Button variant="ghost" onClick={logout}>
@@ -271,6 +308,72 @@ function SignedIn() {
         </div>
       )}
       {note && <Notice tone={note.tone}>{note.text}</Notice>}
+    </div>
+  );
+}
+
+/** ¿Está activado «Entrar con Google» en el servidor? */
+function useGoogleEnabled() {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void authMethods().then((m) => alive && setOn(m.google));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return on;
+}
+
+/** Formas de entrar de la cuenta: passkeys (añadir otra) y Google (vincular o quitar). */
+function LoginMethods({ onNote }: { onNote: (n: { tone: "ok" | "error"; text: string } | null) => void }) {
+  const [info, setInfo] = useState<Logins | null>(null);
+  const load = () =>
+    myLogins()
+      .then(setInfo)
+      .catch(() => setInfo(null));
+  useEffect(() => {
+    void load();
+  }, []);
+  if (!info) return null;
+  const run = async (fn: () => Promise<void>, ok?: string) => {
+    onNote(null);
+    try {
+      await fn();
+      if (ok) onNote({ tone: "ok", text: ok });
+      await load();
+    } catch (e) {
+      if ((e as Error).name !== "NotAllowedError") onNote({ tone: "error", text: errorText(e) });
+    }
+  };
+  return (
+    <div className="mt-5 border-t border-cal/10 pt-4">
+      <p className="text-sm font-medium text-cal/80">{t("account.logins")}</p>
+      <ul className="mt-2 flex flex-col gap-2 text-sm">
+        <li className="flex flex-wrap items-center gap-3">
+          <span className="text-cal/70">{t("account.passkeys", { n: info.passkeys.length })}</span>
+          {passkeysSupported() && (
+            <Button variant="ghost" onClick={() => void run(addPasskey, t("account.passkeyAdded"))}>
+              {t("account.addPasskey")}
+            </Button>
+          )}
+        </li>
+        {(info.google_available || info.google) && (
+          <li className="flex flex-wrap items-center gap-3">
+            <span className="text-cal/70">{info.google ? t("account.googleLinked") : t("account.googleNotLinked")}</span>
+            {info.google ? (
+              <Button variant="ghost" disabled={info.passkeys.length === 0} onClick={() => void run(googleUnlink, t("account.googleUnlinked"))}>
+                {t("account.unlinkGoogle")}
+              </Button>
+            ) : (
+              <Button variant="ghost" onClick={() => void run(googleLink)}>
+                {t("account.linkGoogle")}
+              </Button>
+            )}
+          </li>
+        )}
+      </ul>
+      {info.google && info.passkeys.length === 0 && <p className="mt-1 text-xs text-cal/40">{t("account.addPasskeyHint")}</p>}
     </div>
   );
 }

@@ -3,8 +3,9 @@ Biblioteca de materiales de xenxo: prepara las texturas para la web y las deja e
 apps/web/public/materials/ (se sirven desde xenxo: el navegador del visitante nunca habla
 con Poly Haven ni con ninguna plataforma de IA).
 
-Dos orígenes:
+Tres orígenes:
   - Poly Haven (CC0): escaneos reales que se descargan solos.
+  - ambientCG (CC0): materiales PBR (metal, paneles, suelos técnicos…), con el prefijo "acg:".
   - Generadas con IA (Higgsfield u otras): la imagen vive en tools/materials/generated/<biblioteca>/
     con su meta.json (plataforma, modelo, fecha, prompt, plan…). Ver generated/README.md.
 
@@ -53,10 +54,13 @@ LIBRARY = {
     "corteza": ("bark_brown_01", "tint", 0.3),
     "tierra": ("dirt_floor", "tint", 0.3),
     "hoja": ("leafy_grass", "tint", 0.45),
+    # ambientCG (CC0)
+    "panel": ("acg:MetalPlates004", "tint", 0.0),  # paneles de metal grandes (suelos del nexo y los distritos)
+    "scifi": ("acg:MetalPlates015A", "tint", 0.0),  # rejilla octogonal (parcelas)
 }
 SIZES = (512, 1024)
 # Tamaño de repetición (m) cuando el real no sirve: las rayas del toldo miden 25 cm.
-TILE_OVERRIDE = {"toldo": 2.0, "tela": 0.5}
+TILE_OVERRIDE = {"toldo": 2.0, "tela": 0.5, "panel": 2.0, "scifi": 2.0}
 UA = {"User-Agent": "xenxo-forge/1.0 (+https://github.com/xenxo-dev/xenxo-world)"}
 
 
@@ -74,6 +78,22 @@ def get(url: str) -> bytes:
 def api(path: str) -> dict:
     with urllib.request.urlopen(urllib.request.Request(f"https://api.polyhaven.com/{path}", headers=UA), timeout=60) as r:
         return json.load(r)
+
+
+def ambientcg(asset: str) -> tuple[dict[str, Image.Image], str]:
+    """Descarga (con caché) el zip 2K-JPG de un material de ambientCG y devuelve sus mapas."""
+    import zipfile
+
+    data = get(f"https://ambientcg.com/get?file={asset}_2K-JPG.zip")
+    z = zipfile.ZipFile(io.BytesIO(data))
+    maps: dict[str, Image.Image] = {}
+    for name in z.namelist():
+        for key in ("Color", "NormalGL", "Roughness", "Metalness", "AmbientOcclusion"):
+            if name.endswith(f"_{key}.jpg"):
+                maps[key] = Image.open(io.BytesIO(z.read(name)))
+    if "Color" not in maps or "NormalGL" not in maps:
+        raise SystemExit(f"ambientCG {asset}: faltan mapas en el zip")
+    return maps, asset
 
 
 def prepare_albedo(diff: Image.Image, ao: Image.Image, mode: str, keep: float) -> Image.Image:
@@ -186,6 +206,18 @@ def main() -> None:
         print(f"{lib:9} ← IA {meta['platform']} {meta['model']} {meta['tile']} m", flush=True)
     for lib, (asset, mode, keep) in LIBRARY.items():
         if only and lib not in only:
+            continue
+        if asset.startswith("acg:"):
+            maps, name = ambientcg(asset[4:])
+            color = maps["Color"].convert("RGB")
+            white = Image.new("L", color.size, 255)
+            albedo = prepare_albedo(color, maps.get("AmbientOcclusion", white).convert("L"), mode, keep)
+            rough = maps.get("Roughness", Image.new("L", color.size, 200)).convert("L").resize(color.size)
+            metal = maps.get("Metalness", Image.new("L", color.size, 0)).convert("L").resize(color.size)
+            rm = Image.merge("RGB", (white, rough, metal))
+            save(lib, albedo, maps["NormalGL"].convert("RGB"), rm)
+            index[lib] = {"tile": TILE_OVERRIDE.get(lib, 2.0), "source": f"ambientCG · {name} (CC0)", "asset": name}
+            print(f"{lib:9} ← ambientCG {name}", flush=True)
             continue
         info = api(f"info/{asset}")
         files = api(f"files/{asset}")

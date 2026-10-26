@@ -251,9 +251,9 @@ function Scene({ active }: { active: boolean }) {
   const f = g.features;
   const place = usePlace();
   const inPlaza = place === PLACES.plaza;
-  // El nexo está fuera del tiempo: siempre de noche, para que manden sus líneas de luz.
-  const ambience: Ambience = place === PLACES.nexo ? "night" : g.ambience;
-  const profile: LightProfile = place === PLACES.nexo ? "nexo" : ambience;
+  // El nexo y los distritos están fuera del tiempo: siempre de noche, para que manden sus líneas de luz.
+  const ambience: Ambience = inPlaza ? g.ambience : "night";
+  const profile: LightProfile = inPlaza ? ambience : "nexo";
   const sky = SKY[ambience];
   const realSky = ambience === "day" && f.pbr;
   const daySky = useDaySky(realSky);

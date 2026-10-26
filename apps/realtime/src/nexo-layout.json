@@ -1,8 +1,15 @@
 {
- "$comment": "Disposición del nexo (coordenadas del chunk: X este, Z sur, metros). La usan seed-nexo.ts y la forja (tools/forge/nexo.py). Los portales van en un anillo mirando al centro; el hueco `plaza_slot` es el de la plaza. Si cambias algo aquí, vuelve a forjar y sube NEXO_SEED_VERSION.",
- "center": [32, 32],
+ "$comment": "Disposición del nexo (coordenadas del chunk: X este, Z sur, metros). La usan nexo.ts y la forja (tools/forge/nexo.py). Los portales van en un anillo mirando al centro: los de `district_slots` llevan a los distritos y el resto son el escaparate de los proyectos más nuevos. Si cambias algo aquí, vuelve a forjar y sube NEXO_SEED_VERSION.",
+ "center": [
+  32,
+  32
+ ],
  "platform": 24,
- "rings": [5, 12, 23.6],
+ "rings": [
+  5,
+  12,
+  23.6
+ ],
  "portals": {
   "ring": 19,
   "count": 24,
@@ -12,9 +19,17 @@
   "pedestal": 2.3,
   "pedestal_h": 0.5
  },
- "plaza_slot": 0,
- "spawn": [32, 40],
- "letters": { "p": [32, 34.9], "size": 1.5 },
+ "spawn": [
+  32,
+  40
+ ],
+ "letters": {
+  "p": [
+   32,
+   34.9
+  ],
+  "size": 1.5
+ },
  "colors": {
   "line": "#38d9ff",
   "game3d": "#4fa3ff",
@@ -23,5 +38,13 @@
   "tool": "#ffd54f",
   "other": "#b8c2d6",
   "district": "#ff9e52"
+ },
+ "district_slots": {
+  "plaza": 0,
+  "arcade": 4,
+  "pixel": 8,
+  "agora": 12,
+  "taller": 16,
+  "frontera": 20
  }
 }

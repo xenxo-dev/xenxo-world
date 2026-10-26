@@ -54,6 +54,8 @@ LIBRARY = {
     "persiana": (0.6, 0.0),    # madera pintada de persianas y puertas
     "hierro": (0.45, 0.85),    # forja
     "metal": (0.3, 0.9),
+    "panel": (0.5, 0.0),       # paneles de metal grandes (ambientCG): suelos del nexo y los distritos
+    "scifi": (0.55, 0.0),      # rejilla octogonal (ambientCG): parcelas
     "toldo": (0.95, 0.0),
     "ventana": (0.08, 0.0),    # vidrio de ventanas y escaparates: se encienden de noche
     "agua": (0.02, 0.0),

@@ -71,15 +71,19 @@ jobs:
         env:
           TOKEN_SECRET: ${{ secrets.TOKEN_SECRET }}
           AGENT_KEYS: ${{ secrets.AGENT_KEYS }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
         run: |
           umask 077
           printf 'TOKEN_SECRET=%s\n' "$TOKEN_SECRET" > "$RUNNER_TEMP/secrets.env"
           if [ -n "$AGENT_KEYS" ]; then printf 'AGENT_KEYS=%s\n' "$AGENT_KEYS" >> "$RUNNER_TEMP/secrets.env"; fi
+          # Entrar con Google (opcional): sin estas dos, el botón simplemente no aparece.
+          if [ -n "$GOOGLE_CLIENT_SECRET" ]; then printf 'GOOGLE_CLIENT_SECRET=%s\n' "$GOOGLE_CLIENT_SECRET" >> "$RUNNER_TEMP/secrets.env"; fi
           npx wrangler deploy \
             --domain "api.$WEB_DOMAIN" \
             --var "RP_ID:$WEB_DOMAIN" \
             --var "ALLOWED_ORIGINS:https://$WEB_DOMAIN,https://www.$WEB_DOMAIN" \
             --var "FOUNDER_USER_ID:${{ vars.FOUNDER_USER_ID }}" \
+            --var "GOOGLE_CLIENT_ID:${{ vars.GOOGLE_CLIENT_ID }}" \
             --secrets-file "$RUNNER_TEMP/secrets.env"
           rm -f "$RUNNER_TEMP/secrets.env"
 
