@@ -6,7 +6,7 @@ import { randomId, resolveAgent, signToken, verifyToken, type Principal } from "
 import type { ChunkRoom, ShowcaseItem } from "./chunk-room";
 import { DISTRICTS, districtById, parcelIndex, parcelSpawn } from "./districts";
 import { SHOWCASE_SLOTS } from "./nexo";
-import type { Directory, UserRow } from "./directory";
+import { MAX_SKINS, type Directory, type UserRow } from "./directory";
 
 export { ChunkRoom } from "./chunk-room";
 export { Directory } from "./directory";
@@ -402,7 +402,7 @@ export default {
           return r.ok ? json(await userToken(r.data, env), 200, h) : failure(r, h);
         }
         if (path === "/me/avatar" && req.method === "POST") {
-          const { hash } = await readJson(req);
+          const { hash, label } = await readJson(req);
           let format: "glb" | "vrm" = "glb";
           if (hash !== null && typeof hash === "string" && isAvatarPreset(hash)) {
             format = "vrm"; // avatar de serie
@@ -411,8 +411,20 @@ export default {
             if (!meta || meta.kind !== "avatar" || meta.format === "image") return json({ error: "not_found", message: "ese avatar no existe" }, 404, h);
             format = meta.format;
           }
-          const r = await dir.setAvatar(uid, hash, format);
+          const r = await dir.setAvatar(uid, hash, format, label);
           return r.ok ? json(await userToken(r.data, env), 200, h) : failure(r, h);
+        }
+        /* El armario: personajes propios guardados (máximo MAX_SKINS) */
+        if (path === "/me/skins" && req.method === "GET") {
+          return json({ skins: await dir.skins(uid), max: MAX_SKINS }, 200, h);
+        }
+        const skin = path.match(/^\/me\/skins\/(?:sha256:)?([0-9a-f]{64})$/);
+        if (skin && req.method === "DELETE") {
+          const hash = `sha256:${skin[1]}`;
+          const r = await dir.removeSkin(uid, hash);
+          if (!r.ok) return failure(r, h);
+          if (r.data.orphan) await env.ASSETS.delete(assetKey(hash));
+          return json({ ...(await userToken(r.data.user, env)), skins: r.data.skins, max: MAX_SKINS }, 200, h);
         }
         /* Formas de entrar: más passkeys, Google */
         if (path === "/me/logins" && req.method === "GET") {

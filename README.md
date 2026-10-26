@@ -6,7 +6,7 @@ Se está construyendo en público. Esto es la v0.5.
 
 ## Publicar en xenxo.io (si no vas a tocar el código)
 
-- **Tu personaje y tu proyecto:** entra en [xenxo.io](https://xenxo.io), *Personalizar → Crear cuenta con passkey* (sin email). Desde ahí subes tu personaje (`.vrm` o `.glb`) y en *Proyectos → Publicar el mío* tu proyecto. Eliges **distrito** (Arcade, Píxel, Ágora, Taller o Frontera) y una **parcela libre** en su plano, y das **nombre, enlace, una portada (imagen 16:9) y un monumento 3D** (`.glb`, ≤ 10.000 triángulos): tu proyecto aparece como un **portal en tu parcela**, con la portada en la pantalla y el monumento (hasta 1,6 m) en la peana de delante, en el escaparate del nexo y como tarjeta en el nexo 2D. Guía de modelos: [`docs/CREAR-MODELOS.md`](docs/CREAR-MODELOS.md).
+- **Tu personaje y tu proyecto:** entra en [xenxo.io](https://xenxo.io), *Cuenta → Crear cuenta* con passkey o Google (sin email). Desde ahí subes tu personaje (`.vrm` o `.glb`) y en *Proyectos → Publicar el mío* tu proyecto. Eliges **distrito** (Arcade, Píxel, Ágora, Taller o Frontera) y una **parcela libre** en su plano, y das **nombre, enlace, una portada (imagen 16:9) y un monumento 3D** (`.glb`, ≤ 10.000 triángulos): tu proyecto aparece como un **portal en tu parcela**, con la portada en la pantalla y el monumento (hasta 1,6 m) en la peana de delante, en el escaparate del nexo y como tarjeta en el nexo 2D. Guía de modelos: [`docs/CREAR-MODELOS.md`](docs/CREAR-MODELOS.md).
 - **Construir con un agente de IA:** hoy hace falta una clave de agente que da el equipo de xenxo (escribe a contact@xenxo.io). Están en camino las parcelas propias y un servidor MCP para conectar Claude Code o Cursor sin pedir nada a nadie.
 - **Tu propia copia del mundo:** sigue *Arrancar en local* y *Desplegar*.
 
@@ -50,9 +50,9 @@ Para probar en las Quest 3 en la misma red, abre `http://<IP-de-tu-PC>:5173` en 
 
 ### Personajes y proyectos de la comunidad
 
-Cualquiera que se dé de alta (con una passkey) puede, desde **Personalizar** y **Proyectos**:
+Cualquiera que se dé de alta (con una passkey) puede, desde **Cuenta** y **Proyectos**:
 
-- Subir su **personaje** en `.glb` (Blender o lo que quiera) o `.vrm` (VRoid Studio y similares). Se valida y se optimiza en su propio navegador antes de subirlo, y los demás lo ven en todo el mundo (el mismo personaje, nombre y número en cada lugar).
+- Subir su **personaje** en `.glb` (Blender o lo que quiera) o `.vrm` (VRoid Studio y similares) y verlo en una **vista previa 3D** (quieto, andando, bailando o saludando). Se valida y se optimiza en su propio navegador antes de subirlo, y los demás lo ven en todo el mundo (el mismo personaje, nombre y número en cada lugar). Su **armario** guarda hasta 3 personajes propios para cambiar de uno a otro; los 8 de serie no cuentan.
 - **Publicar un proyecto** en la parcela que elija de un distrito, con nombre, enlace, portada y monumento 3D (descripción opcional). Aparece como portal en su parcela, en el escaparate del nexo y como tarjeta en el nexo 2D.
 - Escribir en el **chat de cada lugar** (nexo, plaza o distrito; los invitados lo leen); los mensajes salen también como bocadillos sobre los personajes y se pueden denunciar.
 - Descargar todos sus datos o borrar la cuenta (y todo su contenido) en un clic.

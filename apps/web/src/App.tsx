@@ -62,7 +62,7 @@ export function App() {
   useEffect(() => {
     void completeGoogleReturn().then((r) => {
       if (!r.returned) return void refreshSession();
-      setPanelSection("customize");
+      setPanelSection("account");
       if (r.error) setAuthNotice({ tone: "error", text: errorText({ code: r.error }) });
       else if (r.linked) setAuthNotice({ tone: "ok", text: t("account.googleLinkedOk") });
     });
@@ -120,7 +120,7 @@ export function App() {
           <Chat
             touch={touch}
             onSignup={() => {
-              setPanelSection("customize");
+              setPanelSection("account");
               setInWorld(false);
             }}
           />

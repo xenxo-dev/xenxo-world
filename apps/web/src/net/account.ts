@@ -316,8 +316,53 @@ export async function uploadCover(c: PreparedCover) {
   return api<{ hash: string }>("POST", "/assets?kind=cover", undefined, c.blob);
 }
 
-export async function setAvatar(hash: string | null) {
-  adopt(await api("POST", "/me/avatar", { hash }));
+/** Viste un personaje: de serie, o propio (si aún no está en el armario, entra con `label`). */
+export async function setAvatar(hash: string | null, label?: string) {
+  adopt(await api("POST", "/me/avatar", { hash, ...(label ? { label } : {}) }));
+  emitSkins();
+}
+
+/* --- El armario: personajes propios guardados (máximo 3) --- */
+
+export interface Skin {
+  hash: string;
+  format: "glb" | "vrm";
+  label: string | null;
+  created_at: number;
+}
+
+let skinsVersion = 0;
+const skinListeners = new Set<() => void>();
+function emitSkins() {
+  skinsVersion++;
+  for (const fn of skinListeners) fn();
+}
+/** Cambia cuando el armario puede haber cambiado (para volver a pedirlo). */
+export function useSkinsVersion(): number {
+  return useSyncExternalStore(
+    (fn) => {
+      skinListeners.add(fn);
+      return () => skinListeners.delete(fn);
+    },
+    () => skinsVersion,
+  );
+}
+
+export async function mySkins(): Promise<{ skins: Skin[]; max: number }> {
+  return api("GET", "/me/skins");
+}
+
+/** Quita un personaje del armario (si lo llevabas, vuelves a uno de serie). */
+export async function removeSkin(hash: string) {
+  const r = await api<{ token: string; user: User; principal: { exp: number }; skins: Skin[]; max: number }>(
+    "DELETE",
+    `/me/skins/${hash.replace(/^sha256:/, "")}`,
+  );
+  const changed = session?.user.avatar_hash !== r.user.avatar_hash;
+  store({ token: r.token, user: r.user, exp: r.principal.exp });
+  if (changed) reconnect();
+  emitSkins();
+  return r;
 }
 
 /* --- Proyectos --- */

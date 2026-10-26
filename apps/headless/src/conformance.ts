@@ -410,6 +410,39 @@ await scenario("avatar VRM: se acepta tal cual, como VRM, y no como modelo de pr
   assert(set.ok && set.data.user.avatar_format === "vrm", "el perfil debería guardar el formato VRM");
 });
 
+await scenario("armario: hasta 3 personajes propios, los de serie no cuentan y quitar uno lo borra", async () => {
+  const api = new Api(baseUrl);
+  await api.register(`conf ${randomUUID().slice(0, 6)}`);
+  const preset = (await api.call<{ user: { avatar_hash: string } }>("POST", "/me/avatar", { hash: AVATAR_PRESETS[0]!.hash }));
+  assert(preset.ok && preset.data.user.avatar_hash === AVATAR_PRESETS[0]!.hash, `una cuenta debería poder ponerse uno de serie: ${JSON.stringify(preset)}`);
+  const hashes: string[] = [];
+  for (let i = 0; i < 4; i++) {
+    const up = await api.upload(await makeBoxGlb({ segments: 2 + i, color: [Math.random(), Math.random(), Math.random(), 1] }), "avatar");
+    assert(up.ok, `subida ${i + 1}`);
+    hashes.push(up.data.hash);
+  }
+  for (let i = 0; i < 3; i++) {
+    const r = await api.call("POST", "/me/avatar", { hash: hashes[i], label: `traje ${i + 1}` });
+    assert(r.ok, `el personaje ${i + 1} debería entrar en el armario`);
+  }
+  const fourth = await api.call("POST", "/me/avatar", { hash: hashes[3] });
+  assert(!fourth.ok && fourth.error === "skins_full", `el cuarto debería dar skins_full, llegó ${fourth.ok ? "ok" : fourth.error}`);
+  const list = await api.call<{ skins: { hash: string; label: string | null }[]; max: number }>("GET", "/me/skins");
+  assert(list.ok && list.data.max === 3 && list.data.skins.length === 3 && list.data.skins[0]!.label === "traje 1", "GET /me/skins");
+  // Lleva puesto el tercero: al quitarlo vuelve al de serie y el archivo (solo suyo) se borra.
+  const del = await api.call<{ user: { avatar_hash: string | null }; skins: unknown[] }>("DELETE", `/me/skins/${hashes[2]!.slice(7)}`);
+  assert(del.ok && del.data.user.avatar_hash === null && del.data.skins.length === 2, "quitar el que lleva puesto");
+  const gone = await fetch(new URL(`/assets/${hashes[2]!.slice(7)}`, baseUrl));
+  await gone.arrayBuffer();
+  assert(gone.status === 404, `el archivo quitado debería borrarse, llegó ${gone.status}`);
+  const again = await api.call("POST", "/me/avatar", { hash: hashes[2] });
+  assert(!again.ok, "uno quitado no se puede volver a poner sin subirlo otra vez");
+  const now = await api.call("POST", "/me/avatar", { hash: hashes[3] });
+  assert(now.ok, "con hueco libre, el cuarto ya entra");
+  const exp = await api.call<{ skins: unknown[] }>("GET", "/me/export");
+  assert(exp.ok && exp.data.skins.length === 3, "la exportación debería incluir el armario");
+});
+
 await scenario("nexo y distritos: el nexo lleva a la plaza y a los distritos, y sus puertas devuelven al nexo", async () => {
   const c = await XenxoClient.connect({ baseUrl, chunkId: PLACES.nexo });
   assert(c.welcome.chunk_id === PLACES.nexo, "el WELCOME debería decir el chunk del nexo");

@@ -23,7 +23,8 @@ export function ModelPicker({
 }: {
   kind: AssetKind;
   accept: string;
-  onReady: (m: PreparedModel | null) => void;
+  /** El modelo listo para subir (o null) y el nombre del archivo, sin extensión. */
+  onReady: (m: PreparedModel | null, name?: string) => void;
 }) {
   const [state, setState] = useState<"idle" | "working" | "ready" | "error">("idle");
   const [model, setModel] = useState<PreparedModel | null>(null);
@@ -49,7 +50,7 @@ export function ModelPicker({
               const m = await prepareModel(file, kind);
               setModel(m);
               setState("ready");
-              onReady(m.problems.length ? null : m);
+              onReady(m.problems.length ? null : m, file.name.replace(/\.(glb|vrm)$/i, ""));
             } catch (err) {
               setError(errorText(err));
               setState("error");

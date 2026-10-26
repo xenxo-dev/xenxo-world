@@ -37,7 +37,7 @@ Si te pasas en triángulos, el navegador intenta simplificar la malla para que q
 
 ## Personajes de serie (sin hacer nada)
 
-En *Personalizar → Tu personaje* puedes elegir una de las 8 personas de serie: son realistas (generadas con MakeHuman, CC0), van vestidas y tienen todas las animaciones. Sin cuenta, la elección se guarda en tu navegador; con cuenta, en tu perfil.
+En *Cuenta → Tu personaje* puedes elegir una de las 8 personas de serie: son realistas (generadas con MakeHuman, CC0), van vestidas y tienen todas las animaciones. Sin cuenta, la elección se guarda en tu navegador; con cuenta, en tu perfil.
 
 ## Con VRoid Studio u otras apps de avatares
 

@@ -3,12 +3,12 @@ import { REALTIME_URL } from "../config";
 import { ACCENTS, SOLUTIONS } from "../content";
 import { LANGS, legalPath, setLang, t, useLang, type Key } from "../i18n";
 import { PLACES } from "@xenxo/protocol";
-import { CustomizeSection, type CustomizeProps } from "./Account";
+import { AccountSection, CustomizeSection, type CustomizeProps } from "./Account";
 import { NexoSection } from "./Nexo";
 import { ProjectsSection } from "./Projects";
 import { Block, card, Stat } from "./ui";
 
-export type Section = "nexo" | "solutions" | "projects" | "agents" | "customize";
+export type Section = "nexo" | "solutions" | "projects" | "agents" | "account" | "customize";
 
 interface LiveState {
   online: number;
@@ -22,6 +22,7 @@ const SECTIONS: { id: Section; label: Key; icon: string }[] = [
   { id: "solutions", label: "nav.solutions", icon: "◇" },
   { id: "projects", label: "nav.projects", icon: "⌥" },
   { id: "agents", label: "nav.agents", icon: "◉" },
+  { id: "account", label: "nav.account", icon: "◈" },
   { id: "customize", label: "nav.customize", icon: "✎" },
 ];
 
@@ -134,7 +135,7 @@ export function Panel(props: PanelProps) {
             </Block>
           )}
 
-          {section === "projects" && <ProjectsSection onGoToAccount={() => setSection("customize")} />}
+          {section === "projects" && <ProjectsSection onGoToAccount={() => setSection("account")} />}
 
           {section === "agents" && (
             <Block title={t("nav.agents")}>
@@ -161,7 +162,8 @@ export function Panel(props: PanelProps) {
             </Block>
           )}
 
-          {section === "customize" && <CustomizeSection {...props} />}
+          {section === "account" && <AccountSection {...props} />}
+          {section === "customize" && <CustomizeSection />}
 
           <div className="mt-8 sm:hidden">
             <LegalLinks />
@@ -171,7 +173,7 @@ export function Panel(props: PanelProps) {
         {/* Pie (móvil): botón principal + pestañas */}
         <div className="border-t border-cal/10 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:hidden">
           <EnterButtons {...props} />
-          <nav className="mt-3 grid grid-cols-5 gap-1">
+          <nav className="mt-3 grid grid-cols-6 gap-1">
             {SECTIONS.map((s) => (
               <button
                 key={s.id}
