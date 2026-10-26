@@ -151,7 +151,8 @@ export function Player({ active }: { active: boolean }) {
           input.jump = false;
         }
         // Sentado no hay físicas: el banco es una caja y nos subiría encima.
-        if (motion.emote !== "sit") stepBody(body, wantX, wantZ, dt, 1, CHUNK_SIZE - 1);
+        // En el nexo (en solitario) se camina más allá del chunk: por las pasarelas hasta las islas.
+        if (motion.emote !== "sit") stepBody(body, wantX, wantZ, dt, world.walk[0], world.walk[1]);
         smoothSpeed(motion, Math.hypot(body.vx, body.vz), dt);
         motion.airborne = !body.grounded;
 
@@ -225,7 +226,7 @@ export function Player({ active }: { active: boolean }) {
     }
 
     // Envío de pose: 8 Hz solo si hay cambio real, latido cada segundo. Detrás del panel no se envía.
-    if ((!active && !inXR) || world.status !== "open" || !world.sessionId) return;
+    if ((!active && !inXR) || world.status !== "open" || !world.sessionId || world.solo) return;
     const now = performance.now();
     if (now - lastSend.current < SEND_EVERY_MS) return;
     const moved = _headP.distanceToSquared(_lastP) > 1e-4 || _headQ.angleTo(_lastQ) > 0.01 || motion.emote !== lastEmote.current;

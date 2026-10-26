@@ -23,6 +23,9 @@ export const ASSET_BUDGETS: Record<AssetKind, { maxBytes: number; maxTriangles: 
  */
 export const COVER_BUDGET = { maxBytes: 300 * 1024, maxWidth: 1600, maxHeight: 900 } as const;
 
+/** Retrato del personaje (lo hace la web de xenxo en el navegador): cuadrado, de 128 a 512 px. */
+export const PORTRAIT_BUDGET = { maxBytes: 120 * 1024, minSide: 128, maxSide: 512 } as const;
+
 /** Tipo real de una imagen por su firma (no por lo que diga quien la sube). */
 export function sniffImage(d: Uint8Array): "image/webp" | "image/jpeg" | "image/png" | null {
   if (d.length < 12) return null;

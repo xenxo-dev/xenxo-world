@@ -26,7 +26,9 @@ async function ficha() {
 
 /**
  * Conecta con xenxo y pinta la barra de arriba. Devuelve el jugador (o null si no ha entrado):
- * { id, name, playerNo, avatar: { url, format }, guest, simulated }.
+ * { id, name, playerNo, avatar: { url, format }, picture, guest, simulated }.
+ * `avatar` es su personaje 3D y `picture`, su retrato (para juegos 2D). Solo sirven para
+ * representarle en esta partida: no los guardes, no los vendas, no los uses para otra cosa.
  */
 export async function conectar() {
   const f = await ficha();
@@ -49,7 +51,17 @@ function pintarBarra(jugador, puedeEntrar) {
   barra.className = "hud";
   const quien = document.createElement("span");
   quien.className = "chip";
-  quien.textContent = jugador?.name ?? textos.jugador;
+  // Su retrato (si lo hay) o la inicial de su nombre: así se ve quién juega también en 2D.
+  const cara = document.createElement("span");
+  cara.className = "cara";
+  cara.textContent = (jugador?.name ?? textos.jugador).trim().charAt(0).toUpperCase();
+  if (jugador?.picture) {
+    const img = new Image();
+    img.alt = "";
+    img.src = jugador.picture;
+    img.onload = () => cara.replaceChildren(img);
+  }
+  quien.append(cara, document.createTextNode(jugador?.name ?? textos.jugador));
   if (jugador?.playerNo !== undefined && jugador?.playerNo !== null) {
     const n = document.createElement("span");
     n.className = "numero";

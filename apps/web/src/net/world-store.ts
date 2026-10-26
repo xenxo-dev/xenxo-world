@@ -27,6 +27,10 @@ class WorldStore {
   /** Chunk en el que estamos (el nexo al entrar). Todo se dibuja relativo a él. */
   chunkId: string = PLACES.nexo;
   canBuild = false;
+  /** Lugar en solitario (el nexo): sin más gente, sin poses y sin chat. */
+  solo = false;
+  /** Hasta dónde se camina (mín. y máx. en X y Z): lo dice el servidor; si no, el chunk. */
+  walk: [number, number] = [1, CHUNK_SIZE - 1];
   status: ConnectionStatus = "idle";
   lastError: string | null = null;
   /** serverTime ≈ Date.now() + clockOffset */
@@ -69,6 +73,8 @@ class WorldStore {
   /** Cambio de lugar: se vacía el mundo hasta que llegue la foto del nuevo chunk. */
   beginTravel(chunkId: string) {
     this.chunkId = chunkId;
+    this.solo = false;
+    this.walk = [1, CHUNK_SIZE - 1];
     this.entities = new Map();
     this.peers.clear();
     this.poseBuffers.clear();
@@ -82,6 +88,8 @@ class WorldStore {
         this.sessionId = m.payload.session_id;
         this.chunkId = m.payload.chunk_id;
         this.canBuild = m.payload.principal.scopes.includes("build");
+        this.solo = m.payload.solo === true;
+        this.walk = m.payload.walk ?? [1, CHUNK_SIZE - 1];
         this.clockOffset = m.payload.server_time - Date.now();
         this.bump();
         break;

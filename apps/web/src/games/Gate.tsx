@@ -5,7 +5,7 @@
  */
 import { assetUrl } from "../config";
 import { t, useLang, type Key } from "../i18n";
-import { useAccount } from "../net/account";
+import { avatarMode, useAccount } from "../net/account";
 import { ReportButton } from "../panel/ReportButton";
 import { Button, card } from "../panel/ui";
 import { fitsHere, visitorDevice } from "./device";
@@ -43,6 +43,7 @@ export function Gate({ open, onSignIn }: { open: OpenGame; onSignIn: () => void 
             )}
             <span className={`${chip} border-cal/20 text-cal/80`}>{t(g.ageRating === "all" ? "gate.age.all" : "gate.age.14")}</span>
             {g.multiplayer && <span className={`${chip} border-cal/20 text-cal/80`}>{t("gate.multiplayer")}</span>}
+            {avatarMode(g) === "character" && <span className={`${chip} border-neon/50 text-sky-100`}>{t("gate.avatar.character")}</span>}
           </div>
           <h2 id="gate-title" className="display mt-3 text-2xl font-semibold text-cal">
             {gameName(p, lang)}
@@ -78,6 +79,11 @@ export function Gate({ open, onSignIn }: { open: OpenGame; onSignIn: () => void 
               {t("gate.privacyLink")}
             </a>
           </p>
+          {avatarMode(g) !== "none" && (
+            <p className="mt-2 text-xs leading-relaxed text-cal/55">
+              {t(avatarMode(g) === "character" ? "gate.avatar.characterNote" : "gate.avatar.badgeNote")} {t("gate.avatarRule")}
+            </p>
+          )}
 
           {!fits ? (
             <div className="mt-5">

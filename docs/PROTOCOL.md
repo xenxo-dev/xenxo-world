@@ -48,7 +48,7 @@ Este documento y [`packages/protocol/src/index.ts`](../packages/protocol/src/ind
 | `primitive@1` | `shape` (`box`, `sphere`, `cylinder`, `plane`), `size`, `color`, `emissive`, `finish?` | `box` = `[ancho, alto, fondo]` · `sphere` = `[diámetro, -, -]` · `cylinder` = `[diámetro, alto, -]` · `plane` = `[ancho, -, fondo]`. `finish` (opcional, por defecto `matte`): `matte`, `glossy`, `metal`, `glass`. Es una intención: cada cliente la pinta como pueda (en equipos modestos todo se ve mate) |
 | `mesh@1` | `lods[]`: `hash`, `media`, `tris` | Hasta 4 LOD, del más detallado al más ligero. El asset debe existir en `/assets`; el servidor **sustituye `tris` por lo que midió al subirlo** (no se fía del cliente) |
 | `collider@1` | `shape`, `half_extents`, `trigger` | `half_extents` = mitad del tamaño |
-| `label@1` | `text` (≤140), `billboard`, `size` (m), `i18n?`, `style?`, `color?` | `i18n` = traducciones por código ISO 639-1 (`{"es": "Agentes", "en": "Agents"}`, máx. 12). El cliente muestra la del idioma del visitante y, si no existe, `text`. `style` (`^[a-z_]{1,16}$`, por defecto `"plain"`) es una pista de presentación: `"neon"` = letras de tubo de neón (la plaza la usa en sus rótulos); un cliente que no conozca el estilo dibuja el texto normal. `color` (`#rrggbb`) es el color del neón |
+| `label@1` | `text` (≤140), `billboard`, `size` (m), `i18n?`, `style?`, `color?`, `width?` | `i18n` = traducciones por código ISO 639-1 (`{"es": "Agentes", "en": "Agents"}`, máx. 12). El cliente muestra la del idioma del visitante y, si no existe, `text`. `style` (`^[a-z_]{1,16}$`, por defecto `"plain"`) es una pista de presentación: `"neon"` = letras de tubo de neón (la plaza la usa en sus rótulos); un cliente que no conozca el estilo dibuja el texto normal. `color` (`#rrggbb`) es el color del neón. `width` (0,5–40 m): ancho máximo; el texto se parte en líneas centradas (sin él, una línea) |
 | `light@1` | `type` (`point`), `color`, `intensity` (0–10), `range` (0,5–30 m), `when?` | Luz puntual que sale del centro de la entidad. `when` = `night` (por defecto, solo de noche) o `always`. Como mucho 16 por chunk. Los clientes ligeros (Quest, móvil) pueden ignorarla: nunca debe ser imprescindible para ver algo |
 | `portal@1` | `to`, `size?`, `cover?`, `title?`, `i18n?`, `category?`, `color?` | Marco de `size` = `[ancho, alto]` m (por defecto `[4, 2.25]`), centrado en el transform y mirando a +Z. `to` = `{kind: "chunk", chunk_id, spawn?, yaw?}` (viajar a otro lugar; `yaw` en grados, 0 = norte/−Z, 90 = oeste) o `{kind: "project", project_id}` (abrir la ficha del proyecto). Se activa al entrar en la franja de `PORTAL_ZONE_DEPTH` (3,4 m) delante del marco. Un portal de proyecto **nunca** abre un enlace solo: el cliente enseña la ficha y el enlace sale del Directory (`GET /projects`), no del portal. `cover` = hash de una portada subida con `kind=cover`; sin portada, el cliente dibuja un velo de luz. `category` es una pista de color (`game3d`, `game2d`, `social`, `tool`, `other`, `district`); `color` (`#rrggbb`, opcional) manda sobre ella para el velo |
 | `behavior@1` | `module`, `abi`, `caps`, `fuel`, `where` | **Reservado.** El servidor lo rechaza hasta que exista el sandbox WASM |
@@ -71,6 +71,12 @@ Este documento y [`packages/protocol/src/index.ts`](../packages/protocol/src/ind
    `budgets` (los de la parcela, §9 bis). Si el proyecto deja de estar publicado, la clave deja de valer.
 2. `GET /chunk/<chunk_id>/ws?token=<token>` → WebSocket.
 3. El cliente envía `HELLO`. El servidor responde `WELCOME` y `SNAPSHOT`, y avisa al resto con `PEER_JOIN`.
+
+**Lugares en solitario.** El nexo se recorre a solas: el multijugador es de la plaza, los distritos y
+los juegos. Allí `WELCOME` lleva `solo: true` y `walk: [mín, máx]` (hasta dónde se camina, en X y en
+Z: el nexo es más grande que su chunk). El `SNAPSHOT` no trae gente, poses ni chat; el servidor no
+reparte `PEER_JOIN`/`PEER_LEAVE`, ignora `POSE` (el cliente no lo manda) y responde a `CHAT` con
+`forbidden`. Sin esos campos, el lugar es compartido y se camina dentro del chunk (1..63).
 
 Lectura pública sin WebSocket: `GET /chunk/<chunk_id>/state` (contadores y últimos eventos, para el panel 2D).
 
@@ -175,7 +181,8 @@ xenxo es proveedor de identidad para juegos web (clientes públicos):
 Datos del `id_token`: `sub` (distinto en cada juego: HMAC de la cuenta y el juego), `name`
 (`profile`), `player_no` (`player`; el mismo en todos los juegos, por eso es un permiso aparte),
 `avatar: { url, format, hash }` (`avatar`; si no eligió personaje, uno de serie fijo para esa
-persona). Nunca el id interno de la cuenta. La clave privada de firma se crea y vive en el
+persona) y `picture` (`avatar`: el retrato de ese personaje, imagen cuadrada de 256 px para juegos
+sin 3D; solo si la web ya lo hizo del personaje que lleva). Nunca el id interno de la cuenta. La clave privada de firma se crea y vive en el
 `Directory`; `POST /admin/oidc/rotate` crea otra (la anterior se sigue publicando para los
 tokens vivos).
 
@@ -201,6 +208,7 @@ plantilla `create-xenxo` la trae rellena; el registro de juegos (fase 4) la leer
 | `category` | `game3d`, `game2d`, `social`, `tool`, `other` |
 | `devices` | `pc`, `mobile`, `vr` (1–3). En las gafas cuenta el navegador de las Quest (fuera de la realidad virtual). El cliente web de xenxo no abre el juego (ni en el aviso previo, ni en el catálogo, ni desde el portal) en un equipo que no esté en la lista: lo avisa |
 | `multiplayer` · `ageRating` | bool · `"all"` o `"+14"` |
+| `avatar` | Qué se ve de quien entra con xenxo: `"character"` (se maneja un personaje y es el suyo de xenxo; sin cuenta, uno de serie), `"badge"` (su nombre, su número y, si quiere, su retrato) o `"none"`. Si falta: `"badge"` con `xenxo.clientId` y `"none"` sin él. Con «Entrar con xenxo», `"none"` no vale (`avatar_required`). La revisión comprueba que sea verdad. El personaje, el retrato, el nombre y el número solo sirven para representar a esa persona en la partida (condiciones) |
 | `monetization` | `{ hasAds, hasPurchases }`. Prohibido el juego con dinero real |
 | `author` · `contact` | Texto (≤ 60) · email o web (≤ 200) |
 | `privacy` · `thumbnail` | https · `/ruta` o https. Opcionales al desarrollar, obligatorios al publicar |
@@ -299,12 +307,13 @@ El mundo solo se escribe por WebSocket (`MUTATE_WORLD`). Lo que no es mundo va p
 | `GET /auth/methods` | público | Formas de entrar activas (`{passkey, google}`) |
 | `GET /auth/google/start?mode=login\|register&origin=…` · `GET /auth/google/callback` · `POST /auth/google/finish` | cualquiera | Entrar con Google (OpenID Connect, código + PKCE, solo `openid`). Al volver, la web recibe un código de un solo uso (60 s) y lo cambia por la sesión; el token nunca viaja en una URL. Para darse de alta se mandan `name`, `age=1` y `terms` como con passkey |
 | `GET /me/logins` · `POST /me/logins/google` · `DELETE /me/logins/google` · `POST /me/passkeys/options` · `/verify` | persona | Formas de entrar de la cuenta: vincular o quitar Google (siempre queda al menos una passkey o Google) y añadir más passkeys |
-| `POST /assets?kind=avatar\|model\|monument\|cover` | persona o agente | Sube un GLB/VRM (o, con `cover`, una imagen). El servidor lo inspecciona, aplica el presupuesto, calcula el hash y lo guarda en R2. Las portadas se comprueban por su firma (WebP, JPEG o PNG, nunca por lo que diga el cliente) y se sirven con su tipo real |
+| `POST /assets?kind=avatar\|model\|monument\|cover\|portrait` | persona o agente | Sube un GLB/VRM (o, con `cover` o `portrait`, una imagen; el retrato, cuadrado de 128 a 512 px y ≤ 120 KB). El servidor lo inspecciona, aplica el presupuesto, calcula el hash y lo guarda en R2. Las portadas se comprueban por su firma (WebP, JPEG o PNG, nunca por lo que diga el cliente) y se sirven con su tipo real |
 | | | Topes: 30 subidas al día y 100 MB por persona (`413 quota_exceeded`), 1000 subidas al día entre todos (`429 storage_busy`); el almacén entero tiene un tope de 8 GB para no salir del plan gratuito de R2 (`507 storage_full`). Las lecturas `GET /assets/<hash>` pasan por la caché de Cloudflare |
 | `GET /assets/<sha256-hex>` | público | Sirve el asset, inmutable y cacheable para siempre. Los **assets del sistema** (la plaza y los avatares de serie, generados por la forja) se sirven desde los recursos estáticos del Worker con la misma ruta |
 | `GET /me` · `PATCH /me` · `POST /me/avatar` | persona | Perfil (con `player_no`), nombre visible y personaje (uno subido o uno de serie). Devuelven un token nuevo con nombre, avatar y número |
 | `GET /me/agent-keys` · `POST /me/agent-keys { project_id, label? }` · `DELETE /me/agent-keys/<id>` | persona | Claves de parcela de sus proyectos publicados (máximo 3 por proyecto). La clave en claro solo llega al crearla (`{ key, info }`); se guarda su huella. Revocar corta al momento las conexiones de ese agente |
 | `GET /me/skins` · `DELETE /me/skins/<hash>` | persona | El armario: hasta 3 personajes propios guardados (`{ skins, max }`). `POST /me/avatar { hash, label? }` viste uno de serie o uno propio; si es propio y no está guardado, entra en el armario (`skins_full` si ya hay 3). Quitar uno que llevas puesto te devuelve a uno de serie; si nadie más subió ese archivo, se borra |
+| `PUT /me/portrait { hash, of }` | persona | El retrato de su personaje: imagen que subió (`kind=portrait`) del personaje que lleva (`of`, el `avatar_effective.hash` de `GET /me`; si no, `portrait_stale`). Lo hace la web en el navegador cada vez que cambia de personaje y llega a los juegos como `picture`. `GET /me` trae `avatar_effective` y `portrait: { hash, current } \| null` |
 | `GET /me/card` · `PUT /me/card { public }` | persona | Tu carné de jugador: `{ public, player_no }`. Privado por defecto; al cambiarlo se borra de la caché al momento |
 | `GET /players/<n>` | — | Carné público del jugador `n` (sin ceros a la izquierda): `{ player_no, name, avatar, joined, projects }`, nunca el id interno. 404 si no existe o no es público. Un minuto en la caché del borde. La web lo enseña en `xenxo.io/p/<n>` |
 | `POST /me/session` | persona | Renueva la sesión con los datos de ahora (número, nombre, personaje); la web lo llama al abrirse |

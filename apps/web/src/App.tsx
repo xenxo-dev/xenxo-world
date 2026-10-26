@@ -178,17 +178,24 @@ export function App() {
             <button onClick={() => setInWorld(false)} className="text-cal/80 hover:text-cal" aria-label={t("hud.backLabel")}>
               {t("hud.back")}
             </button>
-            <span className="h-4 w-px bg-cal/15" />
-            <People selfName={user?.display_name ?? name} selfNo={user?.player_no ?? null} />
+            {/* En el nexo se va en solitario: ni gente ni chat. */}
+            {!world.solo && (
+              <>
+                <span className="h-4 w-px bg-cal/15" />
+                <People selfName={user?.display_name ?? name} selfNo={user?.player_no ?? null} />
+              </>
+            )}
           </div>
           <TopTools onVR={enterVR} />
-          <Chat
-            touch={touch}
-            onSignup={() => {
-              setPanelSection("account");
-              setInWorld(false);
-            }}
-          />
+          {!world.solo && (
+            <Chat
+              touch={touch}
+              onSignup={() => {
+                setPanelSection("account");
+                setInWorld(false);
+              }}
+            />
+          )}
           <PortalCard />
           <TravelToast />
           {/* Primera persona y gestos en una fila; en táctil, por encima del botón de saltar (o del

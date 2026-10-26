@@ -8,6 +8,7 @@
   "category": "{{category}}",
   "devices": ["pc", "mobile", "vr"],
   "multiplayer": false,
+  "avatar": "{{avatar}}",
   "ageRating": "all",
   "monetization": { "hasAds": false, "hasPurchases": false },
   "author": "Tu nombre",

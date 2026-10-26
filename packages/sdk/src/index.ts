@@ -37,6 +37,12 @@ export interface XenxoPlayer {
   name?: string;
   playerNo?: number | null;
   avatar?: { url: string; format: "vrm" | "glb"; hash: string } | null;
+  /**
+   * Retrato de su personaje (imagen cuadrada de 256 px, cabeza y hombros) para juegos sin 3D.
+   * Llega con el permiso "avatar"; puede faltar si la persona aún no lo tiene. Como el personaje,
+   * solo sirve para representarla en la partida: no lo guardes, no lo vendas, no lo uses para otra cosa.
+   */
+  picture?: string | null;
   /** El id_token tal cual, por si tu servidor quiere comprobarlo (con /.well-known/jwks.json). */
   idToken: string;
   /** Hasta cuándo vale (ms desde 1970). */
@@ -130,6 +136,7 @@ async function finish(o: Resolved, code: string, state: string): Promise<XenxoPl
     ...(c.name !== undefined ? { name: String(c.name) } : {}),
     ...(c.player_no !== undefined ? { playerNo: c.player_no as number | null } : {}),
     ...(c.avatar !== undefined ? { avatar: c.avatar as XenxoPlayer["avatar"] } : {}),
+    ...(typeof c.picture === "string" ? { picture: c.picture } : {}),
     idToken: tok.id_token,
     expiresAt: (c.exp as number) * 1000,
     signatureChecked: signed === true,
@@ -148,7 +155,8 @@ function homeOf(o: XenxoOptions | null): string {
 function simPlayer(mode: SimMode, o: XenxoOptions): XenxoPlayer | null {
   if (mode === "none") return null;
   const avatar = { url: `${issuerOf(o)}/assets/${SIM_AVATAR}`, format: "vrm" as const, hash: `sha256:${SIM_AVATAR}` };
-  const base = { idToken: "", expiresAt: Date.now() + 3600_000, signatureChecked: false, simulated: true, avatar };
+  const picture = `${homeOf(o)}/sdk/retrato-prueba.webp`;
+  const base = { idToken: "", expiresAt: Date.now() + 3600_000, signatureChecked: false, simulated: true, avatar, picture };
   return mode === "guest"
     ? { ...base, id: "sim_invitado", name: "Invitado-4821", playerNo: null, guest: true }
     : { ...base, id: "sim_jugador", name: "Jugador de prueba", playerNo: 9999 };
@@ -231,7 +239,7 @@ function greet(origin: string): Promise<typeof welcome> {
 function guestPlayer(name: string): XenxoPlayer {
   let id = read<string>("guest");
   if (!id) store("guest", (id = `guest_${random(9)}`));
-  return { id, name, playerNo: null, avatar: null, idToken: "", expiresAt: Date.now() + 3600_000, signatureChecked: false, guest: true };
+  return { id, name, playerNo: null, avatar: null, picture: null, idToken: "", expiresAt: Date.now() + 3600_000, signatureChecked: false, guest: true };
 }
 
 export const xenxo = {

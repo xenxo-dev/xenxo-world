@@ -238,7 +238,7 @@ async function oidcRoutes(req: Request, env: Env, url: URL, h: Record<string, st
         subject_types_supported: ["pairwise"],
         id_token_signing_alg_values_supported: ["EdDSA"],
         scopes_supported: ["openid", "profile", "player", "avatar"],
-        claims_supported: ["sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "name", "player_no", "avatar"],
+        claims_supported: ["sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "name", "player_no", "avatar", "picture"],
         code_challenge_methods_supported: ["S256"],
         token_endpoint_auth_methods_supported: ["none"],
         prompt_values_supported: ["consent"],
@@ -640,6 +640,12 @@ export default {
           }
           const r = await dir.setAvatar(uid, hash, format, label);
           return r.ok ? json(await userToken(r.data, env), 200, h) : failure(r, h);
+        }
+        // El retrato del personaje (lo hace la web en el navegador; lo reciben los juegos como «picture»).
+        if (path === "/me/portrait" && req.method === "PUT") {
+          const b = await readJson(req);
+          const r = await dir.setPortrait(uid, b.hash, b.of);
+          return r.ok ? json({ portrait: r.data }, 200, h) : failure(r, h);
         }
         /* «Entrar con xenxo»: juegos registrados y juegos a los que se dio permiso */
         if (path === "/me/games" && req.method === "GET") return json({ games: await dir.clientsOf(uid) }, 200, h);

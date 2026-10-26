@@ -191,7 +191,7 @@ const EntityView = memo(function EntityView({
         (label.data.billboard ? (
           // Si la entidad tiene geometría, el cartel flota justo encima de ella.
           <Billboard position={[0, prim.success ? prim.data.size[1] / 2 + label.data.size : 0, 0]}>
-            <Label text={labelText(label.data, lang)} size={label.data.size} />
+            <Label text={labelText(label.data, lang)} size={label.data.size} width={label.data.width} />
           </Billboard>
         ) : label.data.style === "neon" ? (
           <Suspense fallback={null}>
@@ -199,7 +199,7 @@ const EntityView = memo(function EntityView({
           </Suspense>
         ) : (
           // Carteles fijos (los de las fachadas): de noche brillan como un rótulo luminoso.
-          <Label text={labelText(label.data, lang)} size={label.data.size} glow={ambience === "night" && features.bloom ? 2.4 : 1} />
+          <Label text={labelText(label.data, lang)} size={label.data.size} width={label.data.width} glow={ambience === "night" && features.bloom ? 2.4 : 1} />
         ))}
     </group>
     </>
@@ -261,18 +261,18 @@ function Primitive(props: PrimitiveV1Type & { pbr: boolean; glow: number; shadow
 
 type PrimitiveV1Type = ReturnType<typeof PrimitiveV1.parse>;
 
-function Label({ text, size, glow = 1 }: { text: string; size: number; glow?: number }) {
+function Label({ text, size, glow = 1, width }: { text: string; size: number; glow?: number; width?: number }) {
   // Cada texto en su propio Suspense: mientras carga la fuente, la geometría ya se ve.
   return (
     <Suspense fallback={null}>
-      <LabelText text={text} size={size} glow={glow} />
+      <LabelText text={text} size={size} glow={glow} width={width} />
     </Suspense>
   );
 }
 
 const LABEL_COLOR = new THREE.Color("#f6f1e7");
 
-function LabelText({ text, size, glow }: { text: string; size: number; glow: number }) {
+function LabelText({ text, size, glow, width }: { text: string; size: number; glow: number; width?: number }) {
   const color = useMemo(() => LABEL_COLOR.clone().multiplyScalar(glow), [glow]);
   return (
     <Text
@@ -282,6 +282,9 @@ function LabelText({ text, size, glow }: { text: string; size: number; glow: num
       material-toneMapped={glow <= 1}
       anchorX="center"
       anchorY="middle"
+      maxWidth={width}
+      textAlign="center"
+      lineHeight={1.25}
       outlineWidth={size * 0.04}
       outlineColor="#2a211c"
     >

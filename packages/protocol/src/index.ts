@@ -129,6 +129,11 @@ export const LabelV1 = z.object({
   style: z.string().regex(/^[a-z_]{1,16}$/).default("plain"),
   /** Color del texto (o del neón). Si falta, el cliente elige uno legible. */
   color: HexColor.optional(),
+  /**
+   * Ancho máximo en metros: el texto se parte en varias líneas centradas. Si falta, una línea.
+   * Los clientes que no lo conozcan lo dibujan en una línea.
+   */
+  width: z.number().min(0.5).max(40).optional(),
 });
 
 /** Texto de un label en el idioma pedido, con `text` como respaldo. */
@@ -398,6 +403,16 @@ export const WelcomeMsg = envelope(
     server_time: z.number(),
     tick_hz: z.number(),
     budgets: z.record(z.string(), z.number()),
+    /**
+     * Lugar en solitario (el nexo): no hay más gente, ni poses, ni chat. El cliente no manda POSE
+     * y no enseña el chat. Sin el campo, el lugar es compartido.
+     */
+    solo: z.boolean().optional(),
+    /**
+     * Hasta dónde se puede caminar, en metros del chunk (mín. y máx. en X y en Z). Solo en lugares
+     * en solitario, que pueden ser más grandes que su chunk. Sin el campo: 1..CHUNK_SIZE-1.
+     */
+    walk: z.tuple([z.number(), z.number()]).optional(),
   }),
 );
 
@@ -521,6 +536,15 @@ export const GameManifest = z
     /** En qué equipos funciona. */
     devices: z.array(z.enum(["pc", "mobile", "vr"])).min(1).max(3),
     multiplayer: z.boolean(),
+    /**
+     * Qué se ve de quien entra con xenxo dentro del juego:
+     *  - "character": manejas un personaje y es el tuyo de xenxo (sin cuenta, uno de serie).
+     *  - "badge": no hay personaje, pero se ven tu nombre y tu número (y, si quiere, tu retrato).
+     *  - "none": el juego no usa tu identidad de xenxo.
+     * Si falta: "badge" con «Entrar con xenxo» (`xenxo.clientId`) y "none" sin él. Con «Entrar con
+     * xenxo», "none" no vale. La revisión comprueba que sea verdad.
+     */
+    avatar: z.enum(["character", "badge", "none"]).optional(),
     /** "all" o "+14": los invitados solo abren juegos "all" y revisados. */
     ageRating: z.enum(["all", "+14"]),
     /** Anuncios o compras dentro del juego (se avisan antes de abrirlo). Nunca juego con dinero real. */

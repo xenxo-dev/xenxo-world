@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { assetUrl } from "../config";
-import { errorText, getLang, t } from "../i18n";
-import type { Project } from "../net/account";
+import { errorText, getLang, t, type Key } from "../i18n";
+import { avatarMode, type Project } from "../net/account";
 import { modHide, modLog, modQueue, modReport, modReview, myRoles, type LogEntry, type Report } from "../net/games";
 import { gameName, openGame } from "../games/state";
 import { Button, card, input, Notice } from "./ui";
@@ -97,6 +97,9 @@ export function Moderation() {
                   {p.game.monetization.hasAds ? ` · ${t("gate.ads")}` : ""}
                   {p.game.monetization.hasPurchases ? ` · ${t("gate.purchases")}` : ""} · {p.game.devices.join(", ")}
                 </p>
+              ) : null}
+              {p.game ? (
+                <p className="mt-1 text-xs text-sky-100/80">{t(`mod.avatar.${avatarMode(p.game)}` as Key)}</p>
               ) : (
                 <p className="mt-1 text-xs text-cal/45">{t("mod.noGame")}</p>
               )}

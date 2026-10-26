@@ -17,6 +17,8 @@ export type GameInfo = {
   category: (typeof PROJECT_CATEGORIES)[number];
   devices: ("pc" | "mobile" | "vr")[];
   multiplayer: boolean;
+  /** Qué se ve de quien juega: su personaje, su nombre y número, o nada (ver GameManifest.avatar). */
+  avatar: "character" | "badge" | "none";
   ageRating: "all" | "+14";
   monetization: { hasAds: boolean; hasPurchases: boolean };
   author: string;
@@ -181,6 +183,11 @@ export function slugFrom(title: string): string {
 }
 
 /** Lo que se guarda y se enseña de la ficha (más lo que decide el servidor). */
+/** El modo de personaje de una ficha (si no lo dice: placa con «Entrar con xenxo», nada sin él). */
+export function manifestAvatar(m: GameManifest): GameInfo["avatar"] {
+  return m.avatar ?? (m.xenxo?.clientId ? "badge" : "none");
+}
+
 export function gameInfo(m: GameManifest, projectUrl: string): GameInfo {
   const u = new URL(projectUrl);
   return {
@@ -189,6 +196,7 @@ export function gameInfo(m: GameManifest, projectUrl: string): GameInfo {
     category: m.category,
     devices: m.devices,
     multiplayer: m.multiplayer,
+    avatar: manifestAvatar(m),
     ageRating: m.ageRating,
     monetization: m.monetization,
     author: m.author,

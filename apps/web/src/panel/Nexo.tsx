@@ -3,6 +3,7 @@ import { PLACES } from "@xenxo/protocol";
 import { assetUrl } from "../config";
 import { t, useLang, type Key } from "../i18n";
 import { DISTRICT_SPAWN, districtOf, parcelArrival, refreshDistricts, useDistricts, type DistrictInfo } from "../net/districts";
+import { avatarMode } from "../net/account";
 import { refreshProjects, useProjects } from "../net/projects";
 import { travel } from "../net/session";
 import { fitsHere, visitorDevice } from "../games/device";
@@ -105,6 +106,9 @@ export function NexoSection({ onEnter }: { onEnter: () => void }) {
                   {p.summary && <p className="line-clamp-3 text-sm leading-relaxed text-cal/65">{p.summary}</p>}
                   {p.game && (
                     <p className="text-xs text-cal/45">{t("gate.devices", { list: p.game.devices.map((d) => t(`gate.device.${d}` as Key)).join(" · ") })}</p>
+                  )}
+                  {p.game && avatarMode(p.game) === "character" && (
+                    <span className="w-fit rounded-md border border-neon/40 px-2 py-0.5 text-xs text-sky-100">{t("gate.avatar.character")}</span>
                   )}
                   <div className="mt-auto flex flex-wrap gap-2 pt-3">
                     {p.game &&

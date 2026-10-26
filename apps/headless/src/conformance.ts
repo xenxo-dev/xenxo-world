@@ -488,6 +488,14 @@ await scenario("nexo y distritos: el nexo lleva a la plaza y a los distritos, y 
   }
   assert(c.snapshot.entities.some((e) => e.entity_id.startsWith("nexo_mini_plaza_")), "la isla de la plaza lleva la plaza en pequeño");
   assert(!c.snapshot.entities.some((e) => e.entity_id.startsWith("show_") || e.entity_id.startsWith("nexo_frame_")), "en el nexo solo hay distritos");
+  for (const id of ["nexo_arch_arcade", "nexo_bridge_arcade", "nexo_table_arcade", "nexo_sign_desc_arcade"]) {
+    assert(c.snapshot.entities.some((e) => e.entity_id === id), `falta ${id} (arco, pasarela, maqueta y rótulo del distrito)`);
+  }
+  const archP = (c.snapshot.entities.find((e) => e.entity_id === "nexo_arch_arcade")?.components["transform@1"] as { p: number[] }).p;
+  const portalP = (c.snapshot.entities.find((e) => e.entity_id === "nexo_portal_arcade")?.components["transform@1"] as { p: number[] }).p;
+  assert(Math.hypot(portalP[0]! - 32, portalP[2]! - 32) > Math.hypot(archP[0]! - 32, archP[2]! - 32) + 20, "la puerta del distrito está en su isla, al otro lado de la pasarela");
+  const walk = c.welcome.walk;
+  assert(c.welcome.solo === true && !!walk && walk[0] < 0 && walk[1] > 64, "el nexo se recorre en solitario y más allá del chunk");
   c.close();
   const d = await XenxoClient.connect({ baseUrl, chunkId: "c_1_0" });
   const gate = d.snapshot.entities.find((e) => e.entity_id === "arcade_gate_portal")?.components["portal@1"] as { to: { chunk_id?: string } } | undefined;
@@ -497,6 +505,30 @@ await scenario("nexo y distritos: el nexo lleva a la plaza y a los distritos, y 
   const p = await XenxoClient.connect({ baseUrl });
   const back = p.snapshot.entities.find((e) => e.entity_id === "gate_portal")?.components["portal@1"] as { to: { chunk_id?: string } } | undefined;
   assert(back?.to.chunk_id === PLACES.nexo, "el arco de la plaza debería llevar al nexo");
+  p.close();
+});
+
+await scenario("nexo en solitario: nadie ve a nadie, no hay poses ni chat; en la plaza, sí", async () => {
+  const api = new Api(baseUrl);
+  await api.register(`conf ${randomUUID().slice(0, 6)}`);
+  const a = await XenxoClient.connect({ baseUrl, chunkId: PLACES.nexo, token: api.token });
+  const b = await XenxoClient.connect({ baseUrl, chunkId: PLACES.nexo, displayName: "conf-solo-b" });
+  assert(b.snapshot.peers.length === 0 && b.snapshot.poses.length === 0 && (b.snapshot.chat ?? []).length === 0, "en el nexo el SNAPSHOT no trae gente, poses ni chat");
+  let leaked = false;
+  b.onMessage((m) => {
+    if (m.type === "PEER_JOIN" || m.type === "POSES" || m.type === "PEER_LEAVE" || m.type === "CHAT_MSG") leaked = true;
+  });
+  a.pose([32, 1.6, 40]);
+  const said = await a.chat("hola nexo");
+  assert(said.type === "ERROR" && said.payload.code === "forbidden", "en el nexo no hay chat");
+  const late = await XenxoClient.connect({ baseUrl, chunkId: PLACES.nexo, displayName: "conf-solo-c" });
+  late.close();
+  await new Promise((r) => setTimeout(r, 400));
+  assert(!leaked, "en el nexo no llega nada de los demás");
+  a.close();
+  b.close();
+  const p = await XenxoClient.connect({ baseUrl });
+  assert(!p.welcome.solo && !p.welcome.walk, "la plaza es compartida");
   p.close();
 });
 
@@ -605,7 +637,8 @@ await scenario("RGPD: exportar mis datos y borrar la cuenta retira su contenido"
 await scenario("ficha xenxo.json: la de la plantilla create-xenxo es válida; una con campos inventados o sin inglés, no", async () => {
   const raw = readFileSync(new URL("../../../packages/create-xenxo/templates/common/public/xenxo.json", import.meta.url), "utf8")
     .replaceAll("{{title}}", "Mi juego")
-    .replaceAll("{{category}}", "game3d");
+    .replaceAll("{{category}}", "game3d")
+    .replaceAll("{{avatar}}", "character");
   const ficha = JSON.parse(raw) as Record<string, unknown>;
   const ok = GameManifest.safeParse(ficha);
   assert(ok.success, `la ficha de la plantilla debería ser válida: ${ok.success ? "" : JSON.stringify(ok.error.issues)}`);
@@ -614,6 +647,8 @@ await scenario("ficha xenxo.json: la de la plantilla create-xenxo es válida; un
   assert(!GameManifest.safeParse({ ...ficha, ageRating: "+18" }).success, "solo all o +14");
   assert(!GameManifest.safeParse({ ...ficha, privacy: "http://inseguro.example" }).success, "la privacidad va por https");
   assert(GameManifest.safeParse({ ...ficha, xenxo: { clientId: "xg_abcdef123", project: "pdB6auRPggN0" } }).success, "con client_id y proyecto");
+  assert(!GameManifest.safeParse({ ...ficha, avatar: "skin" }).success, "avatar: character, badge o none");
+  assert(GameManifest.safeParse({ ...ficha, avatar: undefined }).success, "sin avatar también vale (se deduce)");
 });
 
 await scenario("DSA: cualquiera puede denunciar un contenido", async () => {
@@ -911,9 +946,28 @@ await scenario("Entrar con xenxo: OpenID Connect con PKCE, consentimiento, sub p
   await vrm.arrayBuffer();
   assert(vrm.ok && vrm.headers.get("access-control-allow-origin") === "*", "la skin se descarga desde cualquier juego");
 
+  assert(claims.picture === undefined, "sin retrato todavía, no hay «picture»");
+
   const ui = await fetch(new URL("/oidc/userinfo", baseUrl), { headers: { Authorization: `Bearer ${tok.access_token}` } });
   const uiClaims = (await ui.json()) as { sub: string };
   assert(ui.ok && uiClaims.sub === claims.sub, "userinfo con el mismo sub");
+
+  // El retrato (lo hace la web en el navegador): cuadrado, del personaje que lleva, y llega como «picture».
+  const st = await player.call<{ avatar_effective: { hash: string }; portrait: unknown }>("GET", "/me");
+  assert(st.ok && st.data.portrait === null && st.data.avatar_effective.hash.startsWith("sha256:"), "GET /me dice su personaje y que no tiene retrato");
+  assert(!(await player.upload(makeCoverPng(320, 180, [10, 20, 30]), "portrait")).ok, "un retrato tiene que ser cuadrado");
+  const pic = await player.upload(makeCoverPng(256, 256, [Math.floor(Math.random() * 255), 140, 220]), "portrait");
+  assert(pic.ok, "subir el retrato");
+  const stale = await player.call("PUT", "/me/portrait", { hash: pic.data.hash, of: "sha256:" + "0".repeat(64) });
+  assert(!stale.ok && (stale as unknown as { error: string }).error === "portrait_stale", "el retrato tiene que ser del personaje que lleva");
+  assert((await player.call("PUT", "/me/portrait", { hash: pic.data.hash, of: st.data.avatar_effective.hash })).ok, "guardar el retrato");
+  const fp = await flow(g.data.client_id, "openid avatar");
+  const tp = (await (await token({ grant_type: "authorization_code", code: fp.code!, redirect_uri: cb, client_id: g.data.client_id, code_verifier: fp.verifier })).json()) as { id_token: string };
+  const cp = JSON.parse(Buffer.from(tp.id_token.split(".")[1]!, "base64url").toString()) as { picture?: string };
+  assert(typeof cp.picture === "string" && cp.picture.endsWith(pic.data.hash.slice(7)), `«picture» con el retrato: ${JSON.stringify(cp)}`);
+  const pr = await fetch(cp.picture!);
+  await pr.arrayBuffer();
+  assert(pr.ok && pr.headers.get("access-control-allow-origin") === "*", "el retrato se descarga desde cualquier juego");
 
   // Otro juego ve a la misma persona con otro sub.
   const f3 = await flow(g2.data.client_id, "openid");
@@ -981,9 +1035,13 @@ await scenario("juegos de fuera: ficha xenxo.json leída por el servidor, enlace
     assert(errOf(await register()) === "privacy_required", "sin página de privacidad no se registra");
     manifest = { ...base, xenxo: { project: "otroproyecto" } };
     assert(errOf(await register()) === "manifest_mismatch", "una ficha que dice ser de otro proyecto se rechaza");
+    manifest = { ...base, avatar: "none", xenxo: { clientId: "xg_noexiste123" } };
+    assert(errOf(await register()) === "avatar_required", "con «Entrar con xenxo», el juego tiene que enseñar quién juega");
     manifest = base;
     assert(errOf(await register({ slug: "admin" })) === "bad_slug", "un enlace reservado no vale");
+    manifest = { ...base, avatar: "character" };
     const okReg = await register();
+    assert(okReg.ok && (okReg.data.project.game as unknown as { avatar: string }).avatar === "character", "la ficha guarda cómo se ve quien juega");
     assert(okReg.ok && okReg.data.project.slug === slug && okReg.data.project.game.host === "juego-de-fuera.example.org" && okReg.data.project.game.embed, `registrar la ficha: ${JSON.stringify(okReg)}`);
     const other = new Api(baseUrl);
     await other.register(`conf ${randomUUID().slice(0, 6)}`);

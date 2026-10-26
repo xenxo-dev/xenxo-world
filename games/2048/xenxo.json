@@ -15,6 +15,7 @@
     "vr"
   ],
   "multiplayer": false,
+  "avatar": "badge",
   "ageRating": "all",
   "monetization": {
     "hasAds": false,

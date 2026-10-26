@@ -6,7 +6,7 @@ import { useSyncExternalStore } from "react";
 import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
 import { checkBudget, COVER_BUDGET, inspectGlb, type AssetKind, type BudgetProblem, type GlbReport } from "@xenxo/assets";
 import type { ProjectCategory } from "@xenxo/protocol";
-import { REALTIME_URL, loadPref, savePref } from "../config";
+import { REALTIME_URL, assetUrl, loadPref, savePref } from "../config";
 import { reconnect } from "./session";
 
 export const TERMS_VERSION = "2026-10";
@@ -52,6 +52,8 @@ export interface GameInfo {
   category: ProjectCategory;
   devices: ("pc" | "mobile" | "vr")[];
   multiplayer: boolean;
+  /** Qué se ve de quien juega (las fichas antiguas no lo traen: ver `avatarMode`). */
+  avatar?: "character" | "badge" | "none";
   ageRating: "all" | "+14";
   monetization: { hasAds: boolean; hasPurchases: boolean };
   author: string;
@@ -62,6 +64,11 @@ export interface GameInfo {
   url: string;
   /** El juego de «Entrar con xenxo» del proyecto (xenxo.clientId de su ficha). */
   clientId: string | null;
+}
+
+/** El modo de personaje de un juego (las fichas guardadas antes del campo: placa si usa «Entrar con xenxo»). */
+export function avatarMode(g: GameInfo): "character" | "badge" | "none" {
+  return g.avatar ?? (g.clientId ? "badge" : "none");
 }
 
 export class ApiError extends Error {
@@ -151,6 +158,7 @@ export async function refreshSession() {
     store({ token: r.token, user: r.user, exp: r.principal.exp });
     const u = r.user;
     if (!before || before.player_no !== u.player_no || before.display_name !== u.display_name || before.avatar_hash !== u.avatar_hash) reconnect();
+    schedulePortrait();
   } catch (e) {
     // La cuenta ya no existe o la sesión no vale: se sale.
     if (e instanceof ApiError && (e.code === "unauthorized" || e.code === "not_found")) store(null);
@@ -347,6 +355,7 @@ export async function uploadCover(c: PreparedCover) {
 /** Viste un personaje: de serie, o propio (si aún no está en el armario, entra con `label`). */
 export async function setAvatar(hash: string | null, label?: string) {
   adopt(await api("POST", "/me/avatar", { hash, ...(label ? { label } : {}) }));
+  schedulePortrait();
   emitSkins();
 }
 
@@ -561,4 +570,39 @@ export async function deleteAccount() {
   await api("DELETE", "/me");
   store(null);
   reconnect();
+}
+
+/* --- El retrato del personaje (para los juegos sin 3D: «picture» al entrar con xenxo) --- */
+
+let portraitBusy = false;
+let portraitTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Si el retrato falta o es de otro personaje, se hace uno en este navegador (cabeza y hombros,
+ * 256 px) y se sube. En segundo plano y una vez por cambio: no estorba al entrar al mundo.
+ */
+export function schedulePortrait(delay = 4000) {
+  if (portraitTimer) clearTimeout(portraitTimer);
+  portraitTimer = setTimeout(() => {
+    portraitTimer = null;
+    void ensurePortrait();
+  }, delay);
+}
+
+async function ensurePortrait() {
+  if (portraitBusy || !accountToken()) return;
+  portraitBusy = true;
+  try {
+    const me = await api<{ avatar_effective: { hash: string }; portrait: { hash: string; current: boolean } | null }>("GET", "/me");
+    if (me.portrait?.current) return;
+    const of = me.avatar_effective.hash;
+    const { renderPortrait } = await import("../world/portrait");
+    const blob = await renderPortrait(assetUrl(of));
+    const up = await api<{ hash: string }>("POST", "/assets?kind=portrait", undefined, blob);
+    await api("PUT", "/me/portrait", { hash: up.hash, of });
+  } catch (e) {
+    console.warn("[xenxo] no se pudo hacer el retrato", e);
+  } finally {
+    portraitBusy = false;
+  }
 }

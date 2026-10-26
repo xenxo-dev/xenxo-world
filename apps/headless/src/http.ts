@@ -69,7 +69,7 @@ export class Api {
     return this.token;
   }
 
-  upload(bytes: Uint8Array, kind: "avatar" | "model" | "monument" | "cover") {
+  upload(bytes: Uint8Array, kind: "avatar" | "model" | "monument" | "cover" | "portrait") {
     return this.call<{ hash: string; triangles: number; bytes: number; format: string; existed: boolean }>("POST", `/assets?kind=${kind}`, undefined, bytes);
   }
 }

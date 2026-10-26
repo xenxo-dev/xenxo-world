@@ -7,16 +7,17 @@ import plazaLayout from "./plaza-layout.json";
 import { SEED_ASSETS } from "./seed-assets";
 
 /**
- * El nexo: la entrada al mundo. Una plataforma flotante con una puerta abierta por distrito (la
- * plaza y los temáticos), mirando al centro. Junto a cada puerta, a su izquierda, el emblema del
- * distrito; detrás, su isla flotante con el distrito en pequeño, que se ve a través de la puerta.
- * En el nexo no hay proyectos: viven en su parcela, dentro de su distrito. Los huecos libres del
- * anillo son para distritos futuros.
+ * El nexo: la entrada al mundo, que se recorre a pie y en solitario (sin multijugador: eso es de
+ * los distritos y los juegos). Del círculo central sale un arco por distrito (la plaza y los
+ * temáticos) y, tras él, una pasarela hasta su isla flotante. En la isla está el distrito en maqueta
+ * sobre una mesa, sus agujas de neón, un rótulo con lo que hay dentro y, al fondo, su puerta: al
+ * llegar a ella se entra. A la izquierda de la puerta, el emblema. En el nexo no hay proyectos:
+ * viven en su parcela, dentro de su distrito. Los huecos libres del anillo son para distritos futuros.
  *
  * La disposición sale de nexo-layout.json (la misma que usa la forja). Sube NEXO_SEED_VERSION
  * si cambias el significado de algo; los cambios de contenido se detectan solos por la huella.
  */
-export const NEXO_SEED_VERSION = 3;
+export const NEXO_SEED_VERSION = 4;
 
 export type { Seeded } from "./places";
 
@@ -24,6 +25,9 @@ const L = nexoLayout;
 const G = L.gates;
 const E = L.emblem;
 const I = L.islands;
+const B = L.bridge;
+/** Hasta dónde se puede caminar en el nexo (se sale del chunk: allí no se mandan poses). */
+export const NEXO_BOUNDS = L.bounds as [number, number];
 const [CX, CZ] = L.center as [number, number];
 const DISTRICT_SLOTS = L.district_slots as Record<string, number>;
 
@@ -39,10 +43,24 @@ export const SHOWCASE_SLOTS: Slot[] = [];
 
 export const NEXO_SPAWN: V3 = [L.spawn[0]!, 0, L.spawn[1]!];
 
-/** Dónde aparece quien vuelve al nexo desde un distrito: delante de su puerta, mirando al centro. */
+/** Centro de la isla de un hueco (las de los huecos impares, más lejos) y hacia dónde mira (al centro). */
+export function islandOf(slot: number): { x: number; z: number; facing: number } {
+  const sl = NEXO_SLOTS[slot]!;
+  const a = ((360 * slot) / G.count) * (Math.PI / 180);
+  const ring = slot % 2 ? I.ring_alt : I.ring;
+  return { x: r3(CX + ring * Math.sin(a)), z: r3(CZ - ring * Math.cos(a)), facing: sl.facing };
+}
+
+/** La puerta de un distrito: al fondo de su isla, mirando al centro de la isla (y del nexo). */
+export function islandGate(slot: number): Slot {
+  const isl = islandOf(slot);
+  const [x, , z] = at(isl.x, isl.z, isl.facing, 0, 0, -I.gate_z);
+  return { index: slot, x, z, facing: isl.facing };
+}
+
+/** Dónde aparece quien vuelve al nexo desde un distrito: en su isla, delante de su puerta. */
 export function nexoArrival(districtId: string) {
-  const slot = NEXO_SLOTS[DISTRICT_SLOTS[districtId] ?? 0]!;
-  return spawnInFront(slot, false);
+  return spawnInFront(islandGate(DISTRICT_SLOTS[districtId] ?? 0), false);
 }
 
 /** Producto de cuaterniones (a ∘ b). */
@@ -104,15 +122,35 @@ export function nexoSeed(): Seeded[] {
       "light@1": { type: "point", color: L.colors.line, intensity: 2.5, range: 12, when: "always" },
     },
   });
-  // Barandilla invisible en el borde: la plataforma flota en el vacío.
-  const EDGE = 32;
-  const rEdge = L.platform + 0.35;
-  for (let i = 0; i < EDGE; i++) {
-    const phi = (360 * i) / EDGE;
-    const a = (phi * Math.PI) / 180;
-    const half = (Math.PI * rEdge) / EDGE + 0.05;
-    solid(`nexo_edge_${i}`, [r3(CX + rEdge * Math.sin(a)), 1, r3(CZ - rEdge * Math.cos(a))], -phi, [r3(half), 1, 0.2]);
-  }
+  /**
+   * Barandilla invisible en un círculo (todo flota en el vacío), con huecos donde llegan las
+   * pasarelas. `gaps` son ángulos en grados (0 = norte, en el sentido de las agujas del reloj).
+   */
+  const ringRail = (prefix: string, cx: number, cz: number, r: number, gaps: number[]) => {
+    const half = (B.w / 2 / r) * (180 / Math.PI);
+    const blocked = (deg: number) => gaps.some((g) => Math.abs(((deg - g + 540) % 360) - 180) < half);
+    // Arcos de 1° que se juntan en tramos de como mucho 10°: cada tramo, una caja.
+    let start: number | null = null;
+    let n = 0;
+    const flush = (end: number) => {
+      if (start === null) return;
+      const mid = (start + end) / 2, a = (mid * Math.PI) / 180;
+      const len = 2 * r * Math.sin((((end - start) / 2) * Math.PI) / 180) + 0.1;
+      solid(`${prefix}_${n++}`, [r3(cx + r * Math.sin(a)), 1, r3(cz - r * Math.cos(a))], -mid, [r3(len / 2), 1, 0.2]);
+      start = null;
+    };
+    for (let deg = 0; deg < 360; deg++) {
+      if (blocked(deg + 0.5)) {
+        flush(deg);
+        continue;
+      }
+      if (start === null) start = deg;
+      if (deg + 1 - start >= 10) flush(deg + 1);
+    }
+    flush(360);
+  };
+  const usedSlots = Object.values(DISTRICT_SLOTS);
+  ringRail("nexo_edge", CX, CZ, L.platform + 0.35, usedSlots.map((sl) => (360 * sl) / G.count));
 
   /* --- «xenxo» en luz, embutido en el suelo del círculo central --- */
   out.push({
@@ -129,50 +167,139 @@ export function nexoSeed(): Seeded[] {
     slot: number;
     color: string;
     name: Record<string, string>;
+    desc: Record<string, string>;
     to: NonNullable<Components["portal@1"]>["to"];
     emblem: string;
     island: (ix: number, iz: number, facing: number) => void;
   }) => {
     const sl = NEXO_SLOTS[spec.slot]!;
-    const { x, z, facing } = sl;
     const k = spec.id;
-    // Puerta abierta (los pilares son sólidos; por el hueco se pasa y se viaja).
-    mesh(`nexo_gate_${k}`, "nexo_gate", [x, 0, z], yaw(facing));
-    for (const sx of [-1, 1]) solid(`nexo_gate_${k}_${sx < 0 ? "l" : "r"}`, at(x, z, facing, sx * (G.w / 2 + 0.275), G.bottom + G.h / 2, 0), facing, [0.3, G.h / 2, 0.38]);
+    const phi = (360 * spec.slot) / G.count;
+    // 1) El arco de su avenida, en el círculo central (de paso: no lleva a ningún sitio).
+    {
+      const { x, z, facing } = sl;
+      mesh(`nexo_arch_${k}`, "nexo_gate", [x, 0, z], yaw(facing));
+      for (const sx of [-1, 1]) solid(`nexo_arch_${k}_${sx < 0 ? "l" : "r"}`, at(x, z, facing, sx * (G.w / 2 + 0.275), G.bottom + G.h / 2, 0), facing, [0.3, G.h / 2, 0.38]);
+      out.push({
+        id: `nexo_arch_band_${k}`,
+        components: {
+          "transform@1": { p: at(x, z, facing, 0, G.bottom + G.h + 0.6, 0.38), r: yaw(facing), s: [1, 1, 1], parent: null },
+          "primitive@1": { shape: "box", size: [G.w + 1.2, 0.08, 0.04], color: spec.color, emissive: true, finish: "matte" },
+        },
+      });
+      out.push({
+        id: `nexo_arch_label_${k}`,
+        components: {
+          "transform@1": { p: at(x, z, facing, 0, G.bottom + G.h + 1.35, 0.4), r: yaw(facing), s: [1, 1, 1], parent: null },
+          "label@1": { text: spec.name.en!, i18n: spec.name, billboard: false, size: 0.6, style: "neon", color: spec.color },
+        },
+      });
+    }
+
+    // 2) La pasarela: del borde del círculo al borde de su isla.
+    const isl = islandOf(spec.slot);
+    const { x: ix, z: iz, facing } = isl;
+    const ring = Math.hypot(ix - CX, iz - CZ);
+    const r0 = L.platform - 0.6, r1 = ring - I.radius + 0.4;
+    const len = r1 - r0, mid = (r0 + r1) / 2;
+    const a = (phi * Math.PI) / 180;
+    const bx = r3(CX + mid * Math.sin(a)), bz = r3(CZ - mid * Math.cos(a));
+    out.push({
+      id: `nexo_bridge_${k}`,
+      components: {
+        "transform@1": { p: [bx, -0.16, bz], r: yaw(facing), s: [1, 1, 1], parent: null },
+        "primitive@1": { shape: "box", size: [B.w, 0.3, r3(len)], color: "#1a2030", emissive: false, finish: "metal" },
+      },
+    });
+    for (const sx of [-1, 1]) {
+      const side = sx < 0 ? "l" : "r";
+      // Filo de luz a ras de suelo y pasamanos de luz, del color del distrito.
+      out.push({
+        id: `nexo_bridge_${k}_edge_${side}`,
+        components: {
+          "transform@1": { p: at(bx, bz, facing, sx * (B.w / 2 - 0.05), 0.02, 0), r: yaw(facing), s: [1, 1, 1], parent: null },
+          "primitive@1": { shape: "box", size: [0.08, 0.04, r3(len)], color: spec.color, emissive: true, finish: "matte" },
+        },
+      });
+      out.push({
+        id: `nexo_bridge_${k}_rail_${side}`,
+        components: {
+          "transform@1": { p: at(bx, bz, facing, sx * (B.w / 2), B.rail_h, 0), r: yaw(facing), s: [1, 1, 1], parent: null },
+          "primitive@1": { shape: "box", size: [0.05, 0.05, r3(len)], color: spec.color, emissive: true, finish: "matte" },
+        },
+      });
+      solid(`nexo_bridge_${k}_wall_${side}`, at(bx, bz, facing, sx * (B.w / 2 + 0.15), 1, 0), facing, [0.15, 1, r3(len / 2)]);
+    }
+
+    // 3) La isla: el distrito en maqueta sobre una mesa, sus agujas, su rótulo y su puerta al fondo.
+    mesh(`nexo_island_${k}`, "nexo_island", [ix, I.y, iz], yaw(facing));
+    ringRail(`nexo_island_${k}_edge`, ix, iz, I.rail, [(phi + 180) % 360]);
+    const table = r3(64 * I.scale + 0.6);
+    out.push({
+      id: `nexo_table_${k}`,
+      components: {
+        "transform@1": { p: [ix, r3(I.table_h / 2), iz], r: yaw(facing), s: [1, 1, 1], parent: null },
+        "primitive@1": { shape: "box", size: [table, I.table_h, table], color: "#141a28", emissive: false, finish: "metal" },
+        "collider@1": { shape: "box", half_extents: [r3(table / 2), r3(I.table_h / 2), r3(table / 2)], trigger: false },
+      },
+    });
+    out.push({
+      id: `nexo_table_glow_${k}`,
+      components: {
+        "transform@1": { p: [ix, r3(I.table_h - 0.02), iz], r: yaw(facing), s: [1, 1, 1], parent: null },
+        "primitive@1": { shape: "box", size: [r3(table + 0.08), 0.04, r3(table + 0.08)], color: spec.color, emissive: true, finish: "matte" },
+      },
+    });
+    out.push({
+      id: `nexo_sign_${k}`,
+      components: {
+        "transform@1": { p: at(ix, iz, facing, 0, 2.1, I.sign_z), r: yaw(facing), s: [1, 1, 1], parent: null },
+        "label@1": { text: spec.name.en!, i18n: spec.name, billboard: false, size: 0.9, style: "neon", color: spec.color },
+      },
+    });
+    out.push({
+      id: `nexo_sign_desc_${k}`,
+      components: {
+        "transform@1": { p: at(ix, iz, facing, 0, 1.45, I.sign_z), r: yaw(facing), s: [1, 1, 1], parent: null },
+        "label@1": { text: spec.desc.en!, i18n: spec.desc, billboard: false, size: 0.3, style: "plain", width: 9 },
+      },
+    });
+    const g = islandGate(spec.slot);
+    mesh(`nexo_gate_${k}`, "nexo_gate", [g.x, 0, g.z], yaw(g.facing));
+    for (const sx of [-1, 1]) solid(`nexo_gate_${k}_${sx < 0 ? "l" : "r"}`, at(g.x, g.z, g.facing, sx * (G.w / 2 + 0.275), G.bottom + G.h / 2, 0), g.facing, [0.3, G.h / 2, 0.38]);
     out.push({
       id: `nexo_portal_${k}`,
       components: {
-        "transform@1": { p: at(x, z, facing, 0, G.bottom + G.h / 2, 0), r: yaw(facing), s: [1, 1, 1], parent: null },
+        "transform@1": { p: at(g.x, g.z, g.facing, 0, G.bottom + G.h / 2, 0), r: yaw(g.facing), s: [1, 1, 1], parent: null },
         "portal@1": { to: spec.to, size: [G.w, G.h], title: spec.name.en!, i18n: spec.name, category: "district", color: spec.color },
       },
     });
-    // Franjas del color del distrito en el dintel y el escalón.
     out.push({
       id: `nexo_band_${k}`,
       components: {
-        "transform@1": { p: at(x, z, facing, 0, G.bottom + G.h + 0.6, 0.38), r: yaw(facing), s: [1, 1, 1], parent: null },
+        "transform@1": { p: at(g.x, g.z, g.facing, 0, G.bottom + G.h + 0.6, 0.38), r: yaw(g.facing), s: [1, 1, 1], parent: null },
         "primitive@1": { shape: "box", size: [G.w + 1.2, 0.08, 0.04], color: spec.color, emissive: true, finish: "matte" },
       },
     });
     out.push({
       id: `nexo_step_${k}`,
       components: {
-        "transform@1": { p: at(x, z, facing, 0, G.bottom + 0.005, 0.5), r: yaw(facing), s: [1, 1, 1], parent: null },
+        "transform@1": { p: at(g.x, g.z, g.facing, 0, G.bottom + 0.005, 0.5), r: yaw(g.facing), s: [1, 1, 1], parent: null },
         "primitive@1": { shape: "box", size: [G.w + 1.4, 0.01, 0.06], color: spec.color, emissive: true, finish: "matte" },
       },
     });
     out.push({
       id: `nexo_label_${k}`,
       components: {
-        "transform@1": { p: at(x, z, facing, 0, G.bottom + G.h + 1.35, 0.4), r: yaw(facing), s: [1, 1, 1], parent: null },
+        "transform@1": { p: at(g.x, g.z, g.facing, 0, G.bottom + G.h + 1.35, 0.4), r: yaw(g.facing), s: [1, 1, 1], parent: null },
         "label@1": { text: spec.name.en!, i18n: spec.name, billboard: false, size: 0.6, style: "neon", color: spec.color },
       },
     });
-    // El emblema, a la izquierda de la puerta (mirándola desde el centro), sobre su peana.
+    // El emblema, a la izquierda de la puerta (mirándola desde la isla), sobre su peana.
     out.push({
       id: `nexo_plinth_${k}`,
       components: {
-        "transform@1": { p: at(x, z, facing, E.x, E.plinth_h / 2, E.z), r: yaw(facing), s: [1, 1, 1], parent: null },
+        "transform@1": { p: at(g.x, g.z, g.facing, E.x, E.plinth_h / 2, E.z), r: yaw(g.facing), s: [1, 1, 1], parent: null },
         "primitive@1": { shape: "cylinder", size: [1.3, E.plinth_h, 1.3], color: "#1a2030", emissive: false, finish: "metal" },
         "collider@1": { shape: "box", half_extents: [0.65, E.plinth_h / 2, 0.65], trigger: false },
       },
@@ -180,18 +307,12 @@ export function nexoSeed(): Seeded[] {
     out.push({
       id: `nexo_plinth_glow_${k}`,
       components: {
-        "transform@1": { p: at(x, z, facing, E.x, E.plinth_h + 0.01, E.z), r: yaw(facing), s: [1, 1, 1], parent: null },
+        "transform@1": { p: at(g.x, g.z, g.facing, E.x, E.plinth_h + 0.01, E.z), r: yaw(g.facing), s: [1, 1, 1], parent: null },
         "primitive@1": { shape: "cylinder", size: [1.34, 0.02, 1.34], color: spec.color, emissive: true, finish: "matte" },
       },
     });
     const fit = fitInto(spec.emblem, E.size);
-    mesh(`nexo_monument_${k}`, spec.emblem, at(x, z, facing, E.x + fit.cx, E.plinth_h + fit.lift, E.z + fit.cz), yaw(facing), fit.scale);
-    // La isla, detrás de la puerta: lo que se ve a través de ella.
-    const a = ((360 * spec.slot) / G.count) * (Math.PI / 180);
-    // Las islas de los huecos impares, más lejos: así caben las de los distritos futuros.
-    const ring = spec.slot % 2 ? I.ring_alt : I.ring;
-    const ix = r3(CX + ring * Math.sin(a)), iz = r3(CZ - ring * Math.cos(a));
-    mesh(`nexo_island_${k}`, "nexo_island", [ix, I.y, iz], yaw(facing));
+    mesh(`nexo_monument_${k}`, spec.emblem, at(g.x, g.z, g.facing, E.x + fit.cx, E.plinth_h + fit.lift, E.z + fit.cz), yaw(g.facing), fit.scale);
     spec.island(ix, iz, facing);
   };
 
@@ -202,6 +323,10 @@ export function nexoSeed(): Seeded[] {
     slot: DISTRICT_SLOTS.plaza!,
     color: L.colors.district,
     name: { es: "La Plaza", en: "The Plaza" },
+    desc: {
+      es: "El distrito mediterráneo de neón donde empezó todo: chat, gestos y los edificios de la comunidad.",
+      en: "The neon Mediterranean district where it all began: chat, emotes and the community's buildings.",
+    },
     to: { kind: "chunk", chunk_id: PLACES.plaza, spawn: [plazaLayout.spawn[0]!, 0, plazaLayout.spawn[1]!], yaw: 0 },
     emblem: "gate",
     island: (ix, iz, facing) => {
@@ -209,7 +334,7 @@ export function nexoSeed(): Seeded[] {
       for (const e of plazaMeshes) {
         const t = e.components["transform@1"]!;
         const p = at(ix, iz, facing, (t.p[0] - 32) * s, 0, (t.p[2] - 32) * s);
-        p[1] = r3(I.y + t.p[1] * s);
+        p[1] = r3(I.table_h + t.p[1] * s);
         out.push({
           id: `nexo_mini_plaza_${e.id}`,
           components: {
@@ -230,13 +355,18 @@ export function nexoSeed(): Seeded[] {
       slot,
       color: d.color,
       name: { es: d.name.es, en: d.name.en },
+      desc: { es: d.desc.es, en: d.desc.en },
       to: { kind: "chunk", chunk_id: d.chunk, spawn: DISTRICT_SPAWN, yaw: 0 },
       emblem: `emblem_${d.id}`,
       island: (ix, iz, facing) => {
-        mesh(`nexo_mini_${d.id}_ground`, `district_${d.id}`, [ix, r3(I.y + 0.62 * I.scale), iz], yaw(facing), I.scale);
+        mesh(`nexo_mini_${d.id}_ground`, `district_${d.id}`, [ix, r3(I.table_h + 0.62 * I.scale), iz], yaw(facing), I.scale);
         mesh(`nexo_mini_${d.id}_spires`, `nexo_spires_${d.id}`, [ix, I.y, iz], yaw(facing));
-        const fit = fitInto(`emblem_${d.id}`, 6.5);
-        mesh(`nexo_mini_${d.id}_emblem`, `emblem_${d.id}`, [r3(ix + fit.cx), r3(I.y + 0.3 + fit.lift), r3(iz + fit.cz)], yaw(facing), fit.scale);
+        // Cada aguja es sólida (las mismas posiciones que forja tools/forge/nexo.py).
+        I.spires.forEach(([sx, sz, h, w], n) =>
+          solid(`nexo_mini_${d.id}_spire_${n}`, at(ix, iz, facing, sx!, r3(h! / 2), sz!), facing, [r3(w! / 2 + 0.1), r3(h! / 2), r3(w! / 2 + 0.1)]),
+        );
+        const fit = fitInto(`emblem_${d.id}`, 4.5);
+        mesh(`nexo_mini_${d.id}_emblem`, `emblem_${d.id}`, [r3(ix + fit.cx), r3(I.table_h + 0.62 * I.scale + 0.3 + fit.lift), r3(iz + fit.cz)], yaw(facing), fit.scale);
       },
     });
   }

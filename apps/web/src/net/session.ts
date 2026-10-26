@@ -129,3 +129,6 @@ export function sendChat(text: string) {
 export function setGuestName(name: string) {
   guestName = name;
 }
+
+// Solo en desarrollo: para revisar lugares sin caminar hasta ellos (desde la consola o las pruebas).
+if (import.meta.env.DEV) (globalThis as { __xenxoTeleport?: typeof teleport }).__xenxoTeleport = teleport;

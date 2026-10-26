@@ -1,5 +1,5 @@
 {
- "$comment": "Disposición del nexo (coordenadas del chunk: X este, Z sur, metros). La usan nexo.ts y la forja (tools/forge/nexo.py). En el nexo solo hay distritos: cada uno tiene una puerta abierta en el anillo `gates` (mirando al centro), su emblema a la izquierda y, detrás, su isla flotante con el distrito en pequeño, que se ve a través de la puerta. `district_slots` dice qué hueco del anillo usa cada distrito; los huecos libres son para distritos futuros. `portals` son las medidas del marco de las parcelas (no del nexo). Las islas de los huecos impares van en un anillo más lejano (`ring_alt`) para que quepan los distritos futuros entre las de ahora. Si cambias algo aquí, vuelve a forjar (npm run forge:nexo) y sube NEXO_SEED_VERSION.",
+ "$comment": "Disposición del nexo (coordenadas del chunk: X este, Z sur, metros). La usan nexo.ts y la forja (tools/forge/nexo.py). En el nexo solo hay distritos y se recorre a pie, en solitario (sin multijugador). Del círculo central sale un arco por distrito (anillo `gates`, mirando al centro) y, tras él, una pasarela (`bridge`) hasta su isla. En la isla está el distrito en maqueta sobre una mesa, sus agujas, su rótulo con lo que hay dentro y, al fondo, su puerta (portal) con el emblema a la izquierda. `district_slots` dice qué hueco usa cada distrito; los libres son para distritos futuros. Las islas de los huecos impares van más lejos (`ring_alt`). `islands.spires` son las agujas de cada isla en coordenadas de la isla ([x, z, alto, ancho]; +Z mira al centro del nexo); dejan libre el pasillo de la pasarela a la puerta y tienen colisión. `bounds` es hasta dónde se puede caminar (en el nexo se sale del chunk: no se mandan poses). `portals` son las medidas del marco de las parcelas (no del nexo). Si cambias algo aquí, vuelve a forjar (npm run forge:nexo) y sube NEXO_SEED_VERSION.",
  "center": [
   32,
   32
@@ -61,10 +61,78 @@
   "size": 2.2
  },
  "islands": {
-  "ring": 46,
-  "ring_alt": 76,
-  "y": -2.5,
+  "ring": 56,
+  "ring_alt": 92,
+  "y": -0.08,
   "radius": 17,
-  "scale": 0.38
- }
+  "scale": 0.28,
+  "table_h": 1.0,
+  "gate_z": 15.5,
+  "rail": 16.9,
+  "sign_z": 12.6,
+  "spires": [
+   [
+    11.67,
+    0.0,
+    9.98,
+    1.69
+   ],
+   [
+    -13.02,
+    0.0,
+    5.74,
+    1.35
+   ],
+   [
+    9.63,
+    -5.12,
+    6.46,
+    1.76
+   ],
+   [
+    -11.09,
+    5.9,
+    11.02,
+    1.43
+   ],
+   [
+    11.85,
+    6.3,
+    3.9,
+    1.21
+   ],
+   [
+    -10.06,
+    -5.35,
+    8.78,
+    1.95
+   ],
+   [
+    7.53,
+    -9.63,
+    9.34,
+    1.6
+   ],
+   [
+    -7.86,
+    10.07,
+    4.46,
+    1.15
+   ],
+   [
+    6.58,
+    8.43,
+    7.9,
+    1.83
+   ]
+  ]
+ },
+ "bridge": {
+  "w": 4,
+  "rail_h": 1.0
+ },
+ "bounds": [
+  -100,
+  164
+ ]
 }

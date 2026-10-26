@@ -11,6 +11,7 @@ import {
   ASSET_BUDGETS,
   checkBudget,
   COVER_BUDGET,
+  PORTRAIT_BUDGET,
   GLB_MEDIA,
   GlbError,
   imageSize,
@@ -40,7 +41,7 @@ export function assetKey(hash: string): string {
   return `assets/${hash.replace(/^sha256:/, "")}`;
 }
 
-export type UploadKind = AssetKind | "cover";
+export type UploadKind = AssetKind | "cover" | "portrait";
 
 export interface UploadResult {
   hash: string;
@@ -63,9 +64,9 @@ export async function handleUpload(req: Request, principal: Principal, bucket: R
     return { ok: false, status: 403, error: "forbidden", message: "crea una cuenta para subir modelos" };
   }
   const kindParam = new URL(req.url).searchParams.get("kind");
-  if (kindParam === "cover") return uploadCover(req, bucket);
+  if (kindParam === "cover" || kindParam === "portrait") return uploadImage(req, bucket, kindParam);
   if (kindParam !== "avatar" && kindParam !== "model" && kindParam !== "monument") {
-    return { ok: false, status: 400, error: "bad_kind", message: "kind debe ser avatar, model, monument o cover" };
+    return { ok: false, status: 400, error: "bad_kind", message: "kind debe ser avatar, model, monument, cover o portrait" };
   }
   const kind: AssetKind = kindParam;
   const max = ASSET_BUDGETS[kind].maxBytes;
@@ -120,18 +121,25 @@ export async function handleUpload(req: Request, principal: Principal, bucket: R
   };
 }
 
-/** Portada: solo WebP, JPEG o PNG, comprobados por su firma y sus medidas reales. */
-async function uploadCover(req: Request, bucket: R2Bucket): Promise<UploadOutcome> {
-  const max = COVER_BUDGET.maxBytes;
+/**
+ * Imágenes: la portada de un proyecto (16:9) o el retrato de un personaje (cuadrado). Solo WebP,
+ * JPEG o PNG, comprobados por su firma y sus medidas reales.
+ */
+async function uploadImage(req: Request, bucket: R2Bucket, kind: "cover" | "portrait"): Promise<UploadOutcome> {
+  const max = kind === "cover" ? COVER_BUDGET.maxBytes : PORTRAIT_BUDGET.maxBytes;
   const tooBig = { ok: false as const, status: 413, error: "too_large", message: `máximo ${Math.round(max / 1024)} KB` };
   if (Number(req.headers.get("Content-Length") ?? 0) > max) return tooBig;
   const bytes = new Uint8Array(await req.arrayBuffer());
   if (bytes.byteLength > max) return tooBig;
   const media = sniffImage(bytes);
   const dims = media ? imageSize(bytes) : null;
-  if (!media || !dims) return { ok: false, status: 422, error: "bad_image", message: "la portada debe ser una imagen WebP, JPEG o PNG" };
+  if (!media || !dims) return { ok: false, status: 422, error: "bad_image", message: "debe ser una imagen WebP, JPEG o PNG" };
   const [w, h] = dims;
-  if (w > COVER_BUDGET.maxWidth || h > COVER_BUDGET.maxHeight || w < 160 || h < 90) {
+  const P = PORTRAIT_BUDGET;
+  if (kind === "portrait" && (w !== h || w < P.minSide || w > P.maxSide)) {
+    return { ok: false, status: 422, error: "bad_image", message: `el retrato debe ser cuadrado, de ${P.minSide} a ${P.maxSide} píxeles`, detail: { width: w, height: h } };
+  }
+  if (kind === "cover" && (w > COVER_BUDGET.maxWidth || h > COVER_BUDGET.maxHeight || w < 160 || h < 90)) {
     return {
       ok: false,
       status: 422,
@@ -146,12 +154,12 @@ async function uploadCover(req: Request, bucket: R2Bucket): Promise<UploadOutcom
   if (!existed) {
     await bucket.put(key, bytes, {
       httpMetadata: { contentType: media, cacheControl: "public, max-age=31536000, immutable" },
-      customMetadata: { kind: "cover", format: "image", bytes: String(bytes.byteLength), width: String(w), height: String(h) },
+      customMetadata: { kind, format: "image", bytes: String(bytes.byteLength), width: String(w), height: String(h) },
     });
   }
   return {
     ok: true,
-    data: { hash, kind: "cover", format: "image", media, triangles: 0, bytes: bytes.byteLength, bounds: null, existed },
+    data: { hash, kind, format: "image", media, triangles: 0, bytes: bytes.byteLength, bounds: null, existed },
   };
 }
 

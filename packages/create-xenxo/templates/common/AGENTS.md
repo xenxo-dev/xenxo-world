@@ -34,7 +34,7 @@ Comandos: `npm run dev` (abre el juego con el simulador), `npm run build` (a `di
 ```js
 import { xenxo } from "@xenxo/sdk";
 const jugador = await xenxo.connect({ clientId, project });   // null si no ha entrado
-// jugador: { id, name, playerNo, avatar: { url, format, hash }, guest, simulated }
+// jugador: { id, name, playerNo, avatar: { url, format, hash }, picture, guest, simulated }
 xenxo.login();   // lleva a xenxo para dar permiso y vuelve a esta página
 xenxo.logout();  // lo olvida en esta página
 xenxo.back();    // vuelve a xenxo, delante del portal del proyecto
@@ -47,6 +47,8 @@ xenxo.error;     // por qué no entró ("access_denied" si dijo que no)
 - `avatar.url` es un VRM (a veces un GLB): cárgalo con `GLTFLoader` + `VRMLoaderPlugin`, como en
   `src/avatar.js`. Si no hay avatar o no carga, enseña algo por defecto: el juego nunca debe
   quedarse en blanco.
+- `picture` es el retrato de su personaje (imagen cuadrada de 256 px): para juegos sin 3D. Puede
+  faltar (aún no lo tiene o es invitado): entonces enseña la inicial de su nombre.
 - `guest: true` = invitado de xenxo: tiene nombre, pero no cuenta ni número.
 
 ## El simulador (desarrollo)
@@ -80,6 +82,15 @@ simulador solo enseña adónde iría.
    varios dedos a la vez: eventos de puntero, no `click`) y, en las gafas, en la ventana del
    navegador de las Quest con el puntero de los mandos (lo mismo que el táctil). Si algún equipo no
    va, quítalo de `devices`: xenxo avisa a quien entre desde él y no le abre el juego.
+10. **Se ve quién juega.** xenxo es un metaverso: la persona lleva su identidad a tu juego. Si en tu
+    juego se maneja un personaje, es **su personaje de xenxo** (`jugador.avatar`, como en
+    `src/avatar.js`; sin cuenta, uno de serie) y la ficha dice `"avatar": "character"`. Si no hay
+    personaje (2D, naves, puzles), enseña su nombre, su número y su retrato (`jugador.picture`,
+    como en la barra de `xenxo-hud.js`) y la ficha dice `"avatar": "badge"`. La revisión lo comprueba.
+11. **El personaje no es tuyo.** Su personaje, su retrato, su nombre y su número solo sirven para
+    representarle en esa partida: no los guardes más allá de la sesión (su `id` sí, para sus
+    partidas), no los vendas ni los pases a nadie, no los cambies para otra cosa ni los uses para
+    entrenar modelos, anuncios o perfiles. Si no, xenxo retira el juego.
 
 ## `public/xenxo.json` (esquema `xenxo.game/0`)
 
@@ -90,6 +101,7 @@ simulador solo enseña adónde iría.
 | `category` | `game3d`, `game2d`, `social`, `tool` u `other` |
 | `devices` | Lista de `pc`, `mobile`, `vr` (solo los que de verdad funcionan). xenxo **avisa y no abre** el juego en los equipos que no estén |
 | `multiplayer` | `true` o `false` |
+| `avatar` | `"character"` (se juega con su personaje de xenxo), `"badge"` (se ven su retrato, su nombre y su número) o `"none"` (no se usa la identidad de xenxo; no vale si el juego usa «Entrar con xenxo») |
 | `ageRating` | `"all"` o `"+14"` |
 | `monetization` | `{ "hasAds": bool, "hasPurchases": bool }` |
 | `author`, `contact` | Quién lo hace y un email o web de contacto |

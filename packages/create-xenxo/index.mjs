@@ -16,7 +16,7 @@ import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const SDK_VERSION = "^0.2.0";
+const SDK_VERSION = "^0.3.0";
 const WRANGLER_VERSION = "^4.150.0";
 
 const args = process.argv.slice(2);
@@ -125,6 +125,8 @@ async function main() {
       "{{title}}": title,
       "{{kind}}": kind.toUpperCase(),
       "{{category}}": kind === "2d" ? "game2d" : "game3d",
+      // 3D: se juega con el personaje de xenxo; 2D: se ven su retrato, su nombre y su número.
+      "{{avatar}}": kind === "2d" ? "badge" : "character",
       "{{sdkVersion}}": SDK_VERSION,
       "{{year}}": String(new Date().getFullYear()),
     };

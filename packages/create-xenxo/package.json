@@ -1,6 +1,6 @@
 {
   "name": "create-xenxo",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "license": "MIT",
   "type": "module",
   "description": "Crea un juego web listo para xenxo.io: 2D o 3D, «Entrar con xenxo», simulador local, sala multijugador opcional y AGENTS.md para tu IA",

@@ -30,7 +30,7 @@ import type { Env } from "./index";
 import { randomId, type Principal } from "./auth";
 import { plazaSeed, SEED_VERSION } from "./seed";
 import { districtByChunk, districtSeed, DISTRICT_SEED_VERSION, PARCELS, parcelIndex, parcelReserved, parcelSlot } from "./districts";
-import { nexoArrival, NEXO_SEED_VERSION, nexoSeed, SHOWCASE_SLOTS } from "./nexo";
+import { nexoArrival, NEXO_BOUNDS, NEXO_SEED_VERSION, nexoSeed, SHOWCASE_SLOTS } from "./nexo";
 import { portalEntities, r3, type Seeded } from "./places";
 import { fitsZone, localBox, worldBox, type Zone } from "./zone";
 import { assetKey } from "./assets";
@@ -273,7 +273,13 @@ export class ChunkRoom extends DurableObject<Env> {
           server_time: Date.now(),
           tick_hz: TICK_HZ,
           budgets: { ...BUDGETS },
+          ...(this.solo ? { solo: true, walk: NEXO_BOUNDS } : {}),
         }));
+        // En solitario (el nexo) nadie ve a nadie: ni gente, ni poses, ni chat.
+        if (this.solo) {
+          this.send(ws, msg("SNAPSHOT", { entities: this.allEntities(), peers: [], poses: [], chat: [] }));
+          return;
+        }
         this.send(
           ws,
           msg("SNAPSHOT", { entities: this.allEntities(), peers: this.peers(), poses: [...this.poses.values()], chat: this.recentChat() }),
@@ -282,6 +288,7 @@ export class ChunkRoom extends DurableObject<Env> {
         return;
       }
       case "POSE": {
+        if (this.solo) return; // en solitario no se reparten poses
         const now = Date.now();
         if (now - (this.lastPoseAt.get(att.session_id) ?? 0) < MIN_POSE_INTERVAL_MS) return; // descarta en silencio
         this.lastPoseAt.set(att.session_id, now);
@@ -293,6 +300,7 @@ export class ChunkRoom extends DurableObject<Env> {
         return;
       }
       case "CHAT":
+        if (this.solo) return this.sendError(ws, m.id, "forbidden", "aquí no hay chat: en el nexo se va en solitario");
         return this.handleChat(ws, att, m.id, m.payload.text);
       case "PING":
         return this.send(ws, msg("PONG", { t: m.payload.t, server_time: Date.now() }));
@@ -315,7 +323,12 @@ export class ChunkRoom extends DurableObject<Env> {
     this.poses.delete(att.session_id);
     this.dirty.delete(att.session_id);
     this.lastPoseAt.delete(att.session_id);
-    if (att.hello) this.broadcast(msg("PEER_LEAVE", { session_id: att.session_id }), ws);
+    if (att.hello && !this.solo) this.broadcast(msg("PEER_LEAVE", { session_id: att.session_id }), ws);
+  }
+
+  /** El nexo se recorre en solitario: el multijugador es de los distritos, la plaza y los juegos. */
+  private get solo(): boolean {
+    return this.chunkId === PLACES.nexo;
   }
 
   /* ---------------------------------------------------------------- */

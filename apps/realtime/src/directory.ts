@@ -30,7 +30,7 @@ import {
 } from "./oidc";
 import { type ProjectCategory } from "@xenxo/protocol";
 import { DISTRICTS, districtById, PARCELS, parcelIndex, parcelRect } from "./districts";
-import { gameInfo, slugFrom, validSlug, type GameInfo } from "./games";
+import { gameInfo, manifestAvatar, slugFrom, validSlug, type GameInfo } from "./games";
 import { badJamDates, JAM_SCHEMA, jamPhase, jamRanking, jamText, jamTime, MAX_ENTRIES_PER_USER, validJamSlug, type Jam, type JamResult } from "./jam";
 import type { GameManifest } from "@xenxo/protocol";
 
@@ -250,6 +250,9 @@ export class Directory extends DurableObject<Env> {
     this.sql.exec("CREATE UNIQUE INDEX IF NOT EXISTS users_player_no ON users(player_no)");
     // Migración: carné público (apagado por defecto; lo enciende cada persona).
     if (!ucols.includes("card_public")) this.sql.exec("ALTER TABLE users ADD COLUMN card_public INTEGER NOT NULL DEFAULT 0");
+    // Migración: retrato del personaje (lo hace la web en el navegador) y de qué personaje es.
+    if (!ucols.includes("portrait_hash")) this.sql.exec("ALTER TABLE users ADD COLUMN portrait_hash TEXT");
+    if (!ucols.includes("portrait_of")) this.sql.exec("ALTER TABLE users ADD COLUMN portrait_of TEXT");
     // Contador de números de jugador: nunca baja, así un número no se reutiliza aunque se borre la cuenta.
     this.sql.exec("INSERT OR IGNORE INTO counters (k, v) VALUES ('next_player', (SELECT COALESCE(MAX(player_no), 0) + 1 FROM users))");
     // Migración: el personaje propio que ya llevaba cada cuenta entra en su armario (una sola vez).
@@ -635,10 +638,48 @@ export class Directory extends DurableObject<Env> {
     );
   }
 
-  me(id: string): Result<UserRow & { projects: PublicProject[] }> {
+  async me(id: string): Promise<Result<UserRow & { projects: PublicProject[]; avatar_effective: { hash: string; format: string }; portrait: { hash: string; current: boolean } | null }>> {
     const u = this.user(id);
     if (!u) return fail(404, "not_found", "la cuenta no existe");
-    return ok({ ...u, projects: this.projectsOf(id, true) });
+    return ok({ ...u, projects: this.projectsOf(id, true), avatar_effective: await this.effectiveAvatar(u), portrait: await this.portrait(u) });
+  }
+
+  /**
+   * El personaje que lleva una persona: el elegido o, si no eligió, uno de serie fijo para ella
+   * (el mismo en todos los juegos).
+   */
+  async effectiveAvatar(u: UserRow): Promise<{ hash: string; format: string }> {
+    if (u.avatar_hash) return { hash: u.avatar_hash, format: u.avatar_format ?? "vrm" };
+    const i = parseInt((await sha256b64url(u.id)).replace(/[^0-9]/g, "").slice(0, 6) || "0", 10) % AVATAR_PRESETS.length;
+    return { hash: AVATAR_PRESETS[i]!.hash, format: "vrm" };
+  }
+
+  /** Su retrato y si es del personaje que lleva ahora (si no, la web hace uno nuevo). */
+  private async portrait(u: UserRow): Promise<{ hash: string; current: boolean } | null> {
+    const r = this.sql
+      .exec<{ portrait_hash: string | null; portrait_of: string | null }>("SELECT portrait_hash, portrait_of FROM users WHERE id = ?", u.id)
+      .toArray()[0];
+    if (!r?.portrait_hash) return null;
+    return { hash: r.portrait_hash, current: r.portrait_of === (await this.effectiveAvatar(u)).hash };
+  }
+
+  /**
+   * Guarda el retrato que hizo la web del personaje que lleva la persona (`of`). Tiene que ser una
+   * imagen que subió ella (kind=portrait) y de su personaje de ahora.
+   */
+  async setPortrait(id: string, hash: unknown, of: unknown): Promise<Result<{ hash: string; current: boolean } | null>> {
+    const u = this.user(id);
+    if (!u) return fail(404, "not_found", "la cuenta no existe");
+    if (hash === null) {
+      this.sql.exec("UPDATE users SET portrait_hash = NULL, portrait_of = NULL WHERE id = ?", id);
+      return ok(null);
+    }
+    if (typeof hash !== "string" || typeof of !== "string") return fail(400, "bad_message", "hash y of (el personaje del retrato)");
+    const up = this.sql.exec("SELECT 1 FROM uploads WHERE hash = ? AND uploader = ? AND kind = 'portrait'", hash, `usr_${id}`).toArray()[0];
+    if (!up) return fail(403, "forbidden", "sube primero el retrato (kind=portrait)");
+    if (of !== (await this.effectiveAvatar(u)).hash) return fail(409, "portrait_stale", "ese retrato no es del personaje que llevas ahora");
+    this.sql.exec("UPDATE users SET portrait_hash = ?, portrait_of = ? WHERE id = ?", hash, of, id);
+    return ok(await this.portrait(u));
   }
 
   rename(id: string, raw: unknown): Result<UserRow> {
@@ -844,7 +885,7 @@ export class Directory extends DurableObject<Env> {
   hashInUse(hash: string): boolean {
     return (
       this.sql.exec("SELECT 1 FROM projects WHERE mesh_hash = ? OR cover_hash = ? LIMIT 1", hash, hash).toArray().length > 0 ||
-      this.sql.exec("SELECT 1 FROM users WHERE avatar_hash = ? LIMIT 1", hash).toArray().length > 0 ||
+      this.sql.exec("SELECT 1 FROM users WHERE avatar_hash = ? OR portrait_hash = ? LIMIT 1", hash, hash).toArray().length > 0 ||
       this.sql.exec("SELECT 1 FROM skins WHERE hash = ? LIMIT 1", hash).toArray().length > 0
     );
   }
@@ -860,7 +901,7 @@ export class Directory extends DurableObject<Env> {
     const rows = this.sql
       .exec<{ hash: string; uploader: string; kind: string }>(
         `SELECT hash, uploader, kind FROM uploads
-         WHERE uploader LIKE 'usr_%' AND kind IN ('avatar', 'cover', 'monument', 'model') AND ts < ? LIMIT ?`,
+         WHERE uploader LIKE 'usr_%' AND kind IN ('avatar', 'cover', 'monument', 'model', 'portrait') AND ts < ? LIMIT ?`,
         now - ORPHAN_GRACE_MS, limit * 5,
       )
       .toArray();
@@ -872,6 +913,7 @@ export class Directory extends DurableObject<Env> {
           this.sql.exec("SELECT 1 FROM users WHERE id = ? AND avatar_hash = ?", uid, r.hash).toArray().length > 0
         );
       }
+      if (r.kind === "portrait") return this.sql.exec("SELECT 1 FROM users WHERE id = ? AND portrait_hash = ?", uid, r.hash).toArray().length > 0;
       const col = r.kind === "cover" ? "cover_hash" : "mesh_hash";
       return this.sql.exec(`SELECT 1 FROM projects WHERE ${col} = ?`, r.hash).toArray().length > 0;
     };
@@ -1055,6 +1097,10 @@ export class Directory extends DurableObject<Env> {
     if (!manifest.privacy) return fail(400, "privacy_required", "la ficha necesita «privacy»: la página de privacidad del juego (https)");
     if (manifest.xenxo?.project && manifest.xenxo.project !== projectId) {
       return fail(400, "manifest_mismatch", "el xenxo.json dice que es de otro proyecto (xenxo.project)");
+    }
+    // Con «Entrar con xenxo», el juego tiene que enseñar quién juega: su personaje o su nombre y número.
+    if (manifest.xenxo?.clientId && manifestAvatar(manifest) === "none") {
+      return fail(400, "avatar_required", "con «Entrar con xenxo», «avatar» tiene que ser \"character\" (su personaje) o \"badge\" (su nombre y número)");
     }
     if (manifest.xenxo?.clientId) {
       const c = this.sql.exec<{ user_id: string }>("SELECT user_id FROM oidc_clients WHERE client_id = ?", manifest.xenxo.clientId).toArray()[0];
@@ -1661,13 +1707,11 @@ export class Directory extends DurableObject<Env> {
     if (scopes.includes("player")) out.player_no = u.player_no;
     if (scopes.includes("avatar")) {
       // Sin personaje elegido, uno de serie fijo para esa persona (el mismo en todos los juegos).
-      let hash = u.avatar_hash, format = u.avatar_format ?? "vrm";
-      if (!hash) {
-        const i = parseInt((await sha256b64url(userId)).replace(/[^0-9]/g, "").slice(0, 6) || "0", 10) % AVATAR_PRESETS.length;
-        hash = AVATAR_PRESETS[i]!.hash;
-        format = "vrm";
-      }
+      const { hash, format } = await this.effectiveAvatar(u);
       out.avatar = { url: `${publicBase}/assets/${hash.replace(/^sha256:/, "")}`, format, hash };
+      // Su retrato (imagen cuadrada), si la web ya lo hizo de este personaje: para juegos sin 3D.
+      const p = await this.portrait(u);
+      if (p?.current) out.picture = `${publicBase}/assets/${p.hash.replace(/^sha256:/, "")}`;
     }
     return out;
   }

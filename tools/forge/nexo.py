@@ -241,20 +241,19 @@ def spires(lay: dict, d: dict, detail: int = 1):
     emblema), con fachada de rascacielos real (sus ventanas se encienden de noche), franjas de neón
     del color del distrito y antenas. Centradas en el origen.
     """
-    R = lay["islands"]["radius"]
     color = d["color"]
     body = mat("fachada", "#b9c0cf")
     trim = mat("metal", "#262f44")
     neon = mat("neon", color)
     p = Part(f"nexo_spires_{d['id']}")
     rnd = [0.37, 0.81, 0.12, 0.66, 0.94, 0.28, 0.55, 0.73, 0.05]
-    n = 9 if detail else 7
+    # Las agujas salen de la disposición (las mismas que llevan colisión en nexo.ts). Dejan libre el
+    # pasillo de la pasarela a la puerta. En Blender, y = −z de la isla.
+    spots = lay["islands"]["spires"]
+    n = len(spots) if detail else min(7, len(spots))
     for i in range(n):
-        a = 2 * math.pi * i / n + 0.35
-        r = R * (0.62 + 0.18 * rnd[i % len(rnd)])
-        x, y = r * math.cos(a), r * math.sin(a)
-        h = 3.5 + 8.0 * rnd[(i * 4 + 1) % len(rnd)]
-        w = 1.1 + 0.9 * rnd[(i * 2 + 3) % len(rnd)]
+        sx, sz, h, w = spots[i]
+        x, y = sx, -sz
         p.box((x - w / 2, y - w / 2, 0.0), (x + w / 2, y + w / 2, h), body)
         p.box((x - w / 2 - 0.08, y - w / 2 - 0.08, h), (x + w / 2 + 0.08, y + w / 2 + 0.08, h + 0.2), trim)
         # Franjas de luz verticales en dos caras y una horizontal arriba
