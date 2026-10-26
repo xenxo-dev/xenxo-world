@@ -193,7 +193,16 @@ export class ChunkRoom extends DurableObject<Env> {
     }
 
     if (this.chunkId === PLACES.plaza) this.applySeed("plaza", SEED_VERSION, plazaSeed());
-    else if (this.chunkId === PLACES.nexo) this.applySeed("nexo", NEXO_SEED_VERSION, nexoSeed());
+    else if (this.chunkId === PLACES.nexo) {
+      this.applySeed("nexo", NEXO_SEED_VERSION, nexoSeed());
+      // Sin escaparate: si quedaba alguno de antes, fuera (los proyectos están en sus distritos).
+      if (SHOWCASE_SLOTS.length === 0) {
+        for (const r of this.sql.exec<{ project_id: string }>("SELECT project_id FROM showcase").toArray()) {
+          for (const id of Object.values(showIds(r.project_id))) this.sql.exec("DELETE FROM entities WHERE entity_id = ?", id);
+        }
+        this.sql.exec("DELETE FROM showcase");
+      }
+    }
     else {
       const d = districtByChunk(this.chunkId);
       if (d) this.applySeed(`district_${d.id}`, DISTRICT_SEED_VERSION, districtSeed(d, nexoArrival(d.id)));

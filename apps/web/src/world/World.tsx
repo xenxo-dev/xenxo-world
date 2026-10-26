@@ -15,6 +15,7 @@ import { Player } from "./Player";
 import { Portals } from "./Portals";
 import { Sky, SKY } from "./Sky";
 import { Skyline } from "./Skyline";
+import { NexoBackdrop } from "./NexoBackdrop";
 import skyDay from "./sky-day.json";
 
 /** Una sola tienda XR para toda la app. Activa foveation para ganar rendimiento en Quest. */
@@ -50,7 +51,13 @@ const LIGHTING = {
     // o la plaza se ve gris y lavada en VR y móvil.
     env: 0.025,
   },
-  // El nexo: siempre de noche, pero con una luz fría de ambiente para que se lea el suelo.
+  // El nexo de día: cielo claro sobre la megaciudad, luz suave para que no se pierdan los neones.
+  nexoDay: {
+    hemi: ["#e6eeff", "#7a7488", 1.2],
+    sun: { color: "#fff4e6", intensity: 1.7, offset: SUN_DIR },
+    env: 0.45,
+  },
+  // El nexo de noche (y los distritos, siempre): una luz fría de ambiente para que se lea el suelo.
   nexo: {
     hemi: ["#7fa6e6", "#1a2333", 1.1],
     sun: { color: "#9fd8ff", intensity: 0.35, offset: [22, 40, -12] },
@@ -251,9 +258,11 @@ function Scene({ active }: { active: boolean }) {
   const f = g.features;
   const place = usePlace();
   const inPlaza = place === PLACES.plaza;
-  // El nexo y los distritos están fuera del tiempo: siempre de noche, para que manden sus líneas de luz.
-  const ambience: Ambience = inPlaza ? g.ambience : "night";
-  const profile: LightProfile = inPlaza ? ambience : "nexo";
+  const inNexo = place === PLACES.nexo;
+  // La plaza y el nexo siguen el ambiente elegido (día, noche o la hora); los distritos están
+  // fuera del tiempo, siempre de noche, para que manden sus líneas de luz.
+  const ambience: Ambience = inPlaza || inNexo ? g.ambience : "night";
+  const profile: LightProfile = inPlaza ? ambience : inNexo && ambience === "day" ? "nexoDay" : "nexo";
   const sky = SKY[ambience];
   const realSky = ambience === "day" && f.pbr;
   const daySky = useDaySky(realSky);
@@ -267,6 +276,7 @@ function Scene({ active }: { active: boolean }) {
       <fog attach="fog" args={[sky.fog, ambience === "night" ? 45 : 70, ambience === "night" ? 230 : 260]} />
       {!skyReady && <Sky ambience={ambience} />}
       {inPlaza && <Skyline count={f.skyline} ambience={ambience} pbr={f.pbr} />}
+      {inNexo && <NexoBackdrop count={f.skyline} ambience={ambience} />}
       <Lighting profile={profile} features={f} />
       <Environment ambience={ambience} profile={profile} probe={f.probe} sky={dayEnv} />
       {/* Los textos cargan su fuente de forma asíncrona: que nunca bloqueen la escena ni el panel. */}

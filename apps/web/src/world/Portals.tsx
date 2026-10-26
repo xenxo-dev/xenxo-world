@@ -118,7 +118,7 @@ const PortalView = memo(function PortalView({ entity, coverWidth }: { entity: En
       {coverMat ? (
         <mesh geometry={unitPlane} material={coverMat} position={[0, 0, 0.02]} scale={[w, h, 1]} />
       ) : (
-        <mesh geometry={unitPlane} material={veilMaterial(categoryColor(portal.data.category))} scale={[w, h, 1]} renderOrder={2} />
+        <mesh geometry={unitPlane} material={veilMaterial(portal.data.color ?? categoryColor(portal.data.category))} scale={[w, h, 1]} renderOrder={2} />
       )}
     </group>
   );

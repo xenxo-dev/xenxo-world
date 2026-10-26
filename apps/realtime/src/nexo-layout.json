@@ -1,5 +1,5 @@
 {
- "$comment": "Disposición del nexo (coordenadas del chunk: X este, Z sur, metros). La usan nexo.ts y la forja (tools/forge/nexo.py). Los portales van en un anillo mirando al centro: los de `district_slots` llevan a los distritos y el resto son el escaparate de los proyectos más nuevos. Si cambias algo aquí, vuelve a forjar y sube NEXO_SEED_VERSION.",
+ "$comment": "Disposición del nexo (coordenadas del chunk: X este, Z sur, metros). La usan nexo.ts y la forja (tools/forge/nexo.py). En el nexo solo hay distritos: cada uno tiene una puerta abierta en el anillo `gates` (mirando al centro), su emblema a la izquierda y, detrás, su isla flotante con el distrito en pequeño, que se ve a través de la puerta. `district_slots` dice qué hueco del anillo usa cada distrito; los huecos libres son para distritos futuros. `portals` son las medidas del marco de las parcelas (no del nexo). Las islas de los huecos impares van en un anillo más lejano (`ring_alt`) para que quepan los distritos futuros entre las de ahora. Si cambias algo aquí, vuelve a forjar (npm run forge:nexo) y sube NEXO_SEED_VERSION.",
  "center": [
   32,
   32
@@ -41,10 +41,30 @@
  },
  "district_slots": {
   "plaza": 0,
-  "arcade": 4,
-  "pixel": 8,
-  "agora": 12,
-  "taller": 16,
-  "frontera": 20
+  "arcade": 2,
+  "pixel": 4,
+  "agora": 6,
+  "taller": 8,
+  "frontera": 10
+ },
+ "gates": {
+  "ring": 15,
+  "count": 12,
+  "w": 5,
+  "h": 6,
+  "bottom": 0.05
+ },
+ "emblem": {
+  "x": -4.1,
+  "z": 0.6,
+  "plinth_h": 0.8,
+  "size": 2.2
+ },
+ "islands": {
+  "ring": 46,
+  "ring_alt": 76,
+  "y": -2.5,
+  "radius": 17,
+  "scale": 0.38
  }
 }

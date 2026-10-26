@@ -6,7 +6,7 @@ Se está construyendo en público. Esto es la v0.5.
 
 ## Publicar en xenxo.io (si no vas a tocar el código)
 
-- **Tu personaje y tu proyecto:** entra en [xenxo.io](https://xenxo.io), *Cuenta → Crear cuenta* con passkey o Google (sin email). Desde ahí subes tu personaje (`.vrm` o `.glb`) y en *Proyectos → Publicar el mío* tu proyecto. Eliges **distrito** (Arcade, Píxel, Ágora, Taller o Frontera) y una **parcela libre** en su plano, y das **nombre, enlace, una portada (imagen 16:9) y un monumento 3D** (`.glb`, ≤ 10.000 triángulos): tu proyecto aparece como un **portal en tu parcela**, con la portada en la pantalla y el monumento (hasta 1,6 m) en la peana de delante, en el escaparate del nexo y como tarjeta en el nexo 2D. Guía de modelos: [`docs/CREAR-MODELOS.md`](docs/CREAR-MODELOS.md).
+- **Tu personaje y tu proyecto:** entra en [xenxo.io](https://xenxo.io), *Cuenta → Crear cuenta* con passkey o Google (sin email). Desde ahí subes tu personaje (`.vrm` o `.glb`) y en *Proyectos → Publicar el mío* tu proyecto. Eliges **distrito** (Arcade, Píxel, Ágora, Taller o Frontera) y una **parcela libre** en su plano, y das **nombre, enlace, una portada (imagen 16:9) y un monumento 3D** (`.glb`, ≤ 10.000 triángulos): tu proyecto aparece como un **portal en tu parcela**, con la portada en la pantalla y el monumento (hasta 1,6 m) en la peana de delante y como tarjeta en el nexo 2D (cuando lo revisa alguien de xenxo). Guía de modelos: [`docs/CREAR-MODELOS.md`](docs/CREAR-MODELOS.md).
 - **Construir con un agente de IA:** publica tu proyecto, crea una clave de parcela en *Proyectos → Construir con tu agente* y conecta el servidor MCP de xenxo a Claude Code o Cursor (ver abajo). Para construir fuera de una parcela hace falta una clave que da el equipo (contact@xenxo.io).
 - **Tu propia copia del mundo:** sigue *Arrancar en local* y *Desplegar*.
 
@@ -53,7 +53,7 @@ Para probar en las Quest 3 en la misma red, abre `http://<IP-de-tu-PC>:5173` en 
 Cualquiera que se dé de alta (con una passkey) puede, desde **Cuenta** y **Proyectos**:
 
 - Subir su **personaje** en `.glb` (Blender o lo que quiera) o `.vrm` (VRoid Studio y similares) y verlo en una **vista previa 3D** (quieto, andando, bailando o saludando). Se valida y se optimiza en su propio navegador antes de subirlo, y los demás lo ven en todo el mundo (el mismo personaje, nombre y número en cada lugar). Su **armario** guarda hasta 3 personajes propios para cambiar de uno a otro; los 8 de serie no cuentan.
-- **Publicar un proyecto** en la parcela que elija de un distrito, con nombre, enlace, portada y monumento 3D (descripción opcional). Aparece como portal en su parcela, en el escaparate del nexo y como tarjeta en el nexo 2D.
+- **Publicar un proyecto** en la parcela que elija de un distrito, con nombre, enlace, portada y monumento 3D (descripción opcional). Aparece como portal en su parcela y, una vez revisado, como tarjeta en el nexo 2D.
 - Escribir en el **chat de cada lugar** (nexo, plaza o distrito; los invitados lo leen); los mensajes salen también como bocadillos sobre los personajes y se pueden denunciar.
 - Descargar todos sus datos o borrar la cuenta (y todo su contenido) en un clic.
 
@@ -80,7 +80,7 @@ npm run agent:build    # el agente coloca un bloque en la plaza
 
 ## El nexo: la entrada
 
-Al entrar en xenxo se aparece en el **nexo**, un vestíbulo minimalista fuera del mapa: suelo oscuro con líneas de luz cian, «xenxo» escrito con luz en el suelo del círculo central, un faro fino y un anillo de 24 portales mirando al centro. Seis llevan a los **distritos** y 18 son el **escaparate** de los proyectos más nuevos.
+Al entrar en xenxo se aparece en el **nexo**, una plataforma flotante sobre una megaciudad cyberpunk, con un planeta con anillos en el cielo (de día o de noche, según elijas en Personalizar): suelo oscuro con líneas de luz cian, «xenxo» escrito con luz en el centro, un faro fino y las **puertas de los distritos**. Cada puerta está abierta: a su izquierda, el emblema del distrito; a través de ella y detrás, su isla flotante con el distrito en pequeño. En el nexo solo hay distritos (los proyectos están en sus parcelas) y quedan huecos para distritos futuros.
 
 - **La Plaza**: el distrito con historia (su arco devuelve al nexo).
 - **Arcade** (juegos 3D), **Píxel** (juegos 2D), **Ágora** (social), **Taller** (herramientas) y **Frontera** (lo demás): cada uno con una avenida, dos calles y **16 parcelas** de 10×10 m. Quien publica elige distrito y parcela libre; su portal va al fondo de la parcela con su portada, su monumento en la peana y su nombre en neón. Al acercarte se abre su ficha con el enlace (nunca se abre nada sin pulsar). En la fase 2, la parcela será también el terreno que su dueño o su agente pueda construir.

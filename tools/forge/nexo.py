@@ -1,6 +1,7 @@
 """
-El nexo: vestíbulo minimalista fuera del mapa. Suelo oscuro con líneas de luz cian,
-un faro central fino (no tapa la vista entre portales) y marcos de portal con su peana.
+El nexo: plataforma flotante fuera del mapa. Suelo oscuro con líneas de luz cian, un faro central
+fino, y en el anillo las puertas abiertas de los distritos; detrás de cada una, su isla flotante
+(casco con agujas de neón) con el distrito en pequeño, que se ve a través de la puerta.
 
 La disposición sale de apps/realtime/src/nexo-layout.json (la misma que usa el servidor).
 Las letras «xenxo» del suelo no son geometría: las siembra el servidor como label@1 de neón.
@@ -24,15 +25,30 @@ def layout() -> dict:
 
 
 def slots(lay: dict) -> list[tuple[float, float, float]]:
-    """(x, z, facing) de cada portal: en anillo, mirando al centro (igual que seed-nexo.ts)."""
+    """(x, z, facing) de cada hueco de puerta: en anillo, mirando al centro (igual que nexo.ts)."""
     cx, cz = lay["center"]
-    P = lay["portals"]
+    G = lay["gates"]
     out = []
-    for i in range(P["count"]):
-        phi = 360.0 * i / P["count"]
+    for i in range(G["count"]):
+        phi = 360.0 * i / G["count"]
         a = math.radians(phi)
-        out.append((round(cx + P["ring"] * math.sin(a), 3), round(cz - P["ring"] * math.cos(a), 3), -phi))
+        out.append((round(cx + G["ring"] * math.sin(a), 3), round(cz - G["ring"] * math.cos(a), 3), -phi))
     return out
+
+
+def used_slots(lay: dict) -> list[int]:
+    """Huecos con distrito (el resto queda libre para distritos futuros)."""
+    return sorted(set(lay["district_slots"].values()))
+
+
+def island_spot(lay: dict, i: int) -> tuple[float, float, float]:
+    """(x, z, facing) de la isla de un hueco: detrás de su puerta, mirando al centro."""
+    cx, cz = lay["center"]
+    G, I = lay["gates"], lay["islands"]
+    phi = 360.0 * i / G["count"]
+    a = math.radians(phi)
+    ring = I["ring_alt"] if i % 2 else I["ring"]
+    return (round(cx + ring * math.sin(a), 3), round(cz - ring * math.cos(a), 3), -phi)
 
 
 def _annulus(p: Part, r0: float, r1: float, z: float, m, segments: int) -> None:
@@ -59,12 +75,12 @@ def floor(lay: dict, detail: int = 1):
     # Anillos de luz embutidos
     for r in lay["rings"]:
         _annulus(p, r - 0.05, r + 0.05, 0.009, neon, seg)
-    # Línea hacia cada portal (del anillo medio a la peana)
-    Pc = lay["portals"]
+    # Línea hacia cada puerta con distrito (del anillo medio al pie de la puerta)
+    G = lay["gates"]
     r_in = lay["rings"][1] + 0.3
-    r_out = Pc["ring"] - Pc["pedestal"] - 0.75
-    for i in range(Pc["count"]):
-        a = math.radians(360.0 * i / Pc["count"])
+    r_out = G["ring"] - 0.6
+    for i in used_slots(lay):
+        a = math.radians(360.0 * i / G["count"])
         bar = Part("l")
         bar.box((-0.03, r_in, 0.0), (0.03, r_out, 0.009), neon)
         # Bearing φ (0 = norte = −Z del mundo = +Y de Blender), girando hacia el este (+X).
@@ -146,5 +162,109 @@ def frame(lay: dict, detail: int = 1):
     p.lathe((0, -d, 0), [(0.56, ph + 0.002), (0.47, ph + 0.002)], neon, segments=s, smooth=False)
     ob = p.to_object()
     ob.name = "nexo_frame"
+    finish(ob)
+    return ob
+
+
+def gate(lay: dict, detail: int = 1):
+    """
+    Puerta de distrito: un arco abierto (sin pantalla) para ver la isla del distrito a través de
+    él. Dos pilares con filos de luz por dentro, dintel con remate y escalón. Frente hacia −Y.
+    """
+    G = lay["gates"]
+    cyan = lay["colors"]["line"]
+    W, H, Z0 = G["w"], G["h"], G["bottom"]
+    body = mat("metal", "#141a26")
+    edge = mat("metal", "#28324a")
+    neon = mat("neon", cyan)
+    pw, pd = 0.55, 0.7  # pilar: ancho y fondo
+    p = Part("nexo_gate")
+    # Escalón de entrada
+    p.box((-W / 2 - pw - 0.2, -0.9, 0.0), (W / 2 + pw + 0.2, 0.5, Z0), edge)
+    for sx in (-1, 1):
+        x0 = sx * W / 2
+        x1 = sx * (W / 2 + pw)
+        lo, hi = min(x0, x1), max(x0, x1)
+        p.box((lo, -pd / 2, Z0), (hi, pd / 2, Z0 + H), body)
+        # Remate escalonado en lo alto del pilar
+        p.box((lo - 0.08, -pd / 2 - 0.08, Z0 + H), (hi + 0.08, pd / 2 + 0.08, Z0 + H + 0.25), edge)
+        # Filo de luz en la cara interior y franjas en la frontal
+        xi = x0 - sx * 0.02
+        p.box((min(xi, x0), -0.06, Z0 + 0.1), (max(xi, x0), 0.06, Z0 + H - 0.1), neon)
+        for k in range(3 if detail else 2):
+            z = Z0 + 0.8 + k * 1.6
+            p.box((lo + 0.1, -pd / 2 - 0.02, z), (hi - 0.1, -pd / 2, z + 0.05), neon)
+    # Dintel con su filo inferior de luz
+    p.box((-W / 2 - pw - 0.08, -pd / 2, Z0 + H + 0.25), (W / 2 + pw + 0.08, pd / 2, Z0 + H + 0.75), body)
+    p.box((-W / 2, -0.06, Z0 + H - 0.02), (W / 2, 0.06, Z0 + H), neon)
+    p.box((-W / 2 - pw, -pd / 2 - 0.02, Z0 + H + 0.45), (W / 2 + pw, -pd / 2, Z0 + H + 0.5), neon)
+    ob = p.to_object()
+    ob.name = "nexo_gate"
+    finish(ob)
+    return ob
+
+
+def island(lay: dict, detail: int = 1):
+    """
+    Casco de una isla flotante: tapa plana (donde va el distrito en pequeño) con su borde de luz y
+    una quilla facetada que se pierde hacia abajo, con «raíces» de neón. Centrada en el origen,
+    con la tapa en z = 0.
+    """
+    R = lay["islands"]["radius"]
+    cyan = lay["colors"]["line"]
+    top = mat("panel", "#1e2433")
+    hull = mat("oscuro", "#0a0d16")
+    rim = mat("metal", "#2a3245")
+    neon = mat("neon", cyan)
+    s = 48 if detail else 24
+    p = Part("nexo_island")
+    p.lathe((0, 0, 0), [(R, -0.6), (R, 0.0), (0.0001, 0.0)], top, segments=s, smooth=False)
+    # Quilla facetada (pocos lados: se lee como roca o metal tallado)
+    k = 12 if detail else 8
+    p.lathe((0, 0, 0), [(R * 0.92, -0.6), (R * 0.7, -2.4), (R * 0.45, -5.0), (R * 0.2, -8.0), (0.0001, -11.0)], hull, segments=k, smooth=False)
+    # Borde: un canto metálico y un anillo de luz
+    p.lathe((0, 0, 0), [(R + 0.15, -0.65), (R + 0.15, 0.08), (R - 0.1, 0.08)], rim, segments=s, smooth=False)
+    p.lathe((0, 0, 0), [(R + 0.17, -0.25), (R + 0.17, -0.15)], neon, segments=s, smooth=False)
+    # Raíces de luz colgando de la quilla
+    for j in range(6 if detail else 4):
+        a = 2 * math.pi * j / (6 if detail else 4) + 0.3
+        r0 = R * 0.6
+        path = [(r0 * math.cos(a), r0 * math.sin(a), -3.0), (r0 * 0.55 * math.cos(a), r0 * 0.55 * math.sin(a), -7.5), (0.0, 0.0, -12.5)]
+        p.tube(path, 0.07, neon, segments=5 if detail else 4)
+    ob = p.to_object()
+    ob.name = "nexo_island"
+    finish(ob)
+    return ob
+
+
+def spires(lay: dict, d: dict, detail: int = 1):
+    """
+    Agujas cyberpunk de la isla de un distrito: torres en corona alrededor del centro (donde va el
+    emblema), con franjas de neón del color del distrito y antenas. Centradas en el origen.
+    """
+    R = lay["islands"]["radius"]
+    color = d["color"]
+    body = mat("metal", "#161c2a")
+    trim = mat("metal", "#262f44")
+    neon = mat("neon", color)
+    p = Part(f"nexo_spires_{d['id']}")
+    rnd = [0.37, 0.81, 0.12, 0.66, 0.94, 0.28, 0.55, 0.73, 0.05]
+    n = 9 if detail else 7
+    for i in range(n):
+        a = 2 * math.pi * i / n + 0.35
+        r = R * (0.62 + 0.18 * rnd[i % len(rnd)])
+        x, y = r * math.cos(a), r * math.sin(a)
+        h = 3.5 + 8.0 * rnd[(i * 4 + 1) % len(rnd)]
+        w = 1.1 + 0.9 * rnd[(i * 2 + 3) % len(rnd)]
+        p.box((x - w / 2, y - w / 2, 0.0), (x + w / 2, y + w / 2, h), body)
+        p.box((x - w / 2 - 0.08, y - w / 2 - 0.08, h), (x + w / 2 + 0.08, y + w / 2 + 0.08, h + 0.2), trim)
+        # Franjas de luz verticales en dos caras y una horizontal arriba
+        p.box((x - 0.04, y - w / 2 - 0.03, 0.4), (x + 0.04, y - w / 2, h - 0.3), neon)
+        p.box((x - w / 2 - 0.03, y - 0.04, 0.4), (x - w / 2, y + 0.04, h - 0.3), neon)
+        p.box((x - w / 2 - 0.02, y - w / 2 - 0.02, h - 0.55), (x + w / 2 + 0.02, y + w / 2 + 0.02, h - 0.45), neon)
+        if detail and i % 2 == 0:
+            p.cylinder((x, y, h + 0.2), 0.04, 1.6 + rnd[i % len(rnd)] * 1.4, trim, segments=6)
+    ob = p.to_object()
+    ob.name = f"nexo_spires_{d['id']}"
     finish(ob)
     return ob

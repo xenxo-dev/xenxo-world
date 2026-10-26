@@ -86,7 +86,11 @@ def main() -> None:
     cx, cz = nx["center"]
     add("nexo_floor", "nexo", lambda d: nexo.floor(nx, d), [(cx + far, cz, 0)])
     add("nexo_beacon", "prop", lambda d: nexo.beacon(nx, d), [(cx + far, cz, 0)])
-    add("nexo_frame", "prop", lambda d: nexo.frame(nx, d), [(x + far, z, f) for x, z, f in nexo.slots(nx)])
+    # El marco de las parcelas (los distritos lo usan; en el nexo ya no hay marcos de proyecto).
+    add("nexo_frame", "prop", lambda d: nexo.frame(nx, d), [(cx + far, cz + 300.0, 0)])
+    gate_spots = [s for i, s in enumerate(nexo.slots(nx)) if i in nexo.used_slots(nx)]
+    add("nexo_gate", "prop", lambda d: nexo.gate(nx, d), [(x + far, z, f) for x, z, f in gate_spots])
+    add("nexo_island", "district", lambda d: nexo.island(nx, d), [(x + far, z, f) for x, z, f in (nexo.island_spot(nx, i) for i in nexo.used_slots(nx))])
 
     # Distritos: cada uno en su sitio lejano (también para hornear sin vecinos) y su emblema.
     dl = district.layout()
@@ -94,6 +98,7 @@ def main() -> None:
         ox = 2000.0 + i * 100.0
         add(f"district_{dd['id']}", "district", lambda d, dd=dd: district.ground(dl, dd, d), [(ox + 32.0, 32.0, 0)])
         add(f"emblem_{dd['id']}", "prop", lambda d, dd=dd: district.emblem(dd, d), [(ox + 32.0, -40.0, 0)])
+        add(f"nexo_spires_{dd['id']}", "prop", lambda d, dd=dd: nexo.spires(nx, dd, d), [(ox + 32.0, -120.0, 0)])
 
     # Colocar: la primera instancia es el propio objeto; el resto, copias enlazadas (solo como oclusores).
     for name, item in catalog.items():

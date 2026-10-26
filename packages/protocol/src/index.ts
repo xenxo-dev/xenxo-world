@@ -184,6 +184,8 @@ export const PortalV1 = z.object({
     .optional(),
   /** Categoría ("game3d", "game2d", "social", "tool", "other"…): pista de color para el cliente. */
   category: z.string().regex(/^[a-z0-9_]{1,16}$/).optional(),
+  /** Color del velo de luz (sin portada). Si no está, el de la categoría. */
+  color: HexColor.optional(),
 });
 
 /** Reservado en v0: el servidor lo rechaza hasta que exista el sandbox WASM. */

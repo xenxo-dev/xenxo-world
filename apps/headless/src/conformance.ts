@@ -481,6 +481,13 @@ await scenario("nexo y distritos: el nexo lleva a la plaza y a los distritos, y 
   assert(c.snapshot.entities.some((e) => e.entity_id === "nexo_letters"), "faltan las letras del suelo del nexo");
   const toArcade = c.snapshot.entities.find((e) => e.entity_id === "nexo_portal_arcade")?.components["portal@1"] as { to: { chunk_id?: string } } | undefined;
   assert(toArcade?.to.chunk_id === "c_1_0", "falta el portal del nexo al distrito Arcade");
+  const arcadePortal = c.snapshot.entities.find((e) => e.entity_id === "nexo_portal_arcade")?.components["portal@1"] as { color?: string; cover?: string } | undefined;
+  assert(!!arcadePortal?.color && !arcadePortal.cover, "la puerta del distrito es abierta (sin portada) y del color del distrito");
+  for (const id of ["nexo_gate_arcade", "nexo_monument_arcade", "nexo_island_arcade", "nexo_mini_arcade_spires", "nexo_island_plaza"]) {
+    assert(c.snapshot.entities.some((e) => e.entity_id === id), `falta ${id} (puerta, emblema e isla del distrito)`);
+  }
+  assert(c.snapshot.entities.some((e) => e.entity_id.startsWith("nexo_mini_plaza_")), "la isla de la plaza lleva la plaza en pequeño");
+  assert(!c.snapshot.entities.some((e) => e.entity_id.startsWith("show_") || e.entity_id.startsWith("nexo_frame_")), "en el nexo solo hay distritos");
   c.close();
   const d = await XenxoClient.connect({ baseUrl, chunkId: "c_1_0" });
   const gate = d.snapshot.entities.find((e) => e.entity_id === "arcade_gate_portal")?.components["portal@1"] as { to: { chunk_id?: string } } | undefined;
@@ -540,18 +547,9 @@ await scenario("proyecto: exige portada, monumento, distrito y parcela libre; su
   const meshEntity = up(`standm_${id}`);
   const lods = meshEntity && meshEntity.kind === "upsert" ? (meshEntity.entity.components["mesh@1"] as { lods: { tris: number }[] }).lods : [];
   assert(lods[0]?.tris === 108, `los triángulos deberían venir medidos por el servidor (108), llegaron ${lods[0]?.tris}`);
-  // Al escaparate del nexo solo llega lo revisado: se aprueba con la clave de administración.
-  assert(created.data.project.review === "pending", "publicar es inmediato, pero el escaparate espera la revisión");
-  if (adminKey) {
-    const mod = new Api(baseUrl);
-    await mod.agentToken(adminKey);
-    const shown = nexo.next("DELTA", (m) => m.payload.changes.some((c) => c.kind === "upsert" && c.entity.entity_id === `show_${id}`), 6000);
-    assert((await mod.call("POST", `/mod/projects/${id}/review`, { decision: "approved" })).ok, "aprobar");
-    const s = await shown;
-    const show = s.payload.changes.find((c) => c.kind === "upsert" && c.entity.entity_id === `show_${id}`);
-    const sc = show && show.kind === "upsert" ? (show.entity.components["portal@1"] as { to: { chunk_id?: string } }) : null;
-    assert(sc?.to.chunk_id === "c_1_-1", "el escaparate del nexo lleva al distrito del proyecto");
-  }
+  // Los proyectos viven en su distrito: el nexo no tiene escaparate.
+  assert(created.data.project.review === "pending", "publicar es inmediato; el catálogo espera la revisión");
+  assert(!nexo.snapshot.entities.some((e) => e.entity_id.startsWith("show_")), "en el nexo no hay portales de proyectos");
 
   const other = new Api(baseUrl);
   await other.register(`conf ${randomUUID().slice(0, 6)}`);
