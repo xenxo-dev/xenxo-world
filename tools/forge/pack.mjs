@@ -5,7 +5,10 @@
  *   - comprueba el presupuesto con el mismo inspector que usa el servidor,
  *   - escribe los GLB en apps/realtime/src/seed-assets/ con un índice (hash, triángulos, límites).
  *
- *   node tools/forge/pack.mjs [carpeta-de-la-forja]
+ *   node tools/forge/pack.mjs [carpeta-de-la-forja] [--keep]
+ *
+ * Con --keep (forja parcial, `--only=`), las piezas que no vienen en esta forja se conservan
+ * tal cual del índice actual en lugar de borrarse.
  */
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -19,7 +22,9 @@ import { checkBudget, inspectGlb } from "../../packages/assets/src/index.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..", "..");
-const src = resolve(process.argv[2] ?? join(here, "out"));
+const args = process.argv.slice(2);
+const keep = args.includes("--keep");
+const src = resolve(args.find((a) => !a.startsWith("--")) ?? join(here, "out"));
 const dest = join(root, "apps", "realtime", "seed-assets");
 const indexFile = join(root, "apps", "realtime", "src", "seed-assets.ts");
 
@@ -33,13 +38,18 @@ const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies(
 });
 
 const forge = JSON.parse(readFileSync(join(src, "forge.json"), "utf8"));
-// Borra solo los modelos de la plaza de la forja anterior (en la misma carpeta viven los avatares de serie).
 mkdirSync(dest, { recursive: true });
-if (existsSync(indexFile)) {
-  for (const m of readFileSync(indexFile, "utf8").matchAll(/sha256:([0-9a-f]{64})/g)) rmSync(join(dest, `${m[1]}.glb`), { force: true });
+const index = {};
+const previous = existsSync(indexFile) ? (await import(indexFile)).SEED_ASSETS : {};
+// Borra solo los modelos de la forja anterior que se rehacen (en la misma carpeta viven los avatares de serie).
+for (const [name, entry] of Object.entries(previous)) {
+  if (keep && !(name in forge)) {
+    index[name] = { kind: entry.kind, lods: entry.lods.map((l) => ({ ...l, file: `${l.hash.slice(7)}.glb` })) };
+    continue;
+  }
+  for (const l of entry.lods) rmSync(join(dest, `${l.hash.slice(7)}.glb`), { force: true });
 }
 
-const index = {};
 let total = 0;
 for (const name of Object.keys(forge).sort()) {
   const lods = [];
@@ -76,6 +86,7 @@ for (const name of Object.keys(forge).sort()) {
   }
   index[name] = { kind: forge[name].kind, lods };
 }
+if (keep) console.log(`(conservadas sin tocar: ${Object.keys(index).filter((n) => !(n in forge)).join(", ") || "ninguna"})`);
 
 // Índice tipado: el servidor siembra entidades con estos hashes y sirve los archivos
 // desde sus recursos estáticos (apps/realtime/seed-assets, nombrados por hash).

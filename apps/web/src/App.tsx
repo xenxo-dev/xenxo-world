@@ -3,7 +3,8 @@ import type { XRStore } from "@react-three/xr";
 import { loadPref, savePref } from "./config";
 import { Chat } from "./hud/Chat";
 import { Emotes } from "./hud/Emotes";
-import { t, useLang } from "./i18n";
+import { PortalCard, TravelToast } from "./hud/PortalCard";
+import { placeName, t, useLang } from "./i18n";
 import { setGuestName as setSessionGuestName, startSession } from "./net/session";
 import { useWorldVersion, world } from "./net/world-store";
 import { Panel, type Section } from "./panel/Panel";
@@ -45,7 +46,7 @@ const hudBox = "rounded-xl border border-cal/10 bg-noche/70 backdrop-blur";
 
 export function App() {
   const [inWorld, setInWorld] = useState(false);
-  const [panelSection, setPanelSection] = useState<Section>("solutions");
+  const [panelSection, setPanelSection] = useState<Section>("nexo");
   const [name, setNameState] = useState(() => loadPref("name", randomName()));
   const vr = useVRSupported();
   const xrStore = useXRStore();
@@ -92,7 +93,7 @@ export function App() {
             <span className="h-4 w-px bg-cal/15" />
             <span className="flex items-center gap-1.5 text-cal/70">
               <span className={`h-2 w-2 rounded-full ${world.status === "open" ? "bg-huerta" : "bg-ocre"}`} />
-              {world.status === "open" ? t("hud.inPlaza", { n: world.peers.size + 1 }) : t("hud.connecting")}
+              {world.status === "open" ? t("hud.inPlace", { n: world.peers.size + 1, place: placeName(world.chunkId) }) : t("hud.connecting")}
             </span>
           </div>
           {enterVR && (
@@ -110,6 +111,8 @@ export function App() {
               setInWorld(false);
             }}
           />
+          <PortalCard />
+          <TravelToast />
           <Emotes className={`pointer-events-auto absolute right-4 ${touch ? "bottom-36" : "bottom-5"}`} />
           {touch ? (
             <TouchJoystick />

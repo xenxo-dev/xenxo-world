@@ -2,11 +2,13 @@ import { useEffect, useState } from "react";
 import { REALTIME_URL } from "../config";
 import { ACCENTS, SOLUTIONS } from "../content";
 import { LANGS, legalPath, setLang, t, useLang, type Key } from "../i18n";
+import { PLACES } from "@xenxo/protocol";
 import { CustomizeSection, type CustomizeProps } from "./Account";
+import { NexoSection } from "./Nexo";
 import { ProjectsSection } from "./Projects";
 import { Block, card, Stat } from "./ui";
 
-export type Section = "solutions" | "projects" | "agents" | "customize";
+export type Section = "nexo" | "solutions" | "projects" | "agents" | "customize";
 
 interface LiveState {
   online: number;
@@ -16,6 +18,7 @@ interface LiveState {
 }
 
 const SECTIONS: { id: Section; label: Key; icon: string }[] = [
+  { id: "nexo", label: "nav.nexo", icon: "◎" },
   { id: "solutions", label: "nav.solutions", icon: "◇" },
   { id: "projects", label: "nav.projects", icon: "⌥" },
   { id: "agents", label: "nav.agents", icon: "◉" },
@@ -33,11 +36,23 @@ function useLiveState() {
   const [state, setState] = useState<LiveState | null>(null);
   useEffect(() => {
     let alive = true;
+    // El nexo y la plaza juntos: cuánta gente hay en el mundo y qué ha cambiado.
+    const one = (chunk: string) =>
+      fetch(new URL(`/chunk/${chunk}/state`, REALTIME_URL))
+        .then((r) => (r.ok ? (r.json() as Promise<LiveState>) : null))
+        .catch(() => null);
     const load = () =>
-      fetch(new URL("/chunk/c_0_0/state", REALTIME_URL))
-        .then((r) => (r.ok ? r.json() : null))
-        .then((s) => alive && setState(s as LiveState | null))
-        .catch(() => alive && setState(null));
+      Promise.all([one(PLACES.nexo), one(PLACES.plaza)]).then((list) => {
+        const ok = list.filter((s): s is LiveState => !!s);
+        if (!alive) return;
+        if (!ok.length) return setState(null);
+        setState({
+          online: ok.reduce((n, s) => n + s.online, 0),
+          agents_online: ok.reduce((n, s) => n + s.agents_online, 0),
+          entities: ok.reduce((n, s) => n + s.entities, 0),
+          recent_events: ok.flatMap((s) => s.recent_events).sort((a, b) => b.ts - a.ts).slice(0, 10),
+        });
+      });
     load();
     const id = setInterval(load, 10_000);
     return () => {
@@ -98,6 +113,8 @@ export function Panel(props: PanelProps) {
         </header>
 
         <main className="min-h-0 flex-1 overflow-y-auto p-5 sm:p-7">
+          {section === "nexo" && <NexoSection onEnter={props.onEnter} />}
+
           {section === "solutions" && (
             <Block title={t("nav.solutions")}>
               <p className="-mt-2 mb-5 max-w-prose text-[15px] leading-relaxed text-cal/65">{t("solutions.intro")}</p>
@@ -154,7 +171,7 @@ export function Panel(props: PanelProps) {
         {/* Pie (móvil): botón principal + pestañas */}
         <div className="border-t border-cal/10 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:hidden">
           <EnterButtons {...props} />
-          <nav className="mt-3 grid grid-cols-4 gap-1">
+          <nav className="mt-3 grid grid-cols-5 gap-1">
             {SECTIONS.map((s) => (
               <button
                 key={s.id}

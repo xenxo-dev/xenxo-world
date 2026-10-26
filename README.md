@@ -6,7 +6,7 @@ Se está construyendo en público. Esto es la v0.5.
 
 ## Publicar en xenxo.io (si no vas a tocar el código)
 
-- **Tu personaje y tu proyecto:** entra en [xenxo.io](https://xenxo.io), *Personalizar → Crear cuenta con passkey* (sin email). Desde ahí subes tu personaje (`.vrm` o `.glb`) y en *Proyectos → Publicar el mío* tu proyecto con un modelo 3D. El modelo se muestra en la exposición como **maqueta de hasta 1,3 m sobre un pedestal**. Guía de modelos: [`docs/CREAR-MODELOS.md`](docs/CREAR-MODELOS.md).
+- **Tu personaje y tu proyecto:** entra en [xenxo.io](https://xenxo.io), *Personalizar → Crear cuenta con passkey* (sin email). Desde ahí subes tu personaje (`.vrm` o `.glb`) y en *Proyectos → Publicar el mío* tu proyecto. Para publicar hacen falta **nombre, enlace, categoría, una portada (imagen 16:9) y un monumento 3D** (`.glb`, ≤ 10.000 triángulos): tu proyecto aparece como un **portal en el nexo**, con la portada en la pantalla y el monumento (hasta 1,6 m) en la peana de delante, y como tarjeta en el nexo 2D. Guía de modelos: [`docs/CREAR-MODELOS.md`](docs/CREAR-MODELOS.md).
 - **Construir con un agente de IA:** hoy hace falta una clave de agente que da el equipo de xenxo (escribe a contact@xenxo.io). Están en camino las parcelas propias y un servidor MCP para conectar Claude Code o Cursor sin pedir nada a nadie.
 - **Tu propia copia del mundo:** sigue *Arrancar en local* y *Desplegar*.
 
@@ -53,7 +53,7 @@ Para probar en las Quest 3 en la misma red, abre `http://<IP-de-tu-PC>:5173` en 
 Cualquiera que se dé de alta (con una passkey) puede, desde **Personalizar** y **Proyectos**:
 
 - Subir su **personaje** en `.glb` (Blender o lo que quiera) o `.vrm` (VRoid Studio y similares). Se valida y se optimiza en su propio navegador antes de subirlo, y los demás lo ven en la plaza.
-- **Publicar un proyecto** con título, descripción, enlace y un modelo 3D opcional. Aparece en la lista y como stand en la exposición, delante del edificio Proyectos.
+- **Publicar un proyecto** con nombre, enlace, categoría, portada y monumento 3D (descripción opcional). Aparece como portal en el nexo y como tarjeta en el nexo 2D.
 - Escribir en el **chat de la plaza** (los invitados lo leen); los mensajes salen también como bocadillos sobre los personajes y se pueden denunciar.
 - Descargar todos sus datos o borrar la cuenta (y todo su contenido) en un clic.
 
@@ -77,6 +77,14 @@ export XENXO_ADMIN_KEY=dev-admin-key-change-me   # moderación (opcional)
 npm run conformance    # 29 escenarios: protocolo, gestos, avatares de serie, cuentas, assets (GLB y VRM), proyectos, chat, luces, RGPD y denuncias
 npm run agent:build    # el agente coloca un bloque en la plaza
 ```
+
+## El nexo: la entrada
+
+Al entrar en xenxo se aparece en el **nexo**, un vestíbulo minimalista fuera del mapa: suelo oscuro con líneas de luz cian, «xenxo» escrito con luz en el suelo del círculo central, un faro fino y un anillo de 24 portales mirando al centro. Uno lleva a **la plaza** (un distrito con historia; su arco devuelve al nexo) y 23 son para los proyectos de la comunidad: portada en la pantalla, banda con el color de su categoría y su monumento en la peana. Al acercarte se abre su ficha con el enlace (nunca se abre nada sin pulsar).
+
+Para quien no quiera moverse en 3D, el panel tiene el **nexo 2D**: las mismas portadas en tarjetas grandes, filtro por categoría, *Abrir* el proyecto o *Ver su portal* (te lleva delante de él).
+
+La disposición está en `apps/realtime/src/nexo-layout.json` (la usan el servidor y la forja); sus piezas se forjan con `npm run forge:nexo`.
 
 ## La plaza y las personas
 
@@ -132,10 +140,11 @@ El agente de ejemplo usa la variable `XENXO_URL=https://api.xenxo.io` y el secre
 - [ ] Panel dentro de la VR con `@react-three/uikit`
 - [ ] Manos en VR y teletransporte
 - [x] Assets glTF en R2 con validación de presupuesto y optimización en el navegador
-- [x] Cuentas con passkey, personaje propio (GLB o VRM) y proyectos con stand en la plaza
+- [x] Cuentas con passkey, personaje propio (GLB o VRM) y proyectos con portal en el nexo
 - [x] Exportar y borrar datos (RGPD), denuncias y moderación (DSA), páginas legales en borrador
 - [ ] Agente con LLM y servidor MCP del mundo ("trae tu propio agente")
-- [ ] Varios chunks y paso de uno a otro
+- [x] Nexo de entrada con portales (3D y 2D) y paso de un lugar a otro
+- [ ] Parcelas y distritos de la comunidad (fase 2)
 - [x] Arquitectura generada (forja), texturas escaneadas y cielo real en lugar de primitivas
 - [x] Personas realistas de serie con animaciones VRMA, gestos en red y colisiones
 - [x] Chat de la plaza con bocadillos, límites, denuncias y moderación

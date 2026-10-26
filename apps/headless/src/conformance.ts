@@ -8,9 +8,9 @@
  */
 import { randomUUID } from "node:crypto";
 import { AVATAR_PRESETS } from "../../realtime/src/avatar-presets";
-import { msg } from "@xenxo/protocol";
+import { msg, PLACES } from "@xenxo/protocol";
 import { XenxoClient } from "./client";
-import { makeBoxGlb, makeVrmMannequin, withExternalImage } from "./fixtures";
+import { makeBoxGlb, makeCoverPng, makeVrmMannequin, withExternalImage } from "./fixtures";
 import { Api } from "./http";
 
 const baseUrl = process.env.XENXO_URL ?? "http://localhost:8787";
@@ -210,6 +210,22 @@ if (!agentKey) {
     c.close();
   });
 
+  await scenario("agente: portal@1 se acepta como cualquier componente; un destino mal formado no", async () => {
+    const c = await XenxoClient.connect({ baseUrl, agentKey });
+    const ok = await c.mutate({
+      op: "SPAWN",
+      components: { "transform@1": { p: [40, 1.5, 50] }, "portal@1": { to: { kind: "chunk", chunk_id: PLACES.nexo }, size: [2, 3], title: "Al nexo" } },
+    });
+    assert(ok.type === "ACK", `portal@1 debería aceptarse: ${JSON.stringify(ok.payload)}`);
+    const bad = await c.mutate({
+      op: "SPAWN",
+      components: { "transform@1": { p: [40, 1.5, 50] }, "portal@1": { to: { kind: "url", href: "https://example.org" } } },
+    });
+    assert(bad.type === "ERROR" && bad.payload.code === "bad_message", "un portal a una URL cualquiera no existe en el protocolo");
+    if (ok.type === "ACK") await c.mutate({ op: "DESPAWN", entity_id: ok.payload.entity_id, base_rev: 1 });
+    c.close();
+  });
+
   await scenario("agente: componente desconocido → unknown_component", async () => {
     const c = await XenxoClient.connect({ baseUrl, agentKey });
     const r = await c.mutate({ op: "SPAWN", components: { "transform@1": { p: [5, 0, 5] }, "laser@1": { power: 9000 } } });
@@ -322,25 +338,66 @@ await scenario("avatar VRM: se acepta tal cual, como VRM, y no como modelo de pr
   assert(set.ok && set.data.user.avatar_format === "vrm", "el perfil debería guardar el formato VRM");
 });
 
-await scenario("proyecto: crea su stand en la plaza y al borrarlo desaparece", async () => {
+await scenario("nexo: se entra por el nexo; su portal lleva a la plaza y el arco de la plaza, de vuelta", async () => {
+  const c = await XenxoClient.connect({ baseUrl, chunkId: PLACES.nexo });
+  assert(c.welcome.chunk_id === PLACES.nexo, "el WELCOME debería decir el chunk del nexo");
+  const toPlaza = c.snapshot.entities.find((e) => e.entity_id === "nexo_portal_plaza")?.components["portal@1"] as
+    | { to: { kind: string; chunk_id?: string }; size: number[] }
+    | undefined;
+  assert(toPlaza?.to.kind === "chunk" && toPlaza.to.chunk_id === PLACES.plaza, "falta el portal del nexo a la plaza");
+  assert(c.snapshot.entities.some((e) => e.entity_id === "nexo_letters"), "faltan las letras del suelo del nexo");
+  c.close();
+  const p = await XenxoClient.connect({ baseUrl });
+  const back = p.snapshot.entities.find((e) => e.entity_id === "gate_portal")?.components["portal@1"] as { to: { chunk_id?: string } } | undefined;
+  assert(back?.to.chunk_id === PLACES.nexo, "el arco de la plaza debería llevar al nexo");
+  p.close();
+});
+
+await scenario("portada: solo imágenes de verdad y con medidas razonables", async () => {
   const api = new Api(baseUrl);
   await api.register(`conf ${randomUUID().slice(0, 6)}`);
-  const model = await api.upload(await makeBoxGlb({ segments: 3 }), "model");
-  assert(model.ok, "subida del modelo");
-  const watcher = await XenxoClient.connect({ baseUrl });
+  const ok = await api.upload(makeCoverPng(), "cover");
+  assert(ok.ok && ok.data.format === "image", `la portada PNG debería aceptarse: ${JSON.stringify(ok)}`);
+  const served = await fetch(new URL(`/assets/${ok.data.hash.slice(7)}`, baseUrl));
+  assert(served.ok && served.headers.get("Content-Type") === "image/png", `se sirve con su tipo real, no ${served.headers.get("Content-Type")}`);
+  const glb = await api.upload(await makeBoxGlb(), "cover");
+  assert(!glb.ok && glb.error === "bad_image", "un GLB no es una portada");
+  const tiny = await api.upload(makeCoverPng(40, 20), "cover");
+  assert(!tiny.ok && tiny.error === "bad_image", "una portada diminuta se rechaza");
+});
+
+await scenario("proyecto: exige portada y monumento; su portal aparece en el nexo y al borrarlo desaparece", async () => {
+  const api = new Api(baseUrl);
+  await api.register(`conf ${randomUUID().slice(0, 6)}`);
+  const base = { title: "Proyecto de prueba", summary: "Creado por el banco de conformidad", url: "https://github.com/xenxo-dev/xenxo-world", category: "game3d" };
+  const noCover = await api.call("POST", "/projects", base);
+  assert(!noCover.ok && noCover.error === "cover_required", `sin portada → cover_required (${!noCover.ok && noCover.error})`);
+  const cover = await api.upload(makeCoverPng(), "cover");
+  const model = await api.upload(await makeBoxGlb({ segments: 3 }), "monument");
+  assert(cover.ok && model.ok, "subidas de portada y monumento");
+  const noUrl = await api.call("POST", "/projects", { ...base, url: "", cover_hash: cover.data.hash, mesh_hash: model.data.hash });
+  assert(!noUrl.ok && noUrl.error === "bad_url", "sin enlace → bad_url");
+  const badCat = await api.call("POST", "/projects", { ...base, category: "casino", cover_hash: cover.data.hash, mesh_hash: model.data.hash });
+  assert(!badCat.ok && badCat.error === "bad_category", "categoría desconocida → bad_category");
+
+  const watcher = await XenxoClient.connect({ baseUrl, chunkId: PLACES.nexo });
   const delta = watcher.next("DELTA", (m) => m.payload.changes.some((c) => c.kind === "upsert" && c.entity.entity_id.startsWith("standm_")), 4000);
-  const created = await api.call<{ project: { id: string; in_world: boolean } }>("POST", "/projects", {
-    title: "Proyecto de prueba",
-    summary: "Creado por el banco de conformidad",
-    url: "https://github.com/xenxo-dev/xenxo-world",
+  const created = await api.call<{ project: { id: string; in_world: boolean; cover_hash: string; category: string } }>("POST", "/projects", {
+    ...base,
+    cover_hash: cover.data.hash,
     mesh_hash: model.data.hash,
   });
-  assert(created.ok && created.data.project.in_world, `el proyecto debería tener stand: ${JSON.stringify(created)}`);
+  assert(created.ok && created.data.project.in_world, `el proyecto debería tener portal: ${JSON.stringify(created)}`);
+  assert(created.data.project.cover_hash === cover.data.hash && created.data.project.category === "game3d", "portada y categoría en el proyecto");
   const d = await delta;
-  const meshEntity = d.payload.changes.find((c) => c.kind === "upsert" && c.entity.entity_id.startsWith("standm_"));
+  const id = created.data.project.id;
+  const up = (eid: string) => d.payload.changes.find((c) => c.kind === "upsert" && c.entity.entity_id === eid);
+  const portal = up(`stand_${id}`);
+  const pc = portal && portal.kind === "upsert" ? (portal.entity.components["portal@1"] as { to: { kind: string; project_id: string }; cover: string }) : null;
+  assert(pc?.to.kind === "project" && pc.to.project_id === id && pc.cover === cover.data.hash, "el portal lleva a la ficha del proyecto con su portada");
+  const meshEntity = up(`standm_${id}`);
   const lods = meshEntity && meshEntity.kind === "upsert" ? (meshEntity.entity.components["mesh@1"] as { lods: { tris: number }[] }).lods : [];
   assert(lods[0]?.tris === 108, `los triángulos deberían venir medidos por el servidor (108), llegaron ${lods[0]?.tris}`);
-  const id = created.data.project.id;
   const removed = watcher.next("DELTA", (m) => m.payload.changes.some((c) => c.kind === "remove" && c.entity_id === `stand_${id}`), 4000);
   const del = await api.call("DELETE", `/projects/${id}`);
   assert(del.ok, "borrar el proyecto");
@@ -352,8 +409,16 @@ await scenario("RGPD: exportar mis datos y borrar la cuenta retira su contenido"
   const api = new Api(baseUrl);
   const { passkey } = await api.register(`conf ${randomUUID().slice(0, 6)}`);
   const model = await api.upload(await makeBoxGlb({ segments: 2, color: [0.1, 0.6, 0.3, 1] }), "model");
-  assert(model.ok, "subida");
-  const created = await api.call<{ project: { id: string } }>("POST", "/projects", { title: "Para borrar", summary: "", mesh_hash: model.data.hash });
+  const cover = await api.upload(makeCoverPng(330, 186, [255, 80, 200]), "cover");
+  assert(model.ok && cover.ok, "subidas");
+  const created = await api.call<{ project: { id: string } }>("POST", "/projects", {
+    title: "Para borrar",
+    summary: "",
+    url: "https://example.org",
+    category: "other",
+    cover_hash: cover.data.hash,
+    mesh_hash: model.data.hash,
+  });
   assert(created.ok, "proyecto");
   const exp = await api.call<{ user: { id: string }; projects: unknown[] }>("GET", "/me/export");
   assert(exp.ok && exp.data.projects.length === 1, "la exportación debería incluir el proyecto");
@@ -361,6 +426,8 @@ await scenario("RGPD: exportar mis datos y borrar la cuenta retira su contenido"
   assert(gone.ok, "borrar la cuenta");
   const asset = await fetch(new URL(`/assets/${model.data.hash.slice(7)}`, baseUrl));
   assert(asset.status === 404, "el modelo que solo subió esa persona debería borrarse");
+  const coverGone = await fetch(new URL(`/assets/${cover.data.hash.slice(7)}`, baseUrl));
+  assert(coverGone.status === 404, "su portada también");
   let loginFailed = false;
   try {
     await new Api(baseUrl).login(passkey);
@@ -368,8 +435,8 @@ await scenario("RGPD: exportar mis datos y borrar la cuenta retira su contenido"
     loginFailed = true;
   }
   assert(loginFailed, "la passkey de una cuenta borrada no debería servir");
-  const c = await XenxoClient.connect({ baseUrl });
-  assert(!c.snapshot.entities.some((e) => e.entity_id === `stand_${created.data.project.id}`), "el stand debería haber desaparecido");
+  const c = await XenxoClient.connect({ baseUrl, chunkId: PLACES.nexo });
+  assert(!c.snapshot.entities.some((e) => e.entity_id === `stand_${created.data.project.id}`), "el portal debería haber desaparecido");
   c.close();
 });
 

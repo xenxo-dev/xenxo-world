@@ -21,7 +21,7 @@ export class Api {
     if (this.token) headers.Authorization = `Bearer ${this.token}`;
     let payload: BodyInit | undefined;
     if (raw) {
-      headers["Content-Type"] = "model/gltf-binary";
+      headers["Content-Type"] = path.includes("kind=cover") ? "image/png" : "model/gltf-binary";
       payload = raw as Uint8Array<ArrayBuffer>;
     } else if (body !== undefined) {
       headers["Content-Type"] = "application/json";
@@ -69,7 +69,7 @@ export class Api {
     return this.token;
   }
 
-  upload(bytes: Uint8Array, kind: "avatar" | "model") {
+  upload(bytes: Uint8Array, kind: "avatar" | "model" | "monument" | "cover") {
     return this.call<{ hash: string; triangles: number; bytes: number; format: string; existed: boolean }>("POST", `/assets?kind=${kind}`, undefined, bytes);
   }
 }

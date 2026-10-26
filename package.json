@@ -16,7 +16,8 @@
     "conformance": "npm run conformance -w @xenxo/headless",
     "agent:build": "npm run agent -w @xenxo/headless",
     "forge": "python3 tools/forge/forge.py && npm run forge:pack",
-    "forge:pack": "tsx tools/forge/pack.mjs"
+    "forge:pack": "tsx tools/forge/pack.mjs",
+    "forge:nexo": "python3 tools/forge/forge.py --only=nexo_floor,nexo_beacon,nexo_frame && tsx tools/forge/pack.mjs --keep"
   },
   "engines": {
     "node": ">=22"

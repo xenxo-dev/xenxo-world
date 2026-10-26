@@ -1,17 +1,22 @@
 import { useCallback, useEffect, useState } from "react";
+import { PROJECT_CATEGORIES, type ProjectCategory } from "@xenxo/protocol";
 import { REALTIME_URL } from "../config";
-import { errorText, t, useLang } from "../i18n";
+import { errorText, t, useLang, type Key } from "../i18n";
 import {
   createProject,
   currentUser,
   deleteProject,
   listProjects,
   myProjects,
+  prepareCover,
+  uploadCover,
   uploadModel,
+  type PreparedCover,
   useAccount,
   type PreparedModel,
   type Project,
 } from "../net/account";
+import { refreshProjects } from "../net/projects";
 import { ModelPicker } from "./ModelPicker";
 import { ReportButton } from "./ReportButton";
 import { Block, Button, card, input, Label, Notice } from "./ui";
@@ -154,21 +159,28 @@ function PublishForm({ onDone }: { onDone: () => void }) {
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
   const [url, setUrl] = useState("");
+  const [category, setCategory] = useState<ProjectCategory | "">("");
+  const [cover, setCover] = useState<PreparedCover | null>(null);
+  const [coverError, setCoverError] = useState("");
   const [model, setModel] = useState<PreparedModel | null>(null);
   const [state, setState] = useState<"idle" | "sending" | "error">("idle");
   const [message, setMessage] = useState("");
+  useEffect(() => () => (cover ? URL.revokeObjectURL(cover.preview) : undefined), [cover]);
+  const ready = title.trim().length >= 3 && /^https:\/\/.+/.test(url) && !!category && !!cover && !!model;
 
   return (
     <form
       className={`${card} mb-4 p-4`}
       onSubmit={async (e) => {
         e.preventDefault();
+        if (!ready || !cover || !model || !category) return;
         setState("sending");
         setMessage("");
         try {
-          const mesh = model ? (await uploadModel(model, "model")).hash : null;
-          const r = await createProject({ title, summary, url, mesh_hash: mesh });
-          setMessage(r.stand.ok ? t("projects.published") : t("projects.publishedNoStand"));
+          const [c, m] = await Promise.all([uploadCover(cover), uploadModel(model, "monument")]);
+          await createProject({ title, summary, url, category, cover_hash: c.hash, mesh_hash: m.hash });
+          void refreshProjects(true);
+          setMessage(t("projects.published"));
           setTimeout(onDone, 1800);
           setState("idle");
         } catch (err) {
@@ -177,17 +189,56 @@ function PublishForm({ onDone }: { onDone: () => void }) {
         }
       }}
     >
+      <p className="mb-3 text-sm leading-relaxed text-cal/60">{t("projects.requirements")}</p>
       <Label htmlFor="pj-title">{t("projects.title")}</Label>
       <input id="pj-title" required minLength={3} maxLength={60} value={title} onChange={(e) => setTitle(e.target.value)} className={input} />
+      <Label htmlFor="pj-url">{t("projects.url")}</Label>
+      <input id="pj-url" required type="url" pattern="https://.*" maxLength={300} value={url} onChange={(e) => setUrl(e.target.value)} className={input} placeholder="https://…" />
+      <Label htmlFor="pj-cat">{t("projects.category")}</Label>
+      <select id="pj-cat" required value={category} onChange={(e) => setCategory(e.target.value as ProjectCategory)} className={input}>
+        <option value="" disabled>
+          —
+        </option>
+        {PROJECT_CATEGORIES.map((c) => (
+          <option key={c} value={c}>
+            {t(`cat.${c}` as Key)}
+          </option>
+        ))}
+      </select>
       <Label htmlFor="pj-summary">{t("projects.summary")}</Label>
       <textarea id="pj-summary" maxLength={280} rows={2} value={summary} onChange={(e) => setSummary(e.target.value)} className={input} />
-      <Label htmlFor="pj-url">{t("projects.url")}</Label>
-      <input id="pj-url" type="url" pattern="https://.*" maxLength={300} value={url} onChange={(e) => setUrl(e.target.value)} className={input} placeholder="https://github.com/…" />
-      <p className="mb-1.5 mt-4 text-sm text-cal/70">{t("projects.model")}</p>
-      <ModelPicker kind="model" accept=".glb" onReady={setModel} />
+
+      <p className="mb-1.5 mt-4 text-sm text-cal/70">{t("projects.cover")}</p>
+      <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-cal/25 px-4 py-2.5 text-sm text-cal/80 hover:border-neon hover:text-cal">
+        <span aria-hidden>🖼</span>
+        {t("projects.coverChoose")}
+        <input
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          className="sr-only"
+          onChange={async (e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (!file) return;
+            setCoverError("");
+            try {
+              setCover(await prepareCover(file));
+            } catch (err) {
+              setCover(null);
+              setCoverError(errorText(err));
+            }
+          }}
+        />
+      </label>
+      {cover && <img src={cover.preview} alt="" className="mt-3 aspect-video w-full max-w-sm rounded-xl border border-cal/10 object-cover" />}
+      {coverError && <Notice tone="error">{coverError}</Notice>}
+      <p className="mt-2 text-xs text-cal/40">{t("projects.coverHint")}</p>
+
+      <p className="mb-1.5 mt-4 text-sm text-cal/70">{t("projects.monument")}</p>
+      <ModelPicker kind="monument" accept=".glb" onReady={setModel} />
       <p className="mt-2 text-xs text-cal/40">{t("projects.modelHint")}</p>
       <div className="mt-4 flex gap-2">
-        <Button type="submit" variant="primary" disabled={state === "sending" || title.trim().length < 3}>
+        <Button type="submit" variant="primary" disabled={state === "sending" || !ready}>
           {state === "sending" ? t("projects.publishing") : t("projects.submit")}
         </Button>
         <Button variant="ghost" onClick={onDone}>

@@ -16,6 +16,7 @@ import {
   ENTITY_SCHEMA,
   estimateTris,
   msg,
+  PLACES,
   PROTOCOL_VERSION,
   type AvatarPose,
   type Components,
@@ -27,15 +28,16 @@ import {
 import type { Env } from "./index";
 import { randomId, type Principal } from "./auth";
 import { plazaSeed, SEED_VERSION } from "./seed";
+import { NEXO_SEED_VERSION, nexoSeed, PROJECT_SLOTS, portalEntities, type Seeded } from "./nexo";
 import { assetKey } from "./assets";
 import { isAvatarPreset } from "./avatar-presets-check";
 
-/** Ranuras de la exposición de proyectos, delante del edificio «Proyectos» (oeste de la plaza). */
-const EXPO_SLOTS: [number, number][] = [
-  [16, 38.5], [19.5, 38.5], [16, 41.5], [19.5, 41.5], [23, 41.5], [16, 44.8], [19.5, 44.8], [23, 44.8],
-];
-
 const TICK_HZ = 10;
+
+/** Ids de las entidades del portal de un proyecto. */
+function standIds(projectId: string) {
+  return { portal: `stand_${projectId}`, band: `standb_${projectId}`, monument: `standm_${projectId}`, label: `standl_${projectId}` };
+}
 
 /** Huella corta de un texto (FNV-1a de 32 bits). */
 function fnv1a(text: string): string {
@@ -134,20 +136,20 @@ export class ChunkRoom extends DurableObject<Env> {
   private ensureChunk(id: string | null) {
     if (this.chunkId) return;
     const stored = this.sql.exec<{ v: string }>("SELECT v FROM meta WHERE k = 'chunk_id'").toArray()[0]?.v;
-    this.chunkId = stored ?? id ?? "c_0_0";
+    this.chunkId = stored ?? id ?? PLACES.plaza;
     if (!stored) this.sql.exec("INSERT INTO meta (k, v) VALUES ('chunk_id', ?)", this.chunkId);
 
-    if (this.chunkId === "c_0_0") this.applySeed();
+    if (this.chunkId === PLACES.plaza) this.applySeed("plaza", SEED_VERSION, plazaSeed());
+    else if (this.chunkId === PLACES.nexo) this.applySeed("nexo", NEXO_SEED_VERSION, nexoSeed());
   }
 
   /**
-   * Siembra o actualiza la plaza del sistema. Si cambió la semilla (SEED_VERSION o su
-   * contenido, p. ej. al volver a forjar los modelos), sustituye las entidades con dueño
+   * Siembra o actualiza un lugar del sistema (la plaza, el nexo). Si cambió la semilla (su versión
+   * o su contenido, p. ej. al volver a forjar los modelos), sustituye las entidades con dueño
    * "system" y conserva las de personas y agentes.
    */
-  private applySeed() {
-    const seed = plazaSeed();
-    const fingerprint = `${SEED_VERSION}:${fnv1a(JSON.stringify(seed))}`;
+  private applySeed(name: string, version: number, seed: Seeded[]) {
+    const fingerprint = `${version}:${fnv1a(JSON.stringify(seed))}`;
     const current = this.sql.exec<{ v: string }>("SELECT v FROM meta WHERE k = 'seed_version'").toArray()[0]?.v;
     if (current === fingerprint) return;
     this.ctx.storage.transactionSync(() => {
@@ -156,7 +158,7 @@ export class ChunkRoom extends DurableObject<Env> {
         // Si alguien ya usó ese id, la semilla no lo pisa.
         if (!this.getRow(id)) this.insertEntity(id, "system", components);
       }
-      this.logEvent("system", "SEED", "plaza", SEED_VERSION, null);
+      this.logEvent("system", "SEED", name, version, null);
       this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('seed_version', ?)", fingerprint);
     });
   }
@@ -368,70 +370,47 @@ export class ChunkRoom extends DurableObject<Env> {
   /* ---------------------------------------------------------------- */
 
   /**
-   * Coloca el stand de un proyecto en la exposición, con el proyecto de su dueño.
-   * Pasa por applyMutation: mismos esquemas, presupuestos, log y DELTA que cualquier otra escritura.
+   * Coloca el portal de un proyecto en el nexo: portada en la pantalla, monumento en la peana,
+   * banda con el color de su categoría y rótulo. Pasa por applyMutation: mismos esquemas,
+   * presupuestos, log y DELTA que cualquier otra escritura.
    */
   async placeStand(input: {
     projectId: string;
     owner: string;
     title: string;
-    mesh?: { hash: string; bounds: { min: number[]; max: number[] } | null };
+    category: string;
+    cover: string;
+    mesh: { hash: string; bounds: { min: number[]; max: number[] } | null };
   }): Promise<{ ok: true; slot: number } | { ok: false; code: string; message: string }> {
     this.ensureChunk(null);
+    if (this.chunkId !== PLACES.nexo) return { ok: false, code: "forbidden", message: "los portales de proyecto van en el nexo" };
     const used = new Set(this.sql.exec<{ slot: number }>("SELECT slot FROM stands").toArray().map((r) => r.slot));
-    const slot = EXPO_SLOTS.findIndex((_, i) => !used.has(i));
-    if (slot < 0) return { ok: false, code: "budget_exceeded", message: "la exposición de este chunk está llena" };
-    const [x, z] = EXPO_SLOTS[slot]!;
+    const slot = PROJECT_SLOTS.find((s) => !used.has(s.index));
+    if (!slot) return { ok: false, code: "nexo_full", message: "el nexo no tiene portales libres" };
 
-    const ops: MutationOp[] = [
-      {
-        op: "SPAWN",
-        entity_id: `stand_${input.projectId}`,
-        components: {
-          "transform@1": { p: [x, 0.45, z] },
-          "primitive@1": { shape: "box", size: [1.4, 0.9, 1.4], color: "#e6dccb" },
-        },
+    const entities = portalEntities(slot, standIds(input.projectId), {
+      portal: {
+        to: { kind: "project", project_id: input.projectId },
+        size: [4, 2.25],
+        cover: input.cover,
+        title: input.title,
+        category: input.category,
       },
-    ];
-    // El cartel flota por encima del modelo (o del pedestal si no hay modelo).
-    let labelY = 1.4;
-    if (input.mesh) {
-      const b = input.mesh.bounds;
-      const dims = b ? [b.max[0]! - b.min[0]!, b.max[1]! - b.min[1]!, b.max[2]! - b.min[2]!] : [1, 1, 1];
-      const scale = Math.min(4, 1.3 / Math.max(0.01, ...dims));
-      const lift = b ? -b.min[1]! * scale : 0;
-      const cx = b ? -((b.max[0]! + b.min[0]!) / 2) * scale : 0;
-      const cz = b ? -((b.max[2]! + b.min[2]!) / 2) * scale : 0;
-      labelY = 0.9 + dims[1]! * scale + 0.35;
-      ops.push({
-        op: "SPAWN",
-        entity_id: `standm_${input.projectId}`,
-        components: {
-          "transform@1": { p: [x + cx, 0.9 + lift, z + cz], s: [scale, scale, scale] },
-          "mesh@1": { lods: [{ hash: input.mesh.hash, media: "model/gltf-binary", tris: 0 }] },
-        },
-      });
-    }
-
-    ops.push({
-      op: "SPAWN",
-      entity_id: `standl_${input.projectId}`,
-      components: {
-        "transform@1": { p: [x, labelY, z] },
-        "label@1": { text: input.title, billboard: true, size: 0.32 },
-      },
+      title: input.title,
+      monument: { lods: [{ hash: input.mesh.hash, tris: 0 }], bounds: input.mesh.bounds },
     });
+    const ops: MutationOp[] = entities.map((e) => ({ op: "SPAWN", entity_id: e.id, components: e.components }));
 
     try {
       const resolved: MutationOp[] = [];
       for (const op of ops) resolved.push(await this.resolveAssets(op));
       const changes = this.ctx.storage.transactionSync(() => {
         const out = resolved.map((op) => this.applyMutation(input.owner, false, op).change);
-        this.sql.exec("INSERT INTO stands (project_id, slot) VALUES (?, ?)", input.projectId, slot);
+        this.sql.exec("INSERT INTO stands (project_id, slot) VALUES (?, ?)", input.projectId, slot.index);
         return out;
       });
       this.broadcast(msg("DELTA", { changes }));
-      return { ok: true, slot };
+      return { ok: true, slot: slot.index };
     } catch (e) {
       if (e instanceof MutationError) return { ok: false, code: e.code, message: e.message };
       throw e;
@@ -441,7 +420,7 @@ export class ChunkRoom extends DurableObject<Env> {
   /** Retira el stand de un proyecto (borrado por su dueño, moderación o baja de la cuenta). */
   async removeStand(projectId: string): Promise<void> {
     this.ensureChunk(null);
-    const ids = [`stand_${projectId}`, `standm_${projectId}`, `standl_${projectId}`];
+    const ids = [...Object.values(standIds(projectId))];
     const changes = this.ctx.storage.transactionSync(() => {
       const out: { kind: "remove"; entity_id: string }[] = [];
       for (const id of ids) {

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { BUDGETS } from "@xenxo/protocol";
-import { t, type Key } from "../i18n";
+import { placeName, t, type Key } from "../i18n";
 import { useAccount } from "../net/account";
 import { sendChat } from "../net/session";
 import { chat, useChatVersion, world } from "../net/world-store";
@@ -77,9 +77,9 @@ export function Chat({ touch, onSignup }: { touch: boolean; onSignup: () => void
     : "bottom-16 left-4 w-[22rem]";
 
   return (
-    <section aria-label={t("chat.title")} className={`pointer-events-auto absolute flex max-h-[45dvh] flex-col ${position} ${box}`}>
+    <section aria-label={t("chat.title", { place: placeName(world.chunkId) })} className={`pointer-events-auto absolute flex max-h-[45dvh] flex-col ${position} ${box}`}>
       <header className="flex items-center justify-between border-b border-cal/10 px-3 py-1.5">
-        <h2 className="text-xs font-medium text-cal/70">{t("chat.title")}</h2>
+        <h2 className="text-xs font-medium text-cal/70">{t("chat.title", { place: placeName(world.chunkId) })}</h2>
         <button onClick={() => setOpen(false)} className="text-xs text-cal/50 hover:text-cal" aria-label={t("chat.close")}>
           ✕
         </button>

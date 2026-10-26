@@ -6,7 +6,7 @@
  * una entidad o un avatar), nunca de cada pose.
  */
 import { useSyncExternalStore } from "react";
-import type { AvatarPose, ChatMessage, Entity, Peer, ServerMessage } from "@xenxo/protocol";
+import { CHUNK_SIZE, PLACES, type AvatarPose, type ChatMessage, type Entity, type Peer, type ServerMessage } from "@xenxo/protocol";
 import type { ConnectionStatus } from "./NetworkAdapter";
 
 export interface PoseSample {
@@ -24,6 +24,8 @@ class WorldStore {
   /** Poses por sesión, ordenadas por tiempo del servidor. */
   poseBuffers = new Map<string, PoseSample[]>();
   sessionId: string | null = null;
+  /** Chunk en el que estamos (el nexo al entrar). Todo se dibuja relativo a él. */
+  chunkId: string = PLACES.nexo;
   canBuild = false;
   status: ConnectionStatus = "idle";
   lastError: string | null = null;
@@ -57,10 +59,28 @@ class WorldStore {
     return Date.now() + this.clockOffset;
   }
 
+  /** Desplazamiento (x, z) de un chunk respecto al actual: el actual queda en 0..CHUNK_SIZE. */
+  offsetOf(chunkId: string): [number, number] {
+    const [, x = "0", z = "0"] = chunkId.split("_");
+    const [, cx = "0", cz = "0"] = this.chunkId.split("_");
+    return [(Number(x) - Number(cx)) * CHUNK_SIZE, (Number(z) - Number(cz)) * CHUNK_SIZE];
+  }
+
+  /** Cambio de lugar: se vacía el mundo hasta que llegue la foto del nuevo chunk. */
+  beginTravel(chunkId: string) {
+    this.chunkId = chunkId;
+    this.entities = new Map();
+    this.peers.clear();
+    this.poseBuffers.clear();
+    chat.reset([]);
+    this.bump();
+  }
+
   apply(m: ServerMessage) {
     switch (m.type) {
       case "WELCOME":
         this.sessionId = m.payload.session_id;
+        this.chunkId = m.payload.chunk_id;
         this.canBuild = m.payload.principal.scopes.includes("build");
         this.clockOffset = m.payload.server_time - Date.now();
         this.bump();
@@ -181,6 +201,11 @@ export const chat = new ChatStore();
 
 export function useChatVersion() {
   return useSyncExternalStore(chat.subscribe, chat.getVersion);
+}
+
+/** Re-renderiza solo cuando cambia de lugar (nexo, plaza…). */
+export function usePlace(): string {
+  return useSyncExternalStore(world.subscribe, () => world.chunkId);
 }
 
 /** Re-renderiza solo ante cambios estructurales. */

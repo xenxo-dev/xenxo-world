@@ -3,7 +3,7 @@ import { useFrame } from "@react-three/fiber";
 import { XROrigin, useXR, useXRControllerLocomotion } from "@react-three/xr";
 import * as THREE from "three";
 import { CHUNK_SIZE, msg, type ClientMessage } from "@xenxo/protocol";
-import { net } from "../net/session";
+import { net, spawn } from "../net/session";
 import { world } from "../net/world-store";
 import type { AvatarRef } from "@xenxo/protocol";
 import { useAccount } from "../net/account";
@@ -23,7 +23,8 @@ const CAM_DIST = 3.4;
 const EMOTE_SECONDS: Record<string, number> = { wave: 2.6, cheer: 1.5 };
 const SEND_EVERY_MS = 100; // 10 Hz
 const HEARTBEAT_MS = 1000;
-export const SPAWN = new THREE.Vector3(CHUNK_SIZE / 2, 0, CHUNK_SIZE / 2 + 11);
+/** Dónde está el jugador ahora (lo leen los portales; se copia cada frame, sin crear objetos). */
+export const playerPos = new THREE.Vector3(...spawn.p);
 
 // Objetos reutilizados: nada de `new` dentro de useFrame (evita tirones del GC en Quest).
 const _fwd = new THREE.Vector3();
@@ -46,8 +47,9 @@ export function Player({ active }: { active: boolean }) {
       : undefined;
   const origin = useRef<THREE.Group>(null!);
   const avatar = useRef<THREE.Group>(null!);
-  const pos = useRef(SPAWN.clone());
-  const look = useRef({ yaw: 0, pitch: -0.12 });
+  const pos = useRef(new THREE.Vector3(...spawn.p));
+  const look = useRef({ yaw: spawn.yaw, pitch: -0.12 });
+  const spawnSeq = useRef(spawn.seq);
   const motion = useRef(createMotion()).current;
   const lastSend = useRef(0);
   const camReach = useRef(1);
@@ -64,10 +66,22 @@ export function Player({ active }: { active: boolean }) {
     const cam = state.camera;
     const l = look.current;
 
+    // Aparecer donde manda un portal (o el nexo 2D).
+    if (spawn.seq !== spawnSeq.current) {
+      spawnSeq.current = spawn.seq;
+      pos.current.set(spawn.p[0], spawn.p[1], spawn.p[2]);
+      l.yaw = spawn.yaw;
+      bodyYaw.current = spawn.yaw;
+      vy.current = 0;
+      motion.emote = null;
+      if (inXR) origin.current.position.set(spawn.p[0], 0, spawn.p[2]);
+    }
+
     if (inXR) {
       cam.getWorldPosition(_headP);
       cam.getWorldQuaternion(_headQ);
       pos.current.set(_headP.x, 0, _headP.z);
+      playerPos.copy(pos.current);
     } else {
       // Mantén el origen XR donde está el jugador, para entrar en VR en el mismo sitio.
       origin.current.position.copy(pos.current);
@@ -149,6 +163,7 @@ export function Player({ active }: { active: boolean }) {
 
       avatar.current.position.copy(pos.current);
       avatar.current.rotation.y = bodyYaw.current;
+      playerPos.copy(pos.current);
       avatar.current.visible = active;
 
       _headP.set(pos.current.x, EYE + pos.current.y, pos.current.z);

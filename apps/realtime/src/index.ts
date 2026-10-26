@@ -1,4 +1,5 @@
-import { ChunkId } from "@xenxo/protocol";
+import { ASSET_BUDGETS } from "@xenxo/assets";
+import { ChunkId, PLACES } from "@xenxo/protocol";
 import { assetMeta, assetKey, handleGet, handleUpload } from "./assets";
 import { isAvatarPreset } from "./avatar-presets-check";
 import { randomId, resolveAgent, signToken, verifyToken, type Principal } from "./auth";
@@ -59,8 +60,10 @@ async function githubRepos(env: Env, ctx: ExecutionContext): Promise<Response> {
 const GUEST_TTL_MS = 60 * 60 * 1000;
 const AGENT_TTL_MS = 15 * 60 * 1000;
 const USER_TTL_MS = 12 * 60 * 60 * 1000;
-/** La exposición de proyectos vive, por ahora, en la plaza central. */
-const EXPO_CHUNK = "c_0_0";
+/** Los portales de los proyectos viven en el nexo. */
+const EXPO_CHUNK = PLACES.nexo;
+/** Lugares con chat (para denuncias, exportación y baja de una cuenta). */
+const CHAT_CHUNKS = [PLACES.nexo, PLACES.plaza];
 
 function inJurisdiction<T extends Rpc.DurableObjectBranded | undefined>(env: Env, ns: DurableObjectNamespace<T>): DurableObjectNamespace<T> {
   return env.DO_JURISDICTION === "eu" || env.DO_JURISDICTION === "fedramp" ? ns.jurisdiction(env.DO_JURISDICTION) : ns;
@@ -207,7 +210,7 @@ export default {
         const body = await readJson(req);
         let evidence: unknown;
         if (body.target_type === "chat" && typeof body.target_id === "string") {
-          evidence = await chunk(env, EXPO_CHUNK).chatMessage(body.target_id);
+          for (const c of CHAT_CHUNKS) evidence ??= await chunk(env, c).chatMessage(body.target_id);
           if (!evidence) return json({ error: "not_found", message: "ese mensaje ya no existe" }, 404, h);
         }
         const r = await dir.report(p.sub, body, evidence);
@@ -236,7 +239,7 @@ export default {
             format = "vrm"; // avatar de serie
           } else if (hash !== null) {
             const meta = typeof hash === "string" ? await assetMeta(env.ASSETS, hash) : null;
-            if (!meta || meta.kind !== "avatar") return json({ error: "not_found", message: "ese avatar no existe" }, 404, h);
+            if (!meta || meta.kind !== "avatar" || meta.format === "image") return json({ error: "not_found", message: "ese avatar no existe" }, 404, h);
             format = meta.format;
           }
           const r = await dir.setAvatar(uid, hash, format);
@@ -245,7 +248,8 @@ export default {
         if (path === "/me/export" && req.method === "GET") {
           const r = await dir.exportData(uid);
           if (!r.ok) return failure(r, h);
-          const chat = await chunk(env, EXPO_CHUNK).chatOf(`usr_${uid}`);
+          const chat = [];
+          for (const c of CHAT_CHUNKS) chat.push(...(await chunk(env, c).chatOf(`usr_${uid}`)));
           return json({ ...r.data, chat_messages: chat }, 200, {
             ...h,
             "Content-Disposition": 'attachment; filename="xenxo-mis-datos.json"',
@@ -256,7 +260,7 @@ export default {
           if (!r.ok) return failure(r, h);
           const room = chunk(env, EXPO_CHUNK);
           for (const id of r.data.projectIds) await room.removeStand(id);
-          await room.purgeOwner(`usr_${uid}`);
+          for (const c of CHAT_CHUNKS) await chunk(env, c).purgeOwner(`usr_${uid}`);
           for (const hash of r.data.orphanHashes) await env.ASSETS.delete(assetKey(hash));
           return json({ deleted: true, assets_removed: r.data.orphanHashes.length }, 200, h);
         }
@@ -267,15 +271,26 @@ export default {
         const r = await dir.createProject(uid, await readJson(req));
         if (!r.ok) return failure(r, h);
         const project = r.data;
-        const meta = project.mesh_hash ? await assetMeta(env.ASSETS, project.mesh_hash) : null;
-        const placed = await chunk(env, EXPO_CHUNK).placeStand({
-          projectId: project.id,
-          owner: `usr_${uid}`,
-          title: project.title,
-          ...(project.mesh_hash ? { mesh: { hash: project.mesh_hash, bounds: meta?.bounds ?? null } } : {}),
-        });
-        if (placed.ok) await dir.setInWorld(project.id, true);
-        return json({ project: { ...project, in_world: placed.ok }, stand: placed }, 201, h);
+        const meta = await assetMeta(env.ASSETS, project.mesh_hash!);
+        const placed =
+          meta && meta.triangles <= ASSET_BUDGETS.monument.maxTriangles
+            ? await chunk(env, EXPO_CHUNK).placeStand({
+                projectId: project.id,
+                owner: `usr_${uid}`,
+                title: project.title,
+                category: project.category,
+                cover: project.cover_hash!,
+                mesh: { hash: project.mesh_hash!, bounds: meta.bounds },
+              })
+            : ({ ok: false, code: "monument_too_big", message: `el monumento debe tener como mucho ${ASSET_BUDGETS.monument.maxTriangles} triángulos` } as const);
+        if (!placed.ok) {
+          // Sin portal no hay proyecto: se deshace el alta y se explica por qué.
+          await dir.deleteProject(project.id);
+          const status = placed.code === "nexo_full" || placed.code === "budget_exceeded" ? 409 : placed.code === "monument_too_big" ? 422 : 400;
+          return json({ error: placed.code === "budget_exceeded" ? "nexo_full" : placed.code, message: placed.message }, status, h);
+        }
+        await dir.setInWorld(project.id, true);
+        return json({ project: { ...project, in_world: true }, stand: placed }, 201, h);
       }
 
       const proj = path.match(/^\/projects\/([a-zA-Z0-9_-]{4,40})$/);
@@ -304,7 +319,9 @@ export default {
         }
         const hideChat = path.match(/^\/admin\/chat\/([a-zA-Z0-9_-]{4,40})\/hide$/);
         if (hideChat && req.method === "POST") {
-          return json({ hidden: await chunk(env, EXPO_CHUNK).hideChat(hideChat[1]!) }, 200, h);
+          let hidden = false;
+          for (const c of CHAT_CHUNKS) hidden = (await chunk(env, c).hideChat(hideChat[1]!)) || hidden;
+          return json({ hidden }, 200, h);
         }
         const hide = path.match(/^\/admin\/projects\/([a-zA-Z0-9_-]{4,40})\/hide$/);
         if (hide && req.method === "POST") {

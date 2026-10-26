@@ -21,6 +21,7 @@ import {
 import { isoBase64URL } from "@simplewebauthn/server/helpers";
 import type { Env } from "./index";
 import { randomId } from "./auth";
+import { PROJECT_CATEGORIES, type ProjectCategory } from "@xenxo/protocol";
 
 export const TERMS_VERSION = "2026-10";
 const FLOW_TTL_MS = 5 * 60 * 1000;
@@ -62,6 +63,9 @@ export type PublicProject = {
   summary: string;
   url: string | null;
   mesh_hash: string | null;
+  /** Portada 16:9 (obligatoria desde el nexo; los antiguos pueden no tenerla). */
+  cover_hash: string | null;
+  category: ProjectCategory;
   author: string;
   created_at: number;
   in_world: boolean;
@@ -113,6 +117,10 @@ export class Directory extends DurableObject<Env> {
     // Migración: tamaño de cada subida (para los topes de almacenamiento).
     const cols = this.sql.exec<{ name: string }>("PRAGMA table_info(uploads)").toArray().map((c) => c.name);
     if (!cols.includes("bytes")) this.sql.exec("ALTER TABLE uploads ADD COLUMN bytes INTEGER NOT NULL DEFAULT 0");
+    // Migración: portada y categoría de los proyectos (para el nexo).
+    const pcols = this.sql.exec<{ name: string }>("PRAGMA table_info(projects)").toArray().map((c) => c.name);
+    if (!pcols.includes("cover_hash")) this.sql.exec("ALTER TABLE projects ADD COLUMN cover_hash TEXT");
+    if (!pcols.includes("category")) this.sql.exec("ALTER TABLE projects ADD COLUMN category TEXT NOT NULL DEFAULT 'other'");
     // Migración: número de jugador. Las cuentas que ya existían se numeran por orden de alta.
     const ucols = this.sql.exec<{ name: string }>("PRAGMA table_info(users)").toArray().map((c) => c.name);
     if (!ucols.includes("player_no")) {
@@ -389,35 +397,45 @@ export class Directory extends DurableObject<Env> {
   /* Proyectos                                                          */
   /* ---------------------------------------------------------------- */
 
-  createProject(userId: string, body: { title?: unknown; summary?: unknown; url?: unknown; mesh_hash?: unknown }): Result<PublicProject> {
-    const title = typeof body.title === "string" ? body.title.trim() : "";
+  /**
+   * Publica un proyecto. Requisitos (los mismos para la web, los agentes y el futuro MCP):
+   * nombre, enlace https, categoría, portada subida (kind=cover) y monumento subido (kind=monument
+   * o model). Las medidas del monumento las comprueba quien lo coloca, con las del servidor.
+   */
+  createProject(
+    userId: string,
+    body: { title?: unknown; summary?: unknown; url?: unknown; mesh_hash?: unknown; cover_hash?: unknown; category?: unknown },
+  ): Result<PublicProject> {
+    const title = typeof body.title === "string" ? body.title.trim().replace(/\s+/g, " ") : "";
     const summary = typeof body.summary === "string" ? body.summary.trim() : "";
     if (title.length < 3 || title.length > 60) return fail(400, "bad_title", "el título debe tener entre 3 y 60 caracteres");
     if (summary.length > 280) return fail(400, "bad_summary", "la descripción admite hasta 280 caracteres");
     const url = validHttpsUrl(body.url);
-    if (url === false) return fail(400, "bad_url", "el enlace debe empezar por https://");
-    let mesh: string | null = null;
-    if (body.mesh_hash !== undefined && body.mesh_hash !== null && body.mesh_hash !== "") {
-      if (typeof body.mesh_hash !== "string") return fail(400, "bad_message", "hash de modelo no válido");
-      const up = this.sql
-        .exec("SELECT 1 FROM uploads WHERE hash = ? AND uploader = ? AND kind = 'model'", body.mesh_hash, `usr_${userId}`)
-        .toArray()[0];
-      if (!up) return fail(403, "forbidden", "sube primero el modelo del proyecto");
-      mesh = body.mesh_hash;
-    }
+    if (!url) return fail(400, "bad_url", "el proyecto necesita un enlace que empiece por https://");
+    const category = typeof body.category === "string" && (PROJECT_CATEGORIES as readonly string[]).includes(body.category) ? (body.category as ProjectCategory) : null;
+    if (!category) return fail(400, "bad_category", `la categoría debe ser una de: ${PROJECT_CATEGORIES.join(", ")}`);
+    const uploaded = (hash: unknown, kinds: string[]) =>
+      typeof hash === "string" &&
+      this.sql
+        .exec(`SELECT 1 FROM uploads WHERE hash = ? AND uploader = ? AND kind IN (${kinds.map(() => "?").join(",")})`, hash, `usr_${userId}`, ...kinds)
+        .toArray().length > 0;
+    if (!uploaded(body.cover_hash, ["cover"])) return fail(400, "cover_required", "sube primero la portada del proyecto (imagen 16:9)");
+    if (!uploaded(body.mesh_hash, ["monument", "model"])) return fail(400, "monument_required", "sube primero el monumento del proyecto (modelo .glb)");
     const count = this.sql
       .exec<{ n: number }>("SELECT COUNT(*) AS n FROM projects WHERE user_id = ? AND status = 'published'", userId)
       .one().n;
     if (count >= MAX_PROJECTS_PER_USER) return fail(409, "too_many_projects", `máximo ${MAX_PROJECTS_PER_USER} proyectos por persona`);
     const id = randomId("p", 8).replace(/[^a-zA-Z0-9]/g, "x");
     this.sql.exec(
-      "INSERT INTO projects (id, user_id, title, summary, url, mesh_hash, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'published', ?)",
+      "INSERT INTO projects (id, user_id, title, summary, url, mesh_hash, cover_hash, category, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'published', ?)",
       id,
       userId,
       title,
       summary,
       url,
-      mesh,
+      body.mesh_hash as string,
+      body.cover_hash as string,
+      category,
       Date.now(),
     );
     return ok(this.project(id)!);
@@ -431,7 +449,7 @@ export class Directory extends DurableObject<Env> {
     return (
       this.sql
         .exec<Omit<PublicProject, "in_world"> & { in_world: number }>(
-          `SELECT p.id, p.title, p.summary, p.url, p.mesh_hash, u.display_name AS author, p.created_at, p.in_world
+          `SELECT p.id, p.title, p.summary, p.url, p.mesh_hash, p.cover_hash, p.category, u.display_name AS author, p.created_at, p.in_world
            FROM projects p JOIN users u ON u.id = p.user_id WHERE p.id = ?`,
           id,
         )
@@ -447,9 +465,9 @@ export class Directory extends DurableObject<Env> {
   listProjects(): PublicProject[] {
     return this.sql
       .exec<Omit<PublicProject, "in_world"> & { in_world: number }>(
-        `SELECT p.id, p.title, p.summary, p.url, p.mesh_hash, u.display_name AS author, p.created_at, p.in_world
+        `SELECT p.id, p.title, p.summary, p.url, p.mesh_hash, p.cover_hash, p.category, u.display_name AS author, p.created_at, p.in_world
          FROM projects p JOIN users u ON u.id = p.user_id WHERE p.status = 'published'
-         ORDER BY p.created_at DESC LIMIT 50`,
+         ORDER BY p.created_at DESC LIMIT 100`,
       )
       .toArray()
       .map((r) => ({ ...r, in_world: !!r.in_world }));

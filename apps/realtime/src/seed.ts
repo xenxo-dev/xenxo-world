@@ -1,6 +1,7 @@
 import { type Components } from "@xenxo/protocol";
 import plazaLayout from "./plaza-layout.json";
 import { SEED_ASSETS } from "./seed-assets";
+import { plazaGatePortal } from "./nexo";
 
 /**
  * La plaza inicial también es DATOS, no código del cliente: cualquier cliente
@@ -16,7 +17,7 @@ import { SEED_ASSETS } from "./seed-assets";
  * Sube SEED_VERSION cuando cambies algo aquí o en plaza-layout.json: el servidor
  * sustituye las entidades del sistema y conserva las de personas y agentes.
  */
-export const SEED_VERSION = 4;
+export const SEED_VERSION = 5;
 
 type P2 = [number, number];
 interface Layout {
@@ -136,6 +137,8 @@ export function plazaSeed(): { id: string; components: Components }[] {
     const top = 4.2 + span / 2 + 1.4;
     label("gate_label", at(px, pz, f, 0, STREET + top - 0.62, 0.72), f, "xenxo.io", {}, 0.8, "#ff4fd8");
     light("gate_glow", at(px, pz, f, 0, 3.2, 1.6), "#4fa3ff", 2, 8);
+    // Cruzar el arco hacia fuera lleva de vuelta al nexo.
+    out.push(plazaGatePortal());
   }
 
   /* --- Campanario ------------------------------------------------------------- */

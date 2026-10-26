@@ -4,14 +4,15 @@ import { PerformanceMonitor } from "@react-three/drei";
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { XR, createXRStore, useXR } from "@react-three/xr";
-import { CHUNK_SIZE } from "@xenxo/protocol";
-import { world } from "../net/world-store";
+import { CHUNK_SIZE, PLACES } from "@xenxo/protocol";
+import { usePlace, world } from "../net/world-store";
 import { Avatars } from "./Avatars";
 import { Entities } from "./Entities";
 import { graphics, useGraphics, type Ambience, type Features } from "./graphics";
 import { attachDesktopInput, input } from "./input";
 import { setMaxAnisotropy, tickMaterials } from "./materials";
 import { Player } from "./Player";
+import { Portals } from "./Portals";
 import { Sky, SKY } from "./Sky";
 import { Skyline } from "./Skyline";
 import skyDay from "./sky-day.json";
@@ -49,12 +50,19 @@ const LIGHTING = {
     // o la plaza se ve gris y lavada en VR y móvil.
     env: 0.025,
   },
+  // El nexo: siempre de noche, pero con una luz fría de ambiente para que se lea el suelo.
+  nexo: {
+    hemi: ["#7fa6e6", "#1a2333", 1.1],
+    sun: { color: "#9fd8ff", intensity: 0.35, offset: [22, 40, -12] },
+    env: 0.05,
+  },
 } as const;
+type LightProfile = keyof typeof LIGHTING;
 
-function Lighting({ ambience, features }: { ambience: Ambience; features: Features }) {
+function Lighting({ profile, features }: { profile: LightProfile; features: Features }) {
   const sun = useRef<THREE.DirectionalLight>(null);
   const scene = useThree((s) => s.scene);
-  const L = LIGHTING[ambience];
+  const L = LIGHTING[profile];
 
   useEffect(() => {
     const light = sun.current;
@@ -146,7 +154,7 @@ function useDaySky(enabled: boolean) {
  *  - Alta/Ultra: una «sonda» que fotografía la propia plaza (neones incluidos)
  *    al cargar y cuando cambia el mundo, para que el suelo mojado y el metal la reflejen.
  */
-function Environment({ ambience, probe, sky }: { ambience: Ambience; probe: Features["probe"]; sky: THREE.Texture | null }) {
+function Environment({ ambience, profile, probe, sky }: { ambience: Ambience; profile: LightProfile; probe: Features["probe"]; sky: THREE.Texture | null }) {
   const gl = useThree((s) => s.gl);
   const scene = useThree((s) => s.scene);
   const base = sky ?? null;
@@ -177,7 +185,7 @@ function Environment({ ambience, probe, sky }: { ambience: Ambience; probe: Feat
   }, [ambience, cube, sky]);
 
   useFrame((_, dt) => {
-    scene.environmentIntensity = cube ? (ambience === "night" ? 0.55 : 1) : LIGHTING[ambience].env;
+    scene.environmentIntensity = cube ? (ambience === "night" ? 0.55 : 1) : LIGHTING[profile].env;
     if (!cube) {
       scene.environment = base ?? room;
       return;
@@ -241,7 +249,11 @@ function XRWatcher() {
 function Scene({ active }: { active: boolean }) {
   const g = useGraphics();
   const f = g.features;
-  const ambience = g.ambience;
+  const place = usePlace();
+  const inPlaza = place === PLACES.plaza;
+  // El nexo está fuera del tiempo: siempre de noche, para que manden sus líneas de luz.
+  const ambience: Ambience = place === PLACES.nexo ? "night" : g.ambience;
+  const profile: LightProfile = place === PLACES.nexo ? "nexo" : ambience;
   const sky = SKY[ambience];
   const realSky = ambience === "day" && f.pbr;
   const daySky = useDaySky(realSky);
@@ -254,12 +266,13 @@ function Scene({ active }: { active: boolean }) {
       {daySky ? <primitive key="sky" attach="background" object={daySky.tex} /> : <color key="color" attach="background" args={[sky.fog]} />}
       <fog attach="fog" args={[sky.fog, ambience === "night" ? 45 : 70, ambience === "night" ? 230 : 260]} />
       {!skyReady && <Sky ambience={ambience} />}
-      <Skyline count={f.skyline} ambience={ambience} pbr={f.pbr} />
-      <Lighting ambience={ambience} features={f} />
-      <Environment ambience={ambience} probe={f.probe} sky={dayEnv} />
+      {inPlaza && <Skyline count={f.skyline} ambience={ambience} pbr={f.pbr} />}
+      <Lighting profile={profile} features={f} />
+      <Environment ambience={ambience} profile={profile} probe={f.probe} sky={dayEnv} />
       {/* Los textos cargan su fuente de forma asíncrona: que nunca bloqueen la escena ni el panel. */}
       <Suspense fallback={null}>
         <Entities features={f} ambience={ambience} />
+        <Portals features={f} active={active} />
         <Avatars />
       </Suspense>
       <Player active={active} />

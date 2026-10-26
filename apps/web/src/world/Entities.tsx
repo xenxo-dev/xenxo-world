@@ -1,7 +1,7 @@
 import { Component, memo, Suspense, useMemo, type ReactNode } from "react";
 import { Billboard, Text, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
-import { CHUNK_SIZE, LabelV1, labelText, LightV1, MeshV1, PrimitiveV1, TransformV1, type Entity } from "@xenxo/protocol";
+import { LabelV1, labelText, LightV1, MeshV1, PrimitiveV1, TransformV1, type Entity } from "@xenxo/protocol";
 import { assetUrl } from "../config";
 import { useLang } from "../i18n";
 import { useWorldVersion, world } from "../net/world-store";
@@ -9,11 +9,8 @@ import { FONT_URL, NEON_FONT_URL } from "./font";
 import type { Ambience, Features } from "./graphics";
 import { haloMaterial, lightweight, libraryMaterial, parseLibraryName } from "./materials";
 
-/** Origen global de un chunk "c_<x>_<z>". */
-function chunkOrigin(chunkId: string): [number, number] {
-  const [, x = "0", z = "0"] = chunkId.split("_");
-  return [Number(x) * CHUNK_SIZE, Number(z) * CHUNK_SIZE];
-}
+/** Origen de un chunk respecto al lugar actual (que se dibuja en 0..CHUNK_SIZE). */
+const chunkOrigin = (chunkId: string) => world.offsetOf(chunkId);
 
 /**
  * Traduce componentes del protocolo a Three.js. Este archivo es el "adaptador de

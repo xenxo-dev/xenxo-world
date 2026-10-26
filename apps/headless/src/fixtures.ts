@@ -1,3 +1,4 @@
+import zlib from "node:zlib";
 /**
  * Modelos de prueba generados en código (sin archivos binarios en el repo).
  */
@@ -232,4 +233,32 @@ function rewriteJson(glb: Uint8Array, json: unknown): Uint8Array {
   out.set(jsonBytes, 20);
   out.set(rest, 20 + jsonBytes.length);
   return out;
+}
+
+/** PNG liso de w×h (portada de prueba), sin dependencias: cabecera, filas sin filtro y deflate. */
+export function makeCoverPng(w = 320, h = 180, rgb: [number, number, number] = [40, 200, 255]): Uint8Array {
+  const crc = (buf: Buffer) => zlib.crc32(buf);
+  const chunk = (type: string, data: Buffer) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const td = Buffer.concat([Buffer.from(type, "ascii"), data]);
+    const c = Buffer.alloc(4);
+    c.writeUInt32BE(crc(td) >>> 0);
+    return Buffer.concat([len, td, c]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr[8] = 8; // bits por canal
+  ihdr[9] = 2; // RGB
+  const row = Buffer.alloc(1 + w * 3);
+  for (let x = 0; x < w; x++) row.set(rgb, 1 + x * 3);
+  const raw = Buffer.concat(Array.from({ length: h }, () => row));
+  const png = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", zlib.deflateSync(raw)),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+  return new Uint8Array(png);
 }

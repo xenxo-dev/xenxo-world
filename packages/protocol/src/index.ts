@@ -33,6 +33,16 @@ export type Quat = z.infer<typeof Quat>;
 /** Lado del chunk en metros. */
 export const CHUNK_SIZE = 64;
 
+/**
+ * Lugares con nombre propio. El nexo es la entrada: un vestíbulo fuera del mapa con
+ * portales a los distritos (la plaza) y a los proyectos de la comunidad.
+ */
+export const PLACES = { nexo: "c_0_-1000", plaza: "c_0_0" } as const;
+
+/** Categorías de proyecto que los clientes conocen (otras se tratan como "other"). */
+export const PROJECT_CATEGORIES = ["game3d", "game2d", "social", "tool", "other"] as const;
+export type ProjectCategory = (typeof PROJECT_CATEGORIES)[number];
+
 /** Presupuestos por defecto. El servidor manda; el cliente solo los lee. */
 export const BUDGETS = {
   maxEntitiesPerChunk: 400,
@@ -135,6 +145,41 @@ export const LightV1 = z.object({
   when: z.enum(["night", "always"]).default("night"),
 });
 
+/**
+ * Portal: un marco de `size` metros (ancho × alto), centrado en el transform y mirando a +Z.
+ * Un cliente lo activa cuando el jugador entra en la franja de PORTAL_ZONE_DEPTH metros delante
+ * del marco (y tan ancha como él):
+ *  - `chunk`: viaja a ese chunk (y aparece en `spawn` mirando hacia `yaw` grados, si vienen).
+ *  - `project`: muestra la ficha del proyecto del Directory (portada, autor, enlace). Nunca
+ *    abre un enlace sin que la persona pulse: el enlace sale del Directory, no del portal.
+ */
+/** Fondo de la franja que activa un portal, delante del marco (m). Llega hasta su peana. */
+export const PORTAL_ZONE_DEPTH = 3.4;
+
+export const PortalV1 = z.object({
+  to: z.discriminatedUnion("kind", [
+    z.object({
+      kind: z.literal("chunk"),
+      chunk_id: ChunkId,
+      spawn: Vec3.optional(),
+      /** Hacia dónde mira al llegar, en grados (0 = norte, −Z; 90 = oeste). */
+      yaw: z.number().min(-360).max(360).optional(),
+    }),
+    z.object({ kind: z.literal("project"), project_id: z.string().regex(/^[a-zA-Z0-9_-]{4,40}$/) }),
+  ]),
+  size: z.tuple([z.number().min(0.5).max(16), z.number().min(0.5).max(16)]).default([4, 2.25]),
+  /** Portada (imagen subida con /assets?kind=cover). Sin portada, el cliente dibuja un velo de luz. */
+  cover: Hash.optional(),
+  /** Nombre que se enseña al acercarse (dato, no instrucciones). */
+  title: z.string().min(1).max(BUDGETS.maxLabelChars).optional(),
+  i18n: z
+    .record(z.string().regex(/^[a-z]{2}$/), z.string().min(1).max(BUDGETS.maxLabelChars))
+    .refine((o) => Object.keys(o).length <= 12, "máximo 12 idiomas")
+    .optional(),
+  /** Categoría ("game3d", "game2d", "social", "tool", "other"…): pista de color para el cliente. */
+  category: z.string().regex(/^[a-z0-9_]{1,16}$/).optional(),
+});
+
 /** Reservado en v0: el servidor lo rechaza hasta que exista el sandbox WASM. */
 export const BehaviorV1 = z.object({
   module: Hash,
@@ -151,6 +196,7 @@ export const COMPONENTS = {
   "collider@1": ColliderV1,
   "label@1": LabelV1,
   "light@1": LightV1,
+  "portal@1": PortalV1,
   "behavior@1": BehaviorV1,
 } as const;
 
@@ -162,6 +208,7 @@ export const ACCEPTED_IN_V0: readonly ComponentKey[] = [
   "collider@1",
   "label@1",
   "light@1",
+  "portal@1",
 ];
 
 /**
@@ -176,6 +223,7 @@ export const ComponentsStrict = z
     "collider@1": ColliderV1.optional(),
     "label@1": LabelV1.optional(),
     "light@1": LightV1.optional(),
+    "portal@1": PortalV1.optional(),
     "behavior@1": BehaviorV1.optional(),
   })
   .strict();

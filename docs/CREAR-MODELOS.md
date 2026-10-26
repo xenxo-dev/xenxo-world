@@ -1,15 +1,17 @@
-# Crear tu personaje y el modelo de tu proyecto
+# Crear tu personaje y el monumento de tu proyecto
 
 Todo lo que subes a xenxo.io es un archivo **glTF binario** (`.glb`) o un **VRM** (`.vrm`, el estándar abierto de avatares). Se valida y se optimiza en tu propio navegador antes de subirlo: nada sale de tu equipo hasta que pulsas el botón.
 
 ## Presupuestos
 
-| | Personaje | Modelo de proyecto |
+| | Personaje | Monumento de proyecto |
 |---|---|---|
-| Triángulos | 30.000 | 50.000 |
-| Tamaño del archivo | 4 MB | 6 MB |
-| Texturas | 1024 px | 2048 px |
+| Triángulos | 30.000 | 10.000 |
+| Tamaño del archivo | 4 MB | 2 MB |
+| Texturas | 1024 px | 1024 px |
 | Formatos | `.glb` o `.vrm` | `.glb` |
+
+Además del monumento, cada proyecto necesita una **portada**: una imagen (PNG, JPEG o WebP) que la web recorta a 16:9 y convierte a WebP de hasta 300 KB. Es lo que se ve en la pantalla de su portal en el nexo y en el nexo 2D.
 
 Si te pasas en triángulos, el navegador intenta simplificar la malla para que quepa. Las texturas grandes se reducen solas. Estos límites existen para que la plaza vaya fluida en unas gafas Meta Quest 3, donde se dibuja un personaje por cada persona cercana.
 
@@ -31,7 +33,7 @@ Si te pasas en triángulos, el navegador intenta simplificar la malla para que q
    - Con textura: `cal`, `estuco`, `piedra`, `losa`, `adoquin`, `teja`, `azulejo`, `madera`, `persiana`, `hierro`, `metal`, `toldo`, `tela`, `corteza`, `tierra`, `hoja`.
    - Que brillan o cambian: `neon`, `farol`, `ventana`, `agua`.
    - Solo color: `oscuro`, `fruta`, `flor`.
-8. Modelos de proyecto: frente hacia **−Y en Blender** (lo que ves en la vista frontal), apoyados en el suelo. En la exposición se muestran como **maqueta de hasta 1,3 m** sobre un pedestal.
+8. Monumentos de proyecto: frente hacia **−Y en Blender** (lo que ves en la vista frontal), apoyados en el suelo. En el nexo se colocan en la peana de delante de tu portal, mirando al centro, escalados para caber en **1,6 m**. Piensa en un símbolo reconocible de tu juego, no en un escenario entero.
 
 ## Personajes de serie (sin hacer nada)
 

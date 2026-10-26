@@ -4,7 +4,8 @@
  */
 import { useSyncExternalStore } from "react";
 import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
-import { checkBudget, inspectGlb, type AssetKind, type BudgetProblem, type GlbReport } from "@xenxo/assets";
+import { checkBudget, COVER_BUDGET, inspectGlb, type AssetKind, type BudgetProblem, type GlbReport } from "@xenxo/assets";
+import type { ProjectCategory } from "@xenxo/protocol";
 import { REALTIME_URL, loadPref, savePref } from "../config";
 import { reconnect } from "./session";
 
@@ -26,6 +27,8 @@ export interface Project {
   summary: string;
   url: string | null;
   mesh_hash: string | null;
+  cover_hash: string | null;
+  category: ProjectCategory;
   author: string;
   created_at: number;
   in_world: boolean;
@@ -89,7 +92,7 @@ async function api<T>(method: string, path: string, body?: unknown, raw?: Blob):
   const token = accountToken();
   if (token) headers.Authorization = `Bearer ${token}`;
   if (body !== undefined) headers["Content-Type"] = "application/json";
-  if (raw) headers["Content-Type"] = "model/gltf-binary";
+  if (raw) headers["Content-Type"] = raw.type || "application/octet-stream";
   const res = await fetch(new URL(path, REALTIME_URL), {
     method,
     headers,
@@ -182,6 +185,42 @@ export async function uploadModel(m: PreparedModel, kind: AssetKind) {
   );
 }
 
+/* --- Portadas --- */
+
+export interface PreparedCover {
+  blob: Blob;
+  /** URL local para la vista previa (revócala al terminar). */
+  preview: string;
+}
+
+/**
+ * Recorta la imagen a 16:9 (por el centro), la deja en 1280×720 como mucho y la pasa a WebP
+ * (o JPEG si el navegador no sabe hacer WebP), bajando la calidad hasta que quepa.
+ */
+export async function prepareCover(file: File): Promise<PreparedCover> {
+  if (!/^image\//.test(file.type)) throw new ApiError("bad_image", "not an image");
+  const bitmap = await createImageBitmap(file);
+  const W = Math.min(1280, bitmap.width), H = Math.round((W * 9) / 16);
+  const srcRatio = bitmap.width / bitmap.height;
+  const sw = srcRatio > 16 / 9 ? bitmap.height * (16 / 9) : bitmap.width;
+  const sh = srcRatio > 16 / 9 ? bitmap.height : bitmap.width / (16 / 9);
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  canvas.getContext("2d")!.drawImage(bitmap, (bitmap.width - sw) / 2, (bitmap.height - sh) / 2, sw, sh, 0, 0, W, H);
+  bitmap.close();
+  for (const q of [0.86, 0.76, 0.64, 0.5, 0.38]) {
+    let blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/webp", q));
+    if (!blob || blob.type !== "image/webp") blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/jpeg", q));
+    if (blob && blob.size <= COVER_BUDGET.maxBytes) return { blob, preview: URL.createObjectURL(blob) };
+  }
+  throw new ApiError("too_large", "cover too large");
+}
+
+export async function uploadCover(c: PreparedCover) {
+  return api<{ hash: string }>("POST", "/assets?kind=cover", undefined, c.blob);
+}
+
 export async function setAvatar(hash: string | null) {
   adopt(await api("POST", "/me/avatar", { hash }));
 }
@@ -192,7 +231,14 @@ export async function listProjects(): Promise<Project[]> {
   return (await api<{ projects: Project[] }>("GET", "/projects")).projects;
 }
 
-export async function createProject(p: { title: string; summary: string; url: string; mesh_hash: string | null }) {
+export async function createProject(p: {
+  title: string;
+  summary: string;
+  url: string;
+  category: ProjectCategory;
+  cover_hash: string;
+  mesh_hash: string;
+}) {
   return api<{ project: Project; stand: { ok: boolean; message?: string } }>("POST", "/projects", p);
 }
 

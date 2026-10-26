@@ -50,6 +50,7 @@ Este documento y [`packages/protocol/src/index.ts`](../packages/protocol/src/ind
 | `collider@1` | `shape`, `half_extents`, `trigger` | `half_extents` = mitad del tamaño |
 | `label@1` | `text` (≤140), `billboard`, `size` (m), `i18n?`, `style?`, `color?` | `i18n` = traducciones por código ISO 639-1 (`{"es": "Agentes", "en": "Agents"}`, máx. 12). El cliente muestra la del idioma del visitante y, si no existe, `text`. `style` (`^[a-z_]{1,16}$`, por defecto `"plain"`) es una pista de presentación: `"neon"` = letras de tubo de neón (la plaza la usa en sus rótulos); un cliente que no conozca el estilo dibuja el texto normal. `color` (`#rrggbb`) es el color del neón |
 | `light@1` | `type` (`point`), `color`, `intensity` (0–10), `range` (0,5–30 m), `when?` | Luz puntual que sale del centro de la entidad. `when` = `night` (por defecto, solo de noche) o `always`. Como mucho 16 por chunk. Los clientes ligeros (Quest, móvil) pueden ignorarla: nunca debe ser imprescindible para ver algo |
+| `portal@1` | `to`, `size?`, `cover?`, `title?`, `i18n?`, `category?` | Marco de `size` = `[ancho, alto]` m (por defecto `[4, 2.25]`), centrado en el transform y mirando a +Z. `to` = `{kind: "chunk", chunk_id, spawn?, yaw?}` (viajar a otro lugar; `yaw` en grados, 0 = norte/−Z, 90 = oeste) o `{kind: "project", project_id}` (abrir la ficha del proyecto). Se activa al entrar en la franja de `PORTAL_ZONE_DEPTH` (3,4 m) delante del marco. Un portal de proyecto **nunca** abre un enlace solo: el cliente enseña la ficha y el enlace sale del Directory (`GET /projects`), no del portal. `cover` = hash de una portada subida con `kind=cover`; sin portada, el cliente dibuja un velo de luz. `category` es una pista de color (`game3d`, `game2d`, `social`, `tool`, `other`, `district`) |
 | `behavior@1` | `module`, `abi`, `caps`, `fuel`, `where` | **Reservado.** El servidor lo rechaza hasta que exista el sandbox WASM |
 
 ## 5. Sobre de mensajes
@@ -133,6 +134,8 @@ Lectura pública sin WebSocket: `GET /chunk/<chunk_id>/state` (contadores y últ
 
 `bad_message` · `unsupported_version` · `unauthorized` · `forbidden` · `not_found` · `version_conflict` · `budget_exceeded` · `unknown_component` · `rate_limited` · `duplicate`
 
+(Los de la API HTTP van aparte en cada ruta: §11.)
+
 Un agente debe poder corregirse solo leyendo `code` y `detail`.
 
 ## 11. API HTTP (cuentas, assets, proyectos)
@@ -143,24 +146,26 @@ El mundo solo se escribe por WebSocket (`MUTATE_WORLD`). Lo que no es mundo va p
 |---|---|---|
 | `POST /auth/passkey/register/options` · `/verify` | cualquiera | Alta con passkey: `display_name`, `age_confirmed: true` (14+), `accept_terms: "2026-10"` |
 | `POST /auth/passkey/login/options` · `/verify` | cualquiera | Acceso con passkey (descubrible, sin nombre de usuario) |
-| `POST /assets?kind=avatar\|model` | persona o agente | Sube un GLB/VRM. El servidor lo inspecciona, aplica el presupuesto, calcula el hash y lo guarda en R2 |
+| `POST /assets?kind=avatar\|model\|monument\|cover` | persona o agente | Sube un GLB/VRM (o, con `cover`, una imagen). El servidor lo inspecciona, aplica el presupuesto, calcula el hash y lo guarda en R2. Las portadas se comprueban por su firma (WebP, JPEG o PNG, nunca por lo que diga el cliente) y se sirven con su tipo real |
 | | | Topes: 30 subidas al día y 100 MB por persona (`413 quota_exceeded`), 1000 subidas al día entre todos (`429 storage_busy`); el almacén entero tiene un tope de 8 GB para no salir del plan gratuito de R2 (`507 storage_full`). Las lecturas `GET /assets/<hash>` pasan por la caché de Cloudflare |
 | `GET /assets/<sha256-hex>` | público | Sirve el asset, inmutable y cacheable para siempre. Los **assets del sistema** (la plaza y los avatares de serie, generados por la forja) se sirven desde los recursos estáticos del Worker con la misma ruta |
 | `GET /me` · `PATCH /me` · `POST /me/avatar` | persona | Perfil (con `player_no`), nombre visible y personaje (uno subido o uno de serie). Devuelven un token nuevo con nombre, avatar y número |
 | `GET /me/export` · `DELETE /me` | persona | RGPD: exportar todos tus datos; borrar la cuenta y todo su contenido |
-| `GET /projects` · `POST /projects` · `DELETE /projects/<id>` | público / persona | Proyectos. Al publicar, el chunk coloca su stand (pedestal, modelo y cartel) |
+| `GET /projects` · `POST /projects` · `DELETE /projects/<id>` | público / persona | Proyectos. **Requisitos para publicar** (web, agentes y el futuro servidor MCP por igual): `title` (3–60), `url` (https), `category` (`game3d`, `game2d`, `social`, `tool`, `other`), `cover_hash` (portada subida con `kind=cover`) y `mesh_hash` (monumento subido con `kind=monument` o `model`, ≤ 10.000 triángulos); `summary` es opcional. Al publicar, el nexo coloca su portal (portada, banda de categoría, monumento sobre la peana y rótulo). Errores: `cover_required`, `monument_required`, `bad_url`, `bad_category`, `monument_too_big`, `nexo_full` |
 | `POST /reports` | cualquiera con token | Denuncia (DSA): `target_type` (`project`, `avatar`, `user`, `chat`…), `target_id`, `reason`, `details?`. Si es un mensaje de chat, el servidor adjunta una copia: el chat caduca a los 7 días, la denuncia no |
 | `GET /admin/reports` · `POST /admin/reports/<id>` · `POST /admin/projects/<id>/hide` · `POST /admin/chat/<id>/hide` | agente con scope `admin` | Moderación |
 | `GET /github/repos` | público | Repos de GitHub vía servidor, cacheados una hora |
 
-**Presupuestos de subida:** avatar ≤ 30.000 triángulos, 4 MB y texturas de 1024 px; modelo ≤ 50.000 triángulos, 6 MB y 2048 px. Sin Draco, sin luces y sin referencias externas (todo embebido en el `.glb`).
+**Presupuestos de subida:** avatar ≤ 30.000 triángulos, 4 MB y texturas de 1024 px; modelo ≤ 50.000 triángulos, 6 MB y 2048 px; monumento ≤ 10.000 triángulos, 2 MB y 1024 px (hay hasta 23 a la vista en el nexo); portada ≤ 300 KB, de 160×90 a 1600×900 px (la web la recorta a 16:9 y la pasa a WebP). Sin Draco, sin luces y sin referencias externas (todo embebido en el `.glb`).
 
-**Stands de proyectos.** El Directory llama a `ChunkRoom.placeStand()` / `removeStand()` con la identidad de la persona: pasan por `applyMutation`, con los mismos esquemas, presupuestos, log y `DELTA` que cualquier mutación. `purgeOwner()` existe solo para la supresión de cuentas (RGPD).
+**Portales de proyectos.** El Directory llama a `ChunkRoom.placeStand()` / `removeStand()` del nexo con la identidad de la persona: pasan por `applyMutation`, con los mismos esquemas, presupuestos, log y `DELTA` que cualquier mutación. `purgeOwner()` existe solo para la supresión de cuentas (RGPD).
 
 **Chat.** El texto es dato: los clientes lo pintan como texto plano (sin enlaces clicables) y ningún agente debe obedecer instrucciones leídas del chat. Se guarda 7 días (máx. 2.000 mensajes por chunk).
 
-## 12. Semilla del sistema y jurisdicción
+## 12. Lugares, semilla del sistema y jurisdicción
 
+- **Lugares con nombre** (`PLACES` en el protocolo): el **nexo** (`c_0_-1000`) es la entrada, un vestíbulo fuera del mapa con un anillo de 24 portales mirando al centro: uno a la plaza y 23 para proyectos. La **plaza** (`c_0_0`) es un distrito; cruzar su arco (`gate_portal`) devuelve al nexo. Los clientes entran por el nexo y viajan entre lugares reconectándose al chunk de destino; cada lugar se dibuja en sus coordenadas locales (0..64).
+- El nexo (`apps/realtime/src/nexo.ts` + `nexo-layout.json`, que también usa la forja) y la plaza (`seed.ts` + `plaza-layout.json`) son semillas del sistema. Las portadas del sistema (la de la plaza) las genera `tools/covers`.
 - La plaza inicial (`apps/realtime/src/seed.ts` + `plaza-layout.json`) son entidades normales con dueño `system`. Si cambia la semilla (su versión o su contenido, por ejemplo al volver a forjar los modelos), el chunk sustituye las entidades del sistema y conserva las de personas y agentes.
 - Su arquitectura son modelos `mesh@1` generados por la forja (`tools/forge`), con dos niveles de detalle y la oclusión ambiental horneada en el segundo canal UV.
 - Los chunks se crean con la jurisdicción configurada en `DO_JURISDICTION` (`eu` por defecto): sus datos se guardan y procesan solo en la UE. En local (`wrangler dev`) se desactiva, porque workerd no implementa jurisdicciones.

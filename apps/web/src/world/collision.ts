@@ -22,10 +22,8 @@ interface Box {
 let boxes: Box[] = [];
 let version = -1;
 
-function chunkOrigin(chunkId: string): [number, number] {
-  const [, x = "0", z = "0"] = chunkId.split("_");
-  return [Number(x) * CHUNK_SIZE, Number(z) * CHUNK_SIZE];
-}
+/** Origen de un chunk respecto al lugar actual (que se dibuja en 0..CHUNK_SIZE). */
+const chunkOrigin = (chunkId: string) => world.offsetOf(chunkId);
 
 function refresh() {
   const v = world.getVersion();

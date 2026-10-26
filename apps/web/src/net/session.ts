@@ -1,4 +1,4 @@
-import { msg, type ClientMessage } from "@xenxo/protocol";
+import { msg, PLACES, type ClientMessage } from "@xenxo/protocol";
 import { REALTIME_URL } from "../config";
 import { accountToken } from "./account";
 import { WebSocketAdapter, type NetworkAdapter } from "./NetworkAdapter";
@@ -13,7 +13,7 @@ net.onStatus((s) => world.setStatus(s));
 let started = false;
 let retry = 0;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
-let chunk = "c_0_0";
+let chunk: string = PLACES.nexo;
 let guestName: string | undefined;
 let reconnecting = false;
 
@@ -49,7 +49,7 @@ function scheduleRetry() {
   }, 1000 * 2 ** retry);
 }
 
-export async function startSession(displayName: string | undefined, chunkId = "c_0_0") {
+export async function startSession(displayName: string | undefined, chunkId: string = PLACES.nexo) {
   if (started) return;
   started = true;
   chunk = chunkId;
@@ -84,6 +84,40 @@ export function reconnect() {
     retryTimer = null;
   }
   void connect();
+}
+
+/* ------------------------------------------------------------------ */
+/* Viajes entre lugares (portales)                                      */
+/* ------------------------------------------------------------------ */
+
+export interface SpawnRequest {
+  seq: number;
+  p: [number, number, number];
+  /** Radianes, como la cámara del jugador (0 = mirando al norte, −Z). */
+  yaw: number;
+}
+
+/** Último sitio donde hay que aparecer; el jugador lo lee en su useFrame. */
+export const spawn: SpawnRequest = { seq: 0, p: [32, 0, 40], yaw: 0 };
+
+/** Pide aparecer en un punto del lugar actual (p. ej. delante de un portal del nexo). */
+export function teleport(p: [number, number, number], yawDeg = 0) {
+  spawn.seq++;
+  spawn.p = p;
+  spawn.yaw = (yawDeg * Math.PI) / 180;
+}
+
+/** Viaja a otro chunk: se reconecta allí y aparece en `p` (o donde diga el lugar). */
+export function travel(chunkId: string, p?: [number, number, number], yawDeg = 0) {
+  if (p) teleport(p, yawDeg);
+  if (chunkId === chunk) return;
+  chunk = chunkId;
+  world.beginTravel(chunkId);
+  if (started) reconnect();
+}
+
+export function currentChunk() {
+  return chunk;
 }
 
 export function sendChat(text: string) {

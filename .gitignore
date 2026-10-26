@@ -9,4 +9,5 @@ dist/
 .DS_Store
 tools/materials/.cache/
 tools/forge/out/
+tools/covers/out/
 __pycache__/
