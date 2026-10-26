@@ -1,0 +1,29 @@
+{
+  "schema": "xenxo.game/0",
+  "name": {
+    "es": "Hextris",
+    "en": "Hextris"
+  },
+  "description": {
+    "es": "Gira el hexágono y junta bloques del mismo color antes de que se desborde: el puzle inspirado en Tetris, con tu nombre de xenxo y tus récords.",
+    "en": "Spin the hexagon and match blocks of the same colour before it overflows: the Tetris-inspired puzzle, with your xenxo name and your high scores."
+  },
+  "category": "game2d",
+  "devices": [
+    "pc",
+    "mobile",
+    "vr"
+  ],
+  "multiplayer": false,
+  "ageRating": "all",
+  "monetization": {
+    "hasAds": false,
+    "hasPurchases": false
+  },
+  "author": "Logan Engstrom y Garrett Finucane · adaptado por xenxo",
+  "contact": "https://github.com/xenxo-dev/xenxo-world/tree/main/games/hextris",
+  "privacy": "https://xenxo-hextris.xenxo.workers.dev/privacidad.html",
+  "thumbnail": "/portada.webp",
+  "embed": true,
+  "xenxo": {}
+}

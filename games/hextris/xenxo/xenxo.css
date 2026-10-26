@@ -1,0 +1,43 @@
+/* Barra de xenxo encima de Hextris (abajo, centrada; arriba van los botones del juego). */
+.xenxo-bar {
+  position: fixed;
+  left: 50%;
+  bottom: max(10px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 3000;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-family: Exo, "Exo 2", system-ui, sans-serif;
+  white-space: nowrap;
+}
+.xenxo-chip,
+.xenxo-btn {
+  font: inherit;
+  font-size: 15px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 0;
+  background: rgba(44, 62, 80, 0.9);
+  color: #ecf0f1;
+}
+.xenxo-btn {
+  cursor: pointer;
+}
+.xenxo-primary {
+  background: #3498db;
+}
+.xenxo-no {
+  margin-left: 6px;
+  color: #f1c40f;
+}
+.xenxo-dim {
+  opacity: 0.8;
+}
+@media (max-width: 520px) {
+  .xenxo-chip,
+  .xenxo-btn {
+    font-size: 13px;
+    padding: 6px 9px;
+  }
+}

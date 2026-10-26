@@ -1,0 +1,10 @@
+# Hextris para xenxo: archivos estáticos en un Worker, en su propio dominio (xenxo-hextris.xenxo.workers.dev).
+# No va en xenxo.io a propósito: un juego en el dominio de xenxo no se puede abrir incrustado
+# (comparte sitio con xenxo). Lo despliega .github/workflows/deploy.yml.
+name = "xenxo-hextris"
+compatibility_date = "2026-10-01"
+workers_dev = true
+preview_urls = false
+
+[assets]
+directory = "."

@@ -1,0 +1,84 @@
+/* xenxo en 2048: barra, flechas en pantalla y etiquetas traducidas. */
+.score-container:after {
+  content: var(--x-score, "Score") !important;
+}
+.best-container:after {
+  content: var(--x-best, "Best") !important;
+}
+.xenxo-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  margin: 0 0 14px;
+}
+.xenxo-chip,
+.xenxo-btn {
+  font: inherit;
+  font-size: 15px;
+  font-weight: bold;
+  padding: 7px 12px;
+  border-radius: 6px;
+  border: 0;
+  background: #bbada0;
+  color: #f9f6f2;
+}
+.xenxo-btn {
+  cursor: pointer;
+  background: #8f7a66;
+}
+.xenxo-primary {
+  background: #1f8fff;
+}
+.xenxo-no {
+  margin-left: 6px;
+  color: #fff7d6;
+}
+.xenxo-dim {
+  font-weight: normal;
+  opacity: 0.8;
+}
+.xenxo-pad {
+  display: grid;
+  grid-template-columns: repeat(3, 72px);
+  grid-template-rows: repeat(2, 64px);
+  gap: 10px;
+  justify-content: center;
+  margin: 18px 0 6px;
+}
+.xenxo-pad[hidden] {
+  display: none;
+}
+.xenxo-arrow {
+  border: 0;
+  border-radius: 10px;
+  background: #8f7a66;
+  color: #f9f6f2;
+  font-size: 28px;
+  touch-action: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.xenxo-arrow:active {
+  background: #6d5d4f;
+}
+.xenxo-up {
+  grid-column: 2;
+  grid-row: 1;
+}
+.xenxo-left {
+  grid-column: 1;
+  grid-row: 2;
+}
+.xenxo-down {
+  grid-column: 2;
+  grid-row: 2;
+}
+.xenxo-right {
+  grid-column: 3;
+  grid-row: 2;
+}
+.xenxo-credits {
+  font-size: 14px;
+}

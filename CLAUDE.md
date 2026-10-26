@@ -21,7 +21,7 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 | `packages/mcp` | Servidor MCP (MIT): el agente de una persona construye en su parcela con su clave `xk_` |
 | `packages/sdk` | `@xenxo/sdk` (MIT): «Entrar con xenxo», simulador local y `xenxo.back()` para juegos web; se sirve en `xenxo.io/sdk/` con un juego de ejemplo y se publica en npm |
 | `packages/create-xenxo` | Plantilla (MIT): `npm create xenxo` crea un juego 2D o 3D con el SDK, `xenxo.json` y `AGENTS.md`; con `--multi`, una sala (Worker + Durable Object) para la cuenta de Cloudflare del creador |
-| `games/` | Juegos de ejemplo hechos como cualquier creador (cada uno con su licencia y su dominio): `games/hexgl` (HexGL, uso no comercial: ver su `NOTICE.md`) |
+| `games/` | Juegos de ejemplo hechos como cualquier creador (cada uno con su licencia, su `NOTICE.md` y su dominio): `hexgl` (Arcade; uso no comercial), `2048` (Píxel; MIT) y `hextris` (Píxel; GPL-3.0) |
 | `docs/PROTOCOL.md` | Explicación del contrato |
 
 ## Antes de dar algo por terminado
