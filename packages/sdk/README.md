@@ -8,6 +8,8 @@ Sin dependencias, unos 5 KB. Licencia MIT: tu juego sigue siendo tuyo.
 
 En xenxo.io → **Proyectos** → *«Entrar con xenxo» en tu juego*: nombre y **dirección de vuelta**
 (la página de tu juego a la que vuelve la persona; `https://`, o `http://localhost` para probar).
+Tiene que coincidir **exacta** con `redirectUri`: ojo con los alojamientos que quitan el `.html` o
+añaden la barra final.
 Te da un `client_id` (`xg_…`). No hay secreto: los juegos web son clientes públicos y la
 seguridad la pone PKCE.
 
@@ -66,4 +68,5 @@ SDK: la dirección lleva el código un instante, hasta que el SDK la limpia. Y s
 servidor, que compruebe él mismo el `idToken` (firma, `aud`, `exp`) en vez de fiarse de
 `signatureChecked`.
 
-Juego de ejemplo: [xenxo.io/sdk/ejemplo.html](https://xenxo.io/sdk/ejemplo.html) (pon tu `client_id`).
+Juego de ejemplo: [xenxo.io/sdk/ejemplo](https://xenxo.io/sdk/ejemplo) (pon tu `client_id`; para probarlo con tu
+propio juego registrado, su dirección de vuelta es `https://xenxo.io/sdk/ejemplo`).

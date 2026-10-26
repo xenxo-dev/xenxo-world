@@ -29,7 +29,9 @@ async function start() {
   } catch {
     /* sin almacenamiento */
   }
-  const player = await xenxo.connect({ clientId, redirectUri: location.origin + location.pathname, issuer, scopes: ["profile", "player", "avatar"] });
+  // La dirección de vuelta tiene que ser exacta: sin ".html" (el servidor la sirve igual con y sin él).
+  const redirectUri = location.origin + location.pathname.replace(/\.html$/, "");
+  const player = await xenxo.connect({ clientId, redirectUri, issuer, scopes: ["profile", "player", "avatar"] });
   if (xenxo.error) $("status").textContent = `Sin entrar: ${xenxo.error}`;
   if (player) await show(player);
   else $("login").removeAttribute("hidden");

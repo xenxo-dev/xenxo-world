@@ -105,7 +105,7 @@ xenxo es proveedor de identidad (OpenID Connect) para juegos web: registras tu j
 MIT) y la gente entra con su cuenta. Con su permiso recibes su nombre, su número de jugador y su
 personaje (VRM), firmados con Ed25519; cada juego ve un identificador distinto de la misma persona
 y cada persona puede retirar el permiso en *Cuenta → Juegos conectados*. Juego de ejemplo:
-[xenxo.io/sdk/ejemplo.html](https://xenxo.io/sdk/ejemplo.html). Detalles en
+[xenxo.io/sdk/ejemplo](https://xenxo.io/sdk/ejemplo). Detalles en
 [`packages/sdk/README.md`](packages/sdk/README.md).
 
 ## La Plaza (distrito) y las personas
