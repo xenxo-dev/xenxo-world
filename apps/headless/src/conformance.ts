@@ -273,12 +273,14 @@ await scenario("alta con passkey y acceso de nuevo con la misma passkey", async 
   assert(me.ok && me.data.id === user.id, "el acceso no recuperó la misma cuenta");
 });
 
-await scenario("el alta exige 14 años y aceptar las condiciones vigentes", async () => {
+await scenario("el alta exige 14 años, aceptar las condiciones vigentes y un nombre no reservado", async () => {
   const api = new Api(baseUrl);
   const noAge = await api.call("POST", "/auth/passkey/register/options", { display_name: "Menor", age_confirmed: false, accept_terms: "2026-10" });
   assert(!noAge.ok && noAge.error === "age_required", "debería exigir la edad");
   const noTerms = await api.call("POST", "/auth/passkey/register/options", { display_name: "Alguien", age_confirmed: true });
   assert(!noTerms.ok && noTerms.error === "terms_required", "debería exigir las condiciones");
+  const reserved = await api.call("POST", "/auth/passkey/register/options", { display_name: "Xenxo", age_confirmed: true, accept_terms: "2026-10" });
+  assert(!reserved.ok && reserved.error === "name_reserved", "un nombre reservado debería decir name_reserved, no bad_name");
 });
 
 await scenario("assets: un invitado no puede subir; un GLB con referencias externas se rechaza", async () => {

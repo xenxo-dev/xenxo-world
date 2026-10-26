@@ -75,12 +75,20 @@ export type PublicProject = {
   in_world: boolean;
 };
 
-export function validDisplayName(raw: unknown): string | null {
+export function validDisplayName(raw: unknown, allowReserved = false): string | null {
   if (typeof raw !== "string") return null;
   const name = raw.trim().replace(/\s+/g, " ");
   if (!/^[\p{L}\p{N} _.\-]{2,32}$/u.test(name)) return null;
-  if (RESERVED_NAMES.has(name.toLowerCase())) return null;
+  if (!allowReserved && RESERVED_NAMES.has(name.toLowerCase())) return null;
   return name;
+}
+
+/** Por qué no vale un nombre: reservado (de xenxo o del sistema) o mal formado. */
+function badName(raw: unknown): Fail {
+  const reserved = typeof raw === "string" && RESERVED_NAMES.has(raw.trim().replace(/\s+/g, " ").toLowerCase());
+  return reserved
+    ? fail(400, "name_reserved", "ese nombre está reservado; elige otro")
+    : fail(400, "bad_name", "nombre no válido: 2–32 letras, números, espacios, «.», «_» o «-»");
 }
 
 function validHttpsUrl(raw: unknown): string | null | false {
@@ -202,7 +210,7 @@ export class Directory extends DurableObject<Env> {
 
   async registerOptions(body: { display_name?: unknown; age_confirmed?: unknown; accept_terms?: unknown }) {
     const name = validDisplayName(body.display_name);
-    if (!name) return fail(400, "bad_name", "nombre no válido: 2–32 letras, números, espacios, «.», «_» o «-»");
+    if (!name) return badName(body.display_name);
     if (body.age_confirmed !== true) return fail(400, "age_required", "hace falta tener 14 años o más para crear una cuenta");
     if (body.accept_terms !== TERMS_VERSION) return fail(400, "terms_required", "acepta las condiciones y la política de privacidad vigentes", { terms_version: TERMS_VERSION });
 
@@ -385,7 +393,7 @@ export class Directory extends DurableObject<Env> {
     let name: string | null = null;
     if (mode === "register") {
       name = validDisplayName(input.display_name);
-      if (!name) return fail(400, "bad_name", "nombre no válido: 2–32 letras, números, espacios, «.», «_» o «-»");
+      if (!name) return badName(input.display_name);
       if (input.age_confirmed !== true) return fail(400, "age_required", "hace falta tener 14 años o más para crear una cuenta");
       if (input.accept_terms !== TERMS_VERSION) return fail(400, "terms_required", "acepta las condiciones y la política de privacidad vigentes");
     }
@@ -494,8 +502,10 @@ export class Directory extends DurableObject<Env> {
   }
 
   rename(id: string, raw: unknown): Result<UserRow> {
-    const name = validDisplayName(raw);
-    if (!name) return fail(400, "bad_name", "nombre no válido");
+    // El fundador puede llevar un nombre reservado (p. ej. «xenxo»).
+    const founder = (this.env.FOUNDER_USER_ID ?? "").replace(/^usr_/, "").trim();
+    const name = validDisplayName(raw, founder !== "" && id === founder);
+    if (!name) return badName(raw);
     this.sql.exec("UPDATE users SET display_name = ? WHERE id = ?", name, id);
     return ok(this.user(id)!);
   }
