@@ -19,7 +19,7 @@ import { SEED_ASSETS } from "./seed-assets";
  * La disposición sale de nexo-layout.json (la misma que usa la forja). Sube NEXO_SEED_VERSION
  * si cambias el significado de algo; los cambios de contenido se detectan solos por la huella.
  */
-export const NEXO_SEED_VERSION = 6;
+export const NEXO_SEED_VERSION = 7;
 
 export type { Seeded } from "./places";
 
@@ -302,12 +302,31 @@ export function nexoSeed(): Seeded[] {
       },
     });
     if (spec.soon) {
-      // Cartel delante de la puerta cerrada (dato del mundo, en sus idiomas).
+      // Puerta cerrada: una hoja maciza que tapa el arco (no se puede cruzar), con dos franjas del
+      // color del distrito y el cartel «Próximamente» delante (dato del mundo, en sus idiomas).
+      const mid = G.bottom + G.h / 2;
+      out.push({
+        id: `nexo_door_${k}`,
+        components: {
+          "transform@1": { p: at(g.x, g.z, g.facing, 0, mid, -0.12), r: yaw(g.facing), s: [1, 1, 1], parent: null },
+          "primitive@1": { shape: "box", size: [G.w, G.h, 0.14], color: "#141a26", emissive: false, finish: "metal" },
+          "collider@1": { shape: "box", half_extents: [G.w / 2, G.h / 2, 0.25], trigger: false },
+        },
+      });
+      for (const [n, y] of [[0, G.bottom + 1.1], [1, G.bottom + G.h - 1.1]] as const) {
+        out.push({
+          id: `nexo_door_${k}_line_${n}`,
+          components: {
+            "transform@1": { p: at(g.x, g.z, g.facing, 0, y, -0.03), r: yaw(g.facing), s: [1, 1, 1], parent: null },
+            "primitive@1": { shape: "box", size: [G.w - 0.5, 0.06, 0.02], color: spec.color, emissive: true, finish: "matte" },
+          },
+        });
+      }
       out.push({
         id: `nexo_soon_${k}`,
         components: {
-          "transform@1": { p: at(g.x, g.z, g.facing, 0, G.bottom + G.h / 2, 0.08), r: yaw(g.facing), s: [1, 1, 1], parent: null },
-          "label@1": { text: "Coming soon", i18n: { es: "Próximamente", en: "Coming soon" }, billboard: false, size: 0.55, style: "neon", color: spec.color },
+          "transform@1": { p: at(g.x, g.z, g.facing, 0, mid, 0.06), r: yaw(g.facing), s: [1, 1, 1], parent: null },
+          "label@1": { text: "Coming soon", i18n: { es: "Próximamente", en: "Coming soon" }, billboard: false, size: 0.62, style: "sign", color: spec.color },
         },
       });
     }

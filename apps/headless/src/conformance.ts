@@ -566,12 +566,15 @@ await scenario("próximamente: un distrito cerrado sale en /districts, su puerta
   const soon = r.districts.find((d) => d.soon);
   assert(!!soon && r.districts.some((d) => !d.soon), "hay distritos abiertos y alguno «próximamente»");
   const nexo = await XenxoClient.connect({ baseUrl, chunkId: PLACES.nexo });
+  const nexoSnap = nexo.snapshot.entities;
   const doors = nexo.snapshot.entities
     .map((e) => e.components["portal@1"] as { to: { chunk_id?: string }; closed?: boolean } | undefined)
     .filter((p) => p?.to.chunk_id);
   nexo.close();
   assert(doors.some((p) => p!.to.chunk_id === soon!.chunk_id && p!.closed), "su puerta del nexo está cerrada");
   assert(doors.some((p) => !p!.closed), "las de los abiertos, no");
+  const slab = nexoSnap.find((e) => e.entity_id === `nexo_door_${soon!.id}`);
+  assert(!!slab?.components["collider@1"], "la puerta cerrada es maciza (no se cruza)");
   let refused = "";
   await XenxoClient.connect({ baseUrl, chunkId: soon!.chunk_id }).then((c) => c.close(), (e: Error) => (refused = e.message));
   assert(/403/.test(refused), `un invitado no entra (${refused || "entró"})`);
