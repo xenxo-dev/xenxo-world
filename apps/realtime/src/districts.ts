@@ -12,7 +12,7 @@ import activities from "./district-activities.json";
 interface DistrictActivities {
   hunts?: { id: string; piece: string; radius: number; items: { p: V3; note?: Record<string, string>; piece?: string }[] }[];
   tiles?: { id: string; p: V3; cols: number; rows: number; size: number }[];
-  boards?: { kind: "race" | "hunt"; id: string; p: V3; yaw: number; size: [number, number]; title?: { es: string; en: string } }[];
+  boards?: { kind: "race" | "hunt" | "points" | "builds"; id: string; period?: "all" | "week" | "day"; p: V3; yaw: number; size: [number, number]; title?: { es: string; en: string }; title_y?: number }[];
   props?: { piece: string; p: V3; yaw: number; half: V3 }[];
   labels?: { text: { es: string; en: string }; p: V3; yaw: number; size: number; flat?: boolean; style?: string; width?: number; max_distance?: number }[];
   races?: { id: string; radius: number; start: { p: V3; radius: number }; cps: V3[]; finish: { p: V3; radius: number } }[];
@@ -209,14 +209,16 @@ export function districtSeed(d: District, toNexo: { p: V3; yaw: number }): Seede
     );
   }
   for (const b of acts?.boards ?? []) {
+    // Un marcador por actividad y periodo (el de siempre conserva el id de antes).
+    const bid = `${d.id}_board_${b.id}${b.period && b.period !== "all" && !(b.kind === "points" && b.period === "day") ? `_${b.period}` : ""}`;
     out.push({
-      id: `${d.id}_board_${b.id}`,
+      id: bid,
       components: {
         "transform@1": { p: b.p, r: yaw(b.yaw), s: [1, 1, 1], parent: null },
-        "scoreboard@1": { kind: b.kind, id: b.id, size: b.size },
+        "scoreboard@1": { kind: b.kind, id: b.id, size: b.size, ...(b.period ? { period: b.period } : {}) },
       } as Components,
     });
-    if (b.title) label(`${d.id}_board_${b.id}_title`, [b.p[0], r3(b.p[1] + b.size[1] / 2 + 0.7), b.p[2]], yaw(b.yaw), b.title.en, b.title, 0.55);
+    if (b.title) label(`${bid}_title`, [b.p[0], r3(b.p[1] + (b.title_y ?? b.size[1] / 2 + 0.7)), b.p[2]], yaw(b.yaw), b.title.en, b.title, 0.55);
   }
 
   /* --- Atrezo modelado (los modelos generados de seed-assets), con su caja --- */

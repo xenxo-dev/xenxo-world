@@ -780,7 +780,13 @@
         "size": [
           12,
           7.4
-        ]
+        ],
+        "period": "week",
+        "title": {
+          "es": "ESTA SEMANA",
+          "en": "THIS WEEK"
+        },
+        "title_y": -4.3
       },
       {
         "kind": "hunt",
@@ -798,6 +804,25 @@
         "title": {
           "es": "MONEDAS",
           "en": "COINS"
+        }
+      },
+      {
+        "kind": "race",
+        "id": "circuito",
+        "period": "all",
+        "p": [
+          22,
+          2.4,
+          21.8
+        ],
+        "yaw": 0,
+        "size": [
+          3.6,
+          2.6
+        ],
+        "title": {
+          "es": "DE SIEMPRE",
+          "en": "ALL TIME"
         }
       }
     ],
@@ -1168,6 +1193,25 @@
           "es": "SPRITES",
           "en": "SPRITES"
         }
+      },
+      {
+        "kind": "points",
+        "id": "tablero",
+        "period": "week",
+        "p": [
+          32.9,
+          2.4,
+          18.6
+        ],
+        "yaw": 0,
+        "size": [
+          3.6,
+          2.6
+        ],
+        "title": {
+          "es": "ESTA SEMANA",
+          "en": "THIS WEEK"
+        }
       }
     ],
     "props": [
@@ -1366,6 +1410,26 @@
         "style": "sign",
         "width": 5,
         "max_distance": 25
+      }
+    ],
+    "boards": [
+      {
+        "kind": "builds",
+        "id": "agentes",
+        "p": [
+          32,
+          3.4,
+          20.2
+        ],
+        "yaw": 0,
+        "size": [
+          6.4,
+          3.8
+        ],
+        "title": {
+          "es": "AGENTES CONSTRUYENDO",
+          "en": "AGENTS BUILDING"
+        }
       }
     ]
   }

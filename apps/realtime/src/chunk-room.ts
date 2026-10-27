@@ -42,7 +42,7 @@ const CABINET_SCREEN = { y: 1.18, z: 0.34, size: [0.56, 0.5] as [number, number]
 import { isCommunityChunk, type CommunityMeta } from "./community";
 import { fitsZone, localBox, worldBox, type Zone } from "./zone";
 import { assetKey } from "./assets";
-import { ACTIVITY_SCHEMA, activityKey, minRaceMs, near, POSE_MAX_AGE_MS, RACE_TIMEOUT_MS, SCORES_LIMIT, type RaceRun } from "./activities";
+import { ACTIVITY_SCHEMA, activityKey, isoWeek, weekStart, minRaceMs, near, POSE_MAX_AGE_MS, RACE_TIMEOUT_MS, SCORES_LIMIT, type RaceRun } from "./activities";
 import { SEED_ASSETS } from "./seed-assets";
 import { figureFor, pointsDay, TILES_IDLE_MS, TILES_PAUSE_MS, TILES_SCHEMA, TILES_START_MS, tileAt, tilesRoundMs, type TileBoard, type TileGame } from "./tiles";
 import { isAvatarPreset } from "./avatar-presets-check";
@@ -138,7 +138,7 @@ export interface ChunkDump {
   stands: { project_id: string; slot: number }[];
   chat: { id: string; ts: number; sender: string; kind: string; display_name: string; session_id: string; text: string; hidden: number }[];
   /** Actividades: lo recogido, las búsquedas completas y los mejores tiempos (activities.ts). */
-  activities?: { collected: Record<string, unknown>[]; hunts: Record<string, unknown>[]; races: Record<string, unknown>[]; points?: Record<string, unknown>[] };
+  activities?: { collected: Record<string, unknown>[]; hunts: Record<string, unknown>[]; races: Record<string, unknown>[]; points?: Record<string, unknown>[]; race_weeks?: Record<string, unknown>[] };
   /** Distrito de la comunidad: lo que es (con lo del sistema que lleva). Ausente en los demás. */
   community?: string | null;
 }
@@ -941,6 +941,7 @@ export class ChunkRoom extends DurableObject<Env> {
         hunts: this.sql.exec("SELECT * FROM act_hunt_done").toArray(),
         races: this.sql.exec("SELECT * FROM act_race_best").toArray(),
         points: this.sql.exec("SELECT * FROM act_points").toArray(),
+        race_weeks: this.sql.exec("SELECT * FROM act_race_week").toArray(),
       },
     };
   }
@@ -973,6 +974,10 @@ export class ChunkRoom extends DurableObject<Env> {
         }
         for (const r of d.activities.races as { race_key: string; sub: string; name: string; player_no: number | null; ms: number; ts: number }[]) {
           this.sql.exec("INSERT OR IGNORE INTO act_race_best (race_key, sub, name, player_no, ms, ts) VALUES (?, ?, ?, ?, ?, ?)", r.race_key, r.sub, r.name, r.player_no, r.ms, r.ts);
+        }
+        this.sql.exec("DELETE FROM act_race_week");
+        for (const r of (d.activities.race_weeks ?? []) as { race_key: string; week: string; sub: string; name: string; player_no: number | null; ms: number; ts: number }[]) {
+          this.sql.exec("INSERT OR IGNORE INTO act_race_week (race_key, week, sub, name, player_no, ms, ts) VALUES (?, ?, ?, ?, ?, ?, ?)", r.race_key, r.week, r.sub, r.name, r.player_no, r.ms, r.ts);
         }
         this.sql.exec("DELETE FROM act_points");
         for (const r of (d.activities.points ?? []) as { board_key: string; day: string; sub: string; name: string; player_no: number | null; points: number; ts: number }[]) {
@@ -1077,6 +1082,7 @@ export class ChunkRoom extends DurableObject<Env> {
       this.sql.exec("DELETE FROM act_collected WHERE sub = ?", owner);
       this.sql.exec("DELETE FROM act_hunt_done WHERE sub = ?", owner);
       this.sql.exec("DELETE FROM act_race_best WHERE sub = ?", owner);
+      this.sql.exec("DELETE FROM act_race_week WHERE sub = ?", owner);
       this.sql.exec("DELETE FROM act_points WHERE sub = ?", owner);
       this.sql.exec("DELETE FROM sandbox WHERE owner = ?", owner);
       this.sql.exec("UPDATE events SET actor = 'deleted' WHERE actor = ?", owner);
@@ -1179,6 +1185,7 @@ export class ChunkRoom extends DurableObject<Env> {
       collected: this.sql.exec("SELECT entity_id, set_key, ts FROM act_collected WHERE sub = ? ORDER BY ts", sub).toArray(),
       hunts_completed: this.sql.exec("SELECT set_key, ts FROM act_hunt_done WHERE sub = ?", sub).toArray(),
       best_times: this.sql.exec("SELECT race_key, ms, ts FROM act_race_best WHERE sub = ?", sub).toArray(),
+      weekly_times: this.sql.exec("SELECT race_key, week, ms, ts FROM act_race_week WHERE sub = ?", sub).toArray(),
       daily_points: this.sql.exec("SELECT board_key, day, points FROM act_points WHERE sub = ?", sub).toArray(),
       sandbox_pieces: this.sql
         .exec<{ entity_id: string; day: string; data: string }>("SELECT s.entity_id, s.day, e.data FROM sandbox s JOIN entities e ON e.entity_id = s.entity_id WHERE s.owner = ?", sub)
@@ -1300,6 +1307,15 @@ export class ChunkRoom extends DurableObject<Env> {
         key, sub, att.principal.name ?? att.display_name, att.principal.no ?? null, ms, now,
       );
     }
+    // Y el de la semana (para el marcador semanal).
+    const week = isoWeek(now);
+    const prevWeek = this.sql.exec<{ ms: number }>("SELECT ms FROM act_race_week WHERE race_key = ? AND week = ? AND sub = ?", key, week, sub).toArray()[0]?.ms;
+    if (prevWeek === undefined || ms < prevWeek) {
+      this.sql.exec(
+        "INSERT OR REPLACE INTO act_race_week (race_key, week, sub, name, player_no, ms, ts) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        key, week, sub, att.principal.name ?? att.display_name, att.principal.no ?? null, ms, now,
+      );
+    }
     const best = Math.min(ms, prev ?? ms);
     const rank = 1 + this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM act_race_best WHERE race_key = ? AND ms < ?", key, best).one().n;
     this.send(ws, msg("RACE", { race, state: "finish", ms, best, rank }));
@@ -1407,40 +1423,94 @@ export class ChunkRoom extends DurableObject<Env> {
     g.timer = setTimeout(() => this.tilesStart(g), TILES_PAUSE_MS);
   }
 
+  /** Las 10 primeras filas de un marcador (lo usan SCORES y la web). */
+  private scoreRows(owner: string, sb: { kind: "race" | "hunt" | "points" | "builds"; id: string; period?: "all" | "week" | "day" }) {
+    type Row = { name: string; player_no: number | null; value: number; ts: number };
+    const key = activityKey(owner, sb.id);
+    const period = sb.period ?? (sb.kind === "points" ? "day" : "all");
+    const now = Date.now();
+    let rows: Row[];
+    if (sb.kind === "builds") return { period, rows: this.buildRows() };
+    if (sb.kind === "points") {
+      rows =
+        period === "day"
+          ? this.sql.exec<Row>("SELECT name, player_no, points AS value, ts FROM act_points WHERE board_key = ? AND day = ? ORDER BY points DESC, ts ASC LIMIT ?", key, pointsDay(now), SCORES_LIMIT).toArray()
+          : this.sql
+              .exec<Row>(
+                `SELECT MAX(name) AS name, MAX(player_no) AS player_no, SUM(points) AS value, MAX(ts) AS ts FROM act_points
+                 WHERE board_key = ? ${period === "week" ? "AND day >= ?" : ""} GROUP BY sub ORDER BY value DESC, ts ASC LIMIT ?`,
+                ...(period === "week" ? [key, pointsDay(weekStart(now)), SCORES_LIMIT] : [key, SCORES_LIMIT]),
+              )
+              .toArray();
+    } else if (sb.kind === "race") {
+      rows =
+        period === "week"
+          ? this.sql.exec<Row>("SELECT name, player_no, ms AS value, ts FROM act_race_week WHERE race_key = ? AND week = ? ORDER BY ms ASC, ts ASC LIMIT ?", key, isoWeek(now), SCORES_LIMIT).toArray()
+          : this.sql.exec<Row>("SELECT name, player_no, ms AS value, ts FROM act_race_best WHERE race_key = ? ORDER BY ms ASC, ts ASC LIMIT ?", key, SCORES_LIMIT).toArray();
+    } else {
+      rows = this.sql
+        .exec<Row>(
+          `SELECT name, player_no, ts AS value, ts FROM act_hunt_done WHERE set_key = ? ${period === "week" ? "AND ts >= ?" : period === "day" ? "AND ts >= ?" : ""} ORDER BY ts ASC LIMIT ?`,
+          ...(period === "all" ? [key, SCORES_LIMIT] : [key, period === "week" ? weekStart(now) : Date.parse(pointsDay(now)), SCORES_LIMIT]),
+        )
+        .toArray();
+    }
+    return { period, rows: rows.map((r) => ({ name: r.name, ...(r.player_no !== null ? { player_no: r.player_no } : {}), value: r.value, ts: r.ts })) };
+  }
+
+  /**
+   * Lo que han construido los agentes en las parcelas de este lugar la última semana: por
+   * proyecto, cuántos cambios y el último (el nombre, el del portal de su parcela).
+   */
+  private buildRows() {
+    const since = Date.now() - 7 * 86_400_000;
+    const evs = this.sql
+      .exec<{ entity_id: string; ts: number }>(
+        "SELECT entity_id, ts FROM events WHERE ts > ? AND op IN ('SPAWN', 'PATCH') AND actor NOT LIKE 'usr_%' AND actor != 'system' ORDER BY ts DESC LIMIT 2000",
+        since,
+      )
+      .toArray();
+    const by = new Map<string, { value: number; ts: number }>();
+    for (const ev of evs) {
+      const owner = this.getRow(ev.entity_id)?.owner;
+      if (!owner?.startsWith("prj_")) continue;
+      const cur = by.get(owner) ?? { value: 0, ts: 0 };
+      cur.value++;
+      cur.ts = Math.max(cur.ts, ev.ts);
+      by.set(owner, cur);
+    }
+    return [...by.entries()]
+      .sort((a, b) => b[1].ts - a[1].ts)
+      .slice(0, SCORES_LIMIT)
+      .map(([owner, v]) => {
+        const stand = this.getRow(`stand_${owner.slice(4)}`);
+        const title = stand ? ((JSON.parse(stand.data) as Entity).components["portal@1"] as { title?: string } | undefined)?.title : undefined;
+        return { name: title ?? owner.slice(4), value: v.value, ts: v.ts };
+      });
+  }
+
   private handleScores(ws: WebSocket, ref: string | undefined, entityId: string) {
     const row = this.getRow(entityId);
     const sb = row ? ScoreboardV1.safeParse((JSON.parse(row.data) as Entity).components["scoreboard@1"]) : null;
     if (!row || !sb?.success) return this.sendError(ws, ref, "not_found", "eso no es un marcador");
-    const key = activityKey(row.owner, sb.data.id);
-    const rows =
-      sb.data.kind === "points"
-        ? this.sql
-            .exec<{ name: string; player_no: number | null; value: number; ts: number }>(
-              "SELECT name, player_no, points AS value, ts FROM act_points WHERE board_key = ? AND day = ? ORDER BY points DESC, ts ASC LIMIT ?",
-              key, pointsDay(), SCORES_LIMIT,
-            )
-            .toArray()
-        : sb.data.kind === "race"
-        ? this.sql
-            .exec<{ name: string; player_no: number | null; value: number; ts: number }>(
-              "SELECT name, player_no, ms AS value, ts FROM act_race_best WHERE race_key = ? ORDER BY ms ASC, ts ASC LIMIT ?",
-              key, SCORES_LIMIT,
-            )
-            .toArray()
-        : this.sql
-            .exec<{ name: string; player_no: number | null; value: number; ts: number }>(
-              "SELECT name, player_no, ts AS value, ts FROM act_hunt_done WHERE set_key = ? ORDER BY ts ASC LIMIT ?",
-              key, SCORES_LIMIT,
-            )
-            .toArray();
-    this.send(
-      ws,
-      msg("SCORES", {
-        entity_id: entityId,
-        kind: sb.data.kind,
-        rows: rows.map((r) => ({ name: r.name, ...(r.player_no !== null ? { player_no: r.player_no } : {}), value: r.value, ts: r.ts })),
-      }),
-    );
+    const r = this.scoreRows(row.owner, sb.data);
+    this.send(ws, msg("SCORES", { entity_id: entityId, kind: sb.data.kind, period: r.period, rows: r.rows }));
+  }
+
+  /** Los marcadores del sistema de este lugar, con sus filas (para la web: GET /scores). */
+  async boardsOf() {
+    this.ensureChunk(null);
+    const out: { entity_id: string; kind: string; id: string; period: string; title: Record<string, string> | null; rows: unknown[] }[] = [];
+    for (const r of this.sql.exec<{ entity_id: string; owner: string; data: string }>("SELECT entity_id, owner, data FROM entities WHERE owner = 'system'").toArray()) {
+      if (!r.data.includes("scoreboard@1")) continue;
+      const sb = ScoreboardV1.safeParse((JSON.parse(r.data) as Entity).components["scoreboard@1"]);
+      if (!sb.success) continue;
+      const title = this.getRow(`${r.entity_id}_title`);
+      const label = title ? ((JSON.parse(title.data) as Entity).components["label@1"] as { i18n?: Record<string, string> } | undefined)?.i18n ?? null : null;
+      const rows = this.scoreRows(r.owner, sb.data);
+      out.push({ entity_id: r.entity_id, kind: sb.data.kind, id: sb.data.id, period: rows.period, title: label, rows: rows.rows });
+    }
+    return out;
   }
 
   async chatOf(sender: string) {

@@ -4,6 +4,7 @@
  */
 import type { ProjectCategory } from "@xenxo/protocol";
 import { REALTIME_URL } from "../config";
+import type { BadgeInfo } from "./badges";
 
 export interface PlayerCard {
   player_no: number;
@@ -11,6 +12,8 @@ export interface PlayerCard {
   avatar: { hash: string; format: "glb" | "vrm" } | null;
   /** Fecha de alta (ms). */
   joined: number;
+  /** Insignias de las actividades (las da el servidor). */
+  badges?: BadgeInfo[];
   projects: {
     id: string;
     title: string;

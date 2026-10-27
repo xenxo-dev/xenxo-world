@@ -7,6 +7,7 @@ import { isAvatarPreset } from "./avatar-presets-check";
 import { randomId, resolveAgent, signToken, verifyToken, type Principal } from "./auth";
 import { CALL_TTL_MS, chunkList, REMOTE_METHODS, sha256B64, signRemote, TICKET_TTL_MS } from "./remote";
 import type { ChunkRoom, ShowcaseItem } from "./chunk-room";
+import { BADGES, earnedIn, type ActivityOf } from "./badges";
 import { cabinetSlots, DISTRICTS, districtById, parcelIndex, parcelSpawn } from "./districts";
 import { communityGates, SHOWCASE_SLOTS, type CommunityGate } from "./nexo";
 import { fetchDevManifest, fetchManifest } from "./games";
@@ -775,6 +776,22 @@ export default {
         return withHeaders(res, h);
       }
 
+      /* --- Marcadores de los distritos (para el panel): en la caché un minuto --- */
+      if (path === "/scores" && req.method === "GET") {
+        const cache = edgeCache();
+        const key = new Request(new URL("/scores", req.url).toString());
+        const hit = await cache?.match(key);
+        if (hit) return withHeaders(hit, h);
+        const districts = [];
+        for (const d of DISTRICTS.filter((x) => !x.soon)) {
+          const boards = await chunk(env, d.chunk).boardsOf().catch(() => []);
+          if (boards.length) districts.push({ id: d.id, name: d.name, color: d.color, boards });
+        }
+        const res = json({ districts, at: Date.now() }, 200, { "Cache-Control": "public, max-age=60" });
+        if (cache) ctx.waitUntil(cache.put(key, res.clone()));
+        return withHeaders(res, h);
+      }
+
       /* --- Denuncias: cualquiera con un token, también invitados --- */
       if (path === "/reports" && req.method === "POST") {
         const p = await bearer(req, env);
@@ -910,6 +927,24 @@ export default {
           if (!r.ok) return failure(r, h);
           await purgeCard(req.url, r.data.player_no);
           return json(r.data, 200, h);
+        }
+        // Insignias: las que tiene, y comprobar si ha ganado alguna (lo dicen los distritos, no el cliente).
+        if (path === "/me/badges" && req.method === "GET") return json({ badges: await dir.badgesOf(uid) }, 200, h);
+        if (path === "/me/badges/check" && req.method === "POST") {
+          if (!(await dir.badgeCheckAllowed(uid))) return json({ badges: await dir.badgesOf(uid), new: [], throttled: true }, 200, h);
+          const earned: string[] = [];
+          for (const district of new Set(BADGES.map((b) => b.district))) {
+            const d = districtById(district);
+            if (!d) continue;
+            const a = await chunk(env, d.chunk).activityOf(`usr_${uid}`).catch(() => null);
+            if (a) earned.push(...earnedIn(district, a as unknown as ActivityOf));
+          }
+          const fresh = await dir.grantBadges(uid, earned);
+          if (fresh.length) {
+            const me = await dir.card(uid);
+            if (me.ok) await purgeCard(req.url, me.data.player_no);
+          }
+          return json({ badges: await dir.badgesOf(uid), new: fresh }, 200, h);
         }
         if (path === "/me/export" && req.method === "GET") {
           const r = await dir.exportData(uid);

@@ -14,6 +14,7 @@ import { BoostV1, CheckpointV1, CollectibleV1, ScoreboardV1, TilesV1, TransformV
 import { t } from "../i18n";
 import { accountToken } from "../net/account";
 import { activity, boost, formatRaceTime, sendActivity, useActivity } from "../net/activity-store";
+import { boardTitle, scoreValue } from "../net/scores";
 import { useWorldVersion, world } from "../net/world-store";
 import { SIGN_FONT_URL, FONT_URL } from "./font";
 import { playerPos } from "./Player";
@@ -251,6 +252,7 @@ function TileBoard({ entity }: { entity: Entity }) {
 const PANEL_MAT = new THREE.MeshBasicMaterial({ color: "#0b0f18", transparent: true, opacity: 0.86 });
 const panelGeo = new THREE.PlaneGeometry(1, 1);
 
+/** Título del marcador según lo que cuenta y de cuándo. */
 function Scoreboard({ entity }: { entity: Entity }) {
   const a = useActivity();
   const tr = TransformV1.safeParse(entity.components["transform@1"]);
@@ -274,13 +276,12 @@ function Scoreboard({ entity }: { entity: Entity }) {
   const [w, h] = sb.data.size;
   const rows = a.scores.get(entity.entity_id) ?? [];
   const line = h / 13;
-  const value = (v: number, ts: number) =>
-    sb.data.kind === "race" ? formatRaceTime(v) : sb.data.kind === "points" ? t("activity.points", { n: v }) : new Date(ts).toLocaleDateString();
+  const value = (v: number, ts: number) => scoreValue(sb.data.kind, v, ts);
   return (
     <group position={pos} quaternion={tr.data.r}>
       <mesh geometry={panelGeo} material={PANEL_MAT} scale={[w, h, 1]} />
       <Text font={SIGN_FONT_URL} fontSize={line * 1.4} color="#33ddff" anchorX="center" anchorY="top" position={[0, h / 2 - line * 0.6, 0.01]}>
-        {sb.data.kind === "race" ? t("activity.boardRace") : sb.data.kind === "points" ? t("activity.boardPoints") : t("activity.boardHunt")}
+        {boardTitle(sb.data.kind, sb.data.period)}
       </Text>
       <Text font={FONT_URL} fontSize={line * 0.8} color="#e8edf7" anchorX="left" anchorY="top" lineHeight={1.35} position={[-w / 2 + line, h / 2 - line * 2.6, 0.01]} maxWidth={w - 2 * line}>
         {rows.length ? rows.map((r, i) => `${i + 1}. ${r.name}${r.player_no !== undefined ? ` #${r.player_no}` : ""} — ${value(r.value, r.ts)}`).join("\n") : t("activity.boardEmpty")}

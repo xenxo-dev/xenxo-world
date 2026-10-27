@@ -10,6 +10,7 @@ import { fitsHere, visitorDevice } from "../games/device";
 import { gameName, openGame } from "../games/state";
 import { JamBlock } from "./Jam";
 import { useRoles } from "./Moderation";
+import { ScoresBlock } from "./Scores";
 import { Block, card } from "./ui";
 
 /** Viaja al distrito de un proyecto y aparece delante de su portal, mirándolo. */
@@ -156,6 +157,7 @@ export function NexoSection({ onEnter }: { onEnter: () => void }) {
           })}
         </ul>
       </Block>
+      <ScoresBlock />
     </>
   );
 }

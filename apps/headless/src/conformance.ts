@@ -788,7 +788,40 @@ await scenario("Rastro de datos (Distrito Cero): 12 fragmentos del sistema con s
   await at([hp[0], 9.6, hp[2]]);
   const above = await u.activity("COLLECT", high.entity_id);
   assert(above.type === "COLLECTED" && above.payload.count === 2, "desde la pasarela, sí");
+  // Insignia: con los 12 (la comprueba el servidor con lo que guarda el distrito, no el cliente).
+  const early = await api.call<{ badges: { id: string }[] }>("GET", "/me/badges");
+  assert(early.ok && early.data.badges.length === 0, "a medias, sin insignia");
+  let last = above;
+  for (const f of frags.filter((e) => e !== first && e !== high)) {
+    const p = pos(f);
+    await at([p[0], Math.max(1.6, p[1]), p[2]]);
+    last = await u.activity("COLLECT", f.entity_id);
+  }
+  assert(last.type === "COLLECTED" && last.payload.complete === true, `los 12 recogidos (${JSON.stringify(last.payload)})`);
   u.close();
+  const got = await api.call<{ new: { id: string }[]; badges: { id: string }[] }>("POST", "/me/badges/check");
+  assert(got.ok && got.data.new.some((b) => b.id === "cero_rastro"), `insignia «Rastro de datos» (${JSON.stringify(got.data)})`);
+  const again = await api.call<{ badges: { id: string }[] }>("GET", "/me/badges");
+  assert(again.ok && again.data.badges.filter((b) => b.id === "cero_rastro").length === 1, "una sola vez");
+  const soon = await api.call<{ throttled?: boolean }>("POST", "/me/badges/check");
+  assert(soon.ok && soon.data.throttled === true, "y no se puede comprobar a cada momento");
+  const exp = await api.call<{ badges?: { id: string }[] }>("GET", "/me/export");
+  assert(exp.ok && (exp.data.badges ?? []).some((b) => b.id === "cero_rastro"), "la exportación incluye las insignias");
+  const mine = await api.call<{ player_no: number }>("PUT", "/me/card", { public: true });
+  assert(mine.ok, "carné público");
+  const no = (await api.call<{ player_no: number }>("GET", "/me/card")).data.player_no;
+  const card = (await (await fetch(new URL(`/players/${no}`, baseUrl))).json()) as { badges?: { id: string }[] };
+  assert((card.badges ?? []).some((b) => b.id === "cero_rastro"), "y se ve en el carné");
+});
+
+await scenario("marcadores en el panel: /scores reúne los de los distritos (del día, de la semana y lo que construyen los agentes)", async () => {
+  const r = await fetch(new URL("/scores", baseUrl));
+  assert(r.ok, `GET /scores (${r.status})`);
+  const d = (await r.json()) as { districts: { id: string; boards: { kind: string; period: string; rows: unknown[] }[] }[] };
+  const of = (id: string) => d.districts.find((x) => x.id === id)?.boards ?? [];
+  assert(of("pixel").some((b) => b.kind === "points" && b.period === "week"), "Píxel: puntos de la semana");
+  assert(of("arcade").some((b) => b.kind === "race" && b.period === "week"), "Arcade: carrera de la semana");
+  assert(of("taller").some((b) => b.kind === "builds"), "Taller: lo que construyen los agentes");
 });
 
 await scenario("Circuito Neón (Arcade): carrera del sistema con salida, 11 puntos y meta, placas de impulso, 50 monedas y sus marcadores", async () => {

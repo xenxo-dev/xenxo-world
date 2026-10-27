@@ -19,12 +19,13 @@ export function ActivityHud() {
   }, [a.race, a.toast, round]);
   const now = performance.now();
   // Lo que cuenta un objeto (y el final de una carrera) se queda más tiempo: hay que leerlo.
-  const long = (a.toast?.kind === "race" && a.toast.state === "finish") || (a.toast?.kind === "collected" && !!a.toast.note);
+  const long = (a.toast?.kind === "race" && a.toast.state === "finish") || (a.toast?.kind === "collected" && !!a.toast.note) || a.toast?.kind === "badge";
   const toast = a.toast && now - a.toast.at < (long ? 8000 : 3200) ? a.toast : null;
   const note = toast?.kind === "collected" && toast.note ? (toast.note[lang] ?? toast.note.en ?? Object.values(toast.note)[0]) : null;
   let text = "";
   if (toast?.kind === "collected") text = toast.complete ? t("activity.complete", { total: toast.total }) : t("activity.collected", { count: toast.count, total: toast.total });
   else if (toast?.kind === "guest") text = t("activity.guest");
+  else if (toast?.kind === "badge") text = t("activity.badge", { name: toast.name[lang] ?? toast.name.en ?? "" });
   else if (toast?.kind === "tiles") text = toast.state === "won" ? t(accountToken() ? "activity.tilesWon" : "activity.tilesWonGuest") : t("activity.tilesLost");
   else if (toast?.kind === "race") {
     if (toast.state === "start") text = toast.total ? t("activity.raceStart", { total: toast.total }) : t("activity.raceStartFinish");

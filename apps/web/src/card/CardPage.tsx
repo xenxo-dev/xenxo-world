@@ -6,6 +6,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { assetUrl } from "../config";
 import { getLang, LANGS, setLang, t, useLang, type Key } from "../i18n";
 import { cardLink, fetchPlayerCard, type PlayerCard } from "../net/card";
+import { BadgeList } from "./Badges";
 import { refreshDistricts, type DistrictInfo } from "../net/districts";
 import type { PreviewPose } from "../panel/AvatarPreview";
 import { Button, card as cardBox } from "../panel/ui";
@@ -181,6 +182,9 @@ export function CardPage({ no }: { no: number }) {
               </p>
               <h1 className="display mt-3 break-words text-4xl font-bold text-cal">{state.card.name}</h1>
               <p className="mt-2 text-cal/70">{t("card.since", { date: longDate(state.card.joined) })}</p>
+
+              <h2 className="mt-8 text-sm font-medium text-cal/80">{t("card.badges")}</h2>
+              <BadgeList badges={state.card.badges ?? []} empty={t("card.noBadges")} />
 
               <h2 className="mt-8 text-sm font-medium text-cal/80">{t("card.projects")}</h2>
               {state.card.projects.length === 0 ? (

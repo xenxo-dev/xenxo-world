@@ -16,7 +16,27 @@ export const ACTIVITY_SCHEMA = `
     race_key TEXT NOT NULL, sub TEXT NOT NULL, name TEXT NOT NULL, player_no INTEGER, ms INTEGER NOT NULL, ts INTEGER NOT NULL,
     PRIMARY KEY (race_key, sub));
   CREATE INDEX IF NOT EXISTS act_race_best_ms ON act_race_best (race_key, ms);
+  CREATE TABLE IF NOT EXISTS act_race_week (
+    race_key TEXT NOT NULL, week TEXT NOT NULL, sub TEXT NOT NULL, name TEXT NOT NULL, player_no INTEGER, ms INTEGER NOT NULL, ts INTEGER NOT NULL,
+    PRIMARY KEY (race_key, week, sub));
 `;
+
+/** Semana ISO (UTC) de un instante: «2026-W44». Los marcadores semanales empiezan el lunes. */
+export function isoWeek(t = Date.now()): string {
+  const d = new Date(t);
+  const day = (d.getUTCDay() + 6) % 7; // lunes = 0
+  const thursday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - day + 3));
+  const firstThursday = new Date(Date.UTC(thursday.getUTCFullYear(), 0, 4));
+  const week = 1 + Math.round(((thursday.getTime() - firstThursday.getTime()) / 86_400_000 - 3 + ((firstThursday.getUTCDay() + 6) % 7)) / 7);
+  return `${thursday.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+
+/** Lunes 00:00 UTC de la semana de `t` (para filtrar por semana). */
+export function weekStart(t = Date.now()): number {
+  const d = new Date(t);
+  const day = (d.getUTCDay() + 6) % 7;
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - day);
+}
 
 /** Margen (m) sobre el radio del objeto o del punto: la pose llega cada 200 ms y el cliente interpola. */
 export const NEAR_SLACK = 2.5;

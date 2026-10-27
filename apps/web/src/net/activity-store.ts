@@ -6,6 +6,7 @@
  */
 import { useSyncExternalStore } from "react";
 import { msg, type ClientMessage, type MessageOf, type ServerMessage } from "@xenxo/protocol";
+import { checkBadgesSoon } from "./badges";
 import { net } from "./session";
 
 export type TilesState = MessageOf<ServerMessage, "TILES">["payload"] & { at: number };
@@ -16,6 +17,7 @@ export type ActivityToast =
   | { kind: "collected"; count: number; total: number; complete: boolean; note?: Record<string, string>; at: number }
   | { kind: "race"; state: "start" | "cp" | "finish" | "reset"; next?: number; total?: number; ms?: number; best?: number; rank?: number; at: number }
   | { kind: "tiles"; state: "won" | "lost"; at: number }
+  | { kind: "badge"; name: Record<string, string>; at: number }
   | { kind: "guest"; at: number }
   | { kind: "far"; at: number };
 
@@ -54,6 +56,13 @@ class ActivityStore {
     this.bump();
   }
 
+  /** Tras completar algo: ¿hay insignia nueva? (se enseña después del aviso de lo completado). */
+  private badges() {
+    checkBadgesSoon((fresh) => {
+      for (const [k, b] of fresh.entries()) setTimeout(() => this.notice({ kind: "badge", name: b.name, at: performance.now() }), 3500 + k * 3500);
+    });
+  }
+
   notice(t: ActivityToast) {
     this.toast = t;
     this.bump();
@@ -71,6 +80,7 @@ class ActivityStore {
         // Un conjunto nuevo: quien lo mira (Entities) se entera de que ha cambiado.
         this.collected = new Set(this.collected).add(m.payload.entity_id);
         this.toast = { kind: "collected", count: m.payload.count, total: m.payload.total, complete: m.payload.complete, note: m.payload.note, at: now };
+        if (m.payload.complete) this.badges();
         this.bump();
         return;
       case "RACE": {
@@ -79,6 +89,7 @@ class ActivityStore {
         else if (p.state === "cp" && this.race) this.race = { ...this.race, next: p.next ?? this.race.next };
         else this.race = null;
         this.toast = { kind: "race", state: p.state, next: p.next, total: p.total, ms: p.ms, best: p.best, rank: p.rank, at: now };
+        if (p.state === "finish") this.badges();
         this.bump();
         return;
       }
@@ -91,6 +102,7 @@ class ActivityStore {
         this.tiles = new Map(this.tiles).set(m.payload.entity_id, { ...m.payload, at: now });
         // Aviso solo al cerrar una ronda (lo de durante la ronda lo enseña el propio HUD).
         if ((m.payload.state === "won" || m.payload.state === "lost") && prev?.state === "show") this.toast = { kind: "tiles", state: m.payload.state, at: now };
+        if (m.payload.state === "won" && prev?.state === "show") this.badges();
         this.bump();
         return;
       }

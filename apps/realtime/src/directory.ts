@@ -34,6 +34,7 @@ import { gameInfo, manifestAvatar, slugFrom, validSlug, type GameInfo } from "./
 import { COMMUNITY_SCHEMA, communityChunk, MAX_DISTRICT_SAVES_PER_DAY, submissionFiles, type CommunityStatus, type ResolvedPortal } from "./community";
 import { isSystemAsset } from "./assets";
 import type { DistrictSubmission } from "@xenxo/protocol";
+import { BADGES, badgeInfo } from "./badges";
 import { badJamDates, JAM_SCHEMA, jamPhase, jamRanking, jamText, jamTime, MAX_ENTRIES_PER_USER, validJamSlug, type Jam, type JamResult } from "./jam";
 import type { GameManifest } from "@xenxo/protocol";
 
@@ -229,6 +230,11 @@ export class Directory extends DurableObject<Env> {
     `);
     // Jams: convocatorias, juegos apuntados y votos (ver jam.ts).
     this.sql.exec(JAM_SCHEMA);
+    // Insignias de las actividades (badges.ts): las comprueba el Worker con los distritos.
+    this.sql.exec(`
+      CREATE TABLE IF NOT EXISTS badges (user_id TEXT NOT NULL, badge_id TEXT NOT NULL, earned_at INTEGER NOT NULL, PRIMARY KEY (user_id, badge_id));
+      CREATE TABLE IF NOT EXISTS badge_checks (user_id TEXT PRIMARY KEY, ts INTEGER NOT NULL);
+    `);
     // Distritos de la comunidad (ver community.ts).
     this.sql.exec(COMMUNITY_SCHEMA);
     // Migración: tamaño de cada subida (para los topes de almacenamiento).
@@ -806,6 +812,7 @@ export class Directory extends DurableObject<Env> {
       name: u.display_name,
       avatar: u.avatar_hash ? { hash: u.avatar_hash, format: u.avatar_format ?? "glb" } : null,
       joined: u.created_at,
+      badges: this.badgesOf(u.id),
       projects: this.projectsOf(u.id).map((p) => ({
         id: p.id,
         title: p.title,
@@ -817,6 +824,38 @@ export class Directory extends DurableObject<Env> {
         parcel: p.parcel,
       })),
     };
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Insignias                                                           */
+  /* ---------------------------------------------------------------- */
+
+  badgesOf(id: string) {
+    return this.sql
+      .exec<{ badge_id: string; earned_at: number }>("SELECT badge_id, earned_at FROM badges WHERE user_id = ? ORDER BY earned_at", id)
+      .toArray()
+      .map((r) => badgeInfo(r.badge_id, r.earned_at))
+      .filter((b) => b !== null);
+  }
+
+  /** ¿Puede comprobar ya sus insignias? (una vez cada 15 s por cuenta: cada comprobación pregunta a los distritos). */
+  badgeCheckAllowed(id: string): boolean {
+    const now = Date.now();
+    const last = this.sql.exec<{ ts: number }>("SELECT ts FROM badge_checks WHERE user_id = ?", id).toArray()[0]?.ts ?? 0;
+    if (now - last < 15_000) return false;
+    this.sql.exec("INSERT OR REPLACE INTO badge_checks (user_id, ts) VALUES (?, ?)", id, now);
+    return true;
+  }
+
+  /** Da las insignias que aún no tenía (ya comprobadas por el Worker). Devuelve las nuevas. */
+  grantBadges(id: string, ids: string[]) {
+    const now = Date.now();
+    const fresh: string[] = [];
+    for (const b of ids) {
+      if (!BADGES.some((x) => x.id === b)) continue;
+      if (this.sql.exec("INSERT OR IGNORE INTO badges (user_id, badge_id, earned_at) VALUES (?, ?, ?)", id, b, now).rowsWritten > 0) fresh.push(b);
+    }
+    return fresh.map((b) => badgeInfo(b, now)).filter((x) => x !== null);
   }
 
   /** Derecho de acceso y portabilidad (RGPD arts. 15 y 20). */
@@ -832,6 +871,7 @@ export class Directory extends DurableObject<Env> {
       projects: this.sql.exec("SELECT * FROM projects WHERE user_id = ?", id).toArray(),
       uploads: this.sql.exec("SELECT hash, kind, ts FROM uploads WHERE uploader = ?", `usr_${id}`).toArray(),
       skins: this.skins(id),
+      badges: this.badgesOf(id),
       // De cada clave de agente solo guardamos su huella; aquí van sus datos, nunca la huella.
       agent_keys: this.agentKeys(id),
       // «Entrar con xenxo»: juegos a los que diste permiso y juegos que registraste.
@@ -889,6 +929,8 @@ export class Directory extends DurableObject<Env> {
       // El registro de moderación se conserva (DSA), sin decir quién moderó.
       this.sql.exec("UPDATE moderation_log SET moderator = 'deleted' WHERE moderator = ?", sub);
       this.sql.exec("DELETE FROM moderators WHERE user_id = ?", id);
+      this.sql.exec("DELETE FROM badges WHERE user_id = ?", id);
+      this.sql.exec("DELETE FROM badge_checks WHERE user_id = ?", id);
       this.sql.exec("DELETE FROM users WHERE id = ?", id);
     });
     return ok({ orphanHashes, projects, agents, community });

@@ -274,8 +274,13 @@ export const BoostV1 = z.object({
 
 /** Marcador de una carrera o una búsqueda de este lugar (y del mismo dueño). El cliente pide SCORES. */
 export const ScoreboardV1 = z.object({
-  /** `points`: puntos del día (el tablero de baldosas). */
-  kind: z.enum(["race", "hunt", "points"]),
+  /** `points`: puntos (el tablero de baldosas); `builds`: lo que construyen los agentes en las parcelas. */
+  kind: z.enum(["race", "hunt", "points", "builds"]),
+  /**
+   * De cuándo: `all` (de siempre; por defecto en carreras y búsquedas), `week` (semana ISO, UTC)
+   * o `day` (hoy, UTC; por defecto en los puntos).
+   */
+  period: z.enum(["all", "week", "day"]).optional(),
   id: ActivityId,
   /** Tamaño del panel (ancho × alto, m). */
   size: z.tuple([z.number().min(1).max(12), z.number().min(1).max(8)]).default([4, 3]),
@@ -626,7 +631,8 @@ export const ScoresMsg = envelope(
   "SCORES",
   z.object({
     entity_id: EntityId,
-    kind: z.enum(["race", "hunt", "points"]),
+    kind: z.enum(["race", "hunt", "points", "builds"]),
+    period: z.enum(["all", "week", "day"]).optional(),
     rows: z.array(z.object({ name: z.string(), player_no: z.number().int().min(0).optional(), value: z.number(), ts: z.number() })),
   }),
 );
