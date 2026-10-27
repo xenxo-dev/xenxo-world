@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { XR, createXRStore, useXR } from "@react-three/xr";
 import { CHUNK_SIZE, PLACES } from "@xenxo/protocol";
-import { usePlace, world } from "../net/world-store";
+import { usePlace, usePlaceTheme, world } from "../net/world-store";
 import { Avatars } from "./Avatars";
 import { Entities } from "./Entities";
 import { graphics, useGraphics, type Ambience, type Features } from "./graphics";
@@ -20,6 +20,11 @@ import { Skyline } from "./Skyline";
 import { NexoBackdrop } from "./NexoBackdrop";
 import { NexoCity } from "./NexoCity";
 import { DistrictSkyline } from "./DistrictSkyline";
+import { Pedestrians, Traffic } from "./CityLife";
+import { ambient } from "./ambient-audio";
+import districtsLayout from "../../../realtime/src/districts.json";
+
+const DISTRICT_IDS = new Map((districtsLayout.districts as { id: string; chunk: string }[]).map((d) => [d.chunk, d.id]));
 import { Activities } from "./Activities";
 import skyDay from "./sky-day.json";
 
@@ -298,6 +303,10 @@ function Scene({ active }: { active: boolean }) {
   // versión de día y de noche. Los distritos usan la luz abierta del nexo.
   const ambience: Ambience = g.ambience;
   const profile: LightProfile = inPlaza ? ambience : ambience === "day" ? "nexoDay" : "nexo";
+  // Sonido ambiente del lugar (sintetizado: ambient-audio.ts).
+  const hint = usePlaceTheme();
+  const soundTheme = inPlaza ? "plaza" : inNexo ? "nexo" : (DISTRICT_IDS.get(place) ?? hint?.id ?? "community");
+  useEffect(() => ambient.setPlace(soundTheme, ambience), [soundTheme, ambience]);
   const sky = SKY[ambience];
   // El cielo de nubes (HDRI) es de la plaza; el nexo lleva su panorámica.
   const realSky = ambience === "day" && f.pbr && !inNexo;
@@ -315,6 +324,12 @@ function Scene({ active }: { active: boolean }) {
       {inNexo && <NexoBackdrop ambience={ambience} hd={f.textures >= 1024} />}
       {inNexo && <NexoCity ambience={ambience} density={f.nexoCity} />}
       {!inNexo && !inPlaza && <DistrictSkyline chunk={place} density={f.nexoCity} ambience={ambience} />}
+      {!inNexo && !inPlaza && (
+        <Suspense fallback={null}>
+          <Pedestrians chunk={place} count={f.pedestrians} />
+          <Traffic chunk={place} count={f.traffic} features={f} ambience={ambience} />
+        </Suspense>
+      )}
       <Lighting profile={profile} features={f} />
       <Environment ambience={ambience} profile={profile} probe={f.probe} sky={dayEnv} />
       {/* Los textos cargan su fuente de forma asíncrona: que nunca bloqueen la escena ni el panel. */}

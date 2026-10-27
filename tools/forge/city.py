@@ -168,7 +168,7 @@ def _tower(p: Part, b: dict, color: str, rnd: random.Random, dark: bool, detail:
     # Anuncio vertical sin letras en la cara que da a la cruz.
     if detail:
         qx = x1 - i + 0.05 if b["q"] in (0, 2) else x0 + i - 0.35
-        _box(p, qx, z0 + 3, qx + 0.3, z0 + 5, h * 0.35, h * 0.75, alt)
+        _box(p, qx, z0 + 3, qx + 0.3, z0 + 5, h * 0.35, h * 0.75, mat("pantalla", rnd.choice(["#36d9ff", "#ff4fd8", "#ff4f8b"])))
 
 
 def _voxel(p: Part, b: dict, color: str, rnd: random.Random, detail: int):

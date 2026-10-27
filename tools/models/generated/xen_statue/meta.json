@@ -1,0 +1,21 @@
+{
+  "name": "cero_xen_statue",
+  "platform": "Tripo",
+  "model": "tripo (image to 3D)",
+  "date": "2026-10-24",
+  "plan": "cuenta de Pencho (Xen); si es del plan gratuito, CC BY 4.0 con atribución a Tripo",
+  "source": "hooded+figure+3d+model.glb (Downloads de Pencho), generado a partir del diseño oficial de Xen",
+  "prompt": "Xen, personaje oficial de xenxo.io: máscara negra con dos X luminosas, capucha y ropa techwear negra",
+  "fit": {
+    "size": 4.2,
+    "along": "height"
+  },
+  "yaw": 0,
+  "lod0_ratio": 0.065,
+  "lod1_ratio": 0.025,
+  "tex": [
+    2048,
+    1024
+  ],
+  "glow": true
+}

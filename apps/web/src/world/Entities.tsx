@@ -10,7 +10,7 @@ import { useCollected } from "../net/activity-store";
 import { FONT_URL, NEON_FONT_URL, SIGN_FONT_URL } from "./font";
 import type { Ambience, Features } from "./graphics";
 import { useFrame } from "@react-three/fiber";
-import { haloMaterial, hologramMaterial, lightweight, libraryMaterial, parseLibraryName, tickHolograms } from "./materials";
+import { haloMaterial, hologramMaterial, lightweight, libraryMaterial, paintedLights, parseLibraryName, tickHolograms } from "./materials";
 
 /** Origen de un chunk respecto al lugar actual (que se dibuja en 0..CHUNK_SIZE). */
 const chunkOrigin = (chunkId: string) => world.offsetOf(chunkId);
@@ -81,6 +81,7 @@ function MeshAsset({ hash, features, ambience, holo, dim }: { hash: string; feat
           const ref = parseLibraryName(m.name);
           const ao = (m as THREE.MeshStandardMaterial).aoMap ?? null;
           out = ref ? libraryMaterial(ref, features, ambience, ao, dim) : features.pbr ? m : lightweight(m);
+          if (m.name === "xenxo-glow") out = paintedLights(out, ambience);
           materialCache.set(key, out);
         }
         return out;

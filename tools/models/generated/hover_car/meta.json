@@ -1,0 +1,19 @@
+{
+  "name": "life_car",
+  "platform": "Higgsfield",
+  "model": "tripo_3d",
+  "date": "2026-10-27",
+  "plan": "plus",
+  "job_id": "be2c054c-81e2-4ce3-b52d-ec1905a95298",
+  "prompt": "compact futuristic flying car for a cyberpunk city, two seats, no wheels, sleek dark graphite body panels, thin cyan light strips along the sides and underneath, small rear thrusters, clean game asset",
+  "negative_prompt": "text, logo, letters, brand, people, wheels",
+  "face_limit": 5000,
+  "credits": 5,
+  "fit": {
+    "size": 4.2,
+    "along": "length"
+  },
+  "yaw": -90,
+  "lod1_ratio": 0.45,
+  "glow": true
+}

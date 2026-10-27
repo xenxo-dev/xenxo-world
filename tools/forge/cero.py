@@ -186,6 +186,13 @@ def _stair_feet():
         yield x0, x1, ztop + sense * N_STEPS * STEP_RUN, sense
 
 
+# Peana de la escultura de Xen (el modelo va aparte: tools/models/generated/xen_statue), en la
+# avenida de llegada y en el eje de la Torre Cero: primer plano de la vista desde la puerta.
+STATUE = (CX, 88.0)
+STATUE_BASE = (2.2, 0.3)   # medio lado y alto del escalón
+STATUE_PLINTH = (1.6, 1.2)  # medio lado y alto del pedestal (la figura se apoya arriba)
+
+
 def colliders() -> list[list[float]]:
     """Cajas [cx, cy, cz, hx, hy, hz] de la pasarela, las escaleras y la Torre Cero."""
     boxes: list[list[float]] = []
@@ -207,6 +214,9 @@ def colliders() -> list[list[float]]:
     for (x0, x1, z, _sense) in _stair_feet():
         for xx in (x0, x1):
             add(xx - 0.18, z - 0.18, xx + 0.18, z + 0.18, 0, FOOT_H)
+    sx, sz = STATUE
+    add(sx - STATUE_BASE[0], sz - STATUE_BASE[0], sx + STATUE_BASE[0], sz + STATUE_BASE[0], 0, STATUE_BASE[1])
+    add(sx - STATUE_PLINTH[0], sz - STATUE_PLINTH[0], sx + STATUE_PLINTH[0], sz + STATUE_PLINTH[0], 0, STATUE_PLINTH[1] + 4.2)
     # La peana (dos escalones de 25 cm, se suben andando) y el cuerpo de la torre.
     for k, s in enumerate(PLINTH):
         add(CX - s, CZ - s, CX + s, CZ + s, 0, 0.25 * (k + 1))
@@ -303,7 +313,7 @@ def gateways(p: Part, blocks, detail: int) -> None:
     """Arcos de luz en las dos bocas de cada pasaje y anuncios verticales magenta en sus paredes."""
     body = mat("metal", "#141a26")
     cyan = mat("neon", CYAN)
-    mag = mat("neon", MAGENTA)
+    mag = mat("pantalla", MAGENTA)  # anuncios vivos (el cliente los anima)
     s = 1.5  # acera
     for (i, j, bx0, bz0, bx1, bz1) in blocks:
         if (i == 1) == (j == 1):
@@ -327,7 +337,31 @@ def gateways(p: Part, blocks, detail: int) -> None:
                 _box(p, bx1 - 9.5, zb + 0.95, bx1 - 7, zb + 1.15, 9, 19, mag)
 
 
+def statue_plinth(p: Part, detail: int) -> None:
+    """Pedestal de la escultura de Xen: escalón, bloque oscuro con filos de luz y un aro magenta."""
+    sx, sz = STATUE
+    base = mat("metal", "#141a26")
+    stone = mat("piedra", "#2a2f3c")
+    cyan = mat("neon", CYAN)
+    mag = mat("neon", MAGENTA)
+    b, h = STATUE_BASE
+    _box(p, sx - b, sz - b, sx + b, sz + b, 0, h, base)
+    w, ph = STATUE_PLINTH
+    _box(p, sx - w, sz - w, sx + w, sz + w, h, ph, stone)
+    # Filo de luz arriba y abajo del pedestal y en las aristas verticales.
+    for y0, y1 in ((h, h + 0.05), (ph - 0.06, ph)):
+        _box(p, sx - w - 0.02, sz - w - 0.02, sx + w + 0.02, sz + w + 0.02, y0, y1, cyan)
+    for dx in (-w, w):
+        for dz in (-w, w):
+            _box(p, sx + dx - 0.04, sz + dz - 0.04, sx + dx + 0.04, sz + dz + 0.04, h, ph, cyan)
+    cx, cy = _xz(sx, sz)
+    n = 40 if detail else 20
+    ring = [(cx + (b + 0.25) * math.cos(2 * math.pi * k / n), cy + (b + 0.25) * math.sin(2 * math.pi * k / n), 0.04) for k in range(n)]
+    p.tube(ring, 0.05, mag, segments=4, closed=True)
+
+
 def build(p: Part, blocks, detail: int) -> None:
+    statue_plinth(p, detail)
     torre_cero(p, detail)
     walkway(p, detail)
     gateways(p, blocks, detail)

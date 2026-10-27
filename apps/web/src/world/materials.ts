@@ -94,8 +94,66 @@ function waterNormals(): THREE.CanvasTexture {
   return waterNormal;
 }
 
-/** Llamar en cada frame: mueve el agua (una sola textura para todas las fuentes). */
+/* ------------------------------------------------------------------ */
+/* Pantallas: anuncios y fachadas vivas, sin texturas ni letras           */
+/* ------------------------------------------------------------------ */
+
+const screenTime = { value: 0 };
+const screens = new Map<string, THREE.ShaderMaterial>();
+
+/**
+ * `xenxo:pantalla.<tinte>`: bloques de luz que bajan, barrido y líneas de barrido, en el color
+ * del tinte. Sin texto (nada que traducir ni que pueda leerse como una marca). Usa las UV en
+ * metros de la forja, así que el dibujo tiene el mismo tamaño en una pantalla grande que en una
+ * pequeña. Un reloj para todas (tickMaterials).
+ */
+function screenMaterial(tint: THREE.Color, ambience: Ambience, bloom: boolean): THREE.ShaderMaterial {
+  const strength = ambience === "night" ? (bloom ? 1.9 : 1.15) : 0.85;
+  const key = `${tint.getHexString()}|${strength}`;
+  let m = screens.get(key);
+  if (!m) {
+    m = new THREE.ShaderMaterial({
+      uniforms: { uTime: screenTime, uColor: { value: tint.clone() }, uStrength: { value: strength } },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }`,
+      fragmentShader: /* glsl */ `
+        uniform float uTime; uniform vec3 uColor; uniform float uStrength;
+        varying vec2 vUv;
+        float h(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        void main() {
+          vec2 uv = vUv * vec2(1.6, 1.0);
+          // Columnas de bloques que bajan a distinta velocidad.
+          float col = floor(uv.x * 2.0);
+          float spd = 0.6 + h(vec2(col, 3.1)) * 1.4;
+          vec2 cell = vec2(col, floor(uv.y * 3.0 + uTime * spd));
+          float on = step(0.45, h(cell));
+          float lvl = 0.35 + 0.65 * h(cell + 7.7);
+          vec2 f = fract(vec2(uv.x * 2.0, uv.y * 3.0 + uTime * spd));
+          float edge = step(0.08, f.x) * step(f.x, 0.92) * step(0.1, f.y) * step(f.y, 0.9);
+          float blocks = on * lvl * edge;
+          // Barrido luminoso cada pocos segundos y líneas de barrido finas.
+          float sweep = smoothstep(0.0, 0.25, 0.25 - abs(fract(uv.y * 0.15 - uTime * 0.12) - 0.5));
+          float scan = 0.82 + 0.18 * sin(vUv.y * 90.0);
+          float flick = 0.94 + 0.06 * sin(uTime * 37.0 + h(vec2(col, 1.0)) * 6.0);
+          float v = (0.16 + blocks * 0.8 + sweep * 0.5) * scan * flick;
+          gl_FragColor = vec4(uColor * v * uStrength, 1.0);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
+        }`,
+      toneMapped: !(ambience === "night" && bloom),
+    });
+    screens.set(key, m);
+  }
+  return m;
+}
+
+/** Llamar en cada frame: mueve el agua (una sola textura para todas las fuentes) y las pantallas. */
 export function tickMaterials(t: number) {
+  screenTime.value = t;
   if (waterNormal) waterNormal.offset.set(t * 0.03, t * 0.017);
 }
 
@@ -156,6 +214,53 @@ function facadeGlow(material: THREE.Material, strength: number) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Luces pintadas en la textura (modelos generados: `xenxo-glow`)        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Los modelos generados traen sus tiras de luz pintadas en el albedo. Con el material llamado
+ * `xenxo-glow`, emite solo lo saturado y claro (cian, magenta…), mucho más de noche; el resto,
+ * nada. Un clon por material y ambiente; sin texturas nuevas.
+ */
+const glows = new Map<string, THREE.Material>();
+export function paintedLights(m: THREE.Material, ambience: Ambience): THREE.Material {
+  const key = `${m.uuid}|${ambience}`;
+  let out = glows.get(key);
+  if (out) return out;
+  const c = m.clone() as THREE.MeshStandardMaterial;
+  if (!c.map) return m;
+  c.emissiveMap = c.map;
+  c.emissive = new THREE.Color(1, 1, 1);
+  c.emissiveIntensity = 1;
+  const strength = ambience === "night" ? 2.4 : 0.7;
+  const rim = ambience === "night" ? 0.25 : 0;
+  c.onBeforeCompile = (shader) => {
+    shader.uniforms.uGlow = { value: strength };
+    shader.uniforms.uRim = { value: rim };
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>", "#include <common>\nuniform float uGlow;\nuniform float uRim;")
+      .replace(
+        "#include <emissivemap_fragment>",
+        `#ifdef USE_EMISSIVEMAP
+        {
+          vec3 eC = texture2D(emissiveMap, vEmissiveMapUv).rgb;
+          float hi = max(eC.r, max(eC.g, eC.b));
+          float sat = hi - min(eC.r, min(eC.g, eC.b));
+          float m = smoothstep(0.28, 0.5, sat) * smoothstep(0.35, 0.65, hi);
+          totalEmissiveRadiance *= eC * m * uGlow;
+        }
+        #endif
+        // Contraluz fino (de noche): separa las siluetas oscuras del fondo oscuro.
+        totalEmissiveRadiance += vec3(0.21, 0.85, 1.0) * pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 3.0) * uRim;`,
+      );
+  };
+  c.customProgramCacheKey = () => `xenxo-glow-${strength}-${rim}`;
+  glows.set(key, c);
+  out = c;
+  return out;
+}
+
+/* ------------------------------------------------------------------ */
 /* Construcción de materiales                                           */
 /* ------------------------------------------------------------------ */
 
@@ -182,6 +287,7 @@ export function libraryMaterial(ref: LibraryRef, f: Features, ambience: Ambience
     return new THREE.MeshBasicMaterial({ color: tint.clone().multiplyScalar(glow), toneMapped: glow <= 1 });
   }
   if (lib === "oscuro") return new THREE.MeshBasicMaterial({ color: tint });
+  if (lib === "pantalla") return screenMaterial(tint, ambience, f.bloom);
   if (lib === "farol") {
     if (night) {
       const glow = f.bloom ? 2.6 : 1;

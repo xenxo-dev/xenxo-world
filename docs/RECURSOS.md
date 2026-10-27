@@ -27,6 +27,23 @@ Nada se enlaza en caliente: los archivos se descargan, se preparan y se sirven d
 | [Smithsonian Open Access](https://www.si.edu/openaccess) | CC0 (solo lo marcado CC0) | Más de 2.000 escaneos de museo | Pesados: simplifica antes de subir |
 | [Poly Pizza](https://poly.pizza) | **Mixta** | Buscador enorme de low-poly | Usa solo los marcados CC0 |
 
+**Orden para un modelo nuevo:** primero se busca en todas estas fuentes y se elige la opción de
+más calidad; solo si nada llega al nivel se genera con IA (abajo).
+
+### Modelos generados con IA
+
+| Vía | Coste | Licencia de lo generado | Notas |
+|---|---|---|---|
+| Higgsfield → **Tripo** (texto a 3D) | ≈ 5 créditos por modelo | Propiedad y uso comercial (plan de pago), no CC0 | Lo que usamos: buena calidad, PBR, 3–5 k triángulos. `tools/models/generated/` |
+| Higgsfield → **Meshy 6/7** | ≈ 25–38 créditos | Igual | Más caro; rigging y animaciones de personajes |
+| **Meshy, plan gratuito** | 100 créditos al mes | **CC BY 4.0**: uso comercial citando a Meshy | Apúntalo en `CREDITS.md` con la atribución |
+| **TripoSR** en local (MIT) | Gratis | MIT | Cabe en 6 GB (GTX 1060), calidad mucho menor y sin PBR. Necesita CUDA (NVIDIA) |
+| **TRELLIS.2** en local (MIT) | Gratis | MIT | Muy bueno, pero pide 24 GB de VRAM (NVIDIA) |
+| ~~Hunyuan3D~~ (Tencent) | — | **Excluye la UE**, Reino Unido y Corea del Sur | No se usa |
+
+Los modelos de IA en local necesitan una NVIDIA (CUDA); una AMD (p. ej. RX 5700 XT) sirve para
+renderizar en Blender (Cycles con HIP), no para estos modelos.
+
 Los modelos se suben como cualquier otro: desde la web o con
 `npm run upload-asset -w @xenxo/headless -- <archivo.glb>` (se validan y optimizan igual).
 

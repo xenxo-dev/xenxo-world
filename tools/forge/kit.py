@@ -61,6 +61,7 @@ LIBRARY = {
     "ventana": (0.08, 0.0),    # vidrio de ventanas y escaparates: se encienden de noche
     "agua": (0.02, 0.0),
     "neon": (0.4, 0.0),        # tubos de neón: brillan según el ambiente
+    "pantalla": (0.3, 0.0),    # pantallas y anuncios: el cliente los anima (sin letras)
     "farol": (0.1, 0.0),       # cristal de farolas: luz cálida de noche
     "hoja": (0.8, 0.0),
     "corteza": (0.9, 0.0),

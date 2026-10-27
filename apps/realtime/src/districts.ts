@@ -12,6 +12,8 @@ import activities from "./district-activities.json";
 interface DistrictActivities {
   hunts?: { id: string; piece: string; radius: number; items: { p: V3; note?: Record<string, string> }[] }[];
   boards?: { kind: "race" | "hunt"; id: string; p: V3; yaw: number; size: [number, number]; title?: { es: string; en: string } }[];
+  props?: { piece: string; p: V3; yaw: number; half: V3 }[];
+  labels?: { text: { es: string; en: string }; p: V3; yaw: number; size: number }[];
 }
 
 /**
@@ -195,6 +197,24 @@ export function districtSeed(d: District, toNexo: { p: V3; yaw: number }): Seede
     });
     if (b.title) label(`${d.id}_board_${b.id}_title`, [b.p[0], r3(b.p[1] + b.size[1] / 2 + 0.7), b.p[2]], yaw(b.yaw), b.title.en, b.title, 0.55);
   }
+
+  /* --- Atrezo modelado (los modelos generados de seed-assets), con su caja --- */
+  (acts?.props ?? []).forEach((pr, n) => {
+    const piece = SEED_ASSETS[pr.piece];
+    if (!piece) throw new Error(`falta el modelo: ${pr.piece}`);
+    const plods = piece.lods.map((l) => ({ hash: l.hash, media: "model/gltf-binary" as const, tris: l.tris }));
+    out.push({
+      id: `${d.id}_prop_${n + 1}`,
+      components: {
+        "transform@1": { p: pr.p, r: yaw(pr.yaw), s: [1, 1, 1], parent: null },
+        "mesh@1": { lods: plods },
+      } as Components,
+    });
+    // La caja va aparte, centrada en su altura (el modelo está apoyado en el suelo). Sin caja (0):
+    // la colisión ya la pone la ciudad (la peana de la escultura de Xen).
+    if (pr.half[1] > 0) solid(`${d.id}_prop_${n + 1}_box`, [pr.p[0], r3(pr.p[1] + pr.half[1]), pr.p[2]], pr.half);
+  });
+  (acts?.labels ?? []).forEach((lb, n) => label(`${d.id}_sign_${n + 1}`, lb.p, yaw(lb.yaw), lb.text.en, lb.text, lb.size));
 
   /* --- Nombre del distrito en luz, en el suelo de la avenida del sur, al llegar --- */
   label(`${d.id}_floor_name`, [32, 0.03, 140], FLAT, d.name.en.toLowerCase(), { es: d.name.es.toLowerCase(), en: d.name.en.toLowerCase() }, 1.5);

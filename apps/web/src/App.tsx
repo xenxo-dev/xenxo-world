@@ -21,6 +21,7 @@ import { closeGame, openGame, useOpenGame } from "./games/state";
 import { gameBySlug, gameRoute } from "./net/games";
 import { Panel, type Section } from "./panel/Panel";
 import { TouchJoystick } from "./world/TouchJoystick";
+import { ambient } from "./world/ambient-audio";
 
 /**
  * La escena 3D (Three.js, WebXR, cargadores de modelos) se descarga aparte:
@@ -71,9 +72,21 @@ export function App() {
   // Entrar al mundo es un gesto: si se pidió en Personalizar, a pantalla completa.
   const enterWorld = () => {
     if (controls.autoFullscreen) void enterFullscreen();
+    ambient.unlock(); // el sonido solo puede empezar con un gesto
     setInWorld(true);
   };
   const game = useOpenGame();
+  // Sonido ambiente: solo en el mundo (no en el panel ni dentro de un juego) y tras un gesto.
+  useEffect(() => ambient.setActive(inWorld && !game), [inWorld, game]);
+  useEffect(() => {
+    const unlock = () => ambient.unlock();
+    window.addEventListener("pointerdown", unlock, { once: true });
+    window.addEventListener("keydown", unlock, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
+    };
+  }, []);
 
   // La plaza se ve viva detrás del panel desde el primer segundo.
   // Vuelta de Google: termina el acceso y abre Personalizar con el resultado.

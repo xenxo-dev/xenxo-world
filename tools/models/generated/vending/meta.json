@@ -1,0 +1,19 @@
+{
+  "name": "prop_vending",
+  "platform": "Higgsfield",
+  "model": "tripo_3d",
+  "date": "2026-10-27",
+  "plan": "plus",
+  "job_id": "3e8c66a8-b2be-4db9-9bb4-5b5150afe228",
+  "prompt": "futuristic street vending machine for a cyberpunk city, tall dark metal cabinet with a glowing magenta-lit display window full of small drinks, cyan trim lights, slightly weathered, clean game asset",
+  "negative_prompt": "text, logo, letters, brand, people",
+  "face_limit": 3000,
+  "credits": 5,
+  "fit": {
+    "size": 2.0,
+    "along": "height"
+  },
+  "yaw": -90,
+  "lod1_ratio": 0.45,
+  "glow": true
+}

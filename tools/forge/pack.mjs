@@ -11,13 +11,14 @@
  * tal cual del índice actual en lugar de borrarse.
  */
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Logger, NodeIO } from "@gltf-transform/core";
 import { ALL_EXTENSIONS, EXTTextureWebP } from "@gltf-transform/extensions";
-import { dedup, meshopt, prune, quantize } from "@gltf-transform/functions";
-import { MeshoptDecoder, MeshoptEncoder } from "meshoptimizer";
+import { dedup, flatten, getBounds, join as join_, meshopt, prune, quantize, simplify, textureCompress, transformMesh, weld } from "@gltf-transform/functions";
+import { MeshoptDecoder, MeshoptEncoder, MeshoptSimplifier } from "meshoptimizer";
+import sharp from "sharp";
 import { checkBudget, inspectGlb } from "../../packages/assets/src/index.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -29,9 +30,16 @@ const dest = join(root, "apps", "realtime", "seed-assets", "s");
 const indexFile = join(root, "apps", "realtime", "src", "seed-assets.ts");
 
 /** Materiales que no llevan oclusión: emiten luz o son superficies que el cliente anima. */
-const NO_AO = /^xenxo:(neon|farol|agua)\b/;
+const NO_AO = /^xenxo:(neon|farol|agua|pantalla)\b/;
 
-await Promise.all([MeshoptDecoder.ready, MeshoptEncoder.ready]);
+await Promise.all([MeshoptDecoder.ready, MeshoptEncoder.ready, MeshoptSimplifier.ready]);
+
+/** Producto de matrices 4 × 4 en columnas (a · b). */
+function multiply4(a, b) {
+  const o = new Array(16).fill(0);
+  for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) for (let k = 0; k < 4; k++) o[c * 4 + r] += a[k * 4 + r] * b[c * 4 + k];
+  return o;
+}
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({
   "meshopt.decoder": MeshoptDecoder,
   "meshopt.encoder": MeshoptEncoder,
@@ -86,7 +94,62 @@ for (const name of Object.keys(forge).sort()) {
   }
   index[name] = { kind: forge[name].kind, lods };
 }
-if (keep) console.log(`(conservadas sin tocar: ${Object.keys(index).filter((n) => !(n in forge)).join(", ") || "ninguna"})`);
+// Modelos generados con IA (tools/models/generated/<carpeta>/: model.glb + meta.json, ver su README):
+// se ponen a su tamaño real (`fit`), de pie en Y = 0 y mirando a +Z (`yaw`), con dos niveles de
+// detalle (texturas a 1024 y 512 px en WebP; el ligero, simplificado) y el mismo presupuesto.
+const generatedDir = join(root, "tools", "models", "generated");
+for (const folder of existsSync(generatedDir) ? readdirSync(generatedDir).sort() : []) {
+  const metaFile = join(generatedDir, folder, "meta.json");
+  if (!existsSync(metaFile)) continue;
+  const meta = JSON.parse(readFileSync(metaFile, "utf8"));
+  const lods = [];
+  for (let lod = 0; lod < 2; lod++) {
+    const doc = await io.read(join(generatedDir, folder, "model.glb"));
+    doc.setLogger(new Logger(Logger.Verbosity.WARN));
+    await doc.transform(flatten(), join_(), weld());
+    // Pista de render: las luces pintadas en la textura brillan (apps/web: paintedLights).
+    if (meta.glow) for (const mat of doc.getRoot().listMaterials()) mat.setName("xenxo-glow");
+    const scene = doc.getRoot().getDefaultScene() ?? doc.getRoot().listScenes()[0];
+    // Girar, escalar y apoyar en el suelo: se aplica a los vértices (sin nodos con transformación).
+    const yaw = ((meta.yaw ?? 0) * Math.PI) / 180;
+    const rot = [Math.cos(yaw), 0, -Math.sin(yaw), 0, 0, 1, 0, 0, Math.sin(yaw), 0, Math.cos(yaw), 0, 0, 0, 0, 1];
+    for (const node of scene.listChildren()) {
+      if (node.getMesh()) transformMesh(node.getMesh(), multiply4(rot, node.getMatrix()));
+      node.setMatrix([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+    }
+    const b = getBounds(scene);
+    const size = [b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]];
+    const s = meta.fit.size / (meta.fit.along === "height" ? size[1] : Math.max(size[0], size[2]));
+    const cx = (b.min[0] + b.max[0]) / 2, cz = (b.min[2] + b.max[2]) / 2;
+    const m = [s, 0, 0, 0, 0, s, 0, 0, 0, 0, s, 0, -cx * s, -b.min[1] * s, -cz * s, 1];
+    for (const node of scene.listChildren()) if (node.getMesh()) transformMesh(node.getMesh(), m);
+    await doc.transform(
+      // Nivel detallado: tal cual (o reducido con `lod0_ratio` si el original es muy denso); ligero: `lod1_ratio`.
+      ...(lod === 1 || meta.lod0_ratio
+        ? [simplify({ simplifier: MeshoptSimplifier, ratio: lod === 1 ? (meta.lod1_ratio ?? 0.5) : meta.lod0_ratio, error: lod === 1 ? 0.004 : 0.002 })]
+        : []),
+      textureCompress({ encoder: sharp, targetFormat: "webp", resize: [meta.tex?.[lod] ?? (lod === 0 ? 1024 : 512), meta.tex?.[lod] ?? (lod === 0 ? 1024 : 512)], quality: 82 }),
+      dedup(),
+      prune(),
+      quantize({ quantizePosition: 14, quantizeNormal: 10, quantizeTexcoord: 12 }),
+      meshopt({ encoder: MeshoptEncoder, level: "medium" }),
+    );
+    const bytes = await io.writeBinary(doc);
+    const report = inspectGlb(bytes);
+    const problems = checkBudget(report, "model");
+    if (problems.length) throw new Error(`${meta.name} lod${lod} supera el presupuesto: ${JSON.stringify(problems)}`);
+    const hash = "sha256:" + createHash("sha256").update(bytes).digest("hex");
+    const file = `${hash.slice(7)}.glb`;
+    if (index[meta.name]) for (const l of index[meta.name].lods) rmSync(join(dest, l.file), { force: true });
+    writeFileSync(join(dest, file), bytes);
+    total += bytes.byteLength;
+    lods.push({ file, hash, tris: report.triangles, bytes: report.bytes, bounds: report.bounds });
+    console.log(`${(meta.name + ".lod" + lod).padEnd(18)} ${String(report.triangles).padStart(6)} tri  ${(bytes.byteLength / 1024).toFixed(0).padStart(5)} KB  (IA: ${meta.platform} ${meta.model})`);
+  }
+  index[meta.name] = { kind: "generated", lods };
+}
+
+if (keep) console.log(`(conservadas sin tocar: ${Object.keys(index).filter((n) => !(n in forge) && index[n].kind !== "generated").join(", ") || "ninguna"})`);
 
 // Índice tipado: el servidor siembra entidades con estos hashes y sirve los archivos
 // desde sus recursos estáticos (apps/realtime/seed-assets/s, nombrados por hash).

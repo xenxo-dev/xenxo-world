@@ -429,7 +429,10 @@ Un GLB puede nombrar sus materiales `xenxo:<biblioteca>.<tinte>` (p. ej. `xenxo:
 | `ventana` | Vidrio: refleja de día; de noche se encienden unas sí y otras no |
 | `fachada` | Fachada de rascacielos con textura real (UV en metros): de noche se encienden sus ventanas |
 | `agua` | Superficie animada |
+| `pantalla` | Pantalla o anuncio vivo: bloques de luz que se mueven en el color del tinte, sin letras |
 | `oscuro`, `fruta`, `flor` | Colores sin textura |
+
+Un material llamado `xenxo-glow` (modelos generados con IA) hace brillar las luces pintadas en su textura (lo saturado y claro), más de noche.
 
 La oclusión horneada (si la hay) va como `occlusionTexture` en `texCoord: 1`. Como manda glTF, el frente de un modelo mira hacia **+Z** y el suelo es Y = 0 (en Blender: frente hacia −Y, la vista frontal).
 

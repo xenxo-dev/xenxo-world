@@ -3,7 +3,8 @@ import { useControls } from "../controls";
 import { fullscreenSupported, toggleFullscreen, useFullscreen } from "../fullscreen";
 import { t } from "../i18n";
 import { input, onPhoto, subscribeView, view } from "../world/input";
-import { EyeIcon, hudIconButton, JumpIcon, PersonIcon } from "./icons";
+import { setAmbientSound, useAmbientSound } from "../world/ambient-audio";
+import { EyeIcon, hudIconButton, JumpIcon, PersonIcon, SoundIcon } from "./icons";
 
 const hudBox = "rounded-xl border border-cal/10 bg-noche/70 backdrop-blur";
 const small = "grid h-9 w-9 place-items-center rounded-lg text-[#f4f7ff] transition hover:bg-cal/10 hover:text-neon active:scale-95";
@@ -15,6 +16,7 @@ const small = "grid h-9 w-9 place-items-center rounded-lg text-[#f4f7ff] transit
 export function TopTools({ onVR }: { onVR: (() => void) | null }) {
   const full = useFullscreen();
   const canFull = fullscreenSupported();
+  const sound = useAmbientSound();
   const [notice, setNotice] = useState<{ ok: boolean; n: number } | null>(null);
   const [flash, setFlash] = useState(0);
 
@@ -50,6 +52,15 @@ export function TopTools({ onVR }: { onVR: (() => void) | null }) {
             VR
           </button>
         )}
+        <button
+          title={t(sound ? "tools.soundOff" : "tools.soundOn")}
+          aria-label={t(sound ? "tools.soundOff" : "tools.soundOn")}
+          aria-pressed={sound}
+          onClick={() => setAmbientSound(!sound)}
+          className={small}
+        >
+          <SoundIcon on={sound} />
+        </button>
         <button title={`${t("tools.photo")} (P)`} aria-label={t("tools.photo")} onClick={() => (input.photo = true)} className={small}>
           <CameraIcon />
         </button>

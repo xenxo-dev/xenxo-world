@@ -51,13 +51,17 @@ export interface Features {
    * instanciado y se mueve en el shader: en la Quest cabe la de «medium».
    */
   nexoCity: number;
+  /** Gente que camina por las ciudades de los distritos (personajes de serie; 0 = nadie). */
+  pedestrians: number;
+  /** Coches voladores y drones por las calles de las ciudades de los distritos (instanciados). */
+  traffic: number;
 }
 
 export const FEATURES: Record<Tier, Features> = {
-  low: { dpr: [0.75, 1], antialias: false, pbr: false, post: false, bloom: false, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 48, lod: "light", textures: 512, normalMaps: false, avatarFill: true, nexoCity: 0.5 },
-  medium: { dpr: [1, 1.5], antialias: true, pbr: true, post: true, bloom: true, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 96, lod: "light", textures: 512, normalMaps: true, avatarFill: true, nexoCity: 0.75 },
-  high: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: false, shadows: 1024, probe: 128, pointLights: true, lightPools: false, skyline: 150, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1 },
-  ultra: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: true, shadows: 2048, probe: 256, pointLights: true, lightPools: false, skyline: 220, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1 },
+  low: { dpr: [0.75, 1], antialias: false, pbr: false, post: false, bloom: false, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 48, lod: "light", textures: 512, normalMaps: false, avatarFill: true, nexoCity: 0.5, pedestrians: 4, traffic: 8 },
+  medium: { dpr: [1, 1.5], antialias: true, pbr: true, post: true, bloom: true, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 96, lod: "light", textures: 512, normalMaps: true, avatarFill: true, nexoCity: 0.75, pedestrians: 8, traffic: 14 },
+  high: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: false, shadows: 1024, probe: 128, pointLights: true, lightPools: false, skyline: 150, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1, pedestrians: 14, traffic: 22 },
+  ultra: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: true, shadows: 2048, probe: 256, pointLights: true, lightPools: false, skyline: 220, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1, pedestrians: 20, traffic: 30 },
 };
 
 /* ------------------------------------------------------------------ */
@@ -139,6 +143,8 @@ function portableClamp(f: Features, xr: boolean): Features {
     lightPools: true,
     skyline: Math.min(f.skyline, 96),
     nexoCity: Math.min(f.nexoCity, 0.75),
+    pedestrians: Math.min(f.pedestrians, xr ? 4 : 6),
+    traffic: Math.min(f.traffic, 14),
     lod: f.lod,
   };
 }
