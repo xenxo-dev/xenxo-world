@@ -169,7 +169,8 @@ def _tower(p: Part, b: dict, color: str, rnd: random.Random, dark: bool, detail:
     alt = mat("neon", rnd.choice(["#36d9ff", "#ff4fd8", "#ff4f8b"]))
     # Zócalo con tienda (luz) y torre retranqueada encima.
     _box(p, x0, z0, x1, z1, 0, 5, trim)
-    _box(p, x0 - 0.05, z0 - 0.05, x1 + 0.05, z1 + 0.05, 4.6, 5.0, neon)
+    # Franjas de luz: solo los lados (su tapa coincidiría con la del zócalo y parpadearía).
+    _box(p, x0 - 0.05, z0 - 0.05, x1 + 0.05, z1 + 0.05, 4.6, 5.0, neon, skip=("+z", "-z"))
     i = 1.0
     _box(p, x0 + i, z0 + i, x1 - i, z1 - i, 5, h, face)
     # Franjas verticales de luz en las cuatro esquinas y una corona.
@@ -195,13 +196,14 @@ def _voxel(p: Part, b: dict, color: str, rnd: random.Random, detail: int):
         th = b["h"] / tiers
         m = mat("azulejo", rnd.choice(tints))
         _box(p, x0 + inset, z0 + inset, x1 - inset, z1 - inset, y, y + th, m)
-        _box(p, x0 + inset - 0.05, z0 + inset - 0.05, x1 - inset + 0.05, z1 - inset + 0.05, y + th - 0.4, y + th, mat("neon", color))
+        _box(p, x0 + inset - 0.05, z0 + inset - 0.05, x1 - inset + 0.05, z1 - inset + 0.05, y + th - 0.4, y + th, mat("neon", color), skip=("+z", "-z"))
         if detail:
             # Píxeles encendidos en la fachada que da a la cruz.
             for n in range(6):
                 px = x0 + inset + 1 + rnd.random() * (x1 - x0 - 2 * inset - 2.5)
                 py = y + 1 + rnd.random() * (th - 2.5)
-                face_z = z1 - inset + 0.02 if b["q"] in (0, 1) else z0 + inset - 0.12
+                # Cada píxel un centímetro más fuera que el anterior: si dos se solapan, no comparten plano.
+                face_z = z1 - inset + 0.02 + 0.01 * n if b["q"] in (0, 1) else z0 + inset - 0.12 - 0.01 * n
                 _box(p, px, face_z, px + 1.0, face_z + 0.1, py, py + 1.0, mat("neon", rnd.choice(tints)))
         y += th
         inset += 1.6

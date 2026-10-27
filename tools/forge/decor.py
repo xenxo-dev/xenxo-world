@@ -246,7 +246,7 @@ def vending(color: str) -> Part:
         p.box((-0.34, -0.42, z), (0.14, -0.4, z + 0.03), mat("neon", color))
     p.box((0.24, -0.4, 1.0), (0.38, -0.38, 1.5), mat("metal", "#0d1018"))  # panel
     p.box((-0.38, -0.4, 0.15), (0.38, -0.38, 0.4), mat("oscuro", "#050608"))  # cajón
-    p.box((-0.46, -0.39, 1.82), (0.46, 0.39, 1.9), mat("neon", color))
+    p.box((-0.46, -0.39, 1.82), (0.46, 0.39, 1.9), mat("neon", color), skip=("+z", "-z"))  # solo los lados: la tapa coincidiría con la de la máquina
     return p
 
 

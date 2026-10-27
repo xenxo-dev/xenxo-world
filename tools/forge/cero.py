@@ -51,8 +51,8 @@ STAIRS = [
 ]
 
 
-def _box(p: Part, x0, z0, x1, z1, y0, y1, m):
-    p.box((x0 - C, -(z1 - C), y0), (x1 - C, -(z0 - C), y1), m)
+def _box(p: Part, x0, z0, x1, z1, y0, y1, m, skip=()):
+    p.box((x0 - C, -(z1 - C), y0), (x1 - C, -(z0 - C), y1), m, skip=skip)
 
 
 def _xz(x: float, z: float) -> tuple[float, float]:
@@ -165,7 +165,8 @@ def _steps():
             za = ztop + sense * k * STEP_RUN
             zb = za + sense * STEP_RUN
             top = max(WALK_Y - (k + 1) * STEP_RISE, 0.0) or 0.05
-            yield x0, x1, min(za, zb), max(za, zb), round(top, 3)
+            # Entre los pretiles (no dentro): si se solapan, sus caras coinciden y parpadean.
+            yield x0 + RAIL_T, x1 - RAIL_T, min(za, zb), max(za, zb), round(top, 3)
 
 
 def _stair_walls():
@@ -387,7 +388,7 @@ def statue_plinth(p: Part, detail: int) -> None:
     _box(p, sx - w, sz - w, sx + w, sz + w, h, ph, stone)
     # Filo de luz arriba y abajo del pedestal y en las aristas verticales.
     for y0, y1 in ((h, h + 0.05), (ph - 0.06, ph)):
-        _box(p, sx - w - 0.02, sz - w - 0.02, sx + w + 0.02, sz + w + 0.02, y0, y1, cyan)
+        _box(p, sx - w - 0.02, sz - w - 0.02, sx + w + 0.02, sz + w + 0.02, y0, y1, cyan, skip=("+z", "-z"))
     for dx in (-w, w):
         for dz in (-w, w):
             _box(p, sx + dx - 0.04, sz + dz - 0.04, sx + dx + 0.04, sz + dz + 0.04, h, ph, cyan)

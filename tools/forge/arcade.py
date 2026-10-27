@@ -33,8 +33,8 @@ BOARD = {"x0": 25.6, "x1": 38.4, "z": 21.0, "y0": 7.2, "y1": 14.8}
 AXIS_GALLERY = 6.0
 
 
-def _box(p: Part, x0, z0, x1, z1, y0, y1, m):
-    p.box((x0 - C, -(z1 - C), y0), (x1 - C, -(z0 - C), y1), m)
+def _box(p: Part, x0, z0, x1, z1, y0, y1, m, skip=()):
+    p.box((x0 - C, -(z1 - C), y0), (x1 - C, -(z0 - C), y1), m, skip=skip)
 
 
 def _xz(x: float, z: float) -> tuple[float, float]:
@@ -108,9 +108,9 @@ def cabinet_tower(p: Part, b: dict, rnd, detail: int) -> None:
     marquee_tint = MAGENTA if screen_tint != MAGENTA else BLUE
     # Cuerpo y remate.
     _box(p, x0, z0, x1, z1, 0, h, body)
-    _box(p, x0 - 0.05, z0 - 0.05, x1 + 0.05, z1 + 0.05, h - 0.5, h, blue)
+    _box(p, x0 - 0.05, z0 - 0.05, x1 + 0.05, z1 + 0.05, h - 0.5, h, blue, skip=("+z", "-z"))  # solo los lados: la tapa coincidiría con la azotea
     # Pie: mueble oscuro con dos ranuras de monedas y la puerta de luz.
-    _face(p, b, 0, width, -0.05, 0.25, 0, 6, dark)
+    _face(p, b, 0.03, width - 0.03, -0.05, 0.25, 0, 6, dark)  # un poco más estrecho: sus lados no coinciden con los de la torre
     for k, u in enumerate((width * 0.3, width * 0.7)):
         _face(p, b, u - 0.35, u + 0.35, 0.25, 0.32, 3.2, 4.4, mat("neon", YELLOW if k == 0 else RED))
     _face(p, b, width / 2 - 1.4, width / 2 + 1.4, 0.25, 0.3, 0, 2.6, mat("pantalla", BLUE))

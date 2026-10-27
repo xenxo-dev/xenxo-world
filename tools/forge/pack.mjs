@@ -73,13 +73,21 @@ for (const name of Object.keys(forge).sort()) {
       mat.getOcclusionTextureInfo().setTexCoord(1);
       mat.setOcclusionStrength(1);
     }
+    // Piezas grandes (suelos de distrito, ciudades, nexo): posiciones a 16 bits. Con 14 bits en
+    // 256 m el paso es de 1,6 cm y las capas del suelo (separadas milímetros) acababan a la misma
+    // altura: parpadeaban al andar (z-fighting). Con 16, 4 mm (las capas van a 6 mm o más).
+    // meshopt() vuelve a cuantizar por su cuenta: hay que decírselo a él también.
+    const ext = (() => {
+      const b = getBounds(doc.getRoot().listScenes()[0]);
+      return Math.max(b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]);
+    })();
     await doc.transform(
       dedup(),
       // keepAttributes: las UV en metros (TEXCOORD_0) no las usa ningún material del GLB, pero sí la biblioteca del cliente.
       prune({ keepAttributes: true }),
       // Las UV van en metros (fuera de 0..1): no se cuantizan, para que las texturas de biblioteca repitan bien.
-      quantize({ pattern: /^(POSITION|NORMAL)$/, quantizePosition: 14, quantizeNormal: 10 }),
-      meshopt({ encoder: MeshoptEncoder, level: "medium" }),
+      quantize({ pattern: /^(POSITION|NORMAL)$/, quantizePosition: ext > 16 ? 16 : 14, quantizeNormal: 10 }),
+      meshopt({ encoder: MeshoptEncoder, level: "medium", quantizePosition: ext > 16 ? 16 : 14 }),
     );
     const bytes = await io.writeBinary(doc);
     const report = inspectGlb(bytes);

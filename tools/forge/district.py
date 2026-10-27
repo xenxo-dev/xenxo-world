@@ -92,8 +92,8 @@ def ground(lay: dict, d: dict, detail: int = 1):
     _rect(p, C2 - h, b0, C2 + h, b1, 0.003, 0.005, street)
     _rect(p, b0, C2 - h, b1, C2 + h, 0.003, 0.005, street)
     for x in (C2 - h, C2 + h - 0.08):
-        _rect(p, x, b0, x + 0.08, b1, 0.005, 0.008, white)
-        _rect(p, b0, x, b1, x + 0.08, 0.005, 0.008, white)
+        _rect(p, x, b0, x + 0.08, b1, 0.005, 0.009, white)  # por encima de las calles de la ciudad (0,008): sin capas a la misma altura
+        _rect(p, b0, x, b1, x + 0.08, 0.005, 0.009, white)
     # La ciudad: losa, borde de luz del distrito, calles entre manzanas y la plaza del medio.
     c = lay["city"]
     pave = mat("losa", "#3a4252")
