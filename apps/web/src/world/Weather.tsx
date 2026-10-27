@@ -52,6 +52,18 @@ export function rainLevel(now: number, ambience: Ambience): number {
   return peak * ramp;
 }
 
+/**
+ * Cuánto de mojado está el suelo (0–1): los charcos salen al empezar a llover (en 2 min) y se
+ * secan en los 5 min siguientes a que pare. Sin lluvia reciente, no hay charcos.
+ */
+export function wetness(now: number, ambience: Ambience): number {
+  const cycle = 20 * 60_000;
+  const t = (now % cycle) / 60_000;
+  const len = ambience === "night" ? 14 : 8;
+  if (t < len) return Math.min(1, t / 2);
+  return Math.max(0, 1 - (t - len) / 5);
+}
+
 function rng(seed: number) {
   let s = seed >>> 0;
   return () => {
@@ -102,6 +114,7 @@ function puddleMaterial() {
       {
         uTime: { value: 0 },
         uRain: { value: 0 },
+        uWet: { value: 0 },
         uNight: { value: 1 },
       },
     ]),
@@ -124,6 +137,7 @@ function puddleMaterial() {
     fragmentShader: /* glsl */ `
       uniform float uTime;
       uniform float uRain;
+      uniform float uWet;
       uniform float uNight;
       varying vec2 vUv;
       varying vec3 vWorld;
@@ -157,7 +171,7 @@ function puddleMaterial() {
           rip += exp(-pow((d - f * 0.55) * 28.0, 2.0)) * (1.0 - f);
         }
         col += vec3(0.6, 0.75, 0.9) * rip * uRain * 0.35;
-        gl_FragColor = vec4(col, edge * mix(0.7, 0.85, uNight));
+        gl_FragColor = vec4(col, edge * mix(0.7, 0.85, uNight) * uWet);
         #include <fog_fragment>
       }
     `,
@@ -189,6 +203,9 @@ function Puddles({ id, ambience }: { id: string; ambience: Ambience }) {
   useEffect(() => () => mesh.geometry.dispose(), [mesh]);
   useFrame((state) => {
     mat.uniforms.uTime!.value = state.clock.elapsedTime;
+    const wet = wetness(Date.now(), ambience);
+    mat.uniforms.uWet!.value = wet;
+    mesh.visible = wet > 0.01;
     mat.uniforms.uRain!.value = rainLevel(Date.now(), ambience);
     mat.uniforms.uNight!.value = ambience === "night" ? 1 : 0;
   });

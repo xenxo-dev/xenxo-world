@@ -226,7 +226,7 @@ def colliders() -> list[list[float]]:
     for k, s in enumerate(PLINTH):
         add(CX - s, CZ - s, CX + s, CZ + s, 0, 0.25 * (k + 1))
     add(CX - 3.4, CZ - 3.4, CX + 3.4, CZ + 3.4, 0, TOWER_H)
-    return boxes
+    return boxes + street_colliders()
 
 
 # --------------------------------------------------------------------------------------
@@ -404,6 +404,7 @@ def build(p: Part, blocks, detail: int) -> None:
     walkway(p, detail)
     gateways(p, blocks, detail)
     billboards(p, detail)
+    street(p, detail)
 
 
 def fragment(detail: int) -> Part:
@@ -421,3 +422,94 @@ def fragment_object(detail: int):
     ob.name = "cero_fragment"
     finish(ob)
     return ob
+
+
+# --------------------------------------------------------------------------------------
+# Vida en la calle: un puesto de fideos en la plaza, bancos mirando a la torre y gente
+# (la dibuja el cliente: world/Interiors.tsx). Asientos y gente salen de aquí como los interiores.
+# --------------------------------------------------------------------------------------
+
+# Bancos: (x, z, giro en grados hacia donde se mira, largo).
+STREET_SEATS = [
+    (28.5, 24.0, 0, 1.8), (35.5, 24.0, 0, 1.8),      # al norte de la torre, mirándola
+    (24.0, 28.5, 90, 1.8), (24.0, 35.5, 90, 1.8),    # al oeste
+    (40.0, 28.5, -90, 1.8), (40.0, 35.5, -90, 1.8),  # al este
+    (41.5, 22.0, 180, 2.6),                          # frente al puesto de fideos
+]
+STALL = (39.5, 19.7, 43.5, 21.0)  # puesto de fideos (x0, z0, x1, z1): barra hacia el sur
+# Gente: (x, z, giro, gesto). Sentados en los bancos, charlando, un bailarín callejero y su público.
+STREET_NPCS = [
+    (28.5, 24.05, 0, "sit"), (24.05, 35.5, 90, "sit"), (39.95, 28.5, -90, "sit"),
+    (40.8, 21.95, 180, "sit"), (42.3, 21.95, 180, "sit"), (41.5, 19.7, 0, "talk"),
+    (21.6, 37.4, 60, "talk"), (22.6, 38.2, 200, "talk"), (21.4, 38.6, 120, "idle"),
+    (42.4, 38.0, -110, "talk"), (41.5, 37.7, 70, "talk"),
+    (35.5, 41.8, 0, "dance"), (34.4, 43.8, 150, "idle"), (36.8, 43.9, 200, "idle"),
+    (31.5, -4.0, 70, "talk"), (32.4, -3.7, -110, "talk"),                    # pasaje norte
+    (66.0, 31.6, 40, "talk"), (66.7, 32.3, 220, "talk"),                     # pasaje este
+    (0.0, 31.3, 0, "talk"), (0.6, 32.4, 210, "idle"), (-0.7, 32.4, 150, "talk"),  # pasaje oeste
+    (32.0, 61.0, 180, "dance"), (31.0, 59.2, 20, "idle"), (33.2, 59.4, -20, "idle"),  # avenida de llegada
+]
+
+
+def _rot(x: float, z: float, deg: float, lx: float, lz: float) -> tuple[float, float]:
+    """Punto local (lx, lz) de algo girado `deg` (su frente, +Z local) y situado en (x, z)."""
+    a = math.radians(deg)
+    return x + lx * math.cos(a) + lz * math.sin(a), z - lx * math.sin(a) + lz * math.cos(a)
+
+
+def _rect_rot(x, z, deg, hx, hz, dz=0.0):
+    """Rectángulo (x0, z0, x1, z1) de un mueble de medio lado (hx, hz) girado un múltiplo de 90°."""
+    cx, cz = _rot(x, z, deg, 0, dz)
+    q = int(round(deg / 90)) % 2
+    ax, az = (hz, hx) if q else (hx, hz)
+    return cx - ax, cz - az, cx + ax, cz + az
+
+
+def street(p: Part, detail: int) -> None:
+    """Bancos de la plaza y el puesto de fideos con su toldo y sus farolillos."""
+    seat_m = mat("metal", "#2a3142")
+    cyan = mat("neon", CYAN)
+    for (x, z, deg, ln) in STREET_SEATS:
+        x0, z0, x1, z1 = _rect_rot(x, z, deg, ln / 2, 0.25)
+        _box(p, x0, z0, x1, z1, 0, 0.45, seat_m)
+        bx0, bz0, bx1, bz1 = _rect_rot(x, z, deg, ln / 2, 0.04, -0.22)
+        _box(p, bx0, bz0, bx1, bz1, 0.45, 0.95, seat_m)
+        _box(p, bx0 - 0.01, bz0 - 0.01, bx1 + 0.01, bz1 + 0.01, 0.95, 1.0, cyan)
+    x0, z0, x1, z1 = STALL
+    wood = mat("madera", "#7a4a2a")
+    red = mat("neon", "#ff4f4f")
+    _box(p, x0, z0 + 0.5, x1, z1, 0, 1.05, wood)              # barra
+    _box(p, x0, z1, x1, z1 + 0.05, 0.85, 0.95, red)           # filo de luz de la barra
+    for (px, pz) in ((x0, z0 - 0.4), (x1 - 0.15, z0 - 0.4), (x0, z1 + 0.4), (x1 - 0.15, z1 + 0.4)):
+        _box(p, px, pz, px + 0.15, pz + 0.15, 0, 2.6, seat_m)  # postes del toldo
+    _box(p, x0 - 0.3, z0 - 0.6, x1 + 0.3, z1 + 0.8, 2.6, 2.75, mat("metal", "#5a1f2a"))  # toldo
+    _box(p, x0 - 0.3, z1 + 0.8, x1 + 0.3, z1 + 0.85, 2.45, 2.75, red)
+    _box(p, x0 + 0.4, z0 - 0.42, x1 - 0.4, z0 - 0.3, 1.6, 2.4, mat("pantalla", "#ffd54f"))  # la carta
+    if detail:
+        for k in range(4):
+            lx = x0 + 0.5 + k * (x1 - x0 - 1.0) / 3
+            _box(p, lx - 0.16, z1 + 0.5, lx + 0.16, z1 + 0.82, 2.05, 2.45, red)  # farolillos
+
+
+def street_colliders() -> list[list[float]]:
+    boxes: list[list[float]] = []
+
+    def add(x0, z0, x1, z1, y0, y1):
+        boxes.append([round((x0 + x1) / 2, 3), round((y0 + y1) / 2, 3), round((z0 + z1) / 2, 3),
+                      round((x1 - x0) / 2, 3), round((y1 - y0) / 2, 3), round((z1 - z0) / 2, 3)])
+
+    for (x, z, deg, ln) in STREET_SEATS:  # el respaldo (el asiento es una caja con giro: street_life)
+        bx0, bz0, bx1, bz1 = _rect_rot(x, z, deg, ln / 2, 0.04, -0.22)
+        add(bx0, bz0, bx1, bz1, 0.45, 1.0)
+    x0, z0, x1, z1 = STALL
+    add(x0, z0 + 0.5, x1, z1, 0, 1.05)
+    for (px, pz) in ((x0, z0 - 0.4), (x1 - 0.15, z0 - 0.4), (x0, z1 + 0.4), (x1 - 0.15, z1 + 0.4)):
+        add(px, pz, px + 0.15, pz + 0.15, 0, 2.6)
+    return boxes
+
+
+def street_life() -> dict:
+    """Asientos (cajas con giro) y gente de la calle, en el formato de interiors.life_of."""
+    seats = [[x, 0.225, z, round(ln / 2, 3), 0.225, 0.25, deg] for (x, z, deg, ln) in STREET_SEATS]
+    npcs = [{"x": x, "y": 0.0, "z": z, "yaw": deg, "pose": pose} for (x, z, deg, pose) in STREET_NPCS]
+    return {"doors": [], "seats": seats, "npcs": npcs, "cabinets": []}

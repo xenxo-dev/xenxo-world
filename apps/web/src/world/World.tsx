@@ -21,6 +21,7 @@ import { NexoBackdrop } from "./NexoBackdrop";
 import { NexoCity } from "./NexoCity";
 import { DistrictSkyline } from "./DistrictSkyline";
 import { Pedestrians, Traffic } from "./CityLife";
+import { Residents, SlidingDoors } from "./Interiors";
 import { Weather } from "./Weather";
 import { ambient } from "./ambient-audio";
 import districtsLayout from "../../../realtime/src/districts.json";
@@ -337,6 +338,10 @@ function Scene({ active }: { active: boolean }) {
           <SkipOnError>
             <Traffic chunk={place} count={f.traffic} features={f} ambience={ambience} />
           </SkipOnError>
+          <SkipOnError>
+            <Residents chunk={place} count={f.residents} />
+          </SkipOnError>
+          <SlidingDoors chunk={place} ambience={ambience} bloom={f.bloom} />
           <SkipOnError>
             <Weather chunk={place} rain={f.rain} ambience={ambience} />
           </SkipOnError>

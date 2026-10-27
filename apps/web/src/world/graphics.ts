@@ -56,6 +56,11 @@ export interface Features {
   /** Coches voladores y drones por las calles de las ciudades de los distritos (instanciados). */
   traffic: number;
   /**
+   * Gente quieta de los interiores y de las calles de Distrito Cero (sentada, charlando, bailando):
+   * cuántos se dibujan a la vez, los más cercanos (los de una sala, solo con el jugador dentro).
+   */
+  residents: number;
+  /**
    * Gotas de lluvia en los lugares donde llueve (Distrito Cero; 0 = sin lluvia dibujada). Son
    * líneas que caen en el shader alrededor de la cámara. Los charcos van en todos los niveles.
    */
@@ -63,10 +68,10 @@ export interface Features {
 }
 
 export const FEATURES: Record<Tier, Features> = {
-  low: { dpr: [0.75, 1], antialias: false, pbr: false, post: false, bloom: false, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 48, lod: "light", textures: 512, normalMaps: false, avatarFill: true, nexoCity: 0.5, pedestrians: 4, traffic: 8, rain: 900 },
-  medium: { dpr: [1, 1.5], antialias: true, pbr: true, post: true, bloom: true, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 96, lod: "light", textures: 512, normalMaps: true, avatarFill: true, nexoCity: 0.75, pedestrians: 8, traffic: 14, rain: 1600 },
-  high: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: false, shadows: 1024, probe: 128, pointLights: true, lightPools: false, skyline: 150, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1, pedestrians: 14, traffic: 22, rain: 3200 },
-  ultra: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: true, shadows: 2048, probe: 256, pointLights: true, lightPools: false, skyline: 220, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1, pedestrians: 20, traffic: 30, rain: 4800 },
+  low: { dpr: [0.75, 1], antialias: false, pbr: false, post: false, bloom: false, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 48, lod: "light", textures: 512, normalMaps: false, avatarFill: true, nexoCity: 0.5, pedestrians: 4, traffic: 8, residents: 3, rain: 900 },
+  medium: { dpr: [1, 1.5], antialias: true, pbr: true, post: true, bloom: true, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 96, lod: "light", textures: 512, normalMaps: true, avatarFill: true, nexoCity: 0.75, pedestrians: 8, traffic: 14, residents: 5, rain: 1600 },
+  high: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: false, shadows: 1024, probe: 128, pointLights: true, lightPools: false, skyline: 150, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1, pedestrians: 14, traffic: 22, residents: 8, rain: 3200 },
+  ultra: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: true, shadows: 2048, probe: 256, pointLights: true, lightPools: false, skyline: 220, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1, pedestrians: 20, traffic: 30, residents: 12, rain: 4800 },
 };
 
 /* ------------------------------------------------------------------ */
@@ -150,6 +155,7 @@ function portableClamp(f: Features, xr: boolean): Features {
     nexoCity: Math.min(f.nexoCity, 0.75),
     pedestrians: Math.min(f.pedestrians, xr ? 4 : 6),
     traffic: Math.min(f.traffic, 14),
+    residents: Math.min(f.residents, xr ? 3 : 4),
     // En las gafas, solo los charcos (las gotas cruzan la vista y marean); en el móvil, poca.
     rain: xr ? 0 : Math.min(f.rain, 900),
     lod: f.lod,

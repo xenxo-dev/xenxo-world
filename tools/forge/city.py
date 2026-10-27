@@ -29,6 +29,8 @@ from townhouse import hip_roof
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 OUT_JSON = os.path.join(ROOT, "apps", "realtime", "src", "district-cities.json")
+# Lo vivo de cada ciudad (puertas correderas, gente y máquinas-portal de los interiores, y la gente de la calle).
+LIFE_JSON = os.path.join(ROOT, "apps", "realtime", "src", "district-interiors.json")
 C = CHUNK / 2
 
 
@@ -164,13 +166,41 @@ def colliders(lay: dict, d: dict) -> list[list[float]]:
     return boxes
 
 
+def life(lay: dict, d: dict) -> dict:
+    """
+    Lo vivo de una ciudad: salas (rectángulo y puerta corredera), asientos (cajas con giro, en
+    grados: [cx, cy, cz, hx, hy, hz, giro]), gente (con la sala donde está, o -1 si en la calle) y
+    máquinas-portal de los interiores.
+    """
+    out = {"rooms": [], "seats": [], "npcs": [], "cabinets": []}
+    for b in plan(lay, d)["buildings"]:
+        if not b.get("open"):
+            continue
+        lf = interiors.life_of(b, d["id"])
+        k = len(out["rooms"])
+        out["rooms"].append({"rect": [round(v, 3) for v in b["rect"]], "y1": interiors.spec(b, d["id"])["y1"], "door": lf["doors"][0]})
+        out["seats"] += lf["seats"]
+        out["npcs"] += [{**n, "room": k} for n in lf["npcs"]]
+        out["cabinets"] += lf["cabinets"]
+    if d["id"] == "cero":
+        st = cero.street_life()
+        out["seats"] += st["seats"]
+        out["npcs"] += [{**n, "room": -1} for n in st["npcs"]]
+    return out
+
+
 def write_colliders(lay: dict, districts: list[dict]) -> None:
-    data = {"$comment": "Generado por tools/forge/city.py. No lo edites a mano: vuelve a forjar (npm run forge:districts).", "cities": {}}
+    note = "Generado por tools/forge/city.py. No lo edites a mano: vuelve a forjar (npm run forge:districts)."
+    data = {"$comment": note + " Cajas [cx, cy, cz, hx, hy, hz] y, los asientos, con su giro en grados de séptimo valor.", "cities": {}}
+    lives = {"$comment": note + " Lo vivo de cada ciudad: salas con su puerta corredera, gente (sala o -1 en la calle) y máquinas-portal de los interiores.", "districts": {}}
     for d in districts:
-        data["cities"][d["id"]] = colliders(lay, d)
-    with open(OUT_JSON, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=1, ensure_ascii=False)
-        f.write("\n")
+        lf = life(lay, d)
+        data["cities"][d["id"]] = colliders(lay, d) + lf["seats"]
+        lives["districts"][d["id"]] = {k: lf[k] for k in ("rooms", "npcs", "cabinets")}
+    for path, obj in ((OUT_JSON, data), (LIFE_JSON, lives)):
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(obj, f, indent=1, ensure_ascii=False)
+            f.write("\n")
 
 
 # --------------------------------------------------------------------------------------

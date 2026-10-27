@@ -62,11 +62,15 @@ export function setMeshCollider(id: string, geometry: THREE.BufferGeometry | nul
 /** Cuántas mallas de colisión hay (pruebas y depuración). */
 export const meshColliderCount = () => meshCols.size;
 
-/* --- Gente (peatones): la escribe CityLife cada frame --- */
+/* --- Gente: la escriben CityLife (peatones) y Interiors (residentes) cada frame --- */
 
 export const NPC_RADIUS = 0.3;
-const MAX_NPC = 32;
-export const npcs = { count: 0, pos: new Float32Array(MAX_NPC * 3) };
+/** Huecos de los peatones: [0, NPC_CITY). Los residentes van detrás: [NPC_CITY, NPC_CITY + extra). */
+export const NPC_CITY = 32;
+const MAX_NPC = 64;
+export const npcs = { count: 0, extra: 0, pos: new Float32Array(MAX_NPC * 3) };
+/** Índice del hueco k de la lista de gente (peatones primero, luego residentes). */
+const npcAt = (k: number) => (k < npcs.count ? k : NPC_CITY + k - npcs.count);
 
 /** Origen de un chunk respecto al lugar actual (que se dibuja en 0..CHUNK_SIZE). */
 const chunkOrigin = (chunkId: string) => world.offsetOf(chunkId);
@@ -152,7 +156,9 @@ export function resolveCircle(p: { x: number; z: number }, r: number, feet: numb
     }
     // La gente: cilindros que no se atraviesan (el que se aparta es el jugador).
     const rr = r + NPC_RADIUS;
-    for (let i = 0; i < npcs.count; i++) {
+    const total = npcs.count + npcs.extra;
+    for (let k = 0; k < total; k++) {
+      const i = npcAt(k);
       const ny = npcs.pos[i * 3 + 1]!;
       if (ny > head || ny + 1.75 < feet - 0.6) continue;
       const dx = p.x - npcs.pos[i * 3]!;
@@ -373,6 +379,17 @@ export function cameraReach(tx: number, ty: number, tz: number, cx: number, cy: 
   return limit;
 }
 
+/** ¿Hay alguien sentado ya en ese asiento (un residente a menos de medio banco)? */
+function seatTaken(x: number, y: number, z: number, half: number) {
+  const total = npcs.count + npcs.extra;
+  for (let k = 0; k < total; k++) {
+    const i = npcAt(k);
+    if (Math.abs(npcs.pos[i * 3 + 1]! - y) > 1) continue;
+    if (Math.hypot(npcs.pos[i * 3]! - x, npcs.pos[i * 3 + 2]! - z) < Math.min(0.6, half)) return true;
+  }
+  return false;
+}
+
 /**
  * Asiento cercano (un colisionador bajo y alargado, como un banco) para el gesto de sentarse.
  * Devuelve dónde colocarse y hacia dónde mirar (el frente del asiento es su +Z local).
@@ -388,7 +405,7 @@ export function findSeat(x: number, z: number, maxDist = 1.8): { x: number; z: n
     const sx = b.x + lz * b.s;
     const sz = b.z + lz * b.c;
     const d = Math.hypot(sx - x, sz - z);
-    if (d < bestD) {
+    if (d < bestD && !seatTaken(sx, b.y, sz, b.hx)) {
       bestD = d;
       best = { x: sx, z: sz, yaw: Math.atan2(b.s, b.c) };
     }

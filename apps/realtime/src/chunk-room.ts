@@ -1062,7 +1062,7 @@ export class ChunkRoom extends DurableObject<Env> {
       return {
         id: `cabinet_${n + 1}`,
         components: {
-          "transform@1": { p: at(sl.p[0], sl.p[2], sl.yaw, 0, CABINET_SCREEN.y, CABINET_SCREEN.z), r: yaw(sl.yaw), s: [1, 1, 1], parent: null },
+          "transform@1": { p: at(sl.p[0], sl.p[2], sl.yaw, 0, sl.p[1] + CABINET_SCREEN.y, CABINET_SCREEN.z), r: yaw(sl.yaw), s: [1, 1, 1], parent: null },
           "portal@1": { to: { kind: "project", project_id: it.projectId }, size: CABINET_SCREEN.size, cover: it.cover, title: it.title, category: it.category },
         } as Components,
       };

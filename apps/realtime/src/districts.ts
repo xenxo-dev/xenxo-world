@@ -7,6 +7,7 @@ import legacyV1 from "./districts-v1-parcels.json";
 import legacyV2 from "./districts-v2-parcels.json";
 import cities from "./district-cities.json";
 import activities from "./district-activities.json";
+import lives from "./district-interiors.json";
 
 /** Actividades del sistema de un distrito (district-activities.json). */
 interface DistrictActivities {
@@ -131,9 +132,17 @@ export function sandboxOf(id: string): SandboxRect | null {
   return (activities as unknown as Record<string, DistrictActivities | undefined>)[id]?.sandbox ?? null;
 }
 
-/** Huecos de las máquinas-portal de un distrito (las llena el Worker con sus juegos: syncCabinets). */
+/** Máquinas-portal de los interiores (las pone la forja: district-interiors.json). */
+function interiorCabinets(id: string): { p: V3; yaw: number }[] {
+  return (lives.districts as unknown as Record<string, { cabinets?: { p: V3; yaw: number }[] } | undefined>)[id]?.cabinets ?? [];
+}
+
+/**
+ * Huecos de las máquinas-portal de un distrito (las llena el Worker con sus juegos: syncCabinets):
+ * primero los de la plaza y después los de dentro de los edificios.
+ */
 export function cabinetSlots(id: string): { p: V3; yaw: number }[] {
-  return (activities as unknown as Record<string, DistrictActivities | undefined>)[id]?.cabinets ?? [];
+  return [...((activities as unknown as Record<string, DistrictActivities | undefined>)[id]?.cabinets ?? []), ...interiorCabinets(id)];
 }
 
 /** Anuncios de fachada de un distrito (las portadas de los proyectos más nuevos: syncBillboards). */
@@ -156,11 +165,11 @@ export function districtSeed(d: District, toNexo: { p: V3; yaw: number }): Seede
     },
   });
 
-  const solid = (id: string, p: V3, half: V3) =>
+  const solid = (id: string, p: V3, half: V3, r: [number, number, number, number] = [0, 0, 0, 1]) =>
     out.push({
       id,
       components: {
-        "transform@1": { p, r: [0, 0, 0, 1], s: [1, 1, 1], parent: null },
+        "transform@1": { p, r, s: [1, 1, 1], parent: null },
         "collider@1": { shape: "box", half_extents: half, trigger: false },
       },
     });
@@ -199,8 +208,9 @@ export function districtSeed(d: District, toNexo: { p: V3; yaw: number }): Seede
     const clods = city.lods.map((l) => ({ hash: l.hash, media: "model/gltf-binary" as const, tris: l.tris }));
     out.push({ id: `${d.id}_city`, components: { "transform@1": { p: [32, 0, 32], r: [0, 0, 0, 1], s: [1, 1, 1], parent: null }, "mesh@1": { lods: clods } } });
   }
+  // Cajas de los edificios; las que llevan giro (séptimo valor, en grados) son asientos.
   const boxes = (cities.cities as Record<string, number[][]>)[d.id] ?? [];
-  boxes.forEach(([x, y, z, hx, hy, hz], n) => solid(`${d.id}_city_${n}`, [x!, y!, z!], [hx!, hy!, hz!]));
+  boxes.forEach(([x, y, z, hx, hy, hz, deg], n) => solid(`${d.id}_city_${n}`, [x!, y!, z!], [hx!, hy!, hz!], deg ? yaw(deg) : undefined));
 
   const lodsOf = (piece: string) => {
     const a = SEED_ASSETS[piece];
@@ -254,6 +264,19 @@ export function districtSeed(d: District, toNexo: { p: V3; yaw: number }): Seede
     // la colisión ya la pone la ciudad (la peana de la escultura de Xen).
     if (pr.half[1] > 0 && !pr.mesh_collider) solid(`${d.id}_prop_${n + 1}_box`, [pr.p[0], r3(pr.p[1] + pr.half[1]), pr.p[2]], pr.half);
   });
+  // Las máquinas-portal de los interiores: el modelo y su caja (la pantalla la pone syncCabinets).
+  const cab = SEED_ASSETS["arcade_cabinet"];
+  if (cab)
+    interiorCabinets(d.id).forEach((c, n) => {
+      out.push({
+        id: `${d.id}_icab_${n + 1}`,
+        components: {
+          "transform@1": { p: c.p, r: yaw(c.yaw), s: [1, 1, 1], parent: null },
+          "mesh@1": { lods: cab.lods.map((l) => ({ hash: l.hash, media: "model/gltf-binary" as const, tris: l.tris })) },
+        } as Components,
+      });
+      solid(`${d.id}_icab_${n + 1}_box`, [c.p[0], r3(c.p[1] + 0.95), c.p[2]], [0.45, 0.95, 0.45], yaw(c.yaw));
+    });
   (acts?.labels ?? []).forEach((lb, n) => {
     label(`${d.id}_sign_${n + 1}`, lb.p, lb.flat ? multiply(yaw(lb.yaw), FLAT) : yaw(lb.yaw), lb.text.en, lb.text, lb.size);
     // Estilo, ancho (texto en varias líneas) y distancia a la que se apaga, si los pide.

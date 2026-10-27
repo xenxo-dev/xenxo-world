@@ -21,7 +21,7 @@ import { AvatarBody } from "./Avatars";
 import { createMotion, type Motion } from "./motion";
 import { rng } from "./NexoCity";
 import { playerPos } from "./Player";
-import { floorAt, npcs } from "./collision";
+import { floorAt, NPC_CITY, npcs } from "./collision";
 
 interface Loop {
   /** Esquinas en orden (x, z), a la altura `y`. */
@@ -38,11 +38,24 @@ interface Walker {
 }
 
 const POPULATION = 44;
+/** Distrito Cero es la ciudad más viva: más gente y también por los pasajes. */
+const POPULATION_CERO = 84;
 /** Más allá, nadie: la niebla de noche empieza a 45 m. */
 const RANGE = 55;
 const REASSIGN_MS = 600;
 /** Cada peatón va 0,45 m a la derecha de su recorrido (los que se cruzan no se pisan). */
 const LANE = 0.45;
+// Estado de un frame (objetos de módulo: nada nuevo por frame).
+const _px = new Float32Array(NPC_CITY), _pz = new Float32Array(NPC_CITY), _py = new Float32Array(NPC_CITY);
+const _hx = new Float32Array(NPC_CITY), _hz = new Float32Array(NPC_CITY);
+const _slot = new Int16Array(NPC_CITY);
+const _blocked = new Uint8Array(NPC_CITY);
+/** ¿Está (x, y, z) justo delante del peatón i (en su carril)? */
+function ahead(i: number, x: number, y: number, z: number) {
+  const ax = x - _px[i]!, az = z - _pz[i]!;
+  const fwd = ax * _hx[i]! + az * _hz[i]!;
+  return fwd > 0 && fwd < 1.2 && Math.abs(ax * _hz[i]! - az * _hx[i]!) < 0.65 && Math.abs(y - _py[i]!) < 1.2;
+}
 
 type City = { x0: number; z0: number; block: number; street: number };
 const CITY = (districts as unknown as { city: City }).city;
@@ -62,7 +75,11 @@ function loopsFor(id: string): Loop[] {
       const bx = x0 + i * (block + street), bz = z0 + j * (block + street);
       out.push(rect(bx - 1, bz - 1, bx + block + 1, bz + block + 1));
     }
-  if (id === "cero") out.push(rect(13.5, 13.5, 50.5, 50.5, 8)); // la pasarela (tools/forge/cero.py)
+  if (id === "cero") {
+    // Los cuatro pasajes de los ejes, de la plaza a la calle de fuera y vuelta (tools/forge/cero.py).
+    out.push(rect(29, -19.5, 35, 19), rect(29, 45, 35, 83.5), rect(-19.5, 29, 19, 35), rect(45, 29, 83.5, 35));
+    out.push(rect(13.5, 13.5, 50.5, 50.5, 8)); // la pasarela: siempre la última
+  }
   return out;
 }
 
@@ -108,9 +125,9 @@ export function Pedestrians({ chunk, count }: { chunk: string; count: number }) 
   const walkers = useMemo<Walker[]>(() => {
     if (!id) return [];
     const r = rng(id.length * 7919 + id.charCodeAt(0));
-    return Array.from({ length: POPULATION }, (_, n) => ({
-      // La pasarela (último recorrido de Cero) lleva una de cada seis personas.
-      loop: id === "cero" && n % 6 === 0 ? loops.length - 1 : Math.floor(r() * 9),
+    return Array.from({ length: id === "cero" ? POPULATION_CERO : POPULATION }, (_, n) => ({
+      // En Cero: una de cada seis personas por la pasarela (el último recorrido) y una de cada tres por los pasajes.
+      loop: id === "cero" && n % 6 === 0 ? loops.length - 1 : id === "cero" && n % 3 === 1 ? 9 + (n % 4) : Math.floor(r() * 9),
       dir: r() < 0.5 ? 1 : -1,
       speed: 1.05 + r() * 0.5,
       offset: r() * 400,
@@ -118,8 +135,8 @@ export function Pedestrians({ chunk, count }: { chunk: string; count: number }) 
   }, [id, loops]);
   const slots = useMemo<Slot[]>(() => Array.from({ length: count }, () => ({ walker: -1, motion: createMotion(), group: null, yaw: 0 })), [count]);
   const last = useRef(0);
-  const dist = useMemo(() => new Float32Array(POPULATION), []);
-  const order = useMemo(() => Array.from({ length: POPULATION }, (_, n) => n), []);
+  const dist = useMemo(() => new Float32Array(walkers.length), [walkers]);
+  const order = useMemo(() => Array.from({ length: walkers.length }, (_, n) => n), [walkers]);
   useEffect(() => {
     last.current = 0;
   }, [chunk]);
@@ -131,7 +148,7 @@ export function Pedestrians({ chunk, count }: { chunk: string; count: number }) 
     if (now - last.current > REASSIGN_MS) {
       last.current = now;
       // Los más cercanos; un hueco se queda con quien ya seguía si sigue entre ellos.
-      for (let n = 0; n < POPULATION; n++) {
+      for (let n = 0; n < walkers.length; n++) {
         const w = walkers[n]!;
         const l = loops[w.loop]!;
         const p = along(l, w.offset + w.dir * w.speed * t);
@@ -140,7 +157,7 @@ export function Pedestrians({ chunk, count }: { chunk: string; count: number }) 
       }
       order.sort((a, b) => dist[a]! - dist[b]!);
       const near = new Set<number>();
-      for (let k = 0; k < slots.length && k < POPULATION; k++) if (dist[order[k]!]! < RANGE * RANGE) near.add(order[k]!);
+      for (let k = 0; k < slots.length && k < walkers.length; k++) if (dist[order[k]!]! < RANGE * RANGE) near.add(order[k]!);
       for (const s of slots) if (s.walker >= 0 && !near.has(s.walker)) s.walker = -1;
       for (const s of slots) if (s.walker >= 0) near.delete(s.walker);
       for (const s of slots) {
@@ -151,10 +168,12 @@ export function Pedestrians({ chunk, count }: { chunk: string; count: number }) 
         near.delete(next.value);
       }
     }
-    let n = 0;
+    // 1) Dónde va cada uno ahora (por su derecha: los que se cruzan no se atraviesan).
+    let m = 0;
     for (const s of slots) {
       const g = s.group;
       if (!g) continue;
+      if (m >= NPC_CITY) break;
       if (s.walker < 0) {
         g.visible = false;
         s.motion.speed = 0;
@@ -162,19 +181,36 @@ export function Pedestrians({ chunk, count }: { chunk: string; count: number }) 
       }
       const w = walkers[s.walker]!;
       const l = loops[w.loop]!;
-      let p = along(l, w.offset + w.dir * w.speed * t);
-      // Cada uno por su derecha (los que se cruzan no se atraviesan) y, si el jugador está justo
-      // delante, se espera: su avance se descuenta mientras no se aparte.
+      const p = along(l, w.offset + w.dir * w.speed * t);
       const hx = p.dx * w.dir, hz = p.dz * w.dir;
-      const lx = p.x - hz * LANE, lz = p.z + hx * LANE;
-      const ax = playerPos.x - lx, az = playerPos.z - lz;
-      const ahead = ax * hx + az * hz;
-      const side = Math.abs(ax * hz - az * hx);
-      const blocked = ahead > 0 && ahead < 1.3 && side < 0.75 && Math.abs(playerPos.y - l.y) < 1.2;
-      if (blocked) {
-        w.offset -= w.dir * w.speed * dt;
-        p = along(l, w.offset + w.dir * w.speed * t);
+      _px[m] = p.x - hz * LANE;
+      _pz[m] = p.z + hx * LANE;
+      _hx[m] = hx;
+      _hz[m] = hz;
+      _py[m] = l.y;
+      _slot[m] = slots.indexOf(s);
+      m++;
+    }
+    // 2) Quién espera: si el jugador u otro peatón está justo delante. Si dos se tienen delante el
+    //    uno al otro (en un cruce), espera solo uno (el de índice mayor): nadie se queda atascado.
+    for (let i = 0; i < m; i++) {
+      let b = ahead(i, playerPos.x, playerPos.y, playerPos.z);
+      for (let j = 0; j < m && !b; j++) {
+        if (j === i || !ahead(i, _px[j]!, _py[j]!, _pz[j]!)) continue;
+        if (!ahead(j, _px[i]!, _py[i]!, _pz[i]!) || i > j) b = true;
       }
+      _blocked[i] = b ? 1 : 0;
+    }
+    // 3) Colocarlos: el que espera descuenta su avance (sigue en su sitio).
+    let n = 0;
+    for (let i = 0; i < m; i++) {
+      const s = slots[_slot[i]!]!;
+      const g = s.group!;
+      const w = walkers[s.walker]!;
+      const l = loops[w.loop]!;
+      const blocked = _blocked[i] === 1;
+      if (blocked) w.offset -= w.dir * w.speed * dt;
+      const p = along(l, w.offset + w.dir * w.speed * t);
       const want = Math.atan2(-p.dx * w.dir, -p.dz * w.dir);
       if (!g.visible) s.yaw = want;
       else {
@@ -189,7 +225,7 @@ export function Pedestrians({ chunk, count }: { chunk: string; count: number }) 
       g.rotation.y = s.yaw;
       s.motion.speed = blocked ? 0 : w.speed;
       // Para las colisiones del jugador (collision.ts): no se atraviesan.
-      if (n < npcs.pos.length / 3) {
+      if (n < NPC_CITY) {
         npcs.pos[n * 3] = px;
         npcs.pos[n * 3 + 1] = py;
         npcs.pos[n * 3 + 2] = pz;
