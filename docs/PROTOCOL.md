@@ -269,7 +269,7 @@ lleva `slug`, `review` (`pending`, `approved`, `rejected`) y `game` (la ficha gu
 **Moderación** (fundador, personas en `moderators` o clave de administración): `GET /mod/queue`
 (pendientes y denuncias abiertas) · `POST /mod/projects/<id>/review { decision, note }` (rechazar exige
 motivo) · `POST /mod/projects/<id>/hide { note }` · `POST /mod/reports/<id> { status, note }` ·
-`GET /mod/log`. Cada decisión queda en `moderation_log`; el motivo lo ve su autor (`review_note` en
+`GET /mod/log` · `GET /mod/summary` (cuánto hay pendiente y desde cuándo: `{ pending_projects, open_reports, pending_districts, oldest, webhook }`; también con una clave de `AGENT_KEYS` que solo tenga el permiso `mod_summary`). Con `N8N_WEBHOOK_URL` y `N8N_WEBHOOK_SECRET`, el Worker avisa al momento con un POST firmado (`X-Xenxo-Signature: t=<ms>,v1=<HMAC-SHA256 de "<t>.<cuerpo>">`): `project.pending`, `game.pending`, `report.open`, `district.pending`, solo con el id, el título público o el tipo y motivo, nunca quién denuncia (`tools/n8n`). Cada decisión queda en `moderation_log`; el motivo lo ve su autor (`review_note` en
 `GET /me`). `GET /me/roles` → `{ moderator, founder }`. Equipo: `GET /mod/moderators` (quién modera:
 número, nombre, desde cuándo) · `PUT|DELETE /mod/moderators/<número de jugador>` (solo el fundador o la
 clave de administración; queda en el registro como `moderator_add` / `moderator_remove`).

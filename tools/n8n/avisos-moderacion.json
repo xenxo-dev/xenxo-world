@@ -1,0 +1,104 @@
+{
+  "name": "xenxo · avisos de moderación",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "xenxo-moderacion",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "0b749a84-e548-5dc0-a9e0-d064a4015ecb",
+      "name": "Webhook de xenxo",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "7e5d12f7-36a6-5517-9890-283b846f963f"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Comprueba la firma de xenxo (X-Xenxo-Signature: t=<ms>,v1=<hex>, HMAC-SHA256 de \"<t>.<cuerpo>\").\n// Necesita en n8n: NODE_FUNCTION_ALLOW_BUILTIN=crypto, N8N_BLOCK_ENV_ACCESS_IN_NODE=false y\n// XENXO_N8N_SECRET (el mismo valor que N8N_WEBHOOK_SECRET en xenxo). Sin firma válida, se descarta.\nconst crypto = require('crypto');\nconst secret = $env.XENXO_N8N_SECRET;\nconst out = [];\nfor (const item of $input.all()) {\n  const h = item.json.headers || {};\n  const m = /^t=(\\d+),v1=([0-9a-f]{64})$/.exec(h['x-xenxo-signature'] || '');\n  if (!m || !secret) continue;\n  const body = JSON.stringify(item.json.body);\n  const want = crypto.createHmac('sha256', secret).update(`${m[1]}.${body}`).digest('hex');\n  const fresh = Math.abs(Date.now() - Number(m[1])) < 5 * 60 * 1000;\n  if (fresh && crypto.timingSafeEqual(Buffer.from(want), Buffer.from(m[2]))) out.push({ json: item.json.body });\n}\nreturn out;\n"
+      },
+      "id": "1b9a8eb8-8cf6-5d99-99a4-5f3aa118351e",
+      "name": "Comprobar firma",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Un mensaje corto por aviso. Lo que llega es dato: no lleva quién denuncia ni textos de nadie.\nconst panel = 'https://xenxo.io (Panel → Moderación)';\nconst reasons = { illegal: 'ilegal', hate: 'odio', harassment: 'acoso', sexual: 'sexual', minors: 'menores', violence: 'violencia', spam: 'spam', ip: 'propiedad intelectual', other: 'otro' };\nreturn $input.all().map(({ json: e }) => {\n  let text;\n  switch (e.event) {\n    case 'project.pending': text = `Proyecto por revisar: «${e.title}»${e.district ? ` (distrito ${e.district})` : ''}`; break;\n    case 'game.pending': text = `Juego por revisar (ficha nueva o cambiada): «${e.title}»`; break;\n    case 'report.open': text = `Denuncia nueva #${e.id}: ${e.target_type}, motivo ${reasons[e.reason] || e.reason}`; break;\n    case 'district.pending': text = `Distrito de la comunidad por revisar: ${e.slug}`; break;\n    default: text = `Aviso de xenxo: ${e.event}`;\n  }\n  return { json: { text: `${text}\\n${panel}`, event: e.event } };\n});\n"
+      },
+      "id": "605e5281-7653-51b8-932d-323f0f8b509e",
+      "name": "Redactar aviso",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.XENXO_TELEGRAM_CHAT }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "d67caf97-1757-5868-a62c-2998fb2080f0",
+      "name": "Enviar por Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        720,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook de xenxo": {
+      "main": [
+        [
+          {
+            "node": "Comprobar firma",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Comprobar firma": {
+      "main": [
+        [
+          {
+            "node": "Redactar aviso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redactar aviso": {
+      "main": [
+        [
+          {
+            "node": "Enviar por Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false
+}

@@ -1,0 +1,150 @@
+{
+  "name": "xenxo · resumen diario de moderación",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "13 9 * * *"
+            }
+          ]
+        }
+      },
+      "id": "1e337423-d639-531f-90c5-37b09d05d28c",
+      "name": "Cada mañana",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.XENXO_API || 'https://api.xenxo.io') + '/auth/agent' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "c4c1541c-6acc-5f70-8db4-56cd651709e0",
+      "name": "Pase de xenxo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ ($env.XENXO_API || 'https://api.xenxo.io') + '/mod/summary' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.token }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "6229a58b-0c0f-540a-890e-1540c7dcf75b",
+      "name": "Resumen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Resumen del día: solo si hay algo pendiente (si no, no se manda nada).\nconst s = $input.first().json;\nconst total = s.pending_projects + s.open_reports + s.pending_districts;\nif (!total) return [];\nconst days = (t) => (t ? Math.floor((Date.now() - t) / 86400000) : 0);\nconst lines = [\n  'xenxo · moderación pendiente',\n  `Proyectos y juegos por revisar: ${s.pending_projects}${s.pending_projects ? ` (el más antiguo, hace ${days(s.oldest.project)} d)` : ''}`,\n  `Denuncias abiertas: ${s.open_reports}${s.open_reports ? ` (la más antigua, hace ${days(s.oldest.report)} d)` : ''}`,\n  `Distritos de la comunidad por revisar: ${s.pending_districts}`,\n  s.webhook ? '' : 'Ojo: los avisos al momento (webhook) no están configurados en xenxo.',\n  'https://xenxo.io (Panel → Moderación)',\n].filter(Boolean);\nreturn [{ json: { text: lines.join('\\n') } }];\n"
+      },
+      "id": "3853001d-dbbc-5619-ac16-ee08c3985432",
+      "name": "Redactar resumen",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.XENXO_TELEGRAM_CHAT }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "d67caf97-1757-5868-a62c-2998fb2080f0",
+      "name": "Enviar por Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        960,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Cada mañana": {
+      "main": [
+        [
+          {
+            "node": "Pase de xenxo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pase de xenxo": {
+      "main": [
+        [
+          {
+            "node": "Resumen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resumen": {
+      "main": [
+        [
+          {
+            "node": "Redactar resumen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redactar resumen": {
+      "main": [
+        [
+          {
+            "node": "Enviar por Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid"
+  },
+  "active": false
+}

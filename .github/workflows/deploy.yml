@@ -2,7 +2,8 @@ name: Desplegar
 
 # Publica en Cloudflare cada vez que el CI pasa en main (o a mano desde la pestaña Actions).
 # Configuración (una vez), en Settings → Secrets and variables → Actions:
-#   Secretos:  CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, TOKEN_SECRET, AGENT_KEYS (opcional)
+#   Secretos:  CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, TOKEN_SECRET, AGENT_KEYS (opcional),
+#              N8N_WEBHOOK_URL y N8N_WEBHOOK_SECRET (opcionales: avisos de moderación, tools/n8n)
 #   Variable:  WEB_DOMAIN (opcional, por defecto xenxo.io; el servidor va en api.<WEB_DOMAIN>)
 on:
   workflow_run:
@@ -72,12 +73,18 @@ jobs:
           TOKEN_SECRET: ${{ secrets.TOKEN_SECRET }}
           AGENT_KEYS: ${{ secrets.AGENT_KEYS }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          N8N_WEBHOOK_URL: ${{ secrets.N8N_WEBHOOK_URL }}
+          N8N_WEBHOOK_SECRET: ${{ secrets.N8N_WEBHOOK_SECRET }}
         run: |
           umask 077
           printf 'TOKEN_SECRET=%s\n' "$TOKEN_SECRET" > "$RUNNER_TEMP/secrets.env"
           if [ -n "$AGENT_KEYS" ]; then printf 'AGENT_KEYS=%s\n' "$AGENT_KEYS" >> "$RUNNER_TEMP/secrets.env"; fi
           # Entrar con Google (opcional): sin estas dos, el botón simplemente no aparece.
           if [ -n "$GOOGLE_CLIENT_SECRET" ]; then printf 'GOOGLE_CLIENT_SECRET=%s\n' "$GOOGLE_CLIENT_SECRET" >> "$RUNNER_TEMP/secrets.env"; fi
+          # Avisos de moderación a n8n (opcional, tools/n8n/README.md): sin los dos, no sale ningún aviso.
+          if [ -n "$N8N_WEBHOOK_URL" ] && [ -n "$N8N_WEBHOOK_SECRET" ]; then
+            printf 'N8N_WEBHOOK_URL=%s\nN8N_WEBHOOK_SECRET=%s\n' "$N8N_WEBHOOK_URL" "$N8N_WEBHOOK_SECRET" >> "$RUNNER_TEMP/secrets.env"
+          fi
           npx wrangler deploy \
             --domain "api.$WEB_DOMAIN" \
             --var "RP_ID:$WEB_DOMAIN" \

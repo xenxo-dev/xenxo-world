@@ -1098,6 +1098,42 @@ await scenario("DSA: cualquiera puede denunciar un contenido", async () => {
   }
 });
 
+await scenario("avisos de moderación: /mod/summary solo para moderación; con webhook, la denuncia llega firmada", async () => {
+  const guest = new Api(baseUrl, ((await (await fetch(new URL("/auth/guest", baseUrl), { method: "POST" })).json()) as { token: string }).token);
+  const denied = await guest.call("GET", "/mod/summary");
+  assert(!denied.ok && (denied.status === 401 || denied.status === 403), "sin moderación, nada");
+  if (!adminKey) return console.log("    (sin XENXO_ADMIN_KEY: se omite)");
+  const admin = new Api(baseUrl);
+  await admin.agentToken(adminKey);
+  const sum = await admin.call<{ pending_projects: number; open_reports: number; pending_districts: number; webhook: boolean }>("GET", "/mod/summary");
+  assert(sum.ok && [sum.data.pending_projects, sum.data.open_reports, sum.data.pending_districts].every((n) => Number.isInteger(n) && n >= 0), "cuentas de lo pendiente");
+  const secret = process.env.XENXO_N8N_SECRET;
+  if (!sum.data.webhook || !secret) return console.log("    (sin webhook de prueba: XENXO_N8N_SECRET y el servidor con N8N_WEBHOOK_URL → http://localhost:8799/hook)");
+  // Un receptor de prueba: comprueba la firma como lo haría n8n.
+  const { createServer } = await import("node:http");
+  const { createHmac, timingSafeEqual } = await import("node:crypto");
+  const got = new Promise<{ body: Record<string, unknown>; ok: boolean }>((resolve) => {
+    const srv = createServer((req, res) => {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => {
+        const m = /^t=(\d+),v1=([0-9a-f]{64})$/.exec(String(req.headers["x-xenxo-signature"] ?? ""));
+        const want = m ? createHmac("sha256", secret).update(`${m[1]}.${raw}`).digest("hex") : "";
+        const ok = !!m && timingSafeEqual(Buffer.from(want), Buffer.from(m[2]!)) && Math.abs(Date.now() - Number(m[1])) < 300_000;
+        res.end("ok");
+        srv.close();
+        resolve({ body: JSON.parse(raw) as Record<string, unknown>, ok });
+      });
+    }).listen(8799);
+  });
+  const r = await guest.call<{ id: number }>("POST", "/reports", { target_type: "project", target_id: "p_aviso", reason: "spam", details: "texto que no debe salir" });
+  assert(r.ok, "denuncia");
+  const hook = await Promise.race([got, new Promise<null>((res) => setTimeout(() => res(null), 6000))]);
+  assert(hook && hook.ok, "llega el aviso con firma válida");
+  assert(hook.body.event === "report.open" && hook.body.id === r.data.id && hook.body.reason === "spam", `qué y cuál (${JSON.stringify(hook.body)})`);
+  assert(!JSON.stringify(hook.body).includes("texto que no debe salir") && !("reporter" in hook.body), "sin el texto de la denuncia ni quién denuncia");
+});
+
 if (agentKey) {
   await scenario("agente: mesh@1 con un hash inexistente → not_found; con uno subido, los triángulos los pone el servidor", async () => {
     const api = new Api(baseUrl);

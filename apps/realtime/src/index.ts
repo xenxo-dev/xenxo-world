@@ -8,6 +8,7 @@ import { randomId, resolveAgent, signToken, verifyToken, type Principal } from "
 import { CALL_TTL_MS, chunkList, REMOTE_METHODS, sha256B64, signRemote, TICKET_TTL_MS } from "./remote";
 import type { ChunkRoom, ShowcaseItem } from "./chunk-room";
 import { BADGES, earnedIn, type ActivityOf } from "./badges";
+import { notify, notifyConfigured } from "./notify";
 import { billboardSlots, cabinetSlots, DISTRICTS, districtById, parcelIndex, parcelSpawn } from "./districts";
 import { communityGates, SHOWCASE_SLOTS, type CommunityGate } from "./nexo";
 import { fetchDevManifest, fetchManifest } from "./games";
@@ -44,6 +45,12 @@ export interface Env {
   DISTRICT_HOST?: string;
   REMOTE_CHUNKS?: string;
   DISTRICT_SIGNING_KEY?: string;
+  /**
+   * Avisos de moderación a una automatización propia (n8n; tools/n8n/README.md): el webhook y el
+   * secreto con el que se firman (los dos con `wrangler secret`). Sin ellos, no sale ningún aviso.
+   */
+  N8N_WEBHOOK_URL?: string;
+  N8N_WEBHOOK_SECRET?: string;
 }
 
 /* ------------------------------------------------------------------ */
@@ -812,6 +819,7 @@ export default {
           if (!evidence) return json({ error: "not_found", message: "ese mensaje ya no existe" }, 404, h);
         }
         const r = await dir.report(p.sub, body, evidence);
+        if (r.ok) ctx.waitUntil(notify(env, { event: "report.open", id: r.data.id, target_type: String(body.target_type), reason: String(body.reason) }));
         return r.ok ? json(r.data, 201, h) : failure(r, h);
       }
 
@@ -996,6 +1004,7 @@ export default {
         }
         if (path === "/me/district/submit" && req.method === "POST") {
           const r = await dir.submitDistrict(uid);
+          if (r.ok) ctx.waitUntil(notify(env, { event: "district.pending", id: r.data.id, slug: r.data.slug }));
           return r.ok ? json({ district: r.data }, 200, h) : failure(r, h);
         }
         if (path === "/me" && req.method === "DELETE") {
@@ -1066,6 +1075,7 @@ export default {
         }
         await dir.setInWorld(project.id, true);
         ctx.waitUntil(syncShowcase(env, dir));
+        ctx.waitUntil(notify(env, { event: "project.pending", id: project.id, title: project.title, district: project.district ?? null }));
         return json({ project: { ...project, in_world: true }, stand: placed }, 201, h);
       }
 
@@ -1112,10 +1122,18 @@ export default {
         const read = devUrl ? await fetchDevManifest(devUrl) : await fetchManifest(p.url);
         if (!read.ok) return json({ error: read.error, message: read.message, detail: read.detail }, 400, h);
         const r = await dir.setGame(uid, id, read.manifest, body.slug);
+        if (r.ok && r.data.review === "pending") ctx.waitUntil(notify(env, { event: "game.pending", id, title: r.data.title }));
         return r.ok ? json({ project: r.data, manifest_url: read.at }, 200, h) : failure(r, h);
       }
 
       /* --- Moderación (personas moderadoras; el fundador siempre) --- */
+      // Resumen para una automatización (n8n): cuánto hay por revisar y desde cuándo, sin datos de
+      // nadie. Lo ve moderación y una clave con solo el permiso `mod_summary` (AGENT_KEYS), que no modera.
+      if (path === "/mod/summary" && req.method === "GET") {
+        const allowed = isAdmin || !!principal?.scopes.includes("mod_summary") || (!!uid && (await dir.isModerator(uid)));
+        if (!allowed) return json({ error: principal ? "forbidden" : "unauthorized", message: "solo moderación" }, principal ? 403 : 401, h);
+        return json({ ...(await dir.moderationSummary()), webhook: notifyConfigured(env) }, 200, { ...h, "Cache-Control": "no-store" });
+      }
       if (path.startsWith("/mod/")) {
         const modId = isAdmin ? `admin:${principal!.sub}` : uid && (await dir.isModerator(uid)) ? `usr_${uid}` : null;
         if (!modId) return json({ error: "forbidden", message: "solo moderación" }, 403, h);

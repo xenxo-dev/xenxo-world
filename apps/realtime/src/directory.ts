@@ -1281,6 +1281,21 @@ export class Directory extends DurableObject<Env> {
   }
 
   /** Lo pendiente: proyectos por revisar (con su autor) y denuncias abiertas. */
+  /** Cuánto hay por revisar (para avisos y resúmenes): solo cuentas y fechas, sin datos de nadie. */
+  moderationSummary() {
+    const one = (q: string) => this.sql.exec<{ n: number; oldest: number | null }>(q).one();
+    const projects = one("SELECT COUNT(*) AS n, MIN(created_at) AS oldest FROM projects WHERE status = 'published' AND review = 'pending'");
+    const reports = one("SELECT COUNT(*) AS n, MIN(ts) AS oldest FROM reports WHERE status = 'open'");
+    const districts = one("SELECT COUNT(*) AS n, MIN(updated_at) AS oldest FROM community_districts WHERE status = 'pending'");
+    return {
+      pending_projects: projects.n,
+      open_reports: reports.n,
+      pending_districts: districts.n,
+      oldest: { project: projects.oldest, report: reports.oldest, district: districts.oldest },
+      at: Date.now(),
+    };
+  }
+
   moderationQueue() {
     const pending = this.projectRows("p.status = 'published' AND p.review = 'pending'", [], true, "ORDER BY p.created_at ASC LIMIT 100");
     return { pending, reports: this.listReports("open") };

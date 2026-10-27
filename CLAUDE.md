@@ -92,6 +92,8 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 - Catálogo: solo `review = 'approved'`. Rechazar u ocultar exige motivo, que ve su autor, y queda en `moderation_log` (DSA). Sin cuenta solo se abren juegos `all` y aprobados.
 - Si tocas el puente (`xenxo:*`) o `web_message`, cambia a la vez el SDK, `games/Player.tsx` y `docs/PROTOCOL.md` §9 quater, y que pasen los escenarios «juegos de fuera» y «Entrar con xenxo dentro de xenxo».
 
+- Avisos de moderación (`notify.ts`, opcional): con `N8N_WEBHOOK_URL` y `N8N_WEBHOOK_SECRET` (secretos de GitHub que pasa el despliegue), POST firmado a n8n cuando hay algo por revisar, y `GET /mod/summary` para el resumen (clave con solo `mod_summary`). Nunca quién denuncia ni textos de nadie; n8n solo avisa, las decisiones van por el panel. Flujos y puesta en marcha en `tools/n8n/`; escenario «avisos de moderación».
+
 - Jams (`apps/realtime/src/jam.ts` + métodos del `Directory`): las crea moderación; un juego por persona, votos con cuenta y nunca lo propio, resultados solo al acabar y nunca quién votó qué. Si cambias sus reglas, que pase el escenario «jam» de la conformidad y actualiza `docs/PROTOCOL.md` §9 quinquies y las páginas legales.
 
 - Los juegos de `games/` se publican como los de cualquier creador: su `xenxo.json`, su privacidad, su parcela y su `client_id`, sin vías privilegiadas. Nunca en `*.xenxo.io` (no se podrían incrustar): van a `*.xenxo.workers.dev`. HexGL tiene archivos CC BY-NC: ni anuncios ni compras mientras esté.
