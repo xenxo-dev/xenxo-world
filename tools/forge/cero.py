@@ -511,5 +511,14 @@ def street_colliders() -> list[list[float]]:
 def street_life() -> dict:
     """Asientos (cajas con giro) y gente de la calle, en el formato de interiors.life_of."""
     seats = [[x, 0.225, z, round(ln / 2, 3), 0.225, 0.25, deg] for (x, z, deg, ln) in STREET_SEATS]
-    npcs = [{"x": x, "y": 0.0, "z": z, "yaw": deg, "pose": pose} for (x, z, deg, pose) in STREET_NPCS]
+    from interiors import SIT_FORWARD
+
+    def spot(x, z, deg, pose):
+        # Los sentados: los pies por delante del banco (STREET_NPCS da el borde del asiento).
+        if pose != "sit":
+            return x, z
+        a = math.radians(deg)
+        return round(x + math.sin(a) * (SIT_FORWARD - 0.05), 3), round(z + math.cos(a) * (SIT_FORWARD - 0.05), 3)
+
+    npcs = [{"x": spot(x, z, deg, pose)[0], "y": 0.0, "z": spot(x, z, deg, pose)[1], "yaw": deg, "pose": pose} for (x, z, deg, pose) in STREET_NPCS]
     return {"doors": [], "seats": seats, "npcs": npcs, "cabinets": []}

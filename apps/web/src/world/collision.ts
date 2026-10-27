@@ -424,6 +424,9 @@ export function cameraReach(tx: number, ty: number, tz: number, cx: number, cy: 
   return limit;
 }
 
+/** Cuánto por delante del centro de un asiento van los pies de quien se sienta (tools/forge/interiors.py). */
+export const SIT_FORWARD = 0.3;
+
 /** ¿Hay alguien sentado ya en ese asiento (un residente a menos de medio banco)? */
 function seatTaken(x: number, y: number, z: number, half: number) {
   const total = npcs.count + npcs.extra;
@@ -445,8 +448,9 @@ export function findSeat(x: number, z: number, maxDist = 1.8): { x: number; z: n
   let bestD = maxDist;
   for (const b of boxes) {
     if (b.hy > 0.55 || b.hx < 0.6 || b.hz > 0.45) continue;
-    // Borde delantero del asiento (en local: z = +hz * 0.2), de vuelta al mundo.
-    const lz = b.hz * 0.2;
+    // Los pies, por delante del asiento (en local: +Z), de vuelta al mundo: así la cadera de la
+    // animación de sentarse (33 cm detrás de los pies) cae sobre el asiento.
+    const lz = SIT_FORWARD;
     const sx = b.x + lz * b.s;
     const sz = b.z + lz * b.c;
     const d = Math.hypot(sx - x, sz - z);

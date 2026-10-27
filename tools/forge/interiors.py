@@ -20,6 +20,9 @@ C = CHUNK / 2
 T = 0.3          # grosor de los muros
 FLOOR = 0.12     # suelo de la sala (por encima de las capas de la calle)
 CEIL = 0.3       # grosor del techo
+# Quien se sienta tiene los pies 30 cm por delante del centro del asiento: en la animación de
+# sentarse (sit_idle) la cadera queda 33 cm por detrás de los pies y a 54 cm del suelo.
+SIT_FORWARD = 0.3
 
 # Edificios abiertos por distrito: (manzana i, j) y cuál de sus edificios (el primero).
 OPEN_BLOCKS = {
@@ -220,7 +223,7 @@ def _furnish(p: Part | None, inner, s: dict, theme: str, b: dict, life: dict) ->
 
     def sit_on(uc, vc, du, dv):
         """Alguien sentado en el banco de (uc, vc) que mira hacia (du, dv)."""
-        npc(uc + du * 0.05, vc + dv * 0.05, du, dv, "sit")
+        npc(uc + du * SIT_FORWARD, vc + dv * SIT_FORWARD, du, dv, "sit")
 
     def cabinet(uc, vc, du, dv):
         """Máquina-portal (la llena el Worker con un proyecto del distrito: syncCabinets)."""
@@ -292,9 +295,10 @@ def _furnish(p: Part | None, inner, s: dict, theme: str, b: dict, life: dict) ->
         k = 0
         v = 5.0
         while v + 1 < depth - 4.5:
-            seat(u0 + 2.2, v, -1, 0, 1.4, "#3a2a2a")
+            # Taburete corrido a medio metro de la barra: las piernas caben debajo.
+            seat(u0 + 2.5, v, -1, 0, 1.4, "#3a2a2a")
             if k % 2 == 0:
-                sit_on(u0 + 2.2, v, -1, 0)
+                sit_on(u0 + 2.5, v, -1, 0)
             k += 1
             v += 2.2
         if p is not None:
@@ -425,10 +429,10 @@ def _furnish(p: Part | None, inner, s: dict, theme: str, b: dict, life: dict) ->
             v = 5.0
             while v + 2.6 < depth - 4.0:
                 item(uc - 0.45, uc + 0.45, v, v + 0.9, f, f + 0.75, M("azulejo", rnd.choice(["#4fa3ff", "#ff4fd8", "#6dff8a"])))
-                seat(uc, v - 0.5, 0, 1, 1.3, "#a26bff")
-                seat(uc, v + 1.4, 0, -1, 1.3, "#a26bff")
+                seat(uc, v - 0.75, 0, 1, 1.3, "#a26bff")
+                seat(uc, v + 1.65, 0, -1, 1.3, "#a26bff")
                 if (c + int(v)) % 2 == 0 and sitting < 3:
-                    sit_on(uc, v - 0.5, 0, 1)
+                    sit_on(uc, v - 0.75, 0, 1)
                     sitting += 1
                 v += 3.6
         cabinet(u1 - 0.55, depth - 4.2, -1, 0)
