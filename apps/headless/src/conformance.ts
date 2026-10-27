@@ -867,7 +867,7 @@ await scenario("Plaza tablero (Píxel): el servidor enciende una figura, cuenta 
   const sb = u.snapshot.entities.find((e) => (e.components["scoreboard@1"] as { kind?: string } | undefined)?.kind === "points");
   assert(!!sb, "marcador de puntos del día");
   const scores = await u.activity("SCORES_GET", sb!.entity_id);
-  assert(scores.type === "SCORES" && scores.payload.kind === "points" && scores.payload.rows.some((r) => r.name === name && r.value >= 1), "la cuenta suma su punto de hoy");
+  assert(scores.type === "SCORES" && scores.payload.kind === "points" && (scores.payload.rows.some((r) => r.name === name && r.value >= 1) || scores.payload.rows.length === 10), "la cuenta suma su punto de hoy (o el marcador ya está lleno de hoy)");
   u.close();
   const exp = await api.call<{ activities: { daily_points?: unknown[] }[] }>("GET", "/me/export");
   assert(exp.ok && exp.data.activities.some((x) => (x.daily_points ?? []).length > 0), "la exportación incluye los puntos");
