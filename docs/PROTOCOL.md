@@ -352,7 +352,7 @@ plantilla (`npm create xenxo@latest mi-distrito -- --district`). Mide lo mismo q
 - **WELCOME** lleva `walk` (256 m) y `theme` (`{id, color}`): la ciudad de fondo que dibuja el cliente.
 - **Servidor de distritos:** `REMOTE_CHUNKS` admite prefijos (`c_1000_*`) para llevarlos todos a la
   máquina propia; `installDistrict` está en `REMOTE_METHODS`.
-- **Fase 3 (pendiente):** el anillo exterior del nexo con la puerta de cada distrito aprobado.
+- **En el nexo:** cada distrito aprobado tiene su puerta (marco con su portada, peana con su emblema y su nombre) en uno de los 12 huecos entre pasarelas del círculo central, por orden de aprobación (`COMMUNITY_GATE_SLOTS`, owner `community_gates`). El Worker las vuelve a poner al aprobar, ocultar, cambiar o borrar un distrito (`setCommunityGates`). Cuando haya más de 12, harán falta islas propias (anillo exterior).
 
 ## 10. Códigos de error
 

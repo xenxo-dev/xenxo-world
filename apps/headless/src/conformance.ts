@@ -654,11 +654,29 @@ await scenario("distrito de la comunidad: la ficha se comprueba, queda en borrad
     const guest = await XenxoClient.connect({ baseUrl, chunkId: chunk_id });
     assert(guest.snapshot.entities.some((e) => e.entity_id === `cd_${id}_piece_0`), "aprobado: entra cualquiera");
     guest.close();
+    // Fase 3: su puerta en el nexo, con su portada, que lleva a su chunk.
+    const nexo = await XenxoClient.connect({ baseUrl, chunkId: PLACES.nexo });
+    const door = nexo.snapshot.entities
+      .map((e) => e.components["portal@1"] as { to: { chunk_id?: string }; cover?: string; closed?: boolean } | undefined)
+      .find((p) => p?.to.chunk_id === chunk_id);
+    nexo.close();
+    assert(!!door && door.cover === cover.data.hash && !door.closed, "aprobado: tiene su puerta en el nexo, con su portada");
   }
   const gone = await api.call("DELETE", "/me/district");
   assert(gone.ok, "borrar el distrito");
   const after = (await (await fetch(new URL("/districts", baseUrl))).json()) as { districts: { id: string }[] };
   assert(!after.districts.some((d) => d.id === slug), "borrado: ya no sale");
+  if (adminKey) {
+    // La puerta del nexo se quita al momento (en segundo plano): se espera un poco.
+    let still = true;
+    for (let i = 0; i < 10 && still; i++) {
+      await new Promise((r) => setTimeout(r, 200));
+      const n = await XenxoClient.connect({ baseUrl, chunkId: PLACES.nexo });
+      still = n.snapshot.entities.some((e) => (e.components["portal@1"] as { to?: { chunk_id?: string } } | undefined)?.to?.chunk_id === chunk_id);
+      n.close();
+    }
+    assert(!still, "borrado: su puerta sale del nexo");
+  }
 });
 
 await scenario("distrito grande: WELCOME.walk de 256 m y cada uno recibe solo las poses de quien tiene cerca", async () => {

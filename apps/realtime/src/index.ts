@@ -8,7 +8,7 @@ import { randomId, resolveAgent, signToken, verifyToken, type Principal } from "
 import { CALL_TTL_MS, chunkList, REMOTE_METHODS, sha256B64, signRemote, TICKET_TTL_MS } from "./remote";
 import type { ChunkRoom, ShowcaseItem } from "./chunk-room";
 import { DISTRICTS, districtById, parcelIndex, parcelSpawn } from "./districts";
-import { SHOWCASE_SLOTS } from "./nexo";
+import { communityGates, SHOWCASE_SLOTS, type CommunityGate } from "./nexo";
 import { fetchDevManifest, fetchManifest } from "./games";
 import { MAX_AGENT_KEYS_PER_PROJECT, MAX_SKINS, type Directory, type UserRow } from "./directory";
 
@@ -391,6 +391,25 @@ async function closedFor(env: Env, chunkId: string, p: Principal): Promise<boole
   return !(uid && (await directory(env).isModerator(uid)));
 }
 const SOON = { error: "soon", message: "este distrito abrirá pronto" };
+
+/**
+ * Vuelve a poner en el nexo las puertas de los distritos de la comunidad aprobados (fase 3). Se
+ * llama al aprobar, ocultar, cambiar o borrar uno: pocas veces, así que se mira R2 sin caché.
+ */
+async function syncCommunityGates(env: Env, dir: ReturnType<typeof directory>) {
+  const gates: CommunityGate[] = [];
+  for (const d of await dir.communityDistricts()) {
+    const m = await assetMeta(env.ASSETS, d.manifest.emblem);
+    gates.push({
+      chunk_id: d.chunk_id,
+      name: { es: d.manifest.name.es, en: d.manifest.name.en },
+      color: d.manifest.color,
+      cover: d.manifest.cover,
+      emblem: m ? { lods: [{ hash: d.manifest.emblem, tris: m.triangles }], bounds: m.bounds } : undefined,
+    });
+  }
+  await chunk(env, PLACES.nexo).setCommunityGates(communityGates(gates));
+}
 
 /** Medidas de los modelos del sistema (los de la forja se pueden usar en un distrito sin subirlos). */
 const SYSTEM_MODELS = new Map<string, ModelInfo>(
@@ -905,12 +924,15 @@ export default {
             meta: { id: d.id, name: { es: c.sub.name.es, en: c.sub.name.en }, color: c.sub.color, theme: c.sub.theme, system: communitySystem(d.id, c.sub) },
             content: communityContent(d.id, c.sub, c.models, d.portals),
           });
+          // Si estaba aprobado, vuelve a borrador: su puerta sale del nexo hasta que se apruebe otra vez.
+          ctx.waitUntil(syncCommunityGates(env, dir));
           return json({ district: d }, 200, h);
         }
         if (path === "/me/district" && req.method === "DELETE") {
           const r = await dir.deleteDistrict(uid);
           if (!r.ok) return failure(r, h);
           await chunk(env, r.data.chunk_id).installDistrict(null);
+          ctx.waitUntil(syncCommunityGates(env, dir));
           return json({ deleted: true }, 200, h);
         }
         if (path === "/me/district/submit" && req.method === "POST") {
@@ -922,7 +944,10 @@ export default {
           const r = await dir.deleteAccount(uid);
           if (!r.ok) return failure(r, h);
           for (const p of r.data.projects) await clearParcel(env, p.district, p.id, r.data.agents);
-          if (r.data.community) await chunk(env, r.data.community.chunk_id).installDistrict(null);
+          if (r.data.community) {
+            await chunk(env, r.data.community.chunk_id).installDistrict(null);
+            ctx.waitUntil(syncCommunityGates(env, dir));
+          }
           for (const c of CHAT_CHUNKS) await chunk(env, c).purgeOwner(`usr_${uid}`);
           await syncShowcase(env, dir);
           await forgetAssets(env.ASSETS, req.url, r.data.orphanHashes);
@@ -1041,7 +1066,9 @@ export default {
         if (dr && req.method === "POST") {
           const body = await readJson(req);
           const r = await dir.reviewDistrict(modId, dr[1]!, body.decision, body.note);
-          return r.ok ? json({ district: r.data }, 200, h) : failure(r, h);
+          if (!r.ok) return failure(r, h);
+          await syncCommunityGates(env, dir);
+          return json({ district: r.data }, 200, h);
         }
         // Mover un chunk de servidor: copia lo de la gente de Cloudflare al servidor de distritos (o al
         // revés). Solo con la clave de administración. Primero se copia; después se cambia REMOTE_CHUNKS.

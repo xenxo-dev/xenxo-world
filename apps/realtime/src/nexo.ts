@@ -1,7 +1,7 @@
 import { PLACES, type Components } from "@xenxo/protocol";
 import { DISTRICTS, DISTRICT_BOUNDS, DISTRICT_SPAWN } from "./districts";
 import nexoLayout from "./nexo-layout.json";
-import { at, r3, r6, spawnInFront, yaw, type Q, type Seeded, type Slot, type V3 } from "./places";
+import { at, FRAME, portalEntities, r3, r6, spawnInFront, yaw, type Q, type Seeded, type Slot, type V3 } from "./places";
 import { plazaSeed } from "./seed";
 import plazaLayout from "./plaza-layout.json";
 import { SEED_ASSETS } from "./seed-assets";
@@ -39,6 +39,43 @@ export const NEXO_SLOTS: Slot[] = Array.from({ length: G.count }, (_, i) => {
   const a = (phi * Math.PI) / 180;
   return { index: i, x: r3(CX + G.ring * Math.sin(a)), z: r3(CZ - G.ring * Math.cos(a)), facing: phi === 0 ? 0 : -phi };
 });
+
+/**
+ * Puertas de los distritos de la comunidad (fase 3): una en cada hueco entre pasarelas, alrededor
+ * del círculo central y mirando al centro. Las pone el Worker (setCommunityGates) al aprobar,
+ * ocultar o borrar un distrito; por orden de aprobación.
+ */
+export const COMMUNITY_GATE_SLOTS: Slot[] = Array.from({ length: G.count }, (_, i) => {
+  const phi = (360 * (i + 0.5)) / G.count;
+  const a = (phi * Math.PI) / 180;
+  return { index: i, x: r3(CX + FRAME.ring * Math.sin(a)), z: r3(CZ - FRAME.ring * Math.cos(a)), facing: -phi };
+});
+
+export type CommunityGate = {
+  chunk_id: string;
+  name: { es: string; en: string };
+  color: string;
+  cover: string;
+  emblem: { lods: { hash: string; tris: number }[]; bounds: { min: number[]; max: number[] } | null } | undefined;
+};
+
+/** Las entidades de las puertas de la comunidad (marco, portada, peana con su emblema y nombre). */
+export function communityGates(list: CommunityGate[]): Seeded[] {
+  return list.slice(0, COMMUNITY_GATE_SLOTS.length).flatMap((g, i) => {
+    const k = `nexo_cd_${i}`;
+    return portalEntities(
+      COMMUNITY_GATE_SLOTS[i]!,
+      { frame: `${k}_frame`, pedestal: `${k}_pedestal`, portal: `${k}_portal`, band: `${k}_band`, monument: `${k}_monument`, label: `${k}_label` },
+      {
+        portal: { to: { kind: "chunk", chunk_id: g.chunk_id, spawn: DISTRICT_SPAWN, yaw: 0 }, size: [FRAME.w, FRAME.h], cover: g.cover, title: g.name.en, i18n: g.name, category: "district", color: g.color },
+        title: g.name.en,
+        i18n: g.name,
+        color: g.color,
+        monument: g.emblem,
+      },
+    );
+  });
+}
 
 /** El nexo ya no tiene escaparate de proyectos (los proyectos están en sus distritos). */
 export const SHOWCASE_SLOTS: Slot[] = [];

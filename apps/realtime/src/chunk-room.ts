@@ -889,6 +889,23 @@ export class ChunkRoom extends DurableObject<Env> {
     return { entities: spec?.content.length ?? 0 };
   }
 
+  /** Puertas de los distritos de la comunidad en el nexo (nexo.ts → communityGates). */
+  async setCommunityGates(seed: Seeded[]): Promise<{ gates: number }> {
+    this.ensureChunk(null);
+    if (this.chunkId !== PLACES.nexo) throw new Error("solo en el nexo");
+    const OWNER = "community_gates";
+    const before = this.sql.exec<{ entity_id: string }>("SELECT entity_id FROM entities WHERE owner = ?", OWNER).toArray().map((r) => r.entity_id);
+    const changes: ({ kind: "remove"; entity_id: string } | { kind: "upsert"; entity: Entity })[] = [];
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec("DELETE FROM entities WHERE owner = ?", OWNER);
+      for (const id of before) if (!seed.some((s) => s.id === id)) changes.push({ kind: "remove", entity_id: id });
+      for (const e of seed) changes.push({ kind: "upsert", entity: this.insertEntity(e.id, OWNER, e.components) });
+      this.logEvent("system", "COMMUNITY_GATES", "nexo", seed.length, null);
+    });
+    if (changes.length) this.broadcast(msg("DELTA", { changes }));
+    return { gates: seed.length };
+  }
+
   async purgeOwner(owner: string): Promise<number> {
     this.ensureChunk(null);
     const ids = this.sql.exec<{ entity_id: string }>("SELECT entity_id FROM entities WHERE owner = ?", owner).toArray().map((r) => r.entity_id);
