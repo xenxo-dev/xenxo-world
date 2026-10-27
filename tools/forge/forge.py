@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 import bpy  # noqa: E402
 
 import arcade  # noqa: E402
+import pixel  # noqa: E402
 import cero  # noqa: E402
 import city  # noqa: E402
 import decor  # noqa: E402
@@ -106,6 +107,9 @@ def main() -> None:
         add(f"emblem_{dd['id']}", "prop", lambda d, dd=dd: district.emblem(dd, d), [(ox + 32.0, -300.0, 0)])
         add(f"nexo_spires_{dd['id']}", "prop", lambda d, dd=dd: nexo.spires(nx, dd, d), [(ox + 32.0, -380.0, 0)])
         add(f"nexo_decor_{dd['id']}", "prop", lambda d, dd=dd: decor.build(nx, dd["id"], dd["color"], d), [(ox + 32.0, -460.0, 0)])
+        if dd["id"] == "pixel":  # los sprites de la búsqueda de Píxel
+            for k, kind in enumerate(pixel.SPRITES):
+                add(f"pixel_sprite_{kind}", "prop", pixel.sprite_object(kind), [(ox + 32.0 + k * 4, -540.0, 0)])
         if dd["id"] == "arcade":  # la moneda del Arcade (se recoge: collectible@1)
             add("arcade_coin", "prop", arcade.coin_object, [(ox + 32.0, -540.0, 0)])
         if dd["id"] == "cero":  # el fragmento del Rastro de datos (se recoge: collectible@1)

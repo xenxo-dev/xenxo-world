@@ -1,5 +1,5 @@
 {
-  "$comment": "Actividades del sistema en cada distrito (coordenadas del chunk: X este, Z sur, metros). Las siembra districts.ts como entidades con dueño `system` (collectible@1, checkpoint@1, scoreboard@1), sus carreras (`races`: salida, puntos y meta), placas de impulso (`boosts`), máquinas-portal (`cabinets`, las llena el Worker con los juegos del distrito), carteles (`labels`) y su atrezo modelado (`props`: pieza de seed-assets, posición, giro y caja de colisión). Las posiciones salen del diseño de cada ciudad (tools/forge/cero.py…): si mueves la ciudad, revisa esto. Los textos van como datos (`note`, `title`) en ES y EN.",
+  "$comment": "Actividades del sistema en cada distrito (coordenadas del chunk: X este, Z sur, metros). Las siembra districts.ts como entidades con dueño `system` (collectible@1, checkpoint@1, scoreboard@1), sus carreras (`races`: salida, puntos y meta), placas de impulso (`boosts`), máquinas-portal (`cabinets`, las llena el Worker con los juegos del distrito), carteles (`labels`), tableros de baldosas (`tiles`) y su atrezo modelado (`props`: pieza de seed-assets, posición, giro y caja de colisión). Las posiciones salen del diseño de cada ciudad (tools/forge/cero.py…): si mueves la ciudad, revisa esto. Los textos van como datos (`note`, `title`) en ES y EN.",
   "cero": {
     "hunts": [
       {
@@ -978,6 +978,288 @@
           30.437
         ],
         "yaw": 100
+      }
+    ]
+  },
+  "pixel": {
+    "tiles": [
+      {
+        "id": "tablero",
+        "p": [
+          32,
+          0,
+          32
+        ],
+        "cols": 8,
+        "rows": 8,
+        "size": 3
+      }
+    ],
+    "hunts": [
+      {
+        "id": "sprites",
+        "piece": "pixel_sprite_gem",
+        "radius": 1.3,
+        "items": [
+          {
+            "p": [
+              -5,
+              1.2,
+              -5
+            ],
+            "piece": "pixel_sprite_gem"
+          },
+          {
+            "p": [
+              32,
+              1.2,
+              -5
+            ],
+            "piece": "pixel_sprite_star"
+          },
+          {
+            "p": [
+              69,
+              1.2,
+              -5
+            ],
+            "piece": "pixel_sprite_heart"
+          },
+          {
+            "p": [
+              -5,
+              1.2,
+              32
+            ],
+            "piece": "pixel_sprite_key"
+          },
+          {
+            "p": [
+              69,
+              1.2,
+              32
+            ],
+            "piece": "pixel_sprite_gem"
+          },
+          {
+            "p": [
+              -5,
+              1.2,
+              69
+            ],
+            "piece": "pixel_sprite_star"
+          },
+          {
+            "p": [
+              32,
+              1.2,
+              69
+            ],
+            "piece": "pixel_sprite_heart"
+          },
+          {
+            "p": [
+              69,
+              1.2,
+              69
+            ],
+            "piece": "pixel_sprite_key"
+          },
+          {
+            "p": [
+              -23,
+              1.2,
+              -23
+            ],
+            "piece": "pixel_sprite_gem"
+          },
+          {
+            "p": [
+              87,
+              1.2,
+              -23
+            ],
+            "piece": "pixel_sprite_star"
+          },
+          {
+            "p": [
+              -23,
+              1.2,
+              87
+            ],
+            "piece": "pixel_sprite_heart"
+          },
+          {
+            "p": [
+              87,
+              1.2,
+              87
+            ],
+            "piece": "pixel_sprite_key"
+          },
+          {
+            "p": [
+              32,
+              1.2,
+              -49
+            ],
+            "piece": "pixel_sprite_gem"
+          },
+          {
+            "p": [
+              -49,
+              1.2,
+              32
+            ],
+            "piece": "pixel_sprite_star"
+          },
+          {
+            "p": [
+              113,
+              1.2,
+              32
+            ],
+            "piece": "pixel_sprite_heart"
+          },
+          {
+            "p": [
+              32,
+              1.2,
+              130
+            ],
+            "piece": "pixel_sprite_key"
+          }
+        ]
+      }
+    ],
+    "boards": [
+      {
+        "kind": "points",
+        "id": "tablero",
+        "p": [
+          26,
+          3.2,
+          18.6
+        ],
+        "yaw": 0,
+        "size": [
+          5.2,
+          3.6
+        ],
+        "title": {
+          "es": "PLAZA TABLERO · HOY",
+          "en": "TILE PLAZA · TODAY"
+        }
+      },
+      {
+        "kind": "hunt",
+        "id": "sprites",
+        "p": [
+          39,
+          2.4,
+          18.6
+        ],
+        "yaw": 0,
+        "size": [
+          3.6,
+          2.6
+        ],
+        "title": {
+          "es": "SPRITES",
+          "en": "SPRITES"
+        }
+      }
+    ],
+    "props": [
+      {
+        "piece": "arcade_cabinet",
+        "p": [
+          16,
+          0,
+          26
+        ],
+        "yaw": 90,
+        "half": [
+          0.45,
+          0.95,
+          0.45
+        ]
+      },
+      {
+        "piece": "arcade_cabinet",
+        "p": [
+          16,
+          0,
+          38
+        ],
+        "yaw": 90,
+        "half": [
+          0.45,
+          0.95,
+          0.45
+        ]
+      },
+      {
+        "piece": "arcade_cabinet",
+        "p": [
+          48,
+          0,
+          26
+        ],
+        "yaw": -90,
+        "half": [
+          0.45,
+          0.95,
+          0.45
+        ]
+      },
+      {
+        "piece": "arcade_cabinet",
+        "p": [
+          48,
+          0,
+          38
+        ],
+        "yaw": -90,
+        "half": [
+          0.45,
+          0.95,
+          0.45
+        ]
+      }
+    ],
+    "cabinets": [
+      {
+        "p": [
+          16,
+          0,
+          26
+        ],
+        "yaw": 90
+      },
+      {
+        "p": [
+          16,
+          0,
+          38
+        ],
+        "yaw": 90
+      },
+      {
+        "p": [
+          48,
+          0,
+          26
+        ],
+        "yaw": -90
+      },
+      {
+        "p": [
+          48,
+          0,
+          38
+        ],
+        "yaw": -90
       }
     ]
   }

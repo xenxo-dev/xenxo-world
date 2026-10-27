@@ -10,7 +10,8 @@ import activities from "./district-activities.json";
 
 /** Actividades del sistema de un distrito (district-activities.json). */
 interface DistrictActivities {
-  hunts?: { id: string; piece: string; radius: number; items: { p: V3; note?: Record<string, string> }[] }[];
+  hunts?: { id: string; piece: string; radius: number; items: { p: V3; note?: Record<string, string>; piece?: string }[] }[];
+  tiles?: { id: string; p: V3; cols: number; rows: number; size: number }[];
   boards?: { kind: "race" | "hunt"; id: string; p: V3; yaw: number; size: [number, number]; title?: { es: string; en: string } }[];
   props?: { piece: string; p: V3; yaw: number; half: V3 }[];
   labels?: { text: { es: string; en: string }; p: V3; yaw: number; size: number; flat?: boolean }[];
@@ -178,6 +179,11 @@ export function districtSeed(d: District, toNexo: { p: V3; yaw: number }): Seede
   const boxes = (cities.cities as Record<string, number[][]>)[d.id] ?? [];
   boxes.forEach(([x, y, z, hx, hy, hz], n) => solid(`${d.id}_city_${n}`, [x!, y!, z!], [hx!, hy!, hz!]));
 
+  const lodsOf = (piece: string) => {
+    const a = SEED_ASSETS[piece];
+    if (!a) throw new Error(`falta el modelo de la forja: ${piece}`);
+    return a.lods.map((l) => ({ hash: l.hash, media: "model/gltf-binary" as const, tris: l.tris }));
+  };
   /* --- Actividades del sistema (district-activities.json): búsquedas y sus marcadores --- */
   const acts = (activities as unknown as Record<string, DistrictActivities | undefined>)[d.id];
   for (const h of acts?.hunts ?? []) {
@@ -189,7 +195,7 @@ export function districtSeed(d: District, toNexo: { p: V3; yaw: number }): Seede
         id: `${d.id}_${h.id}_${n + 1}`,
         components: {
           "transform@1": { p: it.p, r: [0, 0, 0, 1], s: [1, 1, 1], parent: null },
-          "mesh@1": { lods: plods },
+          "mesh@1": { lods: it.piece ? lodsOf(it.piece) : plods },
           "collectible@1": { set: h.id, radius: h.radius, ...(it.note ? { note: it.note } : {}) },
         } as Components,
       }),
@@ -232,6 +238,15 @@ export function districtSeed(d: District, toNexo: { p: V3; yaw: number }): Seede
     cp(`${d.id}_${rc.id}_start`, rc.start.p, "start", 0, rc.start.radius);
     rc.cps.forEach((p, n) => cp(`${d.id}_${rc.id}_cp${n + 1}`, p, "cp", n + 1, rc.radius));
     cp(`${d.id}_${rc.id}_finish`, rc.finish.p, "finish", 0, rc.finish.radius);
+  }
+  for (const tb of acts?.tiles ?? []) {
+    out.push({
+      id: `${d.id}_tiles_${tb.id}`,
+      components: {
+        "transform@1": { p: tb.p, r: [0, 0, 0, 1], s: [1, 1, 1], parent: null },
+        "tiles@1": { id: tb.id, cols: tb.cols, rows: tb.rows, size: tb.size },
+      } as Components,
+    });
   }
   (acts?.boosts ?? []).forEach((b, n) =>
     out.push({

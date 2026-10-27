@@ -8,11 +8,14 @@ import { useSyncExternalStore } from "react";
 import { msg, type ClientMessage, type MessageOf, type ServerMessage } from "@xenxo/protocol";
 import { net } from "./session";
 
+export type TilesState = MessageOf<ServerMessage, "TILES">["payload"] & { at: number };
+
 export type ScoreRow = MessageOf<ServerMessage, "SCORES">["payload"]["rows"][number];
 
 export type ActivityToast =
   | { kind: "collected"; count: number; total: number; complete: boolean; note?: Record<string, string>; at: number }
   | { kind: "race"; state: "start" | "cp" | "finish" | "reset"; next?: number; total?: number; ms?: number; best?: number; rank?: number; at: number }
+  | { kind: "tiles"; state: "won" | "lost"; at: number }
   | { kind: "guest"; at: number }
   | { kind: "far"; at: number };
 
@@ -24,6 +27,8 @@ class ActivityStore {
   /** Carrera en curso: cuándo empezó en este reloj (para el cronómetro) y el punto que toca. */
   race: { race: string; t0: number; next: number; total: number } | null = null;
   scores = new Map<string, ScoreRow[]>();
+  /** Estado de cada tablero de baldosas (TILES), por su entidad; `at` = cuándo llegó (reloj local). */
+  tiles = new Map<string, TilesState>();
   toast: ActivityToast | null = null;
   private version = 0;
   private listeners = new Set<() => void>();
@@ -44,6 +49,7 @@ class ActivityStore {
     this.best = {};
     this.race = null;
     this.scores = new Map();
+    this.tiles = new Map();
     this.toast = null;
     this.bump();
   }
@@ -80,6 +86,14 @@ class ActivityStore {
         this.scores.set(m.payload.entity_id, m.payload.rows);
         this.bump();
         return;
+      case "TILES": {
+        const prev = this.tiles.get(m.payload.entity_id);
+        this.tiles = new Map(this.tiles).set(m.payload.entity_id, { ...m.payload, at: now });
+        // Aviso solo al cerrar una ronda (lo de durante la ronda lo enseña el propio HUD).
+        if ((m.payload.state === "won" || m.payload.state === "lost") && prev?.state === "show") this.toast = { kind: "tiles", state: m.payload.state, at: now };
+        this.bump();
+        return;
+      }
     }
   }
 }

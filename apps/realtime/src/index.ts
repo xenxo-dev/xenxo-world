@@ -916,11 +916,11 @@ export default {
           if (!r.ok) return failure(r, h);
           const chat = [];
           for (const c of CHAT_CHUNKS) chat.push(...(await chunk(env, c).chatOf(`usr_${uid}`)));
-          // Actividades (búsquedas y tiempos), de la plaza y los distritos.
+          // Actividades (búsquedas, tiempos y puntos del día), de la plaza y los distritos.
           const activities = [];
           for (const c of CHAT_CHUNKS.filter((c) => c !== PLACES.nexo)) {
             const a = await chunk(env, c).activityOf(`usr_${uid}`);
-            if (a.collected.length || a.hunts_completed.length || a.best_times.length) activities.push(a);
+            if (a.collected.length || a.hunts_completed.length || a.best_times.length || a.daily_points.length) activities.push(a);
           }
           return json({ ...r.data, chat_messages: chat, activities }, 200, {
             ...h,

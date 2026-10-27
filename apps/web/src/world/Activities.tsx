@@ -10,7 +10,7 @@ import { memo, Suspense, useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Text } from "@react-three/drei";
 import * as THREE from "three";
-import { BoostV1, CheckpointV1, CollectibleV1, ScoreboardV1, TransformV1, type Entity } from "@xenxo/protocol";
+import { BoostV1, CheckpointV1, CollectibleV1, ScoreboardV1, TilesV1, TransformV1, type Entity } from "@xenxo/protocol";
 import { t } from "../i18n";
 import { accountToken } from "../net/account";
 import { activity, boost, formatRaceTime, sendActivity, useActivity } from "../net/activity-store";
@@ -194,6 +194,58 @@ function BoostPads({ zones }: { zones: Zone[] }) {
   );
 }
 
+/* --- Tablero de baldosas (tiles@1): lo que enciende el servidor, encima de las losas --- */
+
+const TILE_TINTS = ["#ff4fd8", "#4fa3ff", "#ffd54f", "#6dff8a", "#ff7a45", "#a26bff"].map((c) => new THREE.Color(c));
+const TILE_OFF = new THREE.Color("#0b0d16");
+const TILE_DONE = new THREE.Color("#ffffff");
+const TILE_WON = new THREE.Color("#6dff8a");
+const tileGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+const TILE_MAT = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false });
+const _tm = new THREE.Matrix4();
+const _tc = new THREE.Color();
+
+function TileBoard({ entity }: { entity: Entity }) {
+  const a = useActivity();
+  const ref = useRef<THREE.InstancedMesh>(null!);
+  const tr = TransformV1.safeParse(entity.components["transform@1"]);
+  const tb = TilesV1.safeParse(entity.components["tiles@1"]);
+  const st = a.tiles.get(entity.entity_id);
+  const ok = tr.success && tb.success;
+  const cols = tb.success ? tb.data.cols : 0, rows = tb.success ? tb.data.rows : 0, size = tb.success ? tb.data.size : 1;
+  // Posiciones fijas (al montar); los colores cambian con cada TILES (pocas veces), no por frame.
+  useEffect(() => {
+    const im = ref.current;
+    if (!im || !ok) return;
+    const [ox, oz] = world.offsetOf(entity.chunk_id);
+    const [x, y, z] = tr.data!.p;
+    const x0 = x + ox - (cols * size) / 2, z0 = z + oz - (rows * size) / 2;
+    for (let r = 0; r < rows; r++)
+      for (let c = 0; c < cols; c++) {
+        _tm.makeScale(size * 0.92, 1, size * 0.92).setPosition(x0 + (c + 0.5) * size, y + 0.1, z0 + (r + 0.5) * size);
+        im.setMatrixAt(r * cols + c, _tm);
+      }
+    im.instanceMatrix.needsUpdate = true;
+  }, [ok, entity, cols, rows, size]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const im = ref.current;
+    if (!im || !ok) return;
+    const lit = new Set(st?.lit ?? []), done = new Set(st?.done ?? []);
+    const tint = TILE_TINTS[(st?.round ?? 0) % TILE_TINTS.length]!;
+    for (let i = 0; i < cols * rows; i++) {
+      if (st?.state === "won" && lit.has(i)) _tc.copy(TILE_WON);
+      else if (st?.state === "show" && done.has(i)) _tc.copy(TILE_DONE);
+      else if (st?.state === "show" && lit.has(i)) _tc.copy(tint);
+      else if (!st || st.state === "idle") _tc.copy(TILE_TINTS[(i + Math.floor(i / cols)) % TILE_TINTS.length]!).multiplyScalar(0.12); // en reposo: damero tenue
+      else _tc.copy(TILE_OFF);
+      im.setColorAt(i, _tc);
+    }
+    if (im.instanceColor) im.instanceColor.needsUpdate = true;
+  }, [st, ok, cols, rows]);
+  if (!ok) return null;
+  return <instancedMesh ref={ref} args={[tileGeo, TILE_MAT, cols * rows]} frustumCulled={false} renderOrder={2} />;
+}
+
 /* --- Marcadores --- */
 
 const PANEL_MAT = new THREE.MeshBasicMaterial({ color: "#0b0f18", transparent: true, opacity: 0.86 });
@@ -222,12 +274,13 @@ function Scoreboard({ entity }: { entity: Entity }) {
   const [w, h] = sb.data.size;
   const rows = a.scores.get(entity.entity_id) ?? [];
   const line = h / 13;
-  const value = (v: number, ts: number) => (sb.data.kind === "race" ? formatRaceTime(v) : new Date(ts).toLocaleDateString());
+  const value = (v: number, ts: number) =>
+    sb.data.kind === "race" ? formatRaceTime(v) : sb.data.kind === "points" ? t("activity.points", { n: v }) : new Date(ts).toLocaleDateString();
   return (
     <group position={pos} quaternion={tr.data.r}>
       <mesh geometry={panelGeo} material={PANEL_MAT} scale={[w, h, 1]} />
       <Text font={SIGN_FONT_URL} fontSize={line * 1.4} color="#33ddff" anchorX="center" anchorY="top" position={[0, h / 2 - line * 0.6, 0.01]}>
-        {sb.data.kind === "race" ? t("activity.boardRace") : t("activity.boardHunt")}
+        {sb.data.kind === "race" ? t("activity.boardRace") : sb.data.kind === "points" ? t("activity.boardPoints") : t("activity.boardHunt")}
       </Text>
       <Text font={FONT_URL} fontSize={line * 0.8} color="#e8edf7" anchorX="left" anchorY="top" lineHeight={1.35} position={[-w / 2 + line, h / 2 - line * 2.6, 0.01]} maxWidth={w - 2 * line}>
         {rows.length ? rows.map((r, i) => `${i + 1}. ${r.name}${r.player_no !== undefined ? ` #${r.player_no}` : ""} — ${value(r.value, r.ts)}`).join("\n") : t("activity.boardEmpty")}
@@ -242,11 +295,15 @@ export function Activities() {
   const key = list.length + ":" + world.getVersion();
   const zones = useMemo(() => zonesOf(list.filter((e) => e.components["collectible@1"] || e.components["checkpoint@1"] || e.components["boost@1"])), [key]); // eslint-disable-line react-hooks/exhaustive-deps
   const boards = list.filter((e) => e.components["scoreboard@1"]);
+  const tileBoards = list.filter((e) => e.components["tiles@1"]);
   return (
     <>
       <Sensor zones={zones} />
       <Checkpoints zones={zones} />
       <BoostPads zones={zones} />
+      {tileBoards.map((e) => (
+        <TileBoard key={`${e.entity_id}:${e.rev}`} entity={e} />
+      ))}
       <Suspense fallback={null}>
         {boards.map((e) => (
           <Scoreboard key={`${e.entity_id}:${e.rev}`} entity={e} />

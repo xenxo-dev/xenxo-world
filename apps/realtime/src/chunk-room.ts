@@ -15,6 +15,7 @@ import {
   ClientMessage,
   CollectibleV1,
   ScoreboardV1,
+  TilesV1,
   ComponentsStrict,
   ENTITY_SCHEMA,
   estimateTris,
@@ -43,6 +44,7 @@ import { fitsZone, localBox, worldBox, type Zone } from "./zone";
 import { assetKey } from "./assets";
 import { ACTIVITY_SCHEMA, activityKey, minRaceMs, near, POSE_MAX_AGE_MS, RACE_TIMEOUT_MS, SCORES_LIMIT, type RaceRun } from "./activities";
 import { SEED_ASSETS } from "./seed-assets";
+import { figureFor, pointsDay, TILES_IDLE_MS, TILES_PAUSE_MS, TILES_SCHEMA, TILES_START_MS, tileAt, tilesRoundMs, type TileBoard, type TileGame } from "./tiles";
 import { isAvatarPreset } from "./avatar-presets-check";
 
 const TICK_HZ = 8;
@@ -136,7 +138,7 @@ export interface ChunkDump {
   stands: { project_id: string; slot: number }[];
   chat: { id: string; ts: number; sender: string; kind: string; display_name: string; session_id: string; text: string; hidden: number }[];
   /** Actividades: lo recogido, las búsquedas completas y los mejores tiempos (activities.ts). */
-  activities?: { collected: Record<string, unknown>[]; hunts: Record<string, unknown>[]; races: Record<string, unknown>[] };
+  activities?: { collected: Record<string, unknown>[]; hunts: Record<string, unknown>[]; races: Record<string, unknown>[]; points?: Record<string, unknown>[] };
   /** Distrito de la comunidad: lo que es (con lo del sistema que lleva). Ausente en los demás. */
   community?: string | null;
 }
@@ -154,6 +156,10 @@ export class ChunkRoom extends DurableObject<Env> {
   private activityLog = new Map<string, number[]>();
   /** Último reparto de poses (ms) y el temporizador corto que se deja solo si hace falta (ver `scheduleTick`). */
   private lastTick = 0;
+  /** Tableros de baldosas (tiles@1) del lugar, leídos como mucho cada 10 s, y sus partidas. */
+  private tileBoardsAt = 0;
+  private tileBoardsList: TileBoard[] = [];
+  private tileGames = new Map<string, TileGame>();
   private tickTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -175,6 +181,7 @@ export class ChunkRoom extends DurableObject<Env> {
         display_name TEXT NOT NULL, session_id TEXT NOT NULL, text TEXT NOT NULL, hidden INTEGER NOT NULL DEFAULT 0);
       CREATE INDEX IF NOT EXISTS chat_ts ON chat (ts);
       ${ACTIVITY_SCHEMA}
+      ${TILES_SCHEMA}
     `);
   }
 
@@ -360,6 +367,7 @@ export class ChunkRoom extends DurableObject<Env> {
         );
         this.broadcast(msg("PEER_JOIN", this.peerOf(att)), ws);
         if (att.principal.kind === "user") this.send(ws, msg("PROGRESS", this.progressOf(att.principal.sub)));
+        for (const g of this.tileGames.values()) if (g.state === "show") this.send(ws, this.tilesMsg(g));
         return;
       }
       case "POSE": {
@@ -372,6 +380,7 @@ export class ChunkRoom extends DurableObject<Env> {
         this.poses.set(att.session_id, { session_id: att.session_id, head, hand_l, hand_r, ...(emote ? { emote } : {}) });
         this.dirty.add(att.session_id);
         this.scheduleTick();
+        this.tilesPose(att, head.p);
         return;
       }
       case "CHAT":
@@ -856,6 +865,7 @@ export class ChunkRoom extends DurableObject<Env> {
         collected: this.sql.exec("SELECT * FROM act_collected").toArray(),
         hunts: this.sql.exec("SELECT * FROM act_hunt_done").toArray(),
         races: this.sql.exec("SELECT * FROM act_race_best").toArray(),
+        points: this.sql.exec("SELECT * FROM act_points").toArray(),
       },
     };
   }
@@ -888,6 +898,10 @@ export class ChunkRoom extends DurableObject<Env> {
         }
         for (const r of d.activities.races as { race_key: string; sub: string; name: string; player_no: number | null; ms: number; ts: number }[]) {
           this.sql.exec("INSERT OR IGNORE INTO act_race_best (race_key, sub, name, player_no, ms, ts) VALUES (?, ?, ?, ?, ?, ?)", r.race_key, r.sub, r.name, r.player_no, r.ms, r.ts);
+        }
+        this.sql.exec("DELETE FROM act_points");
+        for (const r of (d.activities.points ?? []) as { board_key: string; day: string; sub: string; name: string; player_no: number | null; points: number; ts: number }[]) {
+          this.sql.exec("INSERT OR IGNORE INTO act_points (board_key, day, sub, name, player_no, points, ts) VALUES (?, ?, ?, ?, ?, ?, ?)", r.board_key, r.day, r.sub, r.name, r.player_no, r.points, r.ts);
         }
       }
       if (d.community) {
@@ -988,6 +1002,7 @@ export class ChunkRoom extends DurableObject<Env> {
       this.sql.exec("DELETE FROM act_collected WHERE sub = ?", owner);
       this.sql.exec("DELETE FROM act_hunt_done WHERE sub = ?", owner);
       this.sql.exec("DELETE FROM act_race_best WHERE sub = ?", owner);
+      this.sql.exec("DELETE FROM act_points WHERE sub = ?", owner);
       this.sql.exec("UPDATE events SET actor = 'deleted' WHERE actor = ?", owner);
       if (ids.length) this.logEvent("system", "PURGE", "owner", ids.length, null);
     });
@@ -1088,6 +1103,7 @@ export class ChunkRoom extends DurableObject<Env> {
       collected: this.sql.exec("SELECT entity_id, set_key, ts FROM act_collected WHERE sub = ? ORDER BY ts", sub).toArray(),
       hunts_completed: this.sql.exec("SELECT set_key, ts FROM act_hunt_done WHERE sub = ?", sub).toArray(),
       best_times: this.sql.exec("SELECT race_key, ms, ts FROM act_race_best WHERE sub = ?", sub).toArray(),
+      daily_points: this.sql.exec("SELECT board_key, day, points FROM act_points WHERE sub = ?", sub).toArray(),
     };
   }
 
@@ -1209,13 +1225,122 @@ export class ChunkRoom extends DurableObject<Env> {
     this.send(ws, msg("RACE", { race, state: "finish", ms, best, rank }));
   }
 
+  /* ---------------------------------------------------------------- */
+  /* Tablero de baldosas (tiles@1): rondas mientras hay alguien encima    */
+  /* ---------------------------------------------------------------- */
+
+  private tileBoards(): TileBoard[] {
+    const now = Date.now();
+    if (now - this.tileBoardsAt < 10_000) return this.tileBoardsList;
+    this.tileBoardsAt = now;
+    const out: TileBoard[] = [];
+    for (const r of this.sql.exec<{ entity_id: string; owner: string; data: string }>("SELECT entity_id, owner, data FROM entities").toArray()) {
+      if (!r.data.includes("tiles@1")) continue;
+      const e = JSON.parse(r.data) as Entity;
+      const t = TilesV1.safeParse(e.components["tiles@1"]);
+      const p = (e.components["transform@1"] as { p?: number[] } | undefined)?.p;
+      if (!t.success || !p) continue;
+      out.push({ entity_id: r.entity_id, owner: r.owner, id: t.data.id, x: p[0]!, y: p[1]!, z: p[2]!, cols: t.data.cols, rows: t.data.rows, size: t.data.size });
+    }
+    this.tileBoardsList = out;
+    return out;
+  }
+
+  private tilesMsg(g: TileGame) {
+    return msg("TILES", {
+      entity_id: g.board.entity_id,
+      round: g.round,
+      state: g.state,
+      lit: g.lit,
+      done: [...g.done],
+      ...(g.state === "show" ? { ms_left: Math.max(0, g.endsAt - Date.now()) } : {}),
+    });
+  }
+
+  /** La pose de una sesión: si está sobre un tablero, cuenta como presencia y pisa su baldosa. */
+  private tilesPose(att: Attachment, p: number[]) {
+    if (this.solo) return;
+    for (const b of this.tileBoards()) {
+      if (Math.abs((p[1] ?? 0) - b.y) > 4) continue;
+      const idx = tileAt(b, p[0]!, p[2]!);
+      if (idx < 0) continue;
+      const now = Date.now();
+      let g = this.tileGames.get(b.entity_id);
+      if (!g) {
+        g = { board: b, round: 0, state: "idle", lit: [], done: new Set(), players: new Map(), endsAt: 0, lastPresence: now, timer: null };
+        this.tileGames.set(b.entity_id, g);
+      }
+      g.board = b;
+      g.lastPresence = now;
+      if (g.state !== "show") {
+        if (!g.timer) g.timer = setTimeout(() => this.tilesStart(g!), TILES_START_MS);
+        continue;
+      }
+      if (!g.lit.includes(idx) || g.done.has(idx)) {
+        if (g.lit.includes(idx) && att.principal.kind === "user") g.players.set(att.principal.sub, { name: att.principal.name ?? att.display_name, no: att.principal.no ?? null });
+        continue;
+      }
+      g.done.add(idx);
+      if (att.principal.kind === "user") g.players.set(att.principal.sub, { name: att.principal.name ?? att.display_name, no: att.principal.no ?? null });
+      if (g.done.size >= g.lit.length) this.tilesEnd(g, true);
+      else this.broadcast(this.tilesMsg(g));
+    }
+  }
+
+  private tilesStart(g: TileGame) {
+    g.timer = null;
+    if (Date.now() - g.lastPresence > TILES_IDLE_MS) {
+      if (g.state !== "idle") {
+        g.state = "idle";
+        g.lit = [];
+        g.done.clear();
+        this.broadcast(this.tilesMsg(g));
+      }
+      return;
+    }
+    g.round++;
+    g.state = "show";
+    g.lit = figureFor(g.round, g.board.cols, g.board.rows, g.board.entity_id.length);
+    g.done = new Set();
+    g.players = new Map();
+    const ms = tilesRoundMs(g.lit.length);
+    g.endsAt = Date.now() + ms;
+    this.broadcast(this.tilesMsg(g));
+    g.timer = setTimeout(() => this.tilesEnd(g, false), ms);
+  }
+
+  private tilesEnd(g: TileGame, won: boolean) {
+    if (g.timer) clearTimeout(g.timer);
+    g.state = won ? "won" : "lost";
+    if (won && g.players.size) {
+      const key = activityKey(g.board.owner, g.board.id);
+      const day = pointsDay(), now = Date.now();
+      for (const [sub, who] of g.players) {
+        this.sql.exec(
+          `INSERT INTO act_points (board_key, day, sub, name, player_no, points, ts) VALUES (?, ?, ?, ?, ?, 1, ?)
+           ON CONFLICT (board_key, day, sub) DO UPDATE SET points = points + 1, name = excluded.name, ts = excluded.ts`,
+          key, day, sub, who.name, who.no, now,
+        );
+      }
+    }
+    this.broadcast(this.tilesMsg(g));
+    g.timer = setTimeout(() => this.tilesStart(g), TILES_PAUSE_MS);
+  }
+
   private handleScores(ws: WebSocket, ref: string | undefined, entityId: string) {
     const row = this.getRow(entityId);
     const sb = row ? ScoreboardV1.safeParse((JSON.parse(row.data) as Entity).components["scoreboard@1"]) : null;
     if (!row || !sb?.success) return this.sendError(ws, ref, "not_found", "eso no es un marcador");
     const key = activityKey(row.owner, sb.data.id);
     const rows =
-      sb.data.kind === "race"
+      sb.data.kind === "points"
+        ? this.sql
+            .exec<{ name: string; player_no: number | null; value: number; ts: number }>(
+              "SELECT name, player_no, points AS value, ts FROM act_points WHERE board_key = ? AND day = ? ORDER BY points DESC, ts ASC LIMIT ?",
+              key, pointsDay(), SCORES_LIMIT,
+            )
+            .toArray()
+        : sb.data.kind === "race"
         ? this.sql
             .exec<{ name: string; player_no: number | null; value: number; ts: number }>(
               "SELECT name, player_no, ms AS value, ts FROM act_race_best WHERE race_key = ? ORDER BY ms ASC, ts ASC LIMIT ?",

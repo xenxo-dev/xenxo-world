@@ -249,6 +249,19 @@ export const CheckpointV1 = z.object({
 });
 
 /**
+ * Tablero de baldosas (el juego de la plaza de Píxel): `cols` × `rows` baldosas de `size` m,
+ * centrado en la entidad y en el suelo (sin giro). El servidor enciende una figura cada ronda
+ * mientras hay alguien encima y la marca como pisada con la pose de cada sesión (TILES); el
+ * cliente solo la dibuja. Cada ronda ganada da un punto del día a cada cuenta que pisó alguna.
+ */
+export const TilesV1 = z.object({
+  id: ActivityId,
+  cols: z.number().int().min(2).max(12).default(8),
+  rows: z.number().int().min(2).max(12).default(8),
+  size: z.number().min(1).max(5).default(3),
+});
+
+/**
  * Placa de impulso: quien la pisa corre más durante unos segundos (en el cliente; el servidor no
  * cuenta nada). Para las carreras: `speed` no pasa de 12 m/s, por debajo del límite con el que el
  * servidor anula un tiempo imposible. Las gafas la ignoran (allí manda el casco).
@@ -261,7 +274,8 @@ export const BoostV1 = z.object({
 
 /** Marcador de una carrera o una búsqueda de este lugar (y del mismo dueño). El cliente pide SCORES. */
 export const ScoreboardV1 = z.object({
-  kind: z.enum(["race", "hunt"]),
+  /** `points`: puntos del día (el tablero de baldosas). */
+  kind: z.enum(["race", "hunt", "points"]),
   id: ActivityId,
   /** Tamaño del panel (ancho × alto, m). */
   size: z.tuple([z.number().min(1).max(12), z.number().min(1).max(8)]).default([4, 3]),
@@ -289,6 +303,7 @@ export const COMPONENTS = {
   "checkpoint@1": CheckpointV1,
   "scoreboard@1": ScoreboardV1,
   "boost@1": BoostV1,
+  "tiles@1": TilesV1,
   "behavior@1": BehaviorV1,
 } as const;
 
@@ -306,6 +321,7 @@ export const ACCEPTED_IN_V0: readonly ComponentKey[] = [
   "checkpoint@1",
   "scoreboard@1",
   "boost@1",
+  "tiles@1",
 ];
 
 /**
@@ -326,6 +342,7 @@ export const ComponentsStrict = z
     "checkpoint@1": CheckpointV1.optional(),
     "scoreboard@1": ScoreboardV1.optional(),
     "boost@1": BoostV1.optional(),
+    "tiles@1": TilesV1.optional(),
     "behavior@1": BehaviorV1.optional(),
   })
   .strict();
@@ -609,13 +626,31 @@ export const ScoresMsg = envelope(
   "SCORES",
   z.object({
     entity_id: EntityId,
-    kind: z.enum(["race", "hunt"]),
+    kind: z.enum(["race", "hunt", "points"]),
     rows: z.array(z.object({ name: z.string(), player_no: z.number().int().min(0).optional(), value: z.number(), ts: z.number() })),
+  }),
+);
+
+/**
+ * Estado de un tablero de baldosas (a todo el lugar): `show` (ronda en juego: `lit` encendidas,
+ * `done` ya pisadas, `ms_left`), `won`/`lost` (fin de ronda) o `idle` (nadie encima). Las
+ * baldosas van por índice: fila × cols + columna, desde la esquina noroeste.
+ */
+export const TilesMsg = envelope(
+  "TILES",
+  z.object({
+    entity_id: EntityId,
+    round: z.number().int().nonnegative(),
+    state: z.enum(["show", "won", "lost", "idle"]),
+    lit: z.array(z.number().int().min(0).max(143)),
+    done: z.array(z.number().int().min(0).max(143)),
+    ms_left: z.number().int().nonnegative().optional(),
   }),
 );
 
 export const ServerMessage = z.discriminatedUnion("type", [
   ProgressMsg,
+  TilesMsg,
   CollectedMsg,
   RaceMsg,
   ScoresMsg,

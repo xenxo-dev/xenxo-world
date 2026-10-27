@@ -147,6 +147,7 @@ class WorldStore {
       case "COLLECTED":
       case "RACE":
       case "SCORES":
+      case "TILES":
         activity.apply(m);
         break;
       case "ERROR":

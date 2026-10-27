@@ -804,6 +804,39 @@ await scenario("Circuito Neón (Arcade): carrera del sistema con salida, 11 punt
   c.close();
 });
 
+await scenario("Plaza tablero (Píxel): el servidor enciende una figura, cuenta lo que se pisa con las poses y da un punto del día", async () => {
+  const chunkId = "c_-1_0";
+  const api = new Api(baseUrl);
+  const name = `conf tablero ${randomUUID().slice(0, 6)}`;
+  await api.register(name);
+  const u = await XenxoClient.connect({ baseUrl, chunkId, token: api.token });
+  const board = u.snapshot.entities.find((e) => e.components["tiles@1"]);
+  assert(!!board, "la plaza tiene su tablero (tiles@1)");
+  const tb = board!.components["tiles@1"] as { cols: number; rows: number; size: number };
+  const [bx, , bz] = (board!.components["transform@1"] as { p: [number, number, number] }).p;
+  const center = (i: number): [number, number, number] => {
+    const c = i % tb.cols, r = Math.floor(i / tb.cols);
+    return [bx - (tb.cols * tb.size) / 2 + (c + 0.5) * tb.size, 1.6, bz - (tb.rows * tb.size) / 2 + (r + 0.5) * tb.size];
+  };
+  const show = u.next("TILES", (m) => m.payload.state === "show", 8000);
+  u.pose([bx + 0.1, 1.6, bz + 0.1]);
+  const round = await show;
+  assert(round.payload.lit.length > 0 && round.payload.done.length <= round.payload.lit.length, `ronda con su figura (${round.payload.lit.length} baldosas)`);
+  const won = u.next("TILES", (m) => m.payload.state === "won", 60_000);
+  for (const i of round.payload.lit) {
+    u.pose(center(i));
+    await new Promise((r) => setTimeout(r, 230));
+  }
+  await won;
+  const sb = u.snapshot.entities.find((e) => (e.components["scoreboard@1"] as { kind?: string } | undefined)?.kind === "points");
+  assert(!!sb, "marcador de puntos del día");
+  const scores = await u.activity("SCORES_GET", sb!.entity_id);
+  assert(scores.type === "SCORES" && scores.payload.kind === "points" && scores.payload.rows.some((r) => r.name === name && r.value >= 1), "la cuenta suma su punto de hoy");
+  u.close();
+  const exp = await api.call<{ activities: { daily_points?: unknown[] }[] }>("GET", "/me/export");
+  assert(exp.ok && exp.data.activities.some((x) => (x.daily_points ?? []).length > 0), "la exportación incluye los puntos");
+});
+
 await scenario("distrito grande: WELCOME.walk de 256 m y cada uno recibe solo las poses de quien tiene cerca", async () => {
   const chunkId = "c_0_-1";
   const a = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-lejos-a" });

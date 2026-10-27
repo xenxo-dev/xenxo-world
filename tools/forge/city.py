@@ -19,6 +19,7 @@ import random
 from mathutils import Matrix
 
 import arcade
+import pixel
 import cero
 import decor
 from kit import CHUNK, Part, finish, mat
@@ -76,7 +77,9 @@ def plan(lay: dict, d: dict) -> dict:
         x0, z0, x1, z1 = bx0 + SIDEWALK, bz0 + SIDEWALK, bx1 - SIDEWALK, bz1 - SIDEWALK
         q = 2 if j == 2 else 0  # la puerta mira a la calle de la plaza (norte → su cara sur)
         midx = (x0 + x1) / 2
-        lots = [[x0, z0, midx - ALLEY / 2, z1], [midx + ALLEY / 2, z0, x1, z1]]
+        # En las manzanas del eje norte-sur, el callejón es una galería que deja ver la plaza.
+        gap = 6.0 if (i == 1 and theme == "pixel") else ALLEY
+        lots = [[x0, z0, midx - gap / 2, z1], [midx + gap / 2, z0, x1, z1]]
         if theme == "cero":  # diseño propio: pasajes en los ejes y torres ancla (cero.py)
             out["buildings"] += cero.lots(i, j, x0, z0, x1, z1, rnd)
         elif theme == "arcade":  # diseño propio: torres-máquina que miran a la plaza (arcade.py)
@@ -109,14 +112,14 @@ def plan(lay: dict, d: dict) -> dict:
         for (px, pz, rot) in spots:
             if theme == "cero":
                 px, pz = cero.prop_shift(px, pz)
-            elif theme == "arcade":  # el atrezo no tapa el callejón entre las dos máquinas
+            elif theme in ("arcade", "pixel"):  # el atrezo no tapa el callejón entre los dos edificios
                 if abs(px - (bx0 + bx1) / 2) < 0.01:
                     px += 6
                 if abs(pz - (bz0 + bz1) / 2) < 0.01:
                     pz += 6
             out["props"].append({"x": round(px, 2), "z": round(pz, 2), "rot": rot})
     # Cero no lleva monumento en la plaza: allí está la Torre Cero (cero.py).
-    out["landmark"] = None if theme in ("cero", "arcade") else {"x": C, "z": C}
+    out["landmark"] = None if theme in ("cero", "arcade", "pixel") else {"x": C, "z": C}
     return out
 
 
@@ -355,6 +358,8 @@ def build(lay: dict, d: dict, detail: int = 1):
     pl = plan(lay, d)
     if d["id"] == "arcade":
         arcade.build(p, [b for b in pl["buildings"] if b["style"] == "cabinet"], rnd, detail)
+    if d["id"] == "pixel":
+        pixel.build(p, detail)
     for b in pl["buildings"]:
         if b["style"] == "cabinet":
             continue
