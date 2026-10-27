@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import math
 
+import interiors
 from kit import CHUNK, Part, finish, mat
 
 C = CHUNK / 2
@@ -106,14 +107,29 @@ def cabinet_tower(p: Part, b: dict, rnd, detail: int) -> None:
     blue = mat("neon", BLUE)
     screen_tint = rnd.choice([BLUE, MAGENTA, "#36d9ff"])
     marquee_tint = MAGENTA if screen_tint != MAGENTA else BLUE
-    # Cuerpo y remate.
-    _box(p, x0, z0, x1, z1, 0, h, body)
+    # Cuerpo y remate. Si es visitable, la planta baja es la sala recreativa (interiors.py).
+    if b.get("open"):
+        s = interiors.spec(b, "arcade")
+        interiors.room(p, b, "arcade", detail)
+        _box(p, x0, z0, x1, z1, s["y1"], h, body)
+    else:
+        _box(p, x0, z0, x1, z1, 0, h, body)
     _box(p, x0 - 0.05, z0 - 0.05, x1 + 0.05, z1 + 0.05, h - 0.5, h, blue, skip=("+z", "-z"))  # solo los lados: la tapa coincidiría con la azotea
     # Pie: mueble oscuro con dos ranuras de monedas y la puerta de luz.
-    _face(p, b, 0.03, width - 0.03, -0.05, 0.25, 0, 6, dark)  # un poco más estrecho: sus lados no coinciden con los de la torre
+    if b.get("open"):
+        # El mueble con el hueco de la puerta (centrada donde dice interiors.spec).
+        s = interiors.spec(b, "arcade")
+        du = s["door_c"] - (x0 if b["front"] in ("s", "n") else z0)
+        a, c = du - s["door_w"] / 2, du + s["door_w"] / 2
+        _face(p, b, 0.03, a, -0.05, 0.25, 0, 6, dark)
+        _face(p, b, c, width - 0.03, -0.05, 0.25, 0, 6, dark)
+        _face(p, b, a, c, -0.05, 0.25, s["door_h"], 6, dark)
+    else:
+        _face(p, b, 0.03, width - 0.03, -0.05, 0.25, 0, 6, dark)  # un poco más estrecho: sus lados no coinciden con los de la torre
     for k, u in enumerate((width * 0.3, width * 0.7)):
         _face(p, b, u - 0.35, u + 0.35, 0.25, 0.32, 3.2, 4.4, mat("neon", YELLOW if k == 0 else RED))
-    _face(p, b, width / 2 - 1.4, width / 2 + 1.4, 0.25, 0.3, 0, 2.6, mat("pantalla", BLUE))
+    if not b.get("open"):
+        _face(p, b, width / 2 - 1.4, width / 2 + 1.4, 0.25, 0.3, 0, 2.6, mat("pantalla", BLUE))
     # Panel de mandos: una repisa que sale 2,4 m, con la palanca y cuatro botones.
     yd = round(h * 0.3, 2)
     _face(p, b, 0.4, width - 0.4, -0.05, 2.4, yd - 1.2, yd, dark)

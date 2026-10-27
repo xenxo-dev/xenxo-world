@@ -2,7 +2,8 @@ import { isNear, useNearby } from "./nearby";
 import { Component, memo, Suspense, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { Billboard, Text, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
-import { HologramV1, LabelV1, labelText, LightV1, MeshV1, PLACES, PrimitiveV1, TransformV1, type Entity } from "@xenxo/protocol";
+import { ColliderV1, HologramV1, LabelV1, labelText, LightV1, MeshV1, PLACES, PrimitiveV1, TransformV1, type Entity } from "@xenxo/protocol";
+import { MAX_COLLISION_TRIS, MeshCollider } from "./MeshCollider";
 import { assetUrl } from "../config";
 import { useLang } from "../i18n";
 import { useWorldVersion, world } from "../net/world-store";
@@ -196,9 +197,19 @@ const EntityView = memo(function EntityView({
   const showLight = lit && features.pointLights;
   const showPool = lit && features.lightPools && p[1] - POOL_FLOOR_Y < POOL_MAX_HEIGHT;
   const holo = hologram.success ? holoOf(hologram.data.color ?? "#4fe3ff", hologram.data.opacity) : null;
+  // Colisión con la forma del modelo (su nivel más ligero), si la entidad lo pide.
+  const collider = ColliderV1.safeParse(entity.components["collider@1"]);
+  const colLod = collider.success && collider.data.from_mesh && !collider.data.trigger && mesh.success ? mesh.data.lods[mesh.data.lods.length - 1] : undefined;
 
   return (
     <>
+    {colLod && colLod.tris <= MAX_COLLISION_TRIS && (
+      <SkipOnError>
+        <Suspense fallback={null}>
+          <MeshCollider id={entity.entity_id} hash={colLod.hash} x={p[0] + ox} y={p[1]} z={p[2] + oz} r={r} s={s} rev={entity.rev} />
+        </Suspense>
+      </SkipOnError>
+    )}
     {showPool && light.success && (
       <mesh
         geometry={poolGeometry}

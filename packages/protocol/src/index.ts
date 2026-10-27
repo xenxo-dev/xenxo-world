@@ -106,6 +106,13 @@ export const ColliderV1 = z.object({
   shape: z.enum(["box", "sphere"]),
   half_extents: Vec3,
   trigger: z.boolean().default(false),
+  /**
+   * Chocar con la forma real del `mesh@1` de la misma entidad (su nivel más ligero), no con la
+   * caja. La caja (`shape` + `half_extents`, centrada en el transform) queda de reserva: la usan
+   * los clientes que no lo entienden y mientras el modelo no ha llegado. Los clientes pueden
+   * volver a la caja si el modelo es demasiado denso para colisionar.
+   */
+  from_mesh: z.boolean().optional(),
 });
 
 export const LabelV1 = z.object({

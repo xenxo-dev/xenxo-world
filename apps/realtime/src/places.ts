@@ -137,6 +137,8 @@ export function portalEntities(
       components: {
         "transform@1": { p: at(x, z, facing, cx, P.pedestal_h + lift, P.pedestal + cz), r: yaw(facing), s: [scale, scale, scale], parent: null },
         "mesh@1": { lods: spec.monument.lods.map((l) => ({ hash: l.hash, media: "model/gltf-binary" as const, tris: l.tris })) },
+        // Se choca con su forma real; la caja (en su sitio, 1,6 m) es la de reserva.
+        "collider@1": { shape: "box", half_extents: monumentHalf(dims), trigger: false, from_mesh: true },
       },
     });
   }
@@ -155,6 +157,11 @@ export function portalEntities(
     },
   });
   return out;
+}
+
+/** Caja de reserva del monumento: medio tamaño en su espacio (el cliente la escala con el transform). */
+export function monumentHalf(dims: number[]): [number, number, number] {
+  return [r6(Math.max(0.05, dims[0]! / 2)), r6(Math.max(0.05, dims[1]! / 2)), r6(Math.max(0.05, dims[2]! / 2))];
 }
 
 /** Monumento del sistema (emblema de la forja) en el formato de portalEntities. */

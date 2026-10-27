@@ -9,6 +9,9 @@
  * - Salto con margen: vale pulsar un poco antes de tocar el suelo (buffer) o justo después de
  *   salir de un borde (coyote).
  * - Subpasos de 1/120 s: a cualquier tasa de frames no se atraviesan paredes finas.
+ * - Rampas y pendientes de las mallas (collider@1.from_mesh): el suelo las sigue; las muy
+ *   empinadas son pared. La gente de las ciudades no se atraviesa (collision.ts → npcs).
+ * - Caída fuerte: al aterrizar de muy alto, un momento sin poder correr (`stun`).
  *
  * Sin objetos nuevos por frame: todo el estado vive en un objeto que se reutiliza.
  */
@@ -18,6 +21,8 @@ export const BODY_RADIUS = 0.32;
 export const BODY_HEIGHT = 1.8;
 /** Lo más alto que se sube andando, sin saltar (escalón, bordillo). */
 export const STEP_UP = 0.45;
+/** Lo que empieza más arriba que esto (sobre los pies) es techo, no pared. */
+const WAIST = 1.35;
 /** Lo más que se baja pegado al suelo (escaleras); más que esto y se cae. */
 const STEP_DOWN = 0.35;
 const GRAVITY = 15;
@@ -31,6 +36,8 @@ const JUMP_BUFFER = 0.15; // s
 const SUBSTEP = 1 / 120;
 /** Caída máxima (no acelerar sin fin). */
 const TERMINAL = 30;
+/** A partir de esta velocidad de caída (≈ 3 m), el aterrizaje frena un momento. */
+const HARD_LANDING = 7.5;
 
 export interface Body {
   x: number;
@@ -48,10 +55,12 @@ export interface Body {
   jumped: boolean;
   /** Acaba de aterrizar con esta velocidad de caída (para la animación); 0 si no. */
   landed: number;
+  /** Segundos que quedan del aterrizaje fuerte (se anda despacio). */
+  stun: number;
 }
 
 export function createBody(x: number, y: number, z: number): Body {
-  return { x, y, z, vx: 0, vy: 0, vz: 0, grounded: true, airTime: 0, jumpAge: Infinity, jumped: false, landed: 0 };
+  return { x, y, z, vx: 0, vy: 0, vz: 0, grounded: true, airTime: 0, jumpAge: Infinity, jumped: false, landed: 0, stun: 0 };
 }
 
 export function placeBody(b: Body, x: number, y: number, z: number) {
@@ -63,6 +72,7 @@ export function placeBody(b: Body, x: number, y: number, z: number) {
   b.airTime = 0;
   b.jumpAge = Infinity;
   b.jumped = false;
+  b.stun = 0;
 }
 
 /** Pide un salto (se aplica en cuanto se pueda, dentro del margen). */
@@ -85,6 +95,11 @@ export function stepBody(b: Body, wantX: number, wantZ: number, dt: number, min:
 }
 
 function substep(b: Body, wantX: number, wantZ: number, h: number, min: number, max: number) {
+  if (b.stun > 0) {
+    b.stun -= h;
+    wantX *= 0.3;
+    wantZ *= 0.3;
+  }
   // Horizontal: acercarse a la velocidad pedida (más rápido al frenar; poco en el aire).
   const wanting = wantX * wantX + wantZ * wantZ > 1e-4;
   const k = b.grounded ? (wanting ? ACCEL : BRAKE) : AIR;
@@ -96,15 +111,23 @@ function substep(b: Body, wantX: number, wantZ: number, h: number, min: number, 
   const pz = b.z;
   _p.x = b.x + b.vx * h;
   _p.z = b.z + b.vz * h;
-  // Lo que queda por debajo de un paso no frena: se sube.
-  resolveCircle(_p, BODY_RADIUS, b.y + STEP_UP, b.y + BODY_HEIGHT);
+  // Lo que queda por debajo de un paso no frena: se sube. Lo que empieza por encima de la cintura
+  // es techo (lo frena el salto, abajo), no pared: así un dintel o un techo bajo no te escupe a un lado.
+  resolveCircle(_p, BODY_RADIUS, b.y + STEP_UP, b.y + WAIST);
   _p.x = Math.min(max, Math.max(min, _p.x));
   _p.z = Math.min(max, Math.max(min, _p.z));
   b.x = _p.x;
   b.z = _p.z;
-  // Contra una pared, la velocidad que no se pudo usar se pierde (desliza en vez de empujar).
+  // Contra una pared, la velocidad que no se pudo usar se pierde (desliza en vez de empujar). Un
+  // empujón de la colisión nunca da más velocidad de la que se llevaba.
+  const before = Math.hypot(b.vx, b.vz);
   b.vx = (b.x - px) / h;
   b.vz = (b.z - pz) / h;
+  const after = Math.hypot(b.vx, b.vz);
+  if (after > before && after > 1e-6) {
+    b.vx *= before / after;
+    b.vz *= before / after;
+  }
 
   // Salto: pedido hace poco y pisando suelo (o recién salido de un borde).
   b.jumpAge += h;
@@ -140,6 +163,7 @@ function substep(b: Body, wantX: number, wantZ: number, h: number, min: number, 
     }
     if (b.vy <= 0 && b.y <= ground) {
       b.landed = -b.vy;
+      if (-b.vy > HARD_LANDING) b.stun = Math.min(0.45, 0.15 + (-b.vy - HARD_LANDING) * 0.04);
       b.y = ground;
       b.vy = 0;
       b.grounded = true;

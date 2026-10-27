@@ -22,6 +22,7 @@ import arcade
 import pixel
 import taller
 import cero
+import interiors
 import decor
 from kit import CHUNK, Part, finish, mat
 from townhouse import hip_roof
@@ -79,6 +80,7 @@ def plan(lay: dict, d: dict) -> dict:
         q = 2 if j == 2 else 0  # la puerta mira a la calle de la plaza (norte → su cara sur)
         midx = (x0 + x1) / 2
         # En las manzanas del eje norte-sur, el callejón es una galería que deja ver la plaza.
+        n0 = len(out["buildings"])
         gap = 6.0 if (i == 1 and theme == "pixel") else ALLEY
         lots = [[x0, z0, midx - gap / 2, z1], [midx + gap / 2, z0, x1, z1]]
         if theme == "cero":  # diseño propio: pasajes en los ejes y torres ancla (cero.py)
@@ -106,6 +108,12 @@ def plan(lay: dict, d: dict) -> dict:
         elif theme == "vertical":
             for lot in lots:
                 out["buildings"].append({"style": "stack", "rect": [lot[0] + 0.5, lot[1] + 0.5, lot[2] - 0.5, lot[3] - 0.5], "h": round(3.1 * rnd.randint(7, 12), 2), "q": q})
+        for b in out["buildings"][n0:]:
+            b["block"] = (i, j)
+            b["theme"] = theme
+        # Edificios con interior: el primero de las manzanas elegidas (interiors.py).
+        if (i, j) in interiors.OPEN_BLOCKS.get(theme, []) and len(out["buildings"]) > n0:
+            out["buildings"][n0]["open"] = True
         # Atrezo del tema en las aceras que dan a las calles de dentro de la ciudad.
         spots = []
         if i != 1:
@@ -130,9 +138,18 @@ def colliders(lay: dict, d: dict) -> list[list[float]]:
     """Cajas sólidas [cx, cy, cz, hx, hy, hz] en coordenadas del chunk."""
     pl = plan(lay, d)
     boxes = []
+    def add(a0, b0, a1, b1, c0, c1):
+        boxes.append([round((a0 + a1) / 2, 3), round((c0 + c1) / 2, 3), round((b0 + b1) / 2, 3), round((a1 - a0) / 2, 3), round((c1 - c0) / 2, 3), round((b1 - b0) / 2, 3)])
+
     for b in pl["buildings"]:
         x0, z0, x1, z1 = b["rect"]
-        boxes.append([round((x0 + x1) / 2, 3), round(b["h"] / 2, 3), round((z0 + z1) / 2, 3), round((x1 - x0) / 2, 3), round(b["h"] / 2, 3), round((z1 - z0) / 2, 3)])
+        if b.get("open"):
+            # Sala de la planta baja (muros con puerta, suelo, techo y muebles) y lo de arriba, macizo.
+            for bx in interiors.room(None, b, d["id"]):
+                add(*bx)
+            add(x0, z0, x1, z1, interiors.spec(b, d["id"])["y1"], b["h"])
+            continue
+        add(x0, z0, x1, z1, 0, b["h"])
     for pr in pl["props"]:
         boxes.append([pr["x"], 1.0, pr["z"], 0.7, 1.0, 0.7])
     lm = pl["landmark"]
@@ -167,8 +184,11 @@ def _tower(p: Part, b: dict, color: str, rnd: random.Random, dark: bool, detail:
     trim = mat("metal", "#1b1f2e")
     neon = mat("neon", color)
     alt = mat("neon", rnd.choice(["#36d9ff", "#ff4fd8", "#ff4f8b"]))
-    # Zócalo con tienda (luz) y torre retranqueada encima.
-    _box(p, x0, z0, x1, z1, 0, 5, trim)
+    # Zócalo con tienda (luz) y torre retranqueada encima. Si es visitable, el zócalo es el vestíbulo.
+    if b.get("open"):
+        interiors.room(p, b, b["theme"], detail)
+    else:
+        _box(p, x0, z0, x1, z1, 0, 5, trim)
     # Franjas de luz: solo los lados (su tapa coincidiría con la del zócalo y parpadearía).
     _box(p, x0 - 0.05, z0 - 0.05, x1 + 0.05, z1 + 0.05, 4.6, 5.0, neon, skip=("+z", "-z"))
     i = 1.0
@@ -195,10 +215,13 @@ def _voxel(p: Part, b: dict, color: str, rnd: random.Random, detail: int):
     for k in range(tiers):
         th = b["h"] / tiers
         m = mat("azulejo", rnd.choice(tints))
-        _box(p, x0 + inset, z0 + inset, x1 - inset, z1 - inset, y, y + th, m)
+        if k == 0 and b.get("open"):
+            interiors.room(p, b, b["theme"], detail)  # la primera planta es el café (interiors.py)
+        else:
+            _box(p, x0 + inset, z0 + inset, x1 - inset, z1 - inset, y, y + th, m)
         _box(p, x0 + inset - 0.05, z0 + inset - 0.05, x1 - inset + 0.05, z1 - inset + 0.05, y + th - 0.4, y + th, mat("neon", color), skip=("+z", "-z"))
-        if detail:
-            # Píxeles encendidos en la fachada que da a la cruz.
+        if detail and not (k == 0 and b.get("open")):
+            # Píxeles encendidos en la fachada que da a la cruz (no sobre la puerta del café).
             for n in range(6):
                 px = x0 + inset + 1 + rnd.random() * (x1 - x0 - 2 * inset - 2.5)
                 py = y + 1 + rnd.random() * (th - 2.5)
@@ -244,7 +267,10 @@ def _hall(p: Part, b: dict, color: str, rnd: random.Random, detail: int):
     x0, z0, x1, z1 = b["rect"]
     h = b["h"]
     wall = mat("panel", rnd.choice(["#6a7584", "#7d8794", "#59616e"]))
-    _box(p, x0, z0, x1, z1, 0, h - 2, wall)
+    if b.get("open"):
+        interiors.room(p, b, b["theme"], detail)  # la nave por dentro (interiors.py)
+    else:
+        _box(p, x0, z0, x1, z1, 0, h - 2, wall)
     # Tejado plano con lucernarios en fila (el «diente de sierra» de las naves) y sus tapas.
     _box(p, x0 - 0.2, z0 - 0.2, x1 + 0.2, z1 + 0.2, h - 2, h - 1.8, mat("metal", "#3a4256"))
     n = 4
@@ -254,11 +280,12 @@ def _hall(p: Part, b: dict, color: str, rnd: random.Random, detail: int):
         _box(p, a, z0 + 0.6, a + step * 0.45, z1 - 0.6, h - 1.8, h - 0.4, mat("ventana", "#cfe8ff"))
         _box(p, a - 0.1, z0 + 0.5, a + step * 0.45 + 0.1, z1 - 0.5, h - 0.4, h - 0.2, mat("metal", "#8c95a8"))
     # Franja de seguridad y gran portón hacia la cruz.
-    _box(p, x0 - 0.05, z0 - 0.05, x1 + 0.05, z1 + 0.05, 1.0, 1.4, mat("metal", "#ff8a2c"))
+    _box(p, x0 - 0.05, z0 - 0.05, x1 + 0.05, z1 + 0.05, 1.0, 1.4, mat("metal", "#ff8a2c"), skip=("+z", "-z"))  # solo los lados (por dentro, la nave es hueca)
     door_z = z1 if b["q"] in (0, 1) else z0 - 0.08
     xm = (x0 + x1) / 2
-    _box(p, xm - 2.2, door_z, xm + 2.2, door_z + 0.08, 0, 4.2, mat("metal", "#3a4256"))
-    _box(p, xm - 2.3, door_z - 0.02, xm + 2.3, door_z + 0.1, 4.2, 4.45, mat("neon", color))
+    if not b.get("open"):  # la abierta ya tiene su puerta (un hueco con marco de luz)
+        _box(p, xm - 2.2, door_z, xm + 2.2, door_z + 0.08, 0, 4.2, mat("metal", "#3a4256"))
+        _box(p, xm - 2.3, door_z - 0.02, xm + 2.3, door_z + 0.1, 4.2, 4.45, mat("neon", color))
     # Chimenea con anillo rojo.
     cxw, czw = (x0 + 1.5, z0 + 1.5) if b["q"] in (0, 2) else (x1 - 1.5, z0 + 1.5)
     lo, _ = _lo_hi(cxw, czw, cxw, czw, 0, 0)

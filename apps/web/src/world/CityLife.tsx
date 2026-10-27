@@ -21,6 +21,7 @@ import { AvatarBody } from "./Avatars";
 import { createMotion, type Motion } from "./motion";
 import { rng } from "./NexoCity";
 import { playerPos } from "./Player";
+import { npcs } from "./collision";
 
 interface Loop {
   /** Esquinas en orden (x, z), a la altura `y`. */
@@ -40,6 +41,8 @@ const POPULATION = 44;
 /** Más allá, nadie: la niebla de noche empieza a 45 m. */
 const RANGE = 55;
 const REASSIGN_MS = 600;
+/** Cada peatón va 0,45 m a la derecha de su recorrido (los que se cruzan no se pisan). */
+const LANE = 0.45;
 
 type City = { x0: number; z0: number; block: number; street: number };
 const CITY = (districts as unknown as { city: City }).city;
@@ -148,6 +151,7 @@ export function Pedestrians({ chunk, count }: { chunk: string; count: number }) 
         near.delete(next.value);
       }
     }
+    let n = 0;
     for (const s of slots) {
       const g = s.group;
       if (!g) continue;
@@ -158,7 +162,19 @@ export function Pedestrians({ chunk, count }: { chunk: string; count: number }) 
       }
       const w = walkers[s.walker]!;
       const l = loops[w.loop]!;
-      const p = along(l, w.offset + w.dir * w.speed * t);
+      let p = along(l, w.offset + w.dir * w.speed * t);
+      // Cada uno por su derecha (los que se cruzan no se atraviesan) y, si el jugador está justo
+      // delante, se espera: su avance se descuenta mientras no se aparte.
+      const hx = p.dx * w.dir, hz = p.dz * w.dir;
+      const lx = p.x - hz * LANE, lz = p.z + hx * LANE;
+      const ax = playerPos.x - lx, az = playerPos.z - lz;
+      const ahead = ax * hx + az * hz;
+      const side = Math.abs(ax * hz - az * hx);
+      const blocked = ahead > 0 && ahead < 1.3 && side < 0.75 && Math.abs(playerPos.y - l.y) < 1.2;
+      if (blocked) {
+        w.offset -= w.dir * w.speed * dt;
+        p = along(l, w.offset + w.dir * w.speed * t);
+      }
       const want = Math.atan2(-p.dx * w.dir, -p.dz * w.dir);
       if (!g.visible) s.yaw = want;
       else {
@@ -166,11 +182,22 @@ export function Pedestrians({ chunk, count }: { chunk: string; count: number }) 
         s.yaw += d * Math.min(1, dt * 6);
       }
       g.visible = true;
-      g.position.set(p.x, l.y, p.z);
+      const px = p.x - p.dz * w.dir * LANE, pz = p.z + p.dx * w.dir * LANE;
+      g.position.set(px, l.y, pz);
       g.rotation.y = s.yaw;
-      s.motion.speed = w.speed;
+      s.motion.speed = blocked ? 0 : w.speed;
+      // Para las colisiones del jugador (collision.ts): no se atraviesan.
+      if (n < npcs.pos.length / 3) {
+        npcs.pos[n * 3] = px;
+        npcs.pos[n * 3 + 1] = l.y;
+        npcs.pos[n * 3 + 2] = pz;
+        n++;
+      }
     }
+    npcs.count = n;
   });
+  // Al irse del lugar, nadie con quien chocar.
+  useEffect(() => () => void (npcs.count = 0), []);
 
   if (!id || count <= 0) return null;
   return (

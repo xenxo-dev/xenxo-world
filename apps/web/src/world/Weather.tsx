@@ -14,11 +14,19 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import districts from "../../../realtime/src/districts.json";
 import { ambient } from "./ambient-audio";
+import { ceilingHeight } from "./collision";
+import { playerPos } from "./Player";
 import type { Ambience } from "./graphics";
 
 type City = { x0: number; z0: number; block: number; street: number };
 const CITY = (districts as unknown as { city: City }).city;
 const BY_CHUNK = new Map((districts.districts as { id: string; chunk: string }[]).map((d) => [d.chunk, d.id]));
+
+/** ¿Hay techo encima del jugador (dentro de un edificio, bajo la pasarela)? Se mira 4 veces por segundo. */
+const shelter = { under: false };
+function checkShelter() {
+  shelter.under = ceilingHeight(playerPos.x, playerPos.z, 0.1, playerPos.y + 1.9) < playerPos.y + 40;
+}
 
 /** Lugares donde llueve. */
 const RAINY = new Set(["cero"]);
@@ -258,7 +266,8 @@ function Rain({ count, ambience }: { count: number; ambience: Ambience }) {
   useFrame((state) => {
     mat.uniforms.uTime!.value = state.clock.elapsedTime;
     (mat.uniforms.uCam!.value as THREE.Vector3).copy(state.camera.position);
-    mat.uniforms.uRain!.value = rainLevel(Date.now(), ambience);
+    // Bajo techo no llueve (las gotas atravesarían el edificio).
+    mat.uniforms.uRain!.value = shelter.under ? 0 : rainLevel(Date.now(), ambience);
     (mat.uniforms.uColor!.value as THREE.Color).copy(ambience === "night" ? RAIN_NIGHT : RAIN_DAY);
   });
   return <lineSegments geometry={geo} material={mat} frustumCulled={false} renderOrder={3} />;
@@ -277,9 +286,13 @@ export function Weather({ chunk, rain, ambience }: { chunk: string; rain: number
       ambient.setRain(0);
       return;
     }
-    const tick = () => ambient.setRain(rainLevel(Date.now(), amb.current));
+    const tick = () => {
+      checkShelter();
+      // Dentro, la lluvia se oye amortiguada.
+      ambient.setRain(rainLevel(Date.now(), amb.current) * (shelter.under ? 0.35 : 1));
+    };
     tick();
-    const t = setInterval(tick, 2000);
+    const t = setInterval(tick, 250);
     return () => {
       clearInterval(t);
       ambient.setRain(0);

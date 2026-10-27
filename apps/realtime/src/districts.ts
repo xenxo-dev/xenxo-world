@@ -13,7 +13,8 @@ interface DistrictActivities {
   hunts?: { id: string; piece: string; radius: number; items: { p: V3; note?: Record<string, string>; piece?: string }[] }[];
   tiles?: { id: string; p: V3; cols: number; rows: number; size: number }[];
   boards?: { kind: "race" | "hunt" | "points" | "builds"; id: string; period?: "all" | "week" | "day"; p: V3; yaw: number; size: [number, number]; title?: { es: string; en: string }; title_y?: number }[];
-  props?: { piece: string; p: V3; yaw: number; half: V3 }[];
+  /** `mesh_collider`: se choca con la forma del modelo (collider@1.from_mesh; `half` es la caja de reserva). */
+  props?: { piece: string; p: V3; yaw: number; half: V3; mesh_collider?: boolean }[];
   labels?: { text: { es: string; en: string }; p: V3; yaw: number; size: number; flat?: boolean; style?: string; width?: number; max_distance?: number }[];
   races?: { id: string; radius: number; start: { p: V3; radius: number }; cps: V3[]; finish: { p: V3; radius: number } }[];
   boosts?: { p: V3; yaw: number; speed?: number; seconds?: number; radius?: number }[];
@@ -238,11 +239,12 @@ export function districtSeed(d: District, toNexo: { p: V3; yaw: number }): Seede
       components: {
         "transform@1": { p: pr.p, r: yaw(pr.yaw), s: [1, 1, 1], parent: null },
         "mesh@1": { lods: plods },
+        ...(pr.mesh_collider ? { "collider@1": { shape: "box", half_extents: pr.half, trigger: false, from_mesh: true } } : {}),
       } as Components,
     });
     // La caja va aparte, centrada en su altura (el modelo está apoyado en el suelo). Sin caja (0):
     // la colisión ya la pone la ciudad (la peana de la escultura de Xen).
-    if (pr.half[1] > 0) solid(`${d.id}_prop_${n + 1}_box`, [pr.p[0], r3(pr.p[1] + pr.half[1]), pr.p[2]], pr.half);
+    if (pr.half[1] > 0 && !pr.mesh_collider) solid(`${d.id}_prop_${n + 1}_box`, [pr.p[0], r3(pr.p[1] + pr.half[1]), pr.p[2]], pr.half);
   });
   (acts?.labels ?? []).forEach((lb, n) => {
     label(`${d.id}_sign_${n + 1}`, lb.p, lb.flat ? multiply(yaw(lb.yaw), FLAT) : yaw(lb.yaw), lb.text.en, lb.text, lb.size);

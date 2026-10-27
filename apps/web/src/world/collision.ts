@@ -1,11 +1,19 @@
 /**
- * Colisiones sencillas con los collider@1 del mundo (cajas orientadas).
- * El jugador es un cilindro: un círculo en el plano XZ con pies y cabeza. Las cajas bajas
- * (escalones, bordillos, bancos) se suben; sobre las demás se puede caminar si se llega
- * saltando. La cámara se acerca si una pared se interpone.
- * Sin físicas ni objetos nuevos por frame: se recalcula solo cuando cambia el mundo.
+ * Colisiones del personaje con el mundo:
+ *
+ * - **Cajas** (collider@1): orientadas, las de siempre (edificios, muros, escalones, bancos).
+ * - **Mallas** (collider@1 con `from_mesh`): la forma real del modelo de la entidad (monumentos,
+ *   esculturas, atrezo), con three-mesh-bvh. Mientras el modelo no ha llegado, vale su caja.
+ *   Rampas y pendientes: el suelo sale de la malla (hasta ~55°); más empinado es pared.
+ * - **Gente** (los peatones de las ciudades, CityLife): cilindros que se mueven; no se atraviesan.
+ *
+ * El jugador es un cilindro (círculo en XZ con pies y cabeza; contra mallas, una cápsula). Las
+ * cajas bajas se suben; sobre las demás se camina si se llega saltando. La cámara se acerca si
+ * una pared se interpone. Sin objetos nuevos por frame: todo usa objetos de módulo.
  */
-import { CHUNK_SIZE, ColliderV1, TransformV1 } from "@xenxo/protocol";
+import * as THREE from "three";
+import { MeshBVH } from "three-mesh-bvh";
+import { ColliderV1, TransformV1 } from "@xenxo/protocol";
 import { world } from "../net/world-store";
 
 interface Box {
@@ -23,18 +31,57 @@ interface Box {
 
 let boxes: Box[] = [];
 let version = -1;
+let seenMeshVersion = -1;
+
+/* --- Mallas --- */
+
+interface MeshCol {
+  bvh: MeshBVH;
+  box: THREE.Box3;
+}
+const meshCols = new Map<string, MeshCol>();
+let meshVersion = 0;
+
+/**
+ * Registra (o quita, con null) la malla de colisión de una entidad: geometría ya en coordenadas
+ * del lugar. Mientras está, su caja de reserva no cuenta.
+ */
+export function setMeshCollider(id: string, geometry: THREE.BufferGeometry | null) {
+  const old = meshCols.get(id);
+  if (old) {
+    old.bvh.geometry.dispose();
+    meshCols.delete(id);
+  }
+  if (geometry) {
+    geometry.computeBoundingBox();
+    meshCols.set(id, { bvh: new MeshBVH(geometry, { maxLeafSize: 8 }), box: geometry.boundingBox!.clone() });
+  }
+  meshVersion++;
+}
+
+/** Cuántas mallas de colisión hay (pruebas y depuración). */
+export const meshColliderCount = () => meshCols.size;
+
+/* --- Gente (peatones): la escribe CityLife cada frame --- */
+
+export const NPC_RADIUS = 0.3;
+const MAX_NPC = 32;
+export const npcs = { count: 0, pos: new Float32Array(MAX_NPC * 3) };
 
 /** Origen de un chunk respecto al lugar actual (que se dibuja en 0..CHUNK_SIZE). */
 const chunkOrigin = (chunkId: string) => world.offsetOf(chunkId);
 
 function refresh() {
   const v = world.getVersion();
-  if (v === version) return;
+  if (v === version && meshVersion === seenMeshVersion) return;
   version = v;
+  seenMeshVersion = meshVersion;
   const out: Box[] = [];
   for (const e of world.entities.values()) {
     const col = ColliderV1.safeParse(e.components["collider@1"]);
     if (!col.success || col.data.trigger) continue;
+    // Con su malla ya cargada, la caja de reserva no cuenta.
+    if (col.data.from_mesh && meshCols.has(e.entity_id)) continue;
     const t = TransformV1.safeParse(e.components["transform@1"]);
     if (!t.success) continue;
     const [ox, oz] = chunkOrigin(e.chunk_id);
@@ -103,7 +150,130 @@ export function resolveCircle(p: { x: number; z: number }, r: number, feet: numb
       p.x += wx * push;
       p.z += wz * push;
     }
+    // La gente: cilindros que no se atraviesan (el que se aparta es el jugador).
+    const rr = r + NPC_RADIUS;
+    for (let i = 0; i < npcs.count; i++) {
+      const ny = npcs.pos[i * 3 + 1]!;
+      if (ny > head || ny + 1.75 < feet - 0.6) continue;
+      const dx = p.x - npcs.pos[i * 3]!;
+      const dz = p.z - npcs.pos[i * 3 + 2]!;
+      const d2 = dx * dx + dz * dz;
+      if (d2 >= rr * rr) continue;
+      const d = Math.sqrt(d2);
+      if (d < 1e-5) {
+        p.x += rr;
+        continue;
+      }
+      p.x += (dx / d) * (rr - d);
+      p.z += (dz / d) * (rr - d);
+    }
+    if (meshCols.size) resolveMeshes(p, r, feet, head);
   }
+}
+
+/* --- Cápsula contra mallas (objetos de módulo: nada nuevo por llamada) --- */
+
+const _seg = new THREE.Line3();
+const _capBox = new THREE.Box3();
+const _triP = new THREE.Vector3();
+const _capP = new THREE.Vector3();
+const _dir = new THREE.Vector3();
+const _n = new THREE.Vector3();
+let _r = 0;
+
+const capsuleCast = {
+  intersectsBounds: (box: THREE.Box3) => box.intersectsBox(_capBox),
+  intersectsTriangle: (tri: { closestPointToSegment: (s: THREE.Line3, a: THREE.Vector3, b: THREE.Vector3) => number; getNormal: (t: THREE.Vector3) => THREE.Vector3 }) => {
+    const d = tri.closestPointToSegment(_seg, _triP, _capP);
+    if (d >= _r) return;
+    // Solo se empuja en horizontal: el suelo y los techos son cosa de groundHeight y ceilingHeight.
+    _dir.subVectors(_capP, _triP);
+    _dir.y = 0;
+    let len = _dir.length();
+    if (len < 1e-5) {
+      tri.getNormal(_n);
+      _dir.set(_n.x, 0, _n.z);
+      len = _dir.length();
+      if (len < 1e-5) return;
+    }
+    _dir.multiplyScalar((_r - d) / len);
+    _seg.start.add(_dir);
+    _seg.end.add(_dir);
+  },
+};
+
+function resolveMeshes(p: { x: number; z: number }, r: number, feet: number, head: number) {
+  _r = r;
+  const top = Math.max(feet + r, head - r);
+  for (const mc of meshCols.values()) {
+    if (p.x + r < mc.box.min.x || p.x - r > mc.box.max.x || p.z + r < mc.box.min.z || p.z - r > mc.box.max.z) continue;
+    if (feet > mc.box.max.y || head < mc.box.min.y) continue;
+    _seg.start.set(p.x, feet + r, p.z);
+    _seg.end.set(p.x, top, p.z);
+    _capBox.makeEmpty();
+    _capBox.expandByPoint(_seg.start);
+    _capBox.expandByPoint(_seg.end);
+    _capBox.expandByScalar(r);
+    mc.bvh.shapecast(capsuleCast as unknown as Parameters<MeshBVH["shapecast"]>[0]);
+    p.x = _seg.start.x;
+    p.z = _seg.start.z;
+  }
+}
+
+/* --- Rayos contra mallas (suelo, techo y cámara) --- */
+
+const _ray = new THREE.Ray();
+const _hit = new THREE.Vector3();
+const _ta = new THREE.Vector3();
+let _best = Infinity;
+let _far = Infinity;
+/** Solo caras que miran hacia arriba (suelo caminable: hasta ~55°). */
+let _upOnly = false;
+const WALKABLE = 0.57;
+
+const rayCast = {
+  intersectsBounds: (box: THREE.Box3) => (_ray.intersectBox(box, _ta) !== null && _ta.distanceTo(_ray.origin) <= _far) || box.containsPoint(_ray.origin),
+  intersectsTriangle: (tri: { a: THREE.Vector3; b: THREE.Vector3; c: THREE.Vector3; getNormal: (t: THREE.Vector3) => THREE.Vector3 }) => {
+    if (!_ray.intersectTriangle(tri.a, tri.b, tri.c, false, _hit)) return;
+    const d = _hit.distanceTo(_ray.origin);
+    if (d > _far || d >= _best) return;
+    if (_upOnly) {
+      tri.getNormal(_n);
+      if (Math.abs(_n.y) < WALKABLE) return;
+    }
+    _best = d;
+  },
+};
+
+/** Distancia al primer corte de las mallas en esa dirección (Infinity si nada antes de `far`). */
+function castMeshes(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, far: number, upOnly: boolean): number {
+  _ray.origin.set(ox, oy, oz);
+  _ray.direction.set(dx, dy, dz).normalize();
+  _best = Infinity;
+  _far = far;
+  _upOnly = upOnly;
+  const minX = Math.min(ox, ox + dx * far), maxX = Math.max(ox, ox + dx * far);
+  const minY = Math.min(oy, oy + dy * far), maxY = Math.max(oy, oy + dy * far);
+  const minZ = Math.min(oz, oz + dz * far), maxZ = Math.max(oz, oz + dz * far);
+  for (const mc of meshCols.values()) {
+    const b = mc.box;
+    if (maxX < b.min.x || minX > b.max.x || maxY < b.min.y || minY > b.max.y || maxZ < b.min.z || minZ > b.max.z) continue;
+    mc.bvh.shapecast(rayCast as unknown as Parameters<MeshBVH["shapecast"]>[0]);
+  }
+  return _best;
+}
+
+/** Suelo de las mallas bajo (x, z): la cara caminable más alta por debajo de `maxTop` (o -Infinity). */
+function meshGround(x: number, z: number, r: number, maxTop: number, floor: number): number {
+  let g = -Infinity;
+  const k = r * 0.7;
+  for (let i = 0; i < 5; i++) {
+    const px = i === 1 ? x + k : i === 2 ? x - k : x;
+    const pz = i === 3 ? z + k : i === 4 ? z - k : z;
+    const d = castMeshes(px, maxTop + 0.01, pz, 0, -1, 0, maxTop + 0.01 - floor, true);
+    if (d !== Infinity) g = Math.max(g, maxTop + 0.01 - d);
+  }
+  return g;
 }
 
 /** Distancia al cuadrado del punto (x, z) al rectángulo de la caja en planta (0 si está dentro). */
@@ -130,6 +300,7 @@ export function groundHeight(x: number, z: number, r: number, maxTop: number): n
     if (top <= g || top > maxTop) continue;
     if (planDist2(b, x, z) < r2) g = top;
   }
+  if (meshCols.size) g = Math.max(g, meshGround(x, z, r, maxTop, g));
   return g;
 }
 
@@ -142,6 +313,10 @@ export function ceilingHeight(x: number, z: number, r: number, minBottom: number
     const bottom = b.y - b.hy;
     if (bottom >= c || bottom < minBottom) continue;
     if (planDist2(b, x, z) < r2) c = bottom;
+  }
+  if (meshCols.size) {
+    const d = castMeshes(x, minBottom, z, 0, 1, 0, Math.min(c, minBottom + 50) - minBottom, false);
+    if (d !== Infinity) c = Math.min(c, minBottom + d);
   }
   return c;
 }
@@ -165,12 +340,21 @@ function inside(x: number, y: number, z: number, margin: number) {
  */
 export function cameraReach(tx: number, ty: number, tz: number, cx: number, cy: number, cz: number): number {
   refresh();
+  let limit = 1;
+  if (meshCols.size) {
+    const len = Math.hypot(cx - tx, cy - ty, cz - tz);
+    if (len > 1e-3) {
+      const d = castMeshes(tx, ty, tz, cx - tx, cy - ty, cz - tz, len, false);
+      if (d !== Infinity) limit = Math.max(0.15, (d - 0.3) / len);
+    }
+  }
   const steps = 16;
   for (let i = 1; i <= steps; i++) {
     const k = i / steps;
-    if (inside(tx + (cx - tx) * k, ty + (cy - ty) * k, tz + (cz - tz) * k, 0.25)) return Math.max(0.15, (i - 1) / steps);
+    if (k > limit) break;
+    if (inside(tx + (cx - tx) * k, ty + (cy - ty) * k, tz + (cz - tz) * k, 0.25)) return Math.max(0.15, Math.min(limit, (i - 1) / steps));
   }
-  return 1;
+  return limit;
 }
 
 /**

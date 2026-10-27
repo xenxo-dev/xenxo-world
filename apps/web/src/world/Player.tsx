@@ -64,6 +64,8 @@ export function Player({ active }: { active: boolean }) {
   const lastSend = useRef(0);
   const camReach = useRef(1);
   const cam3 = useRef({ dist: CAM_DIST, y: spawn.p[1] });
+  /** Altura a la que se dibuja el cuerpo: sube y baja los escalones con suavidad (la física salta). */
+  const visY = useRef(spawn.p[1]);
   const bodyYaw = useRef(0);
   const emoteUntil = useRef(0);
   const lastEmote = useRef<string | null>(null);
@@ -222,7 +224,10 @@ export function Player({ active }: { active: boolean }) {
         cam.lookAt(c - Math.cos(t) * 4, 5.5, 30 + Math.sin(t) * 4);
       }
 
-      avatar.current.position.set(body.x, body.y, body.z);
+      const dy = body.y - visY.current;
+      if (body.grounded && Math.abs(dy) < STEP_UP + 0.1) visY.current += dy * Math.min(1, dt * 16);
+      else visY.current = body.y;
+      avatar.current.position.set(body.x, visY.current, body.z);
       avatar.current.rotation.y = bodyYaw.current;
       playerPos.set(body.x, body.y, body.z);
       self.x = body.x;

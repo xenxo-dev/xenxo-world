@@ -247,6 +247,7 @@ export class ChunkRoom extends DurableObject<Env> {
       const d = districtByChunk(this.chunkId);
       if (d) {
         this.migrateParcelLayout();
+        this.migrateMonumentColliders();
         // Ids de menos de 6 caracteres (las máquinas-portal se llamaron «cab_1»): el esquema de las
         // entidades no los admite y los clientes descartaban el SNAPSHOT entero. Fuera; se rellenan al recolocar.
         this.sql.exec("DELETE FROM entities WHERE owner IN ('cabinets', 'billboards') AND length(entity_id) < 6");
@@ -264,6 +265,24 @@ export class ChunkRoom extends DurableObject<Env> {
    * gente tenía en una parcela de la v1 (el portal de su proyecto y lo que construyó su agente) se
    * lleva a la misma parcela en su sitio nuevo, girado como ella. Una sola vez por chunk.
    */
+  /** Los monumentos de antes no chocaban: ahora llevan collider@1 con su forma (from_mesh). Una vez. */
+  private migrateMonumentColliders() {
+    if (this.sql.exec<{ v: string }>("SELECT v FROM meta WHERE k = 'monument_colliders'").toArray()[0]?.v === "1") return;
+    this.ctx.storage.transactionSync(() => {
+      for (const row of this.sql.exec<{ entity_id: string; rev: number; data: string }>("SELECT entity_id, rev, data FROM entities WHERE entity_id LIKE 'standm_%'").toArray()) {
+        const e = JSON.parse(row.data) as Entity;
+        if (e.components["collider@1"] || !e.components["mesh@1"]) continue;
+        // Caja de reserva: el monumento cabe en un cubo de 1,6 m (places.ts → portalEntities).
+        const s = (e.components["transform@1"] as { s?: number[] } | undefined)?.s?.[0] ?? 1;
+        const h = Math.max(0.05, Math.round((0.8 / Math.max(0.01, s)) * 1e6) / 1e6);
+        e.components["collider@1"] = { shape: "box", half_extents: [h, h, h], trigger: false, from_mesh: true };
+        e.rev = row.rev + 1;
+        this.sql.exec("UPDATE entities SET rev = ?, data = ? WHERE entity_id = ?", e.rev, JSON.stringify(e), row.entity_id);
+      }
+      this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('monument_colliders', '1')");
+    });
+  }
+
   private migrateParcelLayout() {
     const done = this.sql.exec<{ v: string }>("SELECT v FROM meta WHERE k = 'parcel_layout'").toArray()[0]?.v;
     if (done === PARCEL_LAYOUT_VERSION) return;
@@ -634,7 +653,8 @@ export class ChunkRoom extends DurableObject<Env> {
         this.checkZone(components, zone);
         this.checkParcel(zone.owner, { entities: 1, tris: estimateTris(components), lights: components["light@1"] ? 1 : 0 });
       } else {
-        const count = this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM entities").one().n;
+        // Lo del sistema (la ciudad, sus colisiones y actividades) no gasta el presupuesto de lo construido.
+        const count = this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM entities WHERE owner != 'system'").one().n;
         if (count >= BUDGETS.maxEntitiesPerChunk) throw new MutationError("budget_exceeded", "chunk lleno de entidades", { max: BUDGETS.maxEntitiesPerChunk });
         if (components["light@1"]) this.checkLights(1);
         this.checkTris(estimateTris(components), 0);

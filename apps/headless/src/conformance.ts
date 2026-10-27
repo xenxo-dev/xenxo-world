@@ -246,11 +246,16 @@ if (!agentKey) {
     c.close();
   });
 
-  await scenario("agente: hologram@1 se acepta con su color y opacidad; una opacidad fuera de rango no", async () => {
+  await scenario("agente: hologram@1 se acepta con su color y opacidad (y collider@1.from_mesh); una opacidad fuera de rango no", async () => {
     const c = await XenxoClient.connect({ baseUrl, agentKey });
     const ok = await c.mutate({
       op: "SPAWN",
-      components: { "transform@1": { p: [41, 1.5, 50] }, "primitive@1": { shape: "box", size: [1, 1, 1], color: "#4fa3ff" }, "hologram@1": { color: "#4fa3ff", opacity: 0.7 } },
+      components: {
+        "transform@1": { p: [41, 1.5, 50] },
+        "primitive@1": { shape: "box", size: [1, 1, 1], color: "#4fa3ff" },
+        "hologram@1": { color: "#4fa3ff", opacity: 0.7 },
+        "collider@1": { shape: "box", half_extents: [0.5, 0.5, 0.5], from_mesh: true },
+      },
     });
     assert(ok.type === "ACK", `hologram@1 debería aceptarse: ${JSON.stringify(ok.payload)}`);
     const bad = await c.mutate({
@@ -1011,6 +1016,8 @@ await scenario("proyecto: exige portada, monumento, distrito y parcela libre; su
   assert(!!up(`standf_${id}`), "la parcela recibe su marco");
   const meshEntity = up(`standm_${id}`);
   const lods = meshEntity && meshEntity.kind === "upsert" ? (meshEntity.entity.components["mesh@1"] as { lods: { tris: number }[] }).lods : [];
+  const monCol = meshEntity && meshEntity.kind === "upsert" ? (meshEntity.entity.components["collider@1"] as { from_mesh?: boolean } | undefined) : undefined;
+  assert(monCol?.from_mesh === true, "el monumento choca con su forma (collider@1.from_mesh)");
   assert(lods[0]?.tris === 108, `los triángulos deberían venir medidos por el servidor (108), llegaron ${lods[0]?.tris}`);
   // Los proyectos viven en su distrito: el nexo no tiene escaparate.
   assert(created.data.project.review === "pending", "publicar es inmediato; el catálogo espera la revisión");
