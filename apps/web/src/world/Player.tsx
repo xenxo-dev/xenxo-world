@@ -25,7 +25,9 @@ const CAM_MIN = 1.3;
 const CAM_MAX = 9;
 /** Gestos que terminan solos (segundos); los demás duran hasta que te mueves. */
 const EMOTE_SECONDS: Record<string, number> = { wave: 2.6, cheer: 1.5 };
-const SEND_EVERY_MS = 125; // 8 Hz: el movimiento se suaviza al otro lado (interpolación)
+// 5 Hz: el movimiento se suaviza al otro lado (interpolación). Cada pose es 1/20 de petición del plan
+// gratuito de Durable Objects (docs/LIMITES-CLOUDFLARE.md): a 8 Hz costaba un 60 % más.
+const SEND_EVERY_MS = 200;
 const HEARTBEAT_MS = 1000;
 /** Dónde está el jugador ahora (lo leen los portales; se copia cada frame, sin crear objetos). */
 export const playerPos = new THREE.Vector3(...spawn.p);

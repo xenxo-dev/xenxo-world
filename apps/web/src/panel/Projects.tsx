@@ -343,10 +343,17 @@ function ParcelMap({ district, value, onChange }: { district: DistrictInfo; valu
   const pct = (v: number) => `${(v / 64) * 100}%`;
   return (
     <div className="relative mx-auto aspect-square w-full max-w-sm overflow-hidden rounded-xl border border-cal/10 bg-[#0b0f18]">
-      {/* Avenida y calles */}
-      <div className="absolute bg-cal/[0.07]" style={{ left: pct(27), width: pct(10), top: 0, bottom: 0 }} />
-      <div className="absolute bg-cal/[0.07]" style={{ top: pct(16), height: pct(4), left: 0, right: 0 }} />
-      <div className="absolute bg-cal/[0.07]" style={{ top: pct(44), height: pct(4), left: 0, right: 0 }} />
+      {/* Calle en anillo y la ciudad del centro (con su cruz de calles) */}
+      <div className="absolute bg-cal/[0.07]" style={{ top: pct(10), height: pct(4), left: 0, right: 0 }} />
+      <div className="absolute bg-cal/[0.07]" style={{ top: pct(50), height: pct(4), left: 0, right: 0 }} />
+      <div className="absolute bg-cal/[0.07]" style={{ left: pct(10), width: pct(4), top: pct(14), height: pct(36) }} />
+      <div className="absolute bg-cal/[0.07]" style={{ left: pct(50), width: pct(4), top: pct(14), height: pct(36) }} />
+      <div className="absolute rounded-sm border" style={{ left: pct(14), top: pct(14), width: pct(36), height: pct(36), borderColor: `${district.color}55`, background: `${district.color}14` }} />
+      <div className="absolute bg-cal/[0.06]" style={{ left: pct(29), width: pct(6), top: pct(14), height: pct(36) }} />
+      <div className="absolute bg-cal/[0.06]" style={{ top: pct(29), height: pct(6), left: pct(14), width: pct(36) }} />
+      <span className="absolute -translate-x-1/2 -translate-y-1/2 text-[10px] text-cal/45" style={{ left: "50%", top: "50%" }}>
+        {t("projects.city")}
+      </span>
       {/* Puerta al nexo */}
       <div className="absolute rounded-sm" style={{ left: pct(28), width: pct(8), top: pct(61), height: pct(1.2), background: district.color }} />
       <span className="absolute -translate-x-1/2 text-[10px] text-cal/45" style={{ left: "50%", top: pct(56.5) }}>
@@ -381,11 +388,20 @@ function ParcelMap({ district, value, onChange }: { district: DistrictInfo; valu
             <span
               aria-hidden
               className="absolute left-1/2 h-0.5 w-1/2 -translate-x-1/2 rounded-full"
-              style={{ background: district.color, opacity: taken ? 0.25 : 0.8, ...(q.facing === 0 ? { bottom: 3 } : { top: 3 }) }}
+              style={{ background: district.color, opacity: taken ? 0.25 : 0.8, ...facingMark(q.facing) }}
             />
           </button>
         );
       })}
     </div>
   );
+}
+
+/** La raya del lado que da a la calle de la parcela (0 = sur, 90 = este, 180 = norte, 270 = oeste). */
+function facingMark(facing: number): React.CSSProperties {
+  const f = ((facing % 360) + 360) % 360;
+  if (f === 0) return { bottom: 3 };
+  if (f === 180) return { top: 3 };
+  const side = { top: "50%", width: 2, height: "50%", transform: "translateY(-50%)", left: "auto" as const };
+  return f === 90 ? { ...side, right: 3 } : { ...side, left: 3 };
 }

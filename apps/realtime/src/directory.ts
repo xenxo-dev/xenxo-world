@@ -29,7 +29,7 @@ import {
   sha256b64url, signJwt, validChallenge, validClientName, validNonce, validRedirectUri, validState, validVerifier, withParams,
 } from "./oidc";
 import { type ProjectCategory } from "@xenxo/protocol";
-import { DISTRICTS, districtById, PARCELS, parcelIndex, parcelRect } from "./districts";
+import { DISTRICTS, districtById, PARCELS, parcelIndex, parcelRect, RENAMED_PARCELS } from "./districts";
 import { gameInfo, manifestAvatar, slugFrom, validSlug, type GameInfo } from "./games";
 import { badJamDates, JAM_SCHEMA, jamPhase, jamRanking, jamText, jamTime, MAX_ENTRIES_PER_USER, validJamSlug, type Jam, type JamResult } from "./jam";
 import type { GameManifest } from "@xenxo/protocol";
@@ -225,6 +225,9 @@ export class Directory extends DurableObject<Env> {
     // Migración: distrito y parcela (una parcela publicada solo puede tener un proyecto).
     if (!pcols.includes("district")) this.sql.exec("ALTER TABLE projects ADD COLUMN district TEXT");
     if (!pcols.includes("parcel")) this.sql.exec("ALTER TABLE projects ADD COLUMN parcel TEXT");
+    // Disposición v2 de los distritos: las parcelas B4 y C4 ya no existen; sus proyectos pasan a A5 y A6
+    // (el chunk mueve lo que hubiera en ellas: ver migrateParcelLayout en chunk-room.ts).
+    for (const [from, to] of Object.entries(RENAMED_PARCELS)) this.sql.exec("UPDATE projects SET parcel = ? WHERE parcel = ?", to, from);
     this.sql.exec(
       "CREATE UNIQUE INDEX IF NOT EXISTS projects_parcel ON projects(district, parcel) WHERE status = 'published' AND district IS NOT NULL",
     );

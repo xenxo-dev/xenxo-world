@@ -500,7 +500,10 @@ await scenario("nexo y distritos: el nexo lleva a la plaza y a los distritos, y 
   const arcadePortal = c.snapshot.entities.find((e) => e.entity_id === "nexo_portal_arcade")?.components["portal@1"] as { color?: string; cover?: string } | undefined;
   assert(!!arcadePortal?.color && !arcadePortal.cover, "la puerta del distrito es abierta (sin portada) y del color del distrito");
   // Todos los distritos (también los nuevos) tienen su puerta en el nexo, y la vuelta deja dentro de lo caminable.
-  const all = (await (await fetch(`${baseUrl}/districts`)).json()) as { districts: { id: string; chunk_id: string }[] };
+  const all = (await (await fetch(`${baseUrl}/districts`)).json()) as { districts: { id: string; chunk_id: string; parcels: { id: string; x: number; z: number }[] }[] };
+  for (const d of all.districts) {
+    assert(d.parcels.length === 16 && d.parcels.every((q) => q.x + 5 <= 14 || q.x - 5 >= 50 || q.z + 5 <= 14 || q.z - 5 >= 50), `las parcelas de ${d.id} rodean la ciudad, no la pisan`);
+  }
   const nexoWalk = c.welcome.walk ?? [0, 64];
   for (const d of all.districts) {
     const to = c.snapshot.entities.find((e) => e.entity_id === `nexo_portal_${d.id}`)?.components["portal@1"] as { to: { chunk_id?: string } } | undefined;
@@ -509,6 +512,8 @@ await scenario("nexo y distritos: el nexo lleva a la plaza y a los distritos, y 
     const back = dc.snapshot.entities.find((e) => (e.components["portal@1"] as { to?: { chunk_id?: string } } | undefined)?.to?.chunk_id === PLACES.nexo)?.components["portal@1"] as
       | { to: { spawn: number[] } }
       | undefined;
+    // Disposición v2: la ciudad en el centro, con sus colisiones, y ninguna parcela dentro de ella.
+    assert(dc.snapshot.entities.some((e) => e.entity_id === `${d.id}_city`) && dc.snapshot.entities.some((e) => e.entity_id === `${d.id}_city_0` && !!e.components["collider@1"]), `falta la ciudad del centro de ${d.id}`);
     dc.close();
     const [bx, , bz] = back?.to.spawn ?? [NaN, 0, NaN];
     assert(bx! >= nexoWalk[0] && bx! <= nexoWalk[1] && bz! >= nexoWalk[0] && bz! <= nexoWalk[1], `la puerta de ${d.id} devuelve fuera de lo caminable del nexo`);

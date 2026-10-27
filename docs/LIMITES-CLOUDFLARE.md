@@ -32,8 +32,9 @@ En marcha:
   cada 30 s y solo con la pestaña a la vista (240 por hora), y el Worker guarda la respuesta 15 s en
   la caché, así que los objetos se despiertan como mucho una vez cada 15 s, mire quien mire.
 - **En el nexo** (en solitario): el cliente no manda poses. Casi no gasta.
-- **En la plaza, en un distrito o en una jam, moviéndose:** 8 poses por segundo = 0,4 peticiones de
-  Durable Object por segundo (**1.440 por hora**). Quieto: 1 latido por segundo (**180 por hora**).
+- **En la plaza, en un distrito o en una jam, moviéndose:** 5 poses por segundo (antes 8) = 0,25
+  peticiones de Durable Object por segundo (**900 por hora**; antes 1.440). Quieto: 1 latido por
+  segundo (**180 por hora**).
 - **Duración:** antes, cada pose dejaba un temporizador de reparto pendiente y el objeto no podía
   hibernar: un chunk con gente moviéndose gastaba 450 GB-s por hora (el día entero de plan gratuito
   da para unas 29 horas así). Ahora la pose se reparte al llegar si ya ha pasado el intervalo, y
@@ -43,25 +44,21 @@ En marcha:
 ## 3. Cuánto aguanta
 
 Suponiendo una visita típica de 15 minutos (3 con el panel abierto, 5 moviéndose por la plaza o un
-distrito y el resto en el nexo): unas 35 peticiones al Worker y unas 150 a Durable Objects.
+distrito y el resto en el nexo): unas 35 peticiones al Worker y unas 105 a Durable Objects (150 con
+las poses a 8 Hz).
 
 | Recurso | Visitas al día antes de cortar |
 |---|---|
 | Peticiones al Worker | unas 3.000 (antes de esta revisión, unas 1.000) |
-| Peticiones a Durable Objects | **unas 650**: es el cuello de botella |
+| Peticiones a Durable Objects | **unas 950** (650 a 8 Hz): es el cuello de botella |
 | Duración | holgada con el reparto casi sin temporizadores |
 | Filas SQLite | holgadas: las poses no se guardan; escriben el chat, las construcciones y el sembrado tras cada despliegue |
 
-**Conclusión:** para el día del llamamiento (cientos o miles de visitas el mismo día) el plan gratuito
-se queda corto por los mensajes de las poses. Las opciones:
-
-1. **Workers Paid (5 $/mes).** Incluye 10 M de peticiones al Worker y 1 M a Durable Objects al mes, y
-   lo que pasa se cobra barato (0,30 $ y 0,15 $ por millón). Con 10.000 visitas al mes de las de
-   arriba salen unos 5,10 $. **No corta**: es la opción recomendada antes del llamamiento. Hay
-   que acordarla (CLAUDE.md, «Gasto»).
-2. **Seguir en gratis y bajar el gasto por jugador:** poses a 5 Hz en vez de 8 (un 37 % menos; la
-   interpolación lo disimula) y latido cada 3 s en vez de 1 (hay que comprobar antes que la última
-   pose al pararse llega bien). Sube el techo a unas 1.000 visitas al día, pero sigue cortando.
+**Decisión (27-10-2026): xenxo sigue en el plan gratuito.** Las poses ya van a 5 Hz (la interpolación
+lo disimula). Los distritos van a ser ciudades grandes con actividades y minijuegos: no caben aquí, y
+el plan es llevarlos a un servidor propio, no abrir más cuentas gratuitas (lo prohíben las
+condiciones). Ver `docs/ALOJAMIENTO-DISTRITOS.md`. Workers Paid (5 $/mes, no corta) queda descartado
+por ahora.
 
 ## 4. Qué se ha cambiado en esta revisión
 
@@ -73,6 +70,7 @@ se queda corto por los mensajes de las poses. Las opciones:
 - `/chunk/<id>/state` se guarda 15 s en la caché del centro de datos; el panel lo consulta cada 30 s
   y solo con la pestaña visible.
 - Las poses se reparten al llegar; solo hay `setTimeout` (corto) cuando llegan varias en el mismo intervalo.
+- Las poses salen a 5 Hz (antes 8) y los demás se dibujan con 320 ms de retraso para interpolar.
 
 ## 5. Qué vigilar
 

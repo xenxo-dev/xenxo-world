@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 import bpy  # noqa: E402
 
+import city  # noqa: E402
 import decor  # noqa: E402
 import district  # noqa: E402
 import kit  # noqa: E402
@@ -98,9 +99,12 @@ def main() -> None:
     for i, dd in enumerate(dl["districts"]):
         ox = 2000.0 + i * 100.0
         add(f"district_{dd['id']}", "district", lambda d, dd=dd: district.ground(dl, dd, d), [(ox + 32.0, 32.0, 0)])
+        add(f"district_city_{dd['id']}", "district", lambda d, dd=dd: city.build(dl, dd, d), [(ox + 32.0, 32.0, 0)])
         add(f"emblem_{dd['id']}", "prop", lambda d, dd=dd: district.emblem(dd, d), [(ox + 32.0, -40.0, 0)])
         add(f"nexo_spires_{dd['id']}", "prop", lambda d, dd=dd: nexo.spires(nx, dd, d), [(ox + 32.0, -120.0, 0)])
         add(f"nexo_decor_{dd['id']}", "prop", lambda d, dd=dd: decor.build(nx, dd["id"], dd["color"], d), [(ox + 32.0, -200.0, 0)])
+    # Las colisiones de las ciudades de los distritos (las mismas cajas que sus edificios).
+    city.write_colliders(dl, dl["districts"])
     # La plaza también tiene su isla en el nexo, con su decorado mediterráneo.
     add("nexo_decor_plaza", "prop", lambda d: decor.build(nx, "plaza", nx["colors"]["district"], d), [(1900.0 + 32.0, -200.0, 0)])
 

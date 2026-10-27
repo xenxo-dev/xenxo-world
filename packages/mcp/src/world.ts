@@ -120,14 +120,22 @@ export class Parcel {
    * 0 = la pieza mira a la calle; 90 = mira a la derecha (vista desde la calle).
    */
 
+  // La parcela puede mirar a cualquiera de los cuatro lados (0 = sur, 90 = este, 180 = norte, 270 = oeste).
+  // u: a la derecha de quien mira desde la calle; w: hacia la calle, desde el centro.
   toChunk([x, y, z]: V3): V3 {
     const Z = this.zone;
-    return Z.facing === 180 ? [r3(Z.x1 - x), r3(y), r3(Z.z0 + z)] : [r3(Z.x0 + x), r3(y), r3(Z.z1 - z)];
+    const a = (Z.facing * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
+    const cx = (Z.x0 + Z.x1) / 2, cz = (Z.z0 + Z.z1) / 2;
+    const u = x - (Z.x1 - Z.x0) / 2, w = (Z.z1 - Z.z0) / 2 - z;
+    return [r3(cx + u * c + w * s), r3(y), r3(cz - u * s + w * c)];
   }
 
   toParcel([x, y, z]: number[]): V3 {
     const Z = this.zone;
-    return Z.facing === 180 ? [r3(Z.x1 - x!), r3(y!), r3(z! - Z.z0)] : [r3(x! - Z.x0), r3(y!), r3(Z.z1 - z!)];
+    const a = (Z.facing * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
+    const dx = x! - (Z.x0 + Z.x1) / 2, dz = z! - (Z.z0 + Z.z1) / 2;
+    const u = dx * c - dz * s, w = dx * s + dz * c;
+    return [r3(u + (Z.x1 - Z.x0) / 2), r3(y!), r3((Z.z1 - Z.z0) / 2 - w)];
   }
 
   /** Cuaternión del giro: el de la parcela más el de la pieza. */

@@ -3,6 +3,8 @@ import districtsLayout from "./districts.json";
 import { at, FRAME, r3, yaw, type Seeded, type Slot, type V3 } from "./places";
 import { PORTAL_ZONE_DEPTH } from "@xenxo/protocol";
 import { SEED_ASSETS } from "./seed-assets";
+import legacyV1 from "./districts-v1-parcels.json";
+import cities from "./district-cities.json";
 
 /**
  * Distritos: chunks temáticos alrededor de la plaza, cada uno con 16 parcelas de 10×10 m.
@@ -10,9 +12,14 @@ import { SEED_ASSETS } from "./seed-assets";
  * rótulo) va al fondo de la parcela, mirando a su calle. En la fase 2, la parcela será también
  * el terreno donde su dueño (o su agente) puede construir.
  *
- * La disposición sale de districts.json (la misma que usan la forja y la web).
+ * La disposición sale de districts.json (la misma que usan la forja y la web). Desde la v2, en el
+ * centro va la ciudad del distrito (forjada en tools/forge/city.py, con sus colisiones en
+ * district-cities.json) y las parcelas la rodean; `migrateParcelPose` lleva lo de la v1 a su sitio.
  */
-export const DISTRICT_SEED_VERSION = 1;
+export const DISTRICT_SEED_VERSION = 2;
+
+/** Versión de la disposición de las parcelas (la guarda cada chunk de distrito en su `meta`). */
+export const PARCEL_LAYOUT_VERSION = "2";
 
 export interface District {
   id: string;
@@ -137,7 +144,16 @@ export function districtSeed(d: District, toNexo: { p: V3; yaw: number }): Seede
     } as Components,
   });
 
-  /* --- Nombre del distrito en luz, en el suelo de la avenida --- */
+  /* --- La ciudad del centro: un modelo y las cajas de sus edificios --- */
+  const city = SEED_ASSETS[`district_city_${d.id}`];
+  if (city) {
+    const clods = city.lods.map((l) => ({ hash: l.hash, media: "model/gltf-binary" as const, tris: l.tris }));
+    out.push({ id: `${d.id}_city`, components: { "transform@1": { p: [32, 0, 32], r: [0, 0, 0, 1], s: [1, 1, 1], parent: null }, "mesh@1": { lods: clods } } });
+  }
+  const boxes = (cities.cities as Record<string, number[][]>)[d.id] ?? [];
+  boxes.forEach(([x, y, z, hx, hy, hz], n) => solid(`${d.id}_city_${n}`, [x!, y!, z!], [hx!, hy!, hz!]));
+
+  /* --- Nombre del distrito en luz, en el suelo de la calle del sur, al llegar --- */
   label(`${d.id}_floor_name`, [32, 0.03, 52], FLAT, d.name.en.toLowerCase(), { es: d.name.es.toLowerCase(), en: d.name.en.toLowerCase() }, 1.5);
 
   /* --- Número de cada parcela, en el borde que da a su calle --- */
@@ -147,12 +163,14 @@ export function districtSeed(d: District, toNexo: { p: V3; yaw: number }): Seede
     void i;
   });
 
-  /* --- Luces de la avenida --- */
-  for (const z of [10, 26, 40]) {
+  /* --- Luces: la plaza del centro y las esquinas de la calle en anillo --- */
+  const [r0, r1, r2, r3_] = L.ring as [number, number, number, number];
+  const lights: [number, number][] = [[32, 32], [(r0 + r1) / 2, (r0 + r1) / 2], [(r2 + r3_) / 2, (r0 + r1) / 2], [(r0 + r1) / 2, (r2 + r3_) / 2], [(r2 + r3_) / 2, (r2 + r3_) / 2]];
+  for (const [lx, lz] of lights) {
     out.push({
-      id: `${d.id}_light_${z}`,
+      id: `${d.id}_light_${lx}_${lz}`,
       components: {
-        "transform@1": { p: [32, 3, z], r: [0, 0, 0, 1], s: [1, 1, 1], parent: null },
+        "transform@1": { p: [lx, 3, lz], r: [0, 0, 0, 1], s: [1, 1, 1], parent: null },
         "light@1": { type: "point", color: d.color, intensity: 2, range: 12, when: "always" },
       },
     });
@@ -171,4 +189,39 @@ function multiply(a: [number, number, number, number], b: [number, number, numbe
     r(aw * bz + ax * by - ay * bx + az * bw),
     r(aw * bw - ax * bx - ay * by - az * bz),
   ];
+}
+
+/* ------------------------------------------------------------------ */
+/* Migración de la disposición v1 (avenida y 4 filas) a la v2 (ciudad)  */
+/* ------------------------------------------------------------------ */
+
+/** Parcelas de la v1 (para encontrar lo que había en cada una). */
+export const PARCELS_V1: Parcel[] = legacyV1;
+
+/** Ids de la v1 que ya no existen en la v2: su proyecto pasa a la parcela nueva del norte. */
+export const RENAMED_PARCELS: Record<string, string> = { B4: "A5", C4: "A6" };
+
+export function parcelIdV2(oldId: string): string {
+  return RENAMED_PARCELS[oldId] ?? oldId;
+}
+
+/** Parcela de la v1 que contiene un punto (con medio metro de margen), o null. */
+export function parcelV1At(x: number, z: number): Parcel | null {
+  const hw = L.parcel.w / 2 + 0.5, hd = L.parcel.d / 2 + 0.5;
+  return PARCELS_V1.find((q) => Math.abs(x - q.x) <= hw && Math.abs(z - q.z) <= hd) ?? null;
+}
+
+/**
+ * Lleva una pieza de su parcela v1 a la misma parcela en la v2: la gira lo que haya girado la
+ * parcela (alrededor de su centro) y la traslada. Devuelve null si la pieza no estaba en una parcela.
+ */
+export function migrateParcelPose(p: V3, r: [number, number, number, number]): { p: V3; r: [number, number, number, number] } | null {
+  const old = parcelV1At(p[0], p[2]);
+  if (!old) return null;
+  const i = parcelIndex(parcelIdV2(old.id));
+  const now = PARCELS[i];
+  if (!now) return null;
+  const delta = now.facing - old.facing;
+  const np = at(now.x, now.z, delta, p[0] - old.x, p[1], p[2] - old.z);
+  return { p: np, r: multiply(yaw(delta), r) };
 }

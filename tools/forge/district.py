@@ -1,6 +1,8 @@
 """
-Distritos: suelo con avenida, calles y 16 parcelas de 10×10 m bordeadas de luz del color del
-distrito, y la puerta de vuelta al nexo. Más el emblema de cada distrito (su monumento en el nexo).
+Distritos (disposición v2): suelo con la ciudad en el centro (su cruz de calles y su plaza; los
+edificios, en city.py), la calle en anillo y las 16 parcelas de 10×10 m alrededor, bordeadas de luz
+del color del distrito, y la puerta de vuelta al nexo. Más el emblema de cada distrito (su
+monumento en el nexo).
 
 La disposición sale de apps/realtime/src/districts.json (la misma que usan el servidor y la web).
 """
@@ -54,14 +56,25 @@ def ground(lay: dict, d: dict, detail: int = 1):
     # Base del chunk (el vacío se ve por debajo de los bordes)
     p.box((-S / 2, -S / 2, -0.62), (S / 2, S / 2, -0.6), void, skip=("-z",))
     _rect(p, 0, 0, S, S, -0.6, 0.0, floor)
-    # Avenida y calles, un tono más claras
-    av = lay["avenue"]
-    _rect(p, av["x0"], 0.5, av["x1"], S - 0.5, 0.0, 0.003, street)
-    for z0, z1 in lay["streets"]:
-        _rect(p, 0.5, z0, S - 0.5, z1, 0.0, 0.003, street)
-    # Bordes de la avenida con luz blanca fría (guía del camino)
-    for x in (av["x0"], av["x1"] - 0.06):
-        _rect(p, x, 0.5, x + 0.06, S - 0.5, 0.003, 0.007, white)
+    # Calle en anillo alrededor de la ciudad, un tono más clara, con sus bordes de luz blanca fría.
+    r0, r1, r2, r3_ = lay["ring"]
+    for (x0, z0, x1, z1) in ((0.5, r0, S - 0.5, r1), (0.5, r2, S - 0.5, r3_), (r0, r1, r1, r2), (r2, r1, r3_, r2)):
+        _rect(p, x0, z0, x1, z1, 0.0, 0.003, street)
+    for x in (r0, r3_ - 0.06):
+        _rect(p, x, r1, x + 0.06, r2, 0.003, 0.007, white)
+    for z in (r0, r3_ - 0.06):
+        _rect(p, 0.5, z, S - 0.5, z + 0.06, 0.003, 0.007, white)
+    # La ciudad: acera del color del distrito en el borde, cruz de calles y plaza central.
+    c = lay["city"]
+    pave = mat("losa", "#3a4252")
+    _rect(p, c["x0"], c["z0"], c["x1"], c["z1"], 0.0, 0.004, pave)
+    _frame_lines(p, c["x0"], c["z0"], c["x1"], c["z1"], 0.004, 0.1, neon)
+    h = c["cross"] / 2
+    C2 = S / 2
+    _rect(p, C2 - h, c["z0"], C2 + h, c["z1"], 0.004, 0.006, street)
+    _rect(p, c["x0"], C2 - h, c["x1"], C2 + h, 0.004, 0.006, street)
+    seg = 48 if detail else 24
+    p.lathe((0, 0, 0), [(c["plaza"], 0.008), (c["plaza"] - 0.15, 0.008)], neon, segments=seg, smooth=False)
     # Parcelas: rejilla octogonal y contorno de luz del color del distrito
     W, D = lay["parcel"]["w"], lay["parcel"]["d"]
     for q in lay["parcels"]:

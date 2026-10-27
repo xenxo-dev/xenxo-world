@@ -1,23 +1,23 @@
 {
- "$comment": "Distritos y su plantilla de parcelas (coordenadas del chunk: X este, Z sur, metros). La usan el servidor (districts.ts), la forja (tools/forge/district.py) y la web (por GET /districts). Cada parcela mide 10×10 m y mira a su calle; el portal del proyecto va al fondo de la parcela. Si cambias algo, vuelve a forjar (npm run forge:districts) y sube DISTRICT_SEED_VERSION.",
+ "$comment": "Distritos y su plantilla (coordenadas del chunk: X este, Z sur, metros). La usan el servidor (districts.ts), la forja (tools/forge/district.py y city.py) y la web (por GET /districts). Disposición v2: en el centro, la ciudad del distrito (`city`, con una cruz de calles y una plaza); alrededor, una calle en anillo (`ring`: de 10 a 14 y de 50 a 54) y, por fuera, las 16 parcelas de 10×10 m mirando a esa calle (A1–A6 al norte, B1–B3 al oeste, C1–C3 al este y D1–D4 al sur, a los lados de la puerta). El portal del proyecto va al fondo de la parcela. Si cambias algo, vuelve a forjar (npm run forge:districts) y sube DISTRICT_SEED_VERSION; si mueves parcelas, añade su migración (districts.ts).",
  "parcel": {
   "w": 10,
   "d": 10,
   "frame_back": 3
  },
- "avenue": {
-  "x0": 27,
-  "x1": 37
+ "city": {
+  "x0": 14,
+  "z0": 14,
+  "x1": 50,
+  "z1": 50,
+  "cross": 6,
+  "plaza": 7
  },
- "streets": [
-  [
-   16,
-   20
-  ],
-  [
-   44,
-   48
-  ]
+ "ring": [
+  10,
+  14,
+  50,
+  54
  ],
  "gate": {
   "z": 61.5,
@@ -31,98 +31,98 @@
  "parcels": [
   {
    "id": "A1",
-   "x": 8,
-   "z": 11,
+   "x": 5,
+   "z": 5,
    "facing": 0
   },
   {
    "id": "A2",
-   "x": 19,
-   "z": 11,
+   "x": 15.8,
+   "z": 5,
    "facing": 0
   },
   {
    "id": "A3",
-   "x": 45,
-   "z": 11,
+   "x": 26.6,
+   "z": 5,
    "facing": 0
   },
   {
    "id": "A4",
-   "x": 56,
-   "z": 11,
+   "x": 37.4,
+   "z": 5,
+   "facing": 0
+  },
+  {
+   "id": "A5",
+   "x": 48.2,
+   "z": 5,
+   "facing": 0
+  },
+  {
+   "id": "A6",
+   "x": 59,
+   "z": 5,
    "facing": 0
   },
   {
    "id": "B1",
-   "x": 8,
-   "z": 25,
-   "facing": 180
+   "x": 5,
+   "z": 19,
+   "facing": 90
   },
   {
    "id": "B2",
-   "x": 19,
-   "z": 25,
-   "facing": 180
+   "x": 5,
+   "z": 32,
+   "facing": 90
   },
   {
    "id": "B3",
-   "x": 45,
-   "z": 25,
-   "facing": 180
-  },
-  {
-   "id": "B4",
-   "x": 56,
-   "z": 25,
-   "facing": 180
+   "x": 5,
+   "z": 45,
+   "facing": 90
   },
   {
    "id": "C1",
-   "x": 8,
-   "z": 39,
-   "facing": 0
+   "x": 59,
+   "z": 19,
+   "facing": 270
   },
   {
    "id": "C2",
-   "x": 19,
-   "z": 39,
-   "facing": 0
+   "x": 59,
+   "z": 32,
+   "facing": 270
   },
   {
    "id": "C3",
-   "x": 45,
-   "z": 39,
-   "facing": 0
-  },
-  {
-   "id": "C4",
-   "x": 56,
-   "z": 39,
-   "facing": 0
+   "x": 59,
+   "z": 45,
+   "facing": 270
   },
   {
    "id": "D1",
-   "x": 8,
-   "z": 53,
+   "x": 5,
+   "z": 59,
    "facing": 180
   },
   {
    "id": "D2",
-   "x": 19,
-   "z": 53,
+   "x": 16,
+   "z": 59,
    "facing": 180
   },
   {
    "id": "D3",
-   "x": 45,
-   "z": 53,
+   "x": 48,
+   "z": 59,
    "facing": 180
   },
   {
    "id": "D4",
-   "x": 56,
-   "z": 53,
+   "x": 59,
+   "z": 59,
    "facing": 180
   }
  ],

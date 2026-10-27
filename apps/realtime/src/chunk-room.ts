@@ -29,7 +29,7 @@ import {
 import type { Env } from "./index";
 import { randomId, type Principal } from "./auth";
 import { plazaSeed, SEED_VERSION } from "./seed";
-import { districtByChunk, districtSeed, DISTRICT_SEED_VERSION, PARCELS, parcelIndex, parcelReserved, parcelSlot } from "./districts";
+import { districtByChunk, districtSeed, DISTRICT_SEED_VERSION, migrateParcelPose, PARCEL_LAYOUT_VERSION, PARCELS, PARCELS_V1, parcelIdV2, parcelIndex, parcelReserved, parcelSlot } from "./districts";
 import { nexoArrival, NEXO_BOUNDS, NEXO_SEED_VERSION, nexoSeed, SHOWCASE_SLOTS } from "./nexo";
 import { portalEntities, r3, type Seeded } from "./places";
 import { fitsZone, localBox, worldBox, type Zone } from "./zone";
@@ -207,8 +207,48 @@ export class ChunkRoom extends DurableObject<Env> {
     }
     else {
       const d = districtByChunk(this.chunkId);
-      if (d) this.applySeed(`district_${d.id}`, DISTRICT_SEED_VERSION, districtSeed(d, nexoArrival(d.id)));
+      if (d) {
+        this.migrateParcelLayout();
+        this.applySeed(`district_${d.id}`, DISTRICT_SEED_VERSION, districtSeed(d, nexoArrival(d.id)));
+      }
     }
+  }
+
+  /**
+   * Disposición v2 de los distritos (la ciudad en el centro y las parcelas alrededor): lo que la
+   * gente tenía en una parcela de la v1 (el portal de su proyecto y lo que construyó su agente) se
+   * lleva a la misma parcela en su sitio nuevo, girado como ella. Una sola vez por chunk.
+   */
+  private migrateParcelLayout() {
+    const done = this.sql.exec<{ v: string }>("SELECT v FROM meta WHERE k = 'parcel_layout'").toArray()[0]?.v;
+    if (done === PARCEL_LAYOUT_VERSION) return;
+    this.ctx.storage.transactionSync(() => {
+      let moved = 0;
+      const rows = this.sql.exec<{ entity_id: string; rev: number; data: string }>("SELECT entity_id, rev, data FROM entities WHERE owner != 'system'").toArray();
+      for (const row of rows) {
+        const e = JSON.parse(row.data) as Entity;
+        const t = e.components["transform@1"] as { p: number[]; r: number[]; s: number[]; parent: string | null } | undefined;
+        if (!t || t.parent) continue;
+        const m = migrateParcelPose(t.p as [number, number, number], t.r as [number, number, number, number]);
+        if (!m) continue;
+        (e.components as Record<string, unknown>)["transform@1"] = { ...t, p: m.p, r: m.r };
+        e.rev = row.rev + 1;
+        this.sql.exec("UPDATE entities SET rev = ?, data = ? WHERE entity_id = ?", e.rev, JSON.stringify(e), row.entity_id);
+        moved++;
+      }
+      // Los portales de los proyectos: de su índice en la v1 a su índice en la v2 (en dos pasos: es UNIQUE).
+      const stands = this.sql.exec<{ project_id: string; slot: number }>("SELECT project_id, slot FROM stands").toArray();
+      for (const s of stands) this.sql.exec("UPDATE stands SET slot = ? WHERE project_id = ?", -1 - s.slot, s.project_id);
+      for (const s of stands) {
+        const old = PARCELS_V1[s.slot];
+        const i = old ? parcelIndex(parcelIdV2(old.id)) : -1;
+        if (i >= 0) this.sql.exec("UPDATE stands SET slot = ? WHERE project_id = ?", i, s.project_id);
+        else this.sql.exec("DELETE FROM stands WHERE project_id = ?", s.project_id);
+      }
+      this.logEvent("system", "MIGRATE", "parcel_layout", Number(PARCEL_LAYOUT_VERSION), null);
+      this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('parcel_layout', ?)", PARCEL_LAYOUT_VERSION);
+      void moved;
+    });
   }
 
   /**
