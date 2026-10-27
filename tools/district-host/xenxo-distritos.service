@@ -1,0 +1,24 @@
+# /etc/systemd/system/xenxo-distritos.service — el servidor de distritos (workerd).
+[Unit]
+Description=xenxo: servidor de distritos (workerd)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=xenxo
+Group=xenxo
+WorkingDirectory=/opt/xenxo-distritos
+EnvironmentFile=/etc/xenxo-distritos.env
+ExecStart=/opt/xenxo-distritos/workerd serve /opt/xenxo-distritos/distritos.capnp --experimental
+Restart=always
+RestartSec=3
+# Endurecido: solo escribe en sus datos.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/xenxo-distritos
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

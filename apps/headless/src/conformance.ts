@@ -28,6 +28,15 @@ async function freeParcel(district = "frontera"): Promise<string> {
   return q.id;
 }
 
+/** Parcela libre en el primer distrito que la tenga (las pruebas repetidas llenan los distritos). */
+async function freeSpot(order = ["arcade", "pixel", "cero", "vertical", "agora", "taller", "frontera"]): Promise<{ district: string; parcel: string }> {
+  for (const district of order) {
+    const parcel = await freeParcel(district).catch(() => null);
+    if (parcel) return { district, parcel };
+  }
+  throw new Error("no quedan parcelas libres en ningún distrito");
+}
+
 let failed = 0;
 async function scenario(name: string, fn: () => Promise<void>) {
   try {
@@ -549,6 +558,23 @@ await scenario("nexo y distritos: el nexo lleva a la plaza y a los distritos, y 
   p.close();
 });
 
+await scenario("pase: /chunk/<id>/ticket dice dónde conectar (aquí con el mismo token, o fuera con un pase firmado)", async () => {
+  const g = await fetch(new URL("/auth/guest", baseUrl), { method: "POST" });
+  const token = ((await g.json()) as { token: string }).token;
+  assert((await fetch(new URL("/chunk/c_0_-1/ticket", baseUrl), { method: "POST" })).status === 401, "sin token no hay pase");
+  const ds = ((await (await fetch(new URL("/districts", baseUrl))).json()) as { districts: { chunk_id: string; remote?: boolean }[] }).districts;
+  for (const d of ds) {
+    const r = await fetch(new URL(`/chunk/${d.chunk_id}/ticket`, baseUrl), { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+    assert(r.ok, `pase para ${d.chunk_id}`);
+    const t = (await r.json()) as { url: string; remote: boolean };
+    assert(t.remote === !!d.remote, `remote coincide con /districts en ${d.chunk_id}`);
+    assert(t.remote ? t.url.includes("ticket=") && !t.url.includes(token) : t.url.includes(`token=`), `la URL lleva pase si es de fuera y nunca el token fuera (${d.chunk_id})`);
+    const c = await XenxoClient.connect({ baseUrl, chunkId: d.chunk_id, token });
+    assert(c.welcome.chunk_id === d.chunk_id, `se entra en ${d.chunk_id} por su pase`);
+    c.close();
+  }
+});
+
 await scenario("nexo en solitario: nadie ve a nadie, no hay poses ni chat; en la plaza, sí", async () => {
   const api = new Api(baseUrl);
   await api.register(`conf ${randomUUID().slice(0, 6)}`);
@@ -1053,8 +1079,7 @@ await scenario("juegos de fuera: ficha xenxo.json leída por el servidor, enlace
     const cover = await dev.upload(makeCoverPng(320, 180, [Math.floor(Math.random() * 255), 30, 160]), "cover");
     assert(model.ok && cover.ok, "subidas");
     const created = await dev.call<{ project: { id: string; review: string } }>("POST", "/projects", {
-      title: "Juego de fuera", summary: "", url: "https://juego-de-fuera.example.org/", district: "arcade",
-      parcel: await freeParcel("arcade"), cover_hash: cover.data.hash, mesh_hash: model.data.hash,
+      title: "Juego de fuera", summary: "", url: "https://juego-de-fuera.example.org/", ...(await freeSpot()), cover_hash: cover.data.hash, mesh_hash: model.data.hash,
     });
     assert(created.ok && created.data.project.review === "pending", "un proyecto nuevo espera revisión");
     const id = created.data.project.id;
@@ -1164,8 +1189,7 @@ await scenario("jam: convocatoria con fechas, un juego por persona, votos con cu
     const cover = await api.upload(makeCoverPng(320, 180, [Math.floor(Math.random() * 255), 90, 40]), "cover");
     assert(model.ok && cover.ok, "subidas");
     const c = await api.call<{ project: { id: string } }>("POST", "/projects", {
-      title: "Juego de jam", summary: "", url: "https://jam.example.org/", district: "arcade",
-      parcel: await freeParcel("arcade"), cover_hash: cover.data.hash, mesh_hash: model.data.hash,
+      title: "Juego de jam", summary: "", url: "https://jam.example.org/", ...(await freeSpot()), cover_hash: cover.data.hash, mesh_hash: model.data.hash,
     });
     assert(c.ok, `crear proyecto: ${JSON.stringify(c)}`);
     const id = c.data.project.id;

@@ -19,7 +19,8 @@
     "forge": "python3 tools/forge/forge.py && npm run forge:pack",
     "forge:pack": "tsx tools/forge/pack.mjs",
     "forge:districts": "python3 tools/forge/forge.py --only=district_arcade,district_pixel,district_agora,district_taller,district_frontera,emblem_arcade,emblem_pixel,emblem_agora,emblem_taller,emblem_frontera,district_cero,district_vertical,emblem_cero,emblem_vertical,district_city_arcade,district_city_pixel,district_city_agora,district_city_taller,district_city_frontera,district_city_cero,district_city_vertical && tsx tools/forge/pack.mjs --keep",
-    "forge:nexo": "python3 tools/forge/forge.py --only=nexo_floor,nexo_beacon,nexo_gate,nexo_island,nexo_spires_arcade,nexo_spires_pixel,nexo_spires_agora,nexo_spires_taller,nexo_spires_frontera,nexo_spires_cero,nexo_spires_vertical,nexo_decor_plaza,nexo_decor_arcade,nexo_decor_pixel,nexo_decor_agora,nexo_decor_taller,nexo_decor_frontera,nexo_decor_cero,nexo_decor_vertical && tsx tools/forge/pack.mjs --keep"
+    "forge:nexo": "python3 tools/forge/forge.py --only=nexo_floor,nexo_beacon,nexo_gate,nexo_island,nexo_spires_arcade,nexo_spires_pixel,nexo_spires_agora,nexo_spires_taller,nexo_spires_frontera,nexo_spires_cero,nexo_spires_vertical,nexo_decor_plaza,nexo_decor_arcade,nexo_decor_pixel,nexo_decor_agora,nexo_decor_taller,nexo_decor_frontera,nexo_decor_cero,nexo_decor_vertical && tsx tools/forge/pack.mjs --keep",
+    "build:district-host": "cd apps/realtime && wrangler deploy --dry-run --config wrangler.district.toml --outdir ../../dist/distritos && cp ../../tools/district-host/distritos.capnp ../../dist/distritos/"
   },
   "engines": {
     "node": ">=22"

@@ -81,6 +81,23 @@ reparte `PEER_JOIN`/`PEER_LEAVE`, ignora `POSE` (el cliente no lo manda) y respo
 
 Lectura pública sin WebSocket: `GET /chunk/<chunk_id>/state` (contadores y últimos eventos, para el panel 2D).
 
+**Distritos en otro servidor.** Un distrito puede vivir fuera de Cloudflare, en el servidor de
+distritos (`tools/district-host/`, mismo código con workerd). `GET /districts` lo marca con
+`remote: true` y su `GET /chunk/<id>/ws` responde `421`. Para entrar en cualquier chunk que no sea la
+plaza ni el nexo, el cliente puede pedir dónde conectar:
+
+- `POST /chunk/<chunk_id>/ticket` con `Authorization: Bearer <token>` → `{ url, remote }`. Si el chunk
+  está aquí, `url` es el WebSocket de siempre con el mismo token. Si vive fuera, es el WebSocket del
+  servidor de distritos con un **pase** (`?ticket=`): quién entra y a qué chunk, firmado con Ed25519
+  por el Worker y válido 60 s. El servidor de distritos solo tiene la clave pública.
+- Un agente de parcela con la clave revocada no recibe pase (como en el WebSocket).
+- Los servidores que no tienen `/ticket` responden `404`: entonces se conecta como siempre.
+
+Lo que el Worker le pide a un chunk de fuera (colocar o retirar un portal, expulsar, el chat de una
+denuncia…) va por HTTPS firmado (`X-Xenxo-Call`, atado al chunk, al método y al hash del cuerpo, 30 s).
+Las medidas de los modelos de la gente las da `GET /assets/<hash>/meta`. Moverlo de servidor:
+`POST /mod/chunks/<chunk_id>/move { to: "remote" | "local" }` (solo la clave de administración).
+
 ## 7. Mensajes
 
 ### Cliente → servidor

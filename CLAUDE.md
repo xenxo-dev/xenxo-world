@@ -22,6 +22,7 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 | `packages/sdk` | `@xenxo/sdk` (MIT): «Entrar con xenxo», simulador local y `xenxo.back()` para juegos web; se sirve en `xenxo.io/sdk/` con un juego de ejemplo y se publica en npm |
 | `packages/create-xenxo` | Plantilla (MIT): `npm create xenxo` crea un juego 2D o 3D con el SDK, `xenxo.json` y `AGENTS.md`; con `--multi`, una sala (Worker + Durable Object) para la cuenta de Cloudflare del creador |
 | `games/` | Juegos de ejemplo hechos como cualquier creador (cada uno con su licencia, su `NOTICE.md` y su dominio): `hexgl` (Arcade; uso no comercial), `2048` (Píxel; MIT) y `hextris` (Píxel; GPL-3.0) |
+| `tools/district-host` | El servidor de distritos en una máquina propia: workerd (`src/district-host.ts`, `wrangler.district.toml`), servicios, copias al NAS y guía (`README.md`) |
 | `docs/PROTOCOL.md` | Explicación del contrato |
 
 ## Antes de dar algo por terminado
@@ -43,6 +44,13 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 - Los modelos del sistema (plaza y avatares de serie) **se generan**, no se editan: `npm run forge` (ver `tools/forge/README.md`) y `tools/avatars/`. No toques a mano `apps/realtime/seed-assets/`, `seed-assets.ts`, `seed-covers.ts` (lo genera `tools/covers/`) ni `avatar-presets.*`. Para rehacer solo el nexo o los distritos: `npm run forge:nexo` / `npm run forge:districts` (si añades un distrito, `forge:nexo` también: lleva sus agujas).
 - Materiales de los modelos: `xenxo:<biblioteca>.<tinte>` (lista en `docs/PROTOCOL.md` §12 bis). Texturas y recursos nuevos: CC0 de las plataformas de `docs/RECURSOS.md` (Poly Haven y ambientCG van automáticas por `tools/materials/fetch.py`) o **generadas con IA** (Higgsfield o plataformas parecidas) siguiendo `tools/materials/generated/README.md`: la plataforma da la propiedad y el uso comercial, sin marca de agua, con su `meta.json` (plataforma, modelo, fecha, plan, prompt) y su línea en `CREDITS.md`, sin marcas ni personas reales en el prompt, y pidiendo permiso antes de gastar créditos. Siempre se guardan en el repo y se sirven desde xenxo.
 - `DO_JURISDICTION = "eu"` en `wrangler.toml`: no lo cambies tras el primer despliegue (los datos quedarían en otros objetos).
+
+## Distritos en una máquina propia
+
+- Un distrito vive en Cloudflare o en el servidor de distritos (`REMOTE_CHUNKS`, `DISTRICT_HOST`): el mismo `ChunkRoom` en los dos. Para entrar se pide `/chunk/<id>/ticket`; fuera, el pase lo firma el Worker con `DISTRICT_SIGNING_KEY` (secreto) y la máquina solo tiene la clave pública. Ningún secreto de xenxo va a la máquina.
+- El Worker llama a un chunk siempre con `chunk(env, id)`: si vive fuera, es HTTPS firmado y solo con los métodos de `REMOTE_METHODS` (`remote.ts`). Si añades un método que el Worker llame en un distrito, añádelo ahí. `ChunkRoom` no usa R2 directamente: `assetHead` (fuera, por `/assets/<hash>/meta`).
+- Moverlo de servidor: `/mod/chunks/<id>/move` (clave de administración). Antes de encender el primero, la política de privacidad dice dónde se procesan los distritos.
+- Que siga compilando: `npm run build:district-host` (también en CI). Para probar en local, el segundo servidor con `wrangler dev --config wrangler.district.toml --port 8788` y el Worker con `--var DISTRICT_HOST:http://localhost:8788 --var REMOTE_CHUNKS:… --var DISTRICT_SIGNING_KEY:…` (claves de prueba de `tools/district-host/keys.mjs`); la conformidad tiene que pasar igual.
 
 ## Rendimiento (Quest 3 es el mínimo)
 

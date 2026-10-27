@@ -1,0 +1,7 @@
+[Unit]
+Description=xenxo: copia de los distritos al NAS
+RequiresMountsFor=/mnt/nas
+
+[Service]
+Type=oneshot
+ExecStart=/opt/xenxo-distritos/backup.sh

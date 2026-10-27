@@ -8,7 +8,8 @@ import { parseServerMessage, type ClientMessage, type ServerMessage } from "@xen
 export type ConnectionStatus = "idle" | "connecting" | "open" | "closed";
 
 export interface NetworkAdapter {
-  connect(chunkId: string, token: string): void;
+  /** `url`: dónde conectar si el chunk vive en otro servidor (lo da su pase); si no, aquí con el token. */
+  connect(chunkId: string, token: string, url?: string): void;
   send(m: ClientMessage): void;
   onMessage(fn: (m: ServerMessage) => void): () => void;
   onStatus(fn: (s: ConnectionStatus) => void): () => void;
@@ -22,11 +23,13 @@ export class WebSocketAdapter implements NetworkAdapter {
 
   constructor(private baseUrl: string) {}
 
-  connect(chunkId: string, token: string) {
+  connect(chunkId: string, token: string, remote?: string) {
     this.close();
-    const url = new URL(`/chunk/${chunkId}/ws`, this.baseUrl);
-    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-    url.searchParams.set("token", token);
+    const url = new URL(remote ?? `/chunk/${chunkId}/ws`, this.baseUrl);
+    if (!remote) {
+      url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+      url.searchParams.set("token", token);
+    }
     this.emitStatus("connecting");
     const ws = new WebSocket(url);
     ws.onopen = () => this.emitStatus("open");

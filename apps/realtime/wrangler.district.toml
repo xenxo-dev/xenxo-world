@@ -1,0 +1,23 @@
+# El servidor de distritos (docs/ALOJAMIENTO-DISTRITOS.md): solo los chunks, sin cuentas, sin R2.
+# En local: npx wrangler dev --config wrangler.district.toml --port 8788 --var DISTRICT_PUBLIC_KEY:'<jwk>'
+# En la máquina propia se compila con `npm run build:district-host` y lo corre workerd (tools/district-host/).
+name = "xenxo-distritos"
+main = "src/district-host.ts"
+compatibility_date = "2026-10-01"
+workers_dev = false
+
+[[durable_objects.bindings]]
+name = "CHUNK"
+class_name = "ChunkRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ChunkRoom"]
+
+[vars]
+# Chunks que atiende este servidor (los mismos que REMOTE_CHUNKS en el Worker de Cloudflare).
+HOSTED_CHUNKS = "c_1_0,c_-1_0,c_0_1,c_0_-1,c_1_-1,c_-1_-1,c_-1_1"
+# Worker de Cloudflare: medidas de los modelos de la gente.
+ASSETS_URL = "http://localhost:8787"
+# Clave pública Ed25519 (JWK) del Worker: se pasa al arrancar (no es secreta, pero es de cada instalación).
+DISTRICT_PUBLIC_KEY = ""

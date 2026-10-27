@@ -1,3 +1,4 @@
+import { refreshDistricts } from "./districts";
 import { msg, PLACES, type ClientMessage } from "@xenxo/protocol";
 import { REALTIME_URL } from "../config";
 import { accountToken } from "./account";
@@ -30,9 +31,23 @@ async function tokenForSession(): Promise<string> {
   return ((await r.json()) as { token: string }).token;
 }
 
+/**
+ * Los distritos pueden vivir en el servidor de distritos (docs/ALOJAMIENTO-DISTRITOS.md): entonces
+ * se pide un pase al Worker y se conecta donde diga. La plaza y el nexo siempre están aquí.
+ */
+async function remoteSocket(chunkId: string, token: string): Promise<string | undefined> {
+  if (chunkId === PLACES.nexo || chunkId === PLACES.plaza) return undefined;
+  const list = await refreshDistricts().catch(() => []);
+  if (!list.some((d) => d.chunk_id === chunkId && d.remote)) return undefined;
+  const r = await fetch(new URL(`/chunk/${chunkId}/ticket`, REALTIME_URL), { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+  if (!r.ok) throw new Error(`ticket ${r.status}`);
+  return ((await r.json()) as { url: string }).url;
+}
+
 async function connect() {
   try {
-    net.connect(chunk, await tokenForSession());
+    const token = await tokenForSession();
+    net.connect(chunk, token, await remoteSocket(chunk, token));
   } catch (e) {
     console.warn("[xenxo] sin conexión con el servidor de tiempo real", e);
     world.setStatus("closed");

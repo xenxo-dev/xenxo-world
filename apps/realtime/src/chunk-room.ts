@@ -116,6 +116,15 @@ class MutationError extends Error {
   }
 }
 
+/** Lo que se lleva un chunk al cambiar de servidor (dumpState/loadState). */
+export interface ChunkDump {
+  chunk: string;
+  parcel_layout: string | null;
+  entities: { entity_id: string; owner: string; rev: number; tris: number; data: string }[];
+  stands: { project_id: string; slot: number }[];
+  chat: { id: string; ts: number; sender: string; kind: string; display_name: string; session_id: string; text: string; hidden: number }[];
+}
+
 export class ChunkRoom extends DurableObject<Env> {
   private sql: SqlStorage;
   private chunkId: string | null = null;
@@ -531,12 +540,24 @@ export class ChunkRoom extends DurableObject<Env> {
         if (lods.length === 1) meshBounds = SYSTEM_BOUNDS.get(lod.hash) ?? null;
         continue;
       }
-      const meta = await this.env.ASSETS.head(assetKey(lod.hash));
+      const meta = await this.assetHead(lod.hash);
       if (!meta) throw new MutationError("not_found", `el asset ${lod.hash} no existe; súbelo antes a /assets`);
       lods.push({ hash: lod.hash, media: "model/gltf-binary", tris: Number(meta.customMetadata?.tris ?? 0) });
       if (lods.length === 1) meshBounds = parseBounds(meta.customMetadata?.bounds);
     }
     return { mu: { ...mu, components: { ...mu.components, "mesh@1": { ...mesh, lods } } }, meshBounds };
+  }
+
+  /**
+   * Medidas de un modelo de la gente (de R2). En el servidor de distritos no hay R2: se piden al
+   * Worker de Cloudflare (`ASSETS_URL`/assets/<hash>/meta), que las guarda en su caché.
+   */
+  private async assetHead(hash: string): Promise<{ customMetadata?: Record<string, string> } | null> {
+    if (this.env.ASSETS) return this.env.ASSETS.head(assetKey(hash));
+    const base = (this.env as unknown as { ASSETS_URL?: string }).ASSETS_URL;
+    if (!base) return null;
+    const r = await fetch(new URL(`/assets/${hash.replace(/^sha256:/, "")}/meta`, base));
+    return r.ok ? ((await r.json()) as { customMetadata?: Record<string, string> }) : null;
   }
 
   /** Medidas del modelo que ya lleva una entidad (para un PATCH en una parcela que solo la mueve). */
@@ -546,7 +567,7 @@ export class ChunkRoom extends DurableObject<Env> {
     const hash = mesh?.lods?.[0]?.hash;
     if (!hash) return null;
     if (SYSTEM_BOUNDS.has(hash)) return SYSTEM_BOUNDS.get(hash) ?? null;
-    const meta = await this.env.ASSETS.head(assetKey(hash));
+    const meta = await this.assetHead(hash);
     return parseBounds(meta?.customMetadata?.bounds);
   }
 
@@ -744,6 +765,44 @@ export class ChunkRoom extends DurableObject<Env> {
       }
     }
     return n;
+  }
+
+  /**
+   * Para mover un chunk de servidor (Cloudflare ↔ servidor de distritos): todo lo que no es del
+   * sistema (lo siembra cada servidor solo), los portales de los proyectos, el chat (que pueden
+   * pedir las denuncias) y la versión de la disposición de las parcelas.
+   */
+  async dumpState(): Promise<ChunkDump> {
+    this.ensureChunk(null);
+    return {
+      chunk: this.chunkId!,
+      parcel_layout: this.sql.exec<{ v: string }>("SELECT v FROM meta WHERE k = 'parcel_layout'").toArray()[0]?.v ?? null,
+      entities: this.sql.exec<ChunkDump["entities"][number]>("SELECT entity_id, owner, rev, tris, data FROM entities WHERE owner != 'system'").toArray(),
+      stands: this.sql.exec<ChunkDump["stands"][number]>("SELECT project_id, slot FROM stands").toArray(),
+      chat: this.sql.exec<ChunkDump["chat"][number]>("SELECT id, ts, sender, kind, display_name, session_id, text, hidden FROM chat").toArray(),
+    };
+  }
+
+  /** Sustituye lo de la gente por lo de otro servidor (ver dumpState). Echa a quien esté dentro. */
+  async loadState(d: ChunkDump): Promise<{ entities: number; stands: number; chat: number }> {
+    this.ensureChunk(null);
+    if (d.chunk !== this.chunkId) throw new Error("ese volcado es de otro chunk");
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec("DELETE FROM entities WHERE owner != 'system'");
+      for (const e of d.entities) {
+        this.sql.exec("INSERT OR REPLACE INTO entities (entity_id, owner, rev, tris, data) VALUES (?, ?, ?, ?, ?)", e.entity_id, e.owner, e.rev, e.tris, e.data);
+      }
+      this.sql.exec("DELETE FROM stands");
+      for (const s of d.stands) this.sql.exec("INSERT INTO stands (project_id, slot) VALUES (?, ?)", s.project_id, s.slot);
+      this.sql.exec("DELETE FROM chat");
+      for (const c of d.chat) {
+        this.sql.exec("INSERT INTO chat (id, ts, sender, kind, display_name, session_id, text, hidden) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", c.id, c.ts, c.sender, c.kind, c.display_name, c.session_id, c.text, c.hidden);
+      }
+      if (d.parcel_layout) this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('parcel_layout', ?)", d.parcel_layout);
+      this.logEvent("system", "IMPORT", this.chunkId!, d.entities.length, null);
+    });
+    for (const ws of this.ctx.getWebSockets()) ws.close(1012, "el distrito se ha movido de servidor: vuelve a entrar");
+    return { entities: d.entities.length, stands: d.stands.length, chat: d.chat.length };
   }
 
   async purgeOwner(owner: string): Promise<number> {

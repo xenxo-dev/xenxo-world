@@ -23,6 +23,8 @@ export interface DistrictInfo {
   name: Record<string, string>;
   desc: Record<string, string>;
   parcels: ParcelInfo[];
+  /** Vive en el servidor de distritos: para entrar hay que pedir un pase (ver session.ts). */
+  remote?: boolean;
 }
 
 /** Dónde se aparece al entrar en un distrito (junto a su puerta, mirando a la avenida). */

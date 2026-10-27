@@ -1,6 +1,6 @@
 # Distritos como ciudades completas: cómo y dónde alojarlos sin salir del plan gratuito
 
-Propuesta del 27-10-2026, pendiente de decidir. Contexto: `docs/LIMITES-CLOUDFLARE.md`.
+Decidido el 27-10-2026: los distritos irán en el portátil (MSI GP62VR, i7-7700HQ, 16 GB, SSD; fibra de 600 Mb). El DL380 queda de reserva. Instalación: `tools/district-host/README.md`. Contexto: `docs/LIMITES-CLOUDFLARE.md`.
 
 ## La meta
 
@@ -45,7 +45,7 @@ cuenta aguanta unas 950 visitas al día. Con ciudades grandes y gente quedándos
 4. **Parcelas:** las mismas reglas de hoy (clave `xk_`, presupuestos, revisión), pero más grandes y
    repartidas por los barrios.
 
-## Qué hay que construir
+## Qué hay que construir (hecho: pases, llamadas firmadas, servidor con workerd, mover de servidor, guía)
 
 - **Protocolo:** cada sala dice dónde vive (un `host` opcional en `districts.json`, `WELCOME` y
   `portal@1`), y `walk` también para las salas multijugador. Son campos opcionales: compatible, con su

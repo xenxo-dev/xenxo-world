@@ -3,6 +3,7 @@ import { ChunkId, PARCEL_BUDGETS, PLACES } from "@xenxo/protocol";
 import { assetMeta, assetKey, forgetAssets, handleGet, handleUpload } from "./assets";
 import { isAvatarPreset } from "./avatar-presets-check";
 import { randomId, resolveAgent, signToken, verifyToken, type Principal } from "./auth";
+import { CALL_TTL_MS, chunkList, REMOTE_METHODS, sha256B64, signRemote, TICKET_TTL_MS } from "./remote";
 import type { ChunkRoom, ShowcaseItem } from "./chunk-room";
 import { DISTRICTS, districtById, parcelIndex, parcelSpawn } from "./districts";
 import { SHOWCASE_SLOTS } from "./nexo";
@@ -32,6 +33,14 @@ export interface Env {
   /** Entrar con Google (opcional): cliente OAuth web. El secreto va en un secreto, nunca en el código. */
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  /**
+   * Distritos en otro servidor (docs/ALOJAMIENTO-DISTRITOS.md): su URL (https://…), qué chunks
+   * viven allí (separados por comas) y la clave privada Ed25519 (JWK, un secreto) con la que se
+   * firman los pases y las llamadas. Sin DISTRICT_HOST, todo vive en Cloudflare como siempre.
+   */
+  DISTRICT_HOST?: string;
+  REMOTE_CHUNKS?: string;
+  DISTRICT_SIGNING_KEY?: string;
 }
 
 /* ------------------------------------------------------------------ */
@@ -183,6 +192,12 @@ type Api<T> = { [K in keyof T]: T[K] extends (...a: infer A) => infer R ? (...a:
  * llega por RPC, sin pasar por fetch, no tiene otra forma de saberlo. fetch lo lleva en X-Chunk-Id.
  */
 function chunk(env: Env, id: string) {
+  if (isRemote(env, id)) return remoteChunk(env, id);
+  return localChunk(env, id);
+}
+
+/** El objeto del chunk en Cloudflare, viva donde viva ahora (para moverlo de servidor). */
+function localChunk(env: Env, id: string) {
   const ns = inJurisdiction(env, env.CHUNK);
   const stub = ns.get(ns.idFromName(id)) as unknown as Api<ChunkRoom> & { fetch(r: Request): Promise<Response> };
   // Los métodos del stub se llaman siempre sobre el stub (con otro `this` fallan) y no tienen
@@ -330,6 +345,49 @@ async function clearParcel(env: Env, district: string | null | undefined, projec
   await room.removeStand(projectId);
   await room.purgeOwner(`prj_${projectId}`);
   if (agents.length) await room.kick(agents);
+}
+
+/** ¿Vive este chunk en el servidor de distritos? */
+function isRemote(env: Env, id: string): boolean {
+  return !!env.DISTRICT_HOST && !!env.DISTRICT_SIGNING_KEY && chunkList(env.REMOTE_CHUNKS).has(id);
+}
+
+/**
+ * Un chunk del servidor de distritos, con la misma forma que el de aquí: cada método es una
+ * llamada HTTPS firmada (solo los de REMOTE_METHODS) y fetch lleva el estado público.
+ */
+function remoteChunk(env: Env, id: string) {
+  const host = env.DISTRICT_HOST!.replace(/\/+$/, "");
+  const call = async (method: string, args: unknown[]) => {
+    if (!REMOTE_METHODS.has(method)) throw new Error(`método remoto no permitido: ${method}`);
+    const body = JSON.stringify(args);
+    const token = await signRemote(env.DISTRICT_SIGNING_KEY!, { typ: "rpc", chunk: id, method, body: await sha256B64(body), exp: Date.now() + CALL_TTL_MS });
+    const r = await fetch(`${host}/rpc/${encodeURIComponent(id)}/${method}`, { method: "POST", headers: { "Content-Type": "application/json", "X-Xenxo-Call": token }, body });
+    if (!r.ok) throw new Error(`servidor de distritos: ${method} → ${r.status}`);
+    return (await r.json()) as unknown;
+  };
+  return new Proxy({} as Api<ChunkRoom> & { fetch(r: Request): Promise<Response> }, {
+    get(_target, prop) {
+      if (typeof prop !== "string") return undefined;
+      if (prop === "fetch") return (r: Request) => fetch(`${host}/chunk/${encodeURIComponent(id)}${new URL(r.url).pathname}`);
+      return (...args: unknown[]) => call(prop, args);
+    },
+  });
+}
+
+/** URL del WebSocket de un chunk para quien ya tiene su token de sesión (pase si vive fuera). */
+async function socketFor(env: Env, req: Request, chunkId: string, p: Principal, token: string): Promise<string> {
+  if (isRemote(env, chunkId)) {
+    const ticket = await signRemote(env.DISTRICT_SIGNING_KEY!, { typ: "ticket", chunk: chunkId, principal: p, exp: Date.now() + TICKET_TTL_MS });
+    const u = new URL(`/chunk/${encodeURIComponent(chunkId)}/ws`, env.DISTRICT_HOST!);
+    u.protocol = u.protocol === "http:" ? "ws:" : "wss:";
+    u.searchParams.set("ticket", ticket);
+    return u.toString();
+  }
+  const u = new URL(`/chunk/${encodeURIComponent(chunkId)}/ws`, req.url);
+  u.protocol = u.protocol === "http:" ? "ws:" : "wss:";
+  u.searchParams.set("token", token);
+  return u.toString();
 }
 
 function directory(env: Env) {
@@ -534,6 +592,20 @@ export default {
       }
 
       /* --- Assets --- */
+      // Medidas de un modelo de la gente (triángulos y caja): las usa el servidor de distritos, que
+      // no tiene R2. Inmutables por hash; se guardan en la caché del centro de datos.
+      const metaPath = path.match(/^\/assets\/([0-9a-f]{64})\/meta$/);
+      if (metaPath && req.method === "GET") {
+        const cache = (globalThis as unknown as { caches?: { default?: Cache } }).caches?.default;
+        const key = new Request(`https://xenxo-cache.local/meta/${metaPath[1]}`);
+        const hit = await cache?.match(key);
+        if (hit) return new Response(hit.body, { headers: { ...h, "Content-Type": "application/json", "Cache-Control": "public, max-age=86400" } });
+        const head = await env.ASSETS.head(assetKey(`sha256:${metaPath[1]}`));
+        if (!head) return json({ error: "not_found" }, 404, h);
+        const body = JSON.stringify({ customMetadata: head.customMetadata ?? {} });
+        if (cache) ctx.waitUntil(cache.put(key, new Response(body, { headers: { "Cache-Control": "public, max-age=86400" } })));
+        return new Response(body, { headers: { ...h, "Content-Type": "application/json", "Cache-Control": "public, max-age=86400" } });
+      }
       // /s/<hash>.<ext> lo sirve Cloudflare como estático sin pasar por aquí; si llega, es que no
       // estaba (p. ej. la web es más nueva que este Worker): se atiende como cualquier asset.
       const asset = path.match(/^\/assets\/([0-9a-f]{64})$/) ?? path.match(/^\/s\/([0-9a-f]{64})\.(?:glb|webp)$/);
@@ -554,7 +626,9 @@ export default {
 
       /* --- Distritos y parcelas (lectura pública) --- */
       if (path === "/districts" && req.method === "GET") {
-        return json({ districts: await dir.districts() }, 200, { ...h, "Cache-Control": "public, max-age=10" });
+        // `remote`: el distrito vive en el servidor de distritos (hay que pedir pase para entrar).
+        const list = (await dir.districts()).map((d) => (isRemote(env, d.chunk_id) ? { ...d, remote: true } : d));
+        return json({ districts: list }, 200, { ...h, "Cache-Control": "public, max-age=10" });
       }
 
       /* --- Proyectos (lectura pública) --- */
@@ -857,6 +931,21 @@ export default {
       if (path.startsWith("/mod/")) {
         const modId = isAdmin ? `admin:${principal!.sub}` : uid && (await dir.isModerator(uid)) ? `usr_${uid}` : null;
         if (!modId) return json({ error: "forbidden", message: "solo moderación" }, 403, h);
+        // Mover un chunk de servidor: copia lo de la gente de Cloudflare al servidor de distritos (o al
+        // revés). Solo con la clave de administración. Primero se copia; después se cambia REMOTE_CHUNKS.
+        const mv = path.match(/^\/mod\/chunks\/([^/]+)\/move$/);
+        if (mv && req.method === "POST") {
+          if (!isAdmin) return json({ error: "forbidden", message: "solo con la clave de administración" }, 403, h);
+          const id = mv[1]!;
+          if (!ChunkId.safeParse(id).success || !env.DISTRICT_HOST || !env.DISTRICT_SIGNING_KEY) return json({ error: "bad_request", message: "falta DISTRICT_HOST o el chunk no es válido" }, 400, h);
+          const to = (await readJson(req)).to;
+          if (to !== "remote" && to !== "local") return json({ error: "bad_request", message: "to: remote | local" }, 400, h);
+          const here = localChunk(env, id);
+          const there = remoteChunk(env, id);
+          const dump = to === "remote" ? await here.dumpState() : ((await there.dumpState()) as Awaited<ReturnType<typeof here.dumpState>>);
+          const r = to === "remote" ? await there.loadState(dump) : await here.loadState(dump);
+          return json({ moved: id, to, ...(r as object) }, 200, { ...h, "Cache-Control": "no-store" });
+        }
         if (path === "/mod/queue" && req.method === "GET") return json(await dir.moderationQueue(), 200, { ...h, "Cache-Control": "no-store" });
         if (path === "/mod/log" && req.method === "GET") return json({ log: await dir.moderationLog() }, 200, { ...h, "Cache-Control": "no-store" });
         // Quién modera: lo ve moderación; nombrar y retirar, solo el fundador (o la clave de administración).
@@ -947,6 +1036,21 @@ export default {
       }
 
       /* --- Chunks --- */
+      // Pase para entrar en un chunk: dónde conectar el WebSocket (aquí, con el mismo token; o en el
+      // servidor de distritos, con un pase firmado de 60 s). Lleva el token de sesión en Authorization.
+      const tk = path.match(/^\/chunk\/([^/]+)\/ticket$/);
+      if (tk && req.method === "POST") {
+        const chunkId = tk[1]!;
+        if (!ChunkId.safeParse(chunkId).success) return json({ error: "chunk inválido" }, 400, h);
+        const raw = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
+        const p = await verifyToken(raw, env.TOKEN_SECRET);
+        if (!p) return json({ error: "unauthorized" }, 401, h);
+        if (p.zone && !(await directory(env).agentKeyAlive(p.sub.replace(/^agt_/, "")))) {
+          return json({ error: "unauthorized", message: "tu clave de agente ya no vale" }, 401, h);
+        }
+        return json({ url: await socketFor(env, req, chunkId, p, raw), remote: isRemote(env, chunkId) }, 200, { ...h, "Cache-Control": "no-store" });
+      }
+
       const m = path.match(/^\/chunk\/([^/]+)\/(ws|state)$/);
       if (m) {
         const chunkId = m[1]!;
@@ -968,6 +1072,9 @@ export default {
           return new Response(body, { status: r.status, headers: out });
         }
 
+        if (m[2] === "ws" && isRemote(env, chunkId)) {
+          return json({ error: "elsewhere", message: "este distrito vive en otro servidor: pide un pase en /chunk/<id>/ticket" }, 421, h);
+        }
         if (req.headers.get("Upgrade") !== "websocket") return json({ error: "se esperaba WebSocket" }, 426, h);
         // El token va en la query porque los navegadores no permiten cabeceras en WebSocket.
         // Es de vida corta y nunca es la clave del agente ni la passkey.

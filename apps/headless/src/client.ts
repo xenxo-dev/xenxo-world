@@ -54,9 +54,17 @@ export class XenxoClient {
       token = ((await res.json()) as { token: string }).token;
     }
 
-    const url = new URL(`/chunk/${o.chunkId ?? "c_0_0"}/ws`, o.baseUrl);
+    const chunkId = o.chunkId ?? "c_0_0";
+    let url = new URL(`/chunk/${chunkId}/ws`, o.baseUrl);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     url.searchParams.set("token", token);
+    // Un distrito puede vivir en otro servidor: el pase dice dónde conectar (servidores antiguos no
+    // tienen /ticket: entonces, aquí). La plaza y el nexo siempre están en el servidor principal.
+    if (chunkId !== "c_0_0" && chunkId !== "c_0_-1000") {
+      const t = await fetch(new URL(`/chunk/${chunkId}/ticket`, o.baseUrl), { method: "POST", headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
+      if (t?.ok) url = new URL(((await t.json()) as { url: string }).url);
+      else if (t && t.status !== 404) throw new Error(`ticket ${chunkId} → HTTP ${t.status}`);
+    }
 
     this.ws = new WebSocket(url);
     await new Promise<void>((resolve, reject) => {

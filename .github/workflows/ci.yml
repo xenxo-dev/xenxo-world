@@ -20,6 +20,8 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run build
+      # El servidor de distritos (workerd en una máquina propia): que siga compilando.
+      - run: npm run build:district-host
 
       # La plantilla de juegos: crea uno 2D y otro 3D con el SDK empaquetado y los compila.
       - name: Juegos de ejemplo (ficha xenxo.json válida)
