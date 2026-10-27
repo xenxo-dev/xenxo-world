@@ -18,6 +18,8 @@ interface DistrictActivities {
   races?: { id: string; radius: number; start: { p: V3; radius: number }; cps: V3[]; finish: { p: V3; radius: number } }[];
   boosts?: { p: V3; yaw: number; speed?: number; seconds?: number; radius?: number }[];
   cabinets?: { p: V3; yaw: number }[];
+  /** Anuncios de fachada (Distrito Cero): centro, giro y medida; los llena el Worker (syncBillboards). */
+  billboards?: { p: V3; yaw: number; size: [number, number] }[];
   sandbox?: SandboxRect;
 }
 
@@ -131,6 +133,11 @@ export function sandboxOf(id: string): SandboxRect | null {
 /** Huecos de las máquinas-portal de un distrito (las llena el Worker con sus juegos: syncCabinets). */
 export function cabinetSlots(id: string): { p: V3; yaw: number }[] {
   return (activities as unknown as Record<string, DistrictActivities | undefined>)[id]?.cabinets ?? [];
+}
+
+/** Anuncios de fachada de un distrito (las portadas de los proyectos más nuevos: syncBillboards). */
+export function billboardSlots(id: string): { p: V3; yaw: number; size: [number, number] }[] {
+  return (activities as unknown as Record<string, DistrictActivities | undefined>)[id]?.billboards ?? [];
 }
 
 export function districtSeed(d: District, toNexo: { p: V3; yaw: number }): Seeded[] {

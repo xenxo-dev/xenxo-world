@@ -1,5 +1,5 @@
 {
-  "$comment": "Actividades del sistema en cada distrito (coordenadas del chunk: X este, Z sur, metros). Las siembra districts.ts como entidades con dueño `system` (collectible@1, checkpoint@1, scoreboard@1), sus carreras (`races`: salida, puntos y meta), placas de impulso (`boosts`), máquinas-portal (`cabinets`, las llena el Worker con los juegos del distrito), carteles (`labels`), tableros de baldosas (`tiles`), la zona de pruebas (`sandbox`: rectángulo donde cualquier cuenta construye con piezas básicas; se vacía cada día) y su atrezo modelado (`props`: pieza de seed-assets, posición, giro y caja de colisión). Las posiciones salen del diseño de cada ciudad (tools/forge/cero.py…): si mueves la ciudad, revisa esto. Los textos van como datos (`note`, `title`) en ES y EN.",
+  "$comment": "Actividades del sistema en cada distrito (coordenadas del chunk: X este, Z sur, metros). Las siembra districts.ts como entidades con dueño `system` (collectible@1, checkpoint@1, scoreboard@1), sus carreras (`races`: salida, puntos y meta), placas de impulso (`boosts`), máquinas-portal (`cabinets`, las llena el Worker con los juegos del distrito), carteles (`labels`), tableros de baldosas (`tiles`), la zona de pruebas (`sandbox`: rectángulo donde cualquier cuenta construye con piezas básicas; se vacía cada día) y su atrezo modelado (`props`: pieza de seed-assets, posición, giro y caja de colisión). Las posiciones salen del diseño de cada ciudad (tools/forge/cero.py…): si mueves la ciudad, revisa esto. Los textos van como datos (`note`, `title`) en ES y EN. `billboards` (Distrito Cero): anuncios de fachada que el Worker llena con las portadas de los proyectos más nuevos (syncBillboards); la forja (cero.py) pone su marco en el mismo sitio.",
   "cero": {
     "hunts": [
       {
@@ -275,6 +275,104 @@
         ],
         "yaw": 0,
         "size": 0.3
+      }
+    ],
+    "billboards": [
+      {
+        "p": [
+          -0.5,
+          16.2,
+          5.75
+        ],
+        "yaw": 0,
+        "size": [
+          10,
+          5.625
+        ]
+      },
+      {
+        "p": [
+          5.75,
+          16.2,
+          -0.5
+        ],
+        "yaw": 90,
+        "size": [
+          10,
+          5.625
+        ]
+      },
+      {
+        "p": [
+          64.5,
+          16.2,
+          5.75
+        ],
+        "yaw": 0,
+        "size": [
+          10,
+          5.625
+        ]
+      },
+      {
+        "p": [
+          58.25,
+          16.2,
+          -0.5
+        ],
+        "yaw": -90,
+        "size": [
+          10,
+          5.625
+        ]
+      },
+      {
+        "p": [
+          -0.5,
+          16.2,
+          58.25
+        ],
+        "yaw": 180,
+        "size": [
+          10,
+          5.625
+        ]
+      },
+      {
+        "p": [
+          5.75,
+          16.2,
+          64.5
+        ],
+        "yaw": 90,
+        "size": [
+          10,
+          5.625
+        ]
+      },
+      {
+        "p": [
+          64.5,
+          16.2,
+          58.25
+        ],
+        "yaw": 180,
+        "size": [
+          10,
+          5.625
+        ]
+      },
+      {
+        "p": [
+          58.25,
+          16.2,
+          64.5
+        ],
+        "yaw": -90,
+        "size": [
+          10,
+          5.625
+        ]
       }
     ]
   },

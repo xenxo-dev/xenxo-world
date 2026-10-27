@@ -26,6 +26,8 @@ CRANE = {"x": 41.5, "z": 78.5, "h": 34.0, "jib": 30.0, "counter": 9.0}
 # Paneles de «cómo se hace»: en las cuatro esquinas de la plaza, mirando hacia dentro.
 PANELS = [(22.5, 22.5, 45), (41.5, 22.5, -45), (22.5, 41.5, 135), (41.5, 41.5, -135)]
 PANEL_W, PANEL_H, PANEL_Y = 3.6, 2.4, 1.0
+# Pantalla de «agentes construyendo» (el marcador `builds` de district-activities.json va delante).
+SCREEN = {"x": 32.0, "z": 20.2, "w": 6.4, "h": 3.8, "y": 3.4}
 
 
 def _box(p: Part, x0, z0, x1, z1, y0, y1, m):
@@ -138,6 +140,26 @@ def panels(p: Part, detail: int) -> None:
         q.bm.free()
 
 
+def agents_screen(p: Part, detail: int) -> None:
+    """Monolito con la pantalla de lo que construyen los agentes: marco oscuro, filo naranja y piloto rojo."""
+    s = SCREEN
+    x, z, w, h, y = s["x"], s["z"], s["w"], s["h"], s["y"]
+    dark = mat("metal", "#1b1f2e")
+    orange = mat("neon", ORANGE)
+    # Cuerpo: del suelo hasta encima de la pantalla, detrás de ella (el marcador se pinta en z + 0).
+    _box(p, x - w / 2 - 0.4, z - 0.45, x + w / 2 + 0.4, z - 0.05, 0, y + h / 2 + 0.5, dark)
+    _box(p, x - w / 2 - 0.6, z - 0.6, x + w / 2 + 0.6, z + 0.1, 0, 0.3, dark)
+    e = 0.1
+    for (x0, x1, y0, y1) in ((x - w / 2 - 0.2, x + w / 2 + 0.2, y + h / 2 + 0.05, y + h / 2 + 0.05 + e), (x - w / 2 - 0.2, x + w / 2 + 0.2, y - h / 2 - 0.05 - e, y - h / 2 - 0.05),
+                             (x - w / 2 - 0.2 - e, x - w / 2 - 0.2, y - h / 2 - 0.15, y + h / 2 + 0.15), (x + w / 2 + 0.2, x + w / 2 + 0.2 + e, y - h / 2 - 0.15, y + h / 2 + 0.15)):
+        _box(p, x0, z - 0.05, x1, z + 0.02, y0, y1, orange)
+    # Piloto «en directo» y antena encima.
+    _box(p, x + w / 2 - 0.5, z - 0.3, x + w / 2 - 0.1, z + 0.03, y + h / 2 + 0.6, y + h / 2 + 0.9, mat("neon", "#ff3b3b"))
+    _box(p, x - 0.05, z - 0.3, x + 0.05, z - 0.2, y + h / 2 + 0.5, y + h / 2 + 2.2, dark)
+    cx, cy = _xz(x, z - 0.25)
+    p.sphere((cx, cy, y + h / 2 + 2.3), 0.12, mat("neon", ORANGE), subdiv=1)
+
+
 def colliders() -> list[list[float]]:
     boxes: list[list[float]] = []
 
@@ -156,6 +178,8 @@ def colliders() -> list[list[float]]:
     add(c["x"] - 1.4, c["z"] - 1.4, c["x"] + 1.4, c["z"] + 1.4, 0, c["h"])
     for (x, z, _deg) in PANELS:
         add(x - 0.4, z - 0.4, x + 0.4, z + 0.4, 0, PANEL_Y + PANEL_H)
+    s = SCREEN
+    add(s["x"] - s["w"] / 2 - 0.6, s["z"] - 0.6, s["x"] + s["w"] / 2 + 0.6, s["z"] + 0.1, 0, s["y"] + s["h"] / 2 + 0.9)
     return boxes
 
 
@@ -163,3 +187,4 @@ def build(p: Part, detail: int) -> None:
     zone(p, detail)
     crane(p, detail)
     panels(p, detail)
+    agents_screen(p, detail)

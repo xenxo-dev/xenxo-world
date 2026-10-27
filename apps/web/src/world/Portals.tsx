@@ -137,6 +137,9 @@ interface Zone {
   c: number;
   s: number;
   hw: number;
+  /** Alturas entre las que se puede entrar (pies): un portal alto, como un anuncio de fachada, no se cruza andando. */
+  y0: number;
+  y1: number;
   portal: PortalV1Type;
 }
 type PortalV1Type = ReturnType<typeof PortalV1.parse>;
@@ -150,12 +153,13 @@ function zonesOf(list: Entity[]): Zone[] {
     const [ox, oz] = world.offsetOf(e.chunk_id);
     const [qx, qy, qz, qw] = t.data.r;
     const yaw = Math.atan2(2 * (qw * qy + qx * qz), 1 - 2 * (qy * qy + qx * qx));
-    out.push({ id: e.entity_id, x: t.data.p[0] + ox, z: t.data.p[2] + oz, c: Math.cos(yaw), s: Math.sin(yaw), hw: portal.data.size[0] / 2, portal: portal.data });
+    out.push({ id: e.entity_id, x: t.data.p[0] + ox, z: t.data.p[2] + oz, c: Math.cos(yaw), s: Math.sin(yaw), hw: portal.data.size[0] / 2, y0: t.data.p[1] - portal.data.size[1] / 2 - 2.5, y1: t.data.p[1] + portal.data.size[1] / 2, portal: portal.data });
   }
   return out;
 }
 
-function inZone(z: Zone, x: number, pz: number) {
+function inZone(z: Zone, x: number, y: number, pz: number) {
+  if (y < z.y0 || y > z.y1) return false;
   const dx = x - z.x;
   const dz = pz - z.z;
   const lx = dx * z.c - dz * z.s;
@@ -180,7 +184,7 @@ function PortalSensor({ portals, active }: { portals: Entity[]; active: boolean 
     const st = sets.current;
     const now = st.now;
     now.clear();
-    for (const z of zones) if (inZone(z, playerPos.x, playerPos.z)) now.add(z.id);
+    for (const z of zones) if (inZone(z, playerPos.x, playerPos.y, playerPos.z)) now.add(z.id);
     if (st.primed) {
       for (const z of zones) {
         const was = st.before.has(z.id);

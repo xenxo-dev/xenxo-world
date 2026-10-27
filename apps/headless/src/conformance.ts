@@ -791,16 +791,17 @@ await scenario("Rastro de datos (Distrito Cero): 12 fragmentos del sistema con s
   // Insignia: con los 12 (la comprueba el servidor con lo que guarda el distrito, no el cliente).
   const early = await api.call<{ badges: { id: string }[] }>("GET", "/me/badges");
   assert(early.ok && early.data.badges.length === 0, "a medias, sin insignia");
-  let last = above;
+  let last: unknown = above.payload;
   for (const f of frags.filter((e) => e !== first && e !== high)) {
     const p = pos(f);
     await at([p[0], Math.max(1.6, p[1]), p[2]]);
-    last = await u.activity("COLLECT", f.entity_id);
+    const r = await u.activity("COLLECT", f.entity_id);
+    last = r.type === "COLLECTED" ? r.payload : r;
   }
-  assert(last.type === "COLLECTED" && last.payload.complete === true, `los 12 recogidos (${JSON.stringify(last.payload)})`);
+  assert((last as { complete?: boolean }).complete === true, `los 12 recogidos (${JSON.stringify(last)})`);
   u.close();
   const got = await api.call<{ new: { id: string }[]; badges: { id: string }[] }>("POST", "/me/badges/check");
-  assert(got.ok && got.data.new.some((b) => b.id === "cero_rastro"), `insignia «Rastro de datos» (${JSON.stringify(got.data)})`);
+  assert(got.ok && got.data.new.some((b) => b.id === "cero_rastro"), `insignia «Rastro de datos» (${JSON.stringify(got)})`);
   const again = await api.call<{ badges: { id: string }[] }>("GET", "/me/badges");
   assert(again.ok && again.data.badges.filter((b) => b.id === "cero_rastro").length === 1, "una sola vez");
   const soon = await api.call<{ throttled?: boolean }>("POST", "/me/badges/check");
@@ -809,7 +810,9 @@ await scenario("Rastro de datos (Distrito Cero): 12 fragmentos del sistema con s
   assert(exp.ok && (exp.data.badges ?? []).some((b) => b.id === "cero_rastro"), "la exportación incluye las insignias");
   const mine = await api.call<{ player_no: number }>("PUT", "/me/card", { public: true });
   assert(mine.ok, "carné público");
-  const no = (await api.call<{ player_no: number }>("GET", "/me/card")).data.player_no;
+  const cardMine = await api.call<{ player_no: number }>("GET", "/me/card");
+  assert(cardMine.ok, "GET /me/card");
+  const no = cardMine.data.player_no;
   const card = (await (await fetch(new URL(`/players/${no}`, baseUrl))).json()) as { badges?: { id: string }[] };
   assert((card.badges ?? []).some((b) => b.id === "cero_rastro"), "y se ve en el carné");
 });
@@ -1493,8 +1496,16 @@ await scenario("juegos de fuera: ficha xenxo.json leída por el servidor, enlace
     assert(errOf(await mod.call("POST", `/mod/projects/${id}/review`, { decision: "rejected" })) === "note_required", "rechazar exige motivo");
     assert((await mod.call("POST", `/mod/projects/${id}/review`, { decision: "rejected", note: "No carga en el móvil" })).ok, "rechazar con motivo");
     assert((await fetch(new URL(`/games/${slug}`, baseUrl))).status === 404, "rechazado, pierde su enlace propio");
+    // Aprobado, su portada sale en los anuncios de fachada de Distrito Cero (el más nuevo, el primero).
+    const cero = await XenxoClient.connect({ baseUrl, chunkId: "c_-1_-1" });
+    const bbTo = (e: { components: Record<string, unknown> }) => (e.components["portal@1"] as { to?: { project_id?: string } } | undefined)?.to?.project_id;
+    const shown = cero.next("DELTA", (m) => m.payload.changes.some((c) => c.kind === "upsert" && c.entity.entity_id === "billboard_1" && bbTo(c.entity) === id), 6000);
     assert((await mod.call("POST", `/mod/projects/${id}/review`, { decision: "approved" })).ok, "aprobar");
     assert(await catalog(), "aprobado, sale en el catálogo");
+    const bbDelta = await shown;
+    const bb = bbDelta.payload.changes.find((c) => c.kind === "upsert" && c.entity.entity_id === "billboard_1");
+    cero.close();
+    assert(bb?.kind === "upsert" && ((bb.entity.components["transform@1"] as { p: number[] }).p[1] ?? 0) > 12, "su portada sale en un anuncio de fachada de Distrito Cero (alto: no se cruza andando)");
     manifest = { ...base, ageRating: "+14" };
     const changed = await register();
     assert(changed.ok && changed.data.project.review === "pending", "cambiar la ficha la devuelve a revisión");

@@ -16,7 +16,11 @@ city.colliders, así que modelo y colisión no se separan nunca.
 """
 from __future__ import annotations
 
+import json
 import math
+import os
+
+from mathutils import Matrix
 
 from kit import CHUNK, Part, finish, mat
 
@@ -337,6 +341,39 @@ def gateways(p: Part, blocks, detail: int) -> None:
                 _box(p, bx1 - 9.5, zb + 0.95, bx1 - 7, zb + 1.15, 9, 19, mag)
 
 
+ACTIVITIES = os.path.join(os.path.dirname(__file__), "..", "..", "apps", "realtime", "src", "district-activities.json")
+
+
+def billboard_slots() -> list[dict]:
+    """Anuncios de fachada: la misma lista con la que el Worker pone las portadas (syncBillboards)."""
+    with open(ACTIVITIES, encoding="utf-8") as f:
+        return json.load(f)["cero"].get("billboards", [])
+
+
+def billboards(p: Part, detail: int) -> None:
+    """Marcos de los anuncios de fachada: placa oscura, pantalla viva de fondo (se ve sin portada) y filo de luz."""
+    body = mat("metal", "#141a26")
+    screen = mat("pantalla", MAGENTA)
+    cyan = mat("neon", CYAN)
+    for k, sl in enumerate(billboard_slots()):
+        x, y, z = sl["p"]
+        w, h = sl["size"]
+        q = Part("billboard")
+        # En local: frente hacia −Y de Blender (= hacia donde mira el anuncio); la fachada queda a +0,25.
+        q.box((-w / 2 - 0.45, -0.15, y - h / 2 - 0.45), (w / 2 + 0.45, 0.25, y + h / 2 + 0.45), body)
+        q.box((-w / 2, -0.18, y - h / 2), (w / 2, -0.15, y + h / 2), screen if k % 2 == 0 else mat("pantalla", CYAN))
+        e = 0.12
+        for (x0, z0, x1, z1) in ((-w / 2 - 0.3, y + h / 2, w / 2 + 0.3, y + h / 2 + e), (-w / 2 - 0.3, y - h / 2 - e, w / 2 + 0.3, y - h / 2),
+                                 (-w / 2 - e, y - h / 2, -w / 2, y + h / 2), (w / 2, y - h / 2, w / 2 + e, y + h / 2)):
+            q.box((x0, -0.34, z0), (x1, -0.15, z1), cyan)
+        # Dos ménsulas hasta la fachada, debajo.
+        for bx in (-w / 3, w / 3):
+            q.box((bx - 0.1, -0.15, y - h / 2 - 1.2), (bx + 0.1, 0.25, y - h / 2 - 0.45), body)
+        cx, cy = _xz(x, z)
+        p.merge(q, Matrix.Translation((cx, cy, 0)) @ Matrix.Rotation(math.radians(sl["yaw"]), 4, "Z"))
+        q.bm.free()
+
+
 def statue_plinth(p: Part, detail: int) -> None:
     """Pedestal de la escultura de Xen: escalón, bloque oscuro con filos de luz y un aro magenta."""
     sx, sz = STATUE
@@ -365,6 +402,7 @@ def build(p: Part, blocks, detail: int) -> None:
     torre_cero(p, detail)
     walkway(p, detail)
     gateways(p, blocks, detail)
+    billboards(p, detail)
 
 
 def fragment(detail: int) -> Part:

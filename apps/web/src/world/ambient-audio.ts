@@ -86,7 +86,8 @@ class AmbientAudio {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
   private noise: AudioBuffer | null = null;
-  private bed: { rumble: GainNode; rumbleF: BiquadFilterNode; hum: GainNode; wind: GainNode } | null = null;
+  private bed: { rumble: GainNode; rumbleF: BiquadFilterNode; hum: GainNode; wind: GainNode; rain: GainNode } | null = null;
+  private rainLevel = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private theme: Theme = "plaza";
   private ambience: Ambience = "night";
@@ -170,7 +171,20 @@ class AmbientAudio {
     n2.connect(windF).connect(wind).connect(out);
     n2.start();
 
-    this.bed = { rumble, rumbleF, hum, wind };
+    // Lluvia: ruido agudo y un poco de grave (gotas en charcos); su nivel lo dice la escena.
+    const rain = ctx.createGain();
+    rain.gain.value = 0;
+    const rainHi = ctx.createBiquadFilter();
+    rainHi.type = "highpass";
+    rainHi.frequency.value = 1800;
+    const rainLo = ctx.createBiquadFilter();
+    rainLo.type = "lowpass";
+    rainLo.frequency.value = 9000;
+    const n3 = this.loopNoise();
+    n3.connect(rainHi).connect(rainLo).connect(rain).connect(out);
+    n3.start();
+
+    this.bed = { rumble, rumbleF, hum, wind, rain };
   }
 
   /** Lugar y ambiente actuales (los dice la escena al cambiar). */
@@ -180,6 +194,14 @@ class AmbientAudio {
     this.theme = t;
     this.ambience = ambience;
     void this.apply();
+  }
+
+  /** Cuánto llueve donde estás (0–1; lo dice la escena unas veces por segundo, no por frame). */
+  setRain(level: number) {
+    const v = Math.round(level * 20) / 20;
+    if (v === this.rainLevel) return;
+    this.rainLevel = v;
+    if (this.ctx && this.bed) this.bed.rain.gain.setTargetAtTime(v * 0.5, this.ctx.currentTime, 2);
   }
 
   /** En el mundo (no en el panel ni dentro de un juego). */
@@ -207,6 +229,7 @@ class AmbientAudio {
     this.bed.rumbleF.frequency.setTargetAtTime(l.rumbleHz, now, 1.5);
     this.bed.hum.gain.setTargetAtTime(l.hum, now, 1.5);
     this.bed.wind.gain.setTargetAtTime(l.wind, now, 1.5);
+    this.bed.rain.gain.setTargetAtTime(this.rainLevel * 0.5, now, 1.5);
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     if (on) this.schedule();

@@ -18,6 +18,7 @@ import {
   TilesV1,
   ComponentsStrict,
   ENTITY_SCHEMA,
+  EntityId,
   estimateTris,
   msg,
   PARCEL_BUDGETS,
@@ -33,7 +34,7 @@ import {
 import type { Env } from "./index";
 import { randomId, type Principal } from "./auth";
 import { plazaSeed, SEED_VERSION } from "./seed";
-import { cabinetSlots, sandboxOf, type SandboxRect, DISTRICT_BOUNDS, districtByChunk, districtSeed, DISTRICT_SEED_VERSION, migrateParcelPose, migrateSlot, PARCEL_LAYOUT_VERSION, PARCELS, parcelIndex, parcelReserved, parcelSlot } from "./districts";
+import { billboardSlots, cabinetSlots, sandboxOf, type SandboxRect, DISTRICT_BOUNDS, districtByChunk, districtSeed, DISTRICT_SEED_VERSION, migrateParcelPose, migrateSlot, PARCEL_LAYOUT_VERSION, PARCELS, parcelIndex, parcelReserved, parcelSlot } from "./districts";
 import { nexoArrival, NEXO_BOUNDS, NEXO_SEED_VERSION, nexoSeed, SHOWCASE_SLOTS } from "./nexo";
 import { at, portalEntities, r3, yaw, type Seeded } from "./places";
 
@@ -246,6 +247,9 @@ export class ChunkRoom extends DurableObject<Env> {
       const d = districtByChunk(this.chunkId);
       if (d) {
         this.migrateParcelLayout();
+        // Ids de menos de 6 caracteres (las máquinas-portal se llamaron «cab_1»): el esquema de las
+        // entidades no los admite y los clientes descartaban el SNAPSHOT entero. Fuera; se rellenan al recolocar.
+        this.sql.exec("DELETE FROM entities WHERE owner IN ('cabinets', 'billboards') AND length(entity_id) < 6");
         this.applySeed(`district_${d.id}`, DISTRICT_SEED_VERSION, districtSeed(d, nexoArrival(d.id)));
       } else if (isCommunityChunk(this.chunkId)) {
         const raw = this.sql.exec<{ v: string }>("SELECT v FROM meta WHERE k = 'community'").toArray()[0]?.v;
@@ -1036,7 +1040,7 @@ export class ChunkRoom extends DurableObject<Env> {
     const seed: Seeded[] = items.slice(0, slots.length).map((it, n) => {
       const sl = slots[n]!;
       return {
-        id: `cab_${n + 1}`,
+        id: `cabinet_${n + 1}`,
         components: {
           "transform@1": { p: at(sl.p[0], sl.p[2], sl.yaw, 0, CABINET_SCREEN.y, CABINET_SCREEN.z), r: yaw(sl.yaw), s: [1, 1, 1], parent: null },
           "portal@1": { to: { kind: "project", project_id: it.projectId }, size: CABINET_SCREEN.size, cover: it.cover, title: it.title, category: it.category },
@@ -1050,6 +1054,37 @@ export class ChunkRoom extends DurableObject<Env> {
       for (const id of before) if (!seed.some((x) => x.id === id)) changes.push({ kind: "remove", entity_id: id });
       for (const e of seed) changes.push({ kind: "upsert", entity: this.insertEntity(e.id, OWNER, e.components) });
       this.logEvent("system", "CABINETS", this.chunkId!, seed.length, null);
+    });
+    if (changes.length) this.broadcast(msg("DELTA", { changes }));
+    return { shown: seed.length };
+  }
+
+  /**
+   * Anuncios de fachada (Distrito Cero): las portadas de los proyectos más nuevos de la comunidad en
+   * los marcos de las torres. Son portales a su proyecto, pero altos: nadie los cruza andando.
+   */
+  async syncBillboards(items: { projectId: string; title: string; category: string; cover: string }[]): Promise<{ shown: number }> {
+    this.ensureChunk(null);
+    const district = districtByChunk(this.chunkId!);
+    const slots = district ? billboardSlots(district.id) : [];
+    const OWNER = "billboards";
+    const seed: Seeded[] = items.slice(0, slots.length).map((it, n) => {
+      const sl = slots[n]!;
+      return {
+        id: `billboard_${n + 1}`,
+        components: {
+          "transform@1": { p: at(sl.p[0], sl.p[2], sl.yaw, 0, sl.p[1], 0.26), r: yaw(sl.yaw), s: [1, 1, 1], parent: null },
+          "portal@1": { to: { kind: "project", project_id: it.projectId }, size: sl.size, cover: it.cover, title: it.title, category: it.category },
+        } as Components,
+      };
+    });
+    const before = this.sql.exec<{ entity_id: string }>("SELECT entity_id FROM entities WHERE owner = ?", OWNER).toArray().map((r) => r.entity_id);
+    const changes: ({ kind: "remove"; entity_id: string } | { kind: "upsert"; entity: Entity })[] = [];
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec("DELETE FROM entities WHERE owner = ?", OWNER);
+      for (const id of before) if (!seed.some((x) => x.id === id)) changes.push({ kind: "remove", entity_id: id });
+      for (const e of seed) changes.push({ kind: "upsert", entity: this.insertEntity(e.id, OWNER, e.components) });
+      this.logEvent("system", "BILLBOARDS", this.chunkId!, seed.length, null);
     });
     if (changes.length) this.broadcast(msg("DELTA", { changes }));
     return { shown: seed.length };
@@ -1568,6 +1603,8 @@ export class ChunkRoom extends DurableObject<Env> {
   }
 
   private insertEntity(entity_id: string, owner: string, components: Components): Entity {
+    // Un id fuera del esquema hace que los clientes descarten el SNAPSHOT entero: mejor fallar aquí.
+    if (!EntityId.safeParse(entity_id).success) throw new Error(`id de entidad no válido: ${entity_id}`);
     const entity = this.entityOf(entity_id, owner, 1, components);
     this.sql.exec(
       "INSERT INTO entities (entity_id, owner, rev, tris, data) VALUES (?, ?, 1, ?, ?)",

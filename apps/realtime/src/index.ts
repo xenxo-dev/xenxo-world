@@ -8,7 +8,7 @@ import { randomId, resolveAgent, signToken, verifyToken, type Principal } from "
 import { CALL_TTL_MS, chunkList, REMOTE_METHODS, sha256B64, signRemote, TICKET_TTL_MS } from "./remote";
 import type { ChunkRoom, ShowcaseItem } from "./chunk-room";
 import { BADGES, earnedIn, type ActivityOf } from "./badges";
-import { cabinetSlots, DISTRICTS, districtById, parcelIndex, parcelSpawn } from "./districts";
+import { billboardSlots, cabinetSlots, DISTRICTS, districtById, parcelIndex, parcelSpawn } from "./districts";
 import { communityGates, SHOWCASE_SLOTS, type CommunityGate } from "./nexo";
 import { fetchDevManifest, fetchManifest } from "./games";
 import { MAX_AGENT_KEYS_PER_PROJECT, MAX_SKINS, type Directory, type UserRow } from "./directory";
@@ -189,6 +189,15 @@ async function syncShowcase(env: Env, dir: ReturnType<typeof directory>) {
     await chunk(env, d.chunk)
       .syncCabinets(games.map((g) => ({ projectId: g.id, title: g.title, category: g.category, cover: g.cover_hash })))
       .catch((e: Error) => console.warn("máquinas-portal:", d.id, e.message));
+  }
+  // Los anuncios de fachada (Distrito Cero): las portadas de los proyectos más nuevos de todos los distritos.
+  for (const d of DISTRICTS) {
+    const slots = billboardSlots(d.id);
+    if (!slots.length) continue;
+    const newest = rows.length >= slots.length ? rows : await dir.showcase(slots.length);
+    await chunk(env, d.chunk)
+      .syncBillboards(newest.slice(0, slots.length).map((g) => ({ projectId: g.id, title: g.title, category: g.category, cover: g.cover_hash })))
+      .catch((e: Error) => console.warn("anuncios:", d.id, e.message));
   }
 }
 
