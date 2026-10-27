@@ -1,4 +1,4 @@
-import { Suspense, useRef } from "react";
+import { Suspense, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { XROrigin, useXR, useXRControllerLocomotion } from "@react-three/xr";
 import * as THREE from "three";
@@ -12,7 +12,7 @@ import { createMotion, smoothSpeed } from "./motion";
 import { cameraReach, findSeat, resolveCircle } from "./collision";
 import { boost } from "../net/activity-store";
 import { BODY_HEIGHT, STEP_UP, createBody, placeBody, requestJump, stepBody } from "./locomotion";
-import { useChosenPreset } from "./presets";
+import { guestPreset, useAccountPreset, useChosenPreset } from "./presets";
 import { input, setFirstPerson, view } from "./input";
 import { self } from "./self";
 import { controls } from "../controls";
@@ -50,11 +50,16 @@ const _xr = { x: 0, z: 0 };
 export function Player({ active }: { active: boolean }) {
   const user = useAccount();
   const chosen = useChosenPreset();
-  const myAvatar: AvatarRef | undefined = user?.avatar_hash
+  const accountDefault = useAccountPreset(user && !user.avatar_hash ? user.id : undefined);
+  // El propio personaje nunca depende de la sesión (cambiaría al ir de un lugar a otro).
+  const guest = useMemo(() => guestPreset(), [chosen]); // eslint-disable-line react-hooks/exhaustive-deps
+  const myAvatar: AvatarRef | null = user?.avatar_hash
     ? { hash: user.avatar_hash, format: user.avatar_format ?? "glb" }
-    : chosen
-      ? { hash: chosen.hash, format: "vrm" }
-      : undefined;
+    : user
+      ? accountDefault
+        ? { hash: accountDefault.hash, format: "vrm" }
+        : null // aún calculándolo: el muñeco de respaldo, nunca uno al azar
+      : { hash: guest.hash, format: "vrm" };
   const origin = useRef<THREE.Group>(null!);
   const avatar = useRef<THREE.Group>(null!);
   const body = useRef(createBody(...spawn.p)).current;

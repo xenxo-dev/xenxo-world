@@ -4,7 +4,7 @@ import { REALTIME_URL } from "../config";
 import { accountToken } from "./account";
 import { WebSocketAdapter, type NetworkAdapter } from "./NetworkAdapter";
 import { world } from "./world-store";
-import { chosenPreset } from "../world/presets";
+import { guestPreset } from "../world/presets";
 
 export const net: NetworkAdapter = new WebSocketAdapter(REALTIME_URL);
 
@@ -78,7 +78,8 @@ export async function startSession(displayName: string | undefined, chunkId: str
           client_type: detectClientType(),
           capabilities: { xr: false, hand_tracking: false, haptics: false, lod: "medium" },
           display_name: guestName,
-          ...(chosenPreset() && !accountToken() ? { avatar: { hash: chosenPreset()!.hash, format: "vrm" as const } } : {}),
+          // El de un invitado (elegido o el que le tocó en este navegador): así lo ven igual los demás.
+          ...(!accountToken() ? { avatar: { hash: guestPreset().hash, format: "vrm" as const } } : {}),
         }) as ClientMessage,
       );
     }

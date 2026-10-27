@@ -103,9 +103,11 @@ export function DefaultAvatar({ color, motion }: { color: THREE.ColorRepresentat
  * Personaje de alguien: el suyo propio si lo tiene; si no, uno de serie (realista, animado).
  * Mientras carga se ve el muñeco articulado de respaldo.
  */
-export function AvatarBody({ avatar, seed, motion }: { avatar?: AvatarRef; seed: string; motion: Motion }) {
+/** `avatar`: el suyo; sin él, uno de serie según `seed`; `null`: aún no se sabe (solo el muñeco). */
+export function AvatarBody({ avatar, seed, motion }: { avatar?: AvatarRef | null; seed: string; motion: Motion }) {
   useFrame((_, dt) => advance(motion, Math.min(dt, 0.1)));
   const fallback = <DefaultAvatar color={colorFor(seed)} motion={motion} />;
+  if (avatar === null) return fallback;
   const preset = avatar ? null : presetFor(seed);
   const url = avatar ? assetUrl(avatar.hash) : preset ? assetUrl(preset.hash) : null;
   return <CustomAvatar url={url} fallback={fallback} motion={motion} />;

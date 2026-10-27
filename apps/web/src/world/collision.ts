@@ -304,6 +304,22 @@ export function groundHeight(x: number, z: number, r: number, maxTop: number): n
   return g;
 }
 
+/** Suelo bajo un punto (un solo rayo en las mallas): para la gente de las ciudades, cada frame. */
+export function floorAt(x: number, z: number, maxTop: number): number {
+  refresh();
+  let g = 0;
+  for (const b of boxes) {
+    const top = b.y + b.hy;
+    if (top <= g || top > maxTop) continue;
+    if (planDist2(b, x, z) < 1e-6) g = top;
+  }
+  if (meshCols.size) {
+    const d = castMeshes(x, maxTop + 0.01, z, 0, -1, 0, maxTop + 0.01 - g, true);
+    if (d !== Infinity) g = Math.max(g, maxTop + 0.01 - d);
+  }
+  return g;
+}
+
 /** Techo sobre un círculo: la cara de abajo más baja por encima de `minBottom` (Infinity si no hay). */
 export function ceilingHeight(x: number, z: number, r: number, minBottom: number): number {
   refresh();

@@ -267,7 +267,8 @@ export function paintedLights(m: THREE.Material, ambience: Ambience): THREE.Mate
 /** Brillo de los neones: por encima de 1 para que el bloom los haga resplandecer, sobre todo de noche. */
 export function neonGlow(ambience: Ambience, bloom: boolean) {
   if (!bloom) return ambience === "night" ? 1 : 0.9;
-  return ambience === "night" ? 4 : 1.15;
+  // De noche, 2,2 (antes 4): con el bloom, los tubos se quemaban en blanco y deslumbraban.
+  return ambience === "night" ? 2.2 : 1.15;
 }
 
 const ROUGH: Record<string, number> = { azulejo: 0.35, ventana: 0.06, agua: 0.04, fruta: 0.5, flor: 0.8, hoja: 0.85 };

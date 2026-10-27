@@ -12,7 +12,7 @@ import { notify, notifyConfigured } from "./notify";
 import { billboardSlots, cabinetSlots, DISTRICTS, districtById, parcelIndex, parcelSpawn } from "./districts";
 import { communityGates, SHOWCASE_SLOTS, type CommunityGate } from "./nexo";
 import { fetchDevManifest, fetchManifest } from "./games";
-import { MAX_AGENT_KEYS_PER_PROJECT, MAX_SKINS, type Directory, type UserRow } from "./directory";
+import { defaultAvatarFor, MAX_AGENT_KEYS_PER_PROJECT, MAX_SKINS, type Directory, type UserRow } from "./directory";
 
 export { ChunkRoom } from "./chunk-room";
 export { Directory } from "./directory";
@@ -570,7 +570,8 @@ async function userToken(u: UserRow, env: Env) {
     scopes: ["upload"],
     exp: Date.now() + USER_TTL_MS,
     name: u.display_name,
-    ...(u.avatar_hash ? { avatar: { hash: u.avatar_hash, format: u.avatar_format ?? "glb" } } : {}),
+    // Sin personaje propio, el de serie de la cuenta: los demás la ven siempre igual (no según la sesión).
+    avatar: u.avatar_hash ? { hash: u.avatar_hash, format: u.avatar_format ?? "glb" } : await defaultAvatarFor(u.id),
     ...(u.player_no != null ? { no: u.player_no } : {}),
   };
   return { token: await signToken(p, env.TOKEN_SECRET), principal: p, user: u };

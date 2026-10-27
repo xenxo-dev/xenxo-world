@@ -11,7 +11,7 @@ import { useCollected } from "../net/activity-store";
 import { FONT_URL, NEON_FONT_URL, SIGN_FONT_URL } from "./font";
 import type { Ambience, Features } from "./graphics";
 import { useFrame } from "@react-three/fiber";
-import { haloMaterial, hologramMaterial, lightweight, libraryMaterial, paintedLights, parseLibraryName, tickHolograms } from "./materials";
+import { haloMaterial, hologramMaterial, lightweight, libraryMaterial, neonGlow, paintedLights, parseLibraryName, tickHolograms } from "./materials";
 
 /** Origen de un chunk respecto al lugar actual (que se dibuja en 0..CHUNK_SIZE). */
 const chunkOrigin = (chunkId: string) => world.offsetOf(chunkId);
@@ -111,7 +111,7 @@ function MeshAsset({ hash, features, ambience, holo, dim }: { hash: string; feat
 /** Brillo de los emisivos: por encima de 1 para que el bloom los haga resplandecer, sobre todo de noche. */
 function glow(ambience: Ambience, bloom: boolean, dim = 1) {
   if (!bloom) return 1;
-  return Math.max(1, (ambience === "night" ? 4 : 1.15) * dim);
+  return Math.max(1, neonGlow(ambience, bloom) * dim);
 }
 
 /**

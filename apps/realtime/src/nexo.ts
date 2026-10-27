@@ -142,6 +142,11 @@ export function nexoSeed(): Seeded[] {
     if (collider) components["collider@1"] = { shape: "box", half_extents: collider, trigger: false };
     out.push({ id, components });
   };
+  /** Suelo que se pisa por su forma real (collider@1.from_mesh): los pies quedan sobre sus capas. */
+  const floorMesh = (id: string, name: string, p: V3, r: Q) => {
+    mesh(id, name, p, r);
+    out[out.length - 1]!.components["collider@1"] = { shape: "box", half_extents: [0.5, 0.01, 0.5], trigger: false, from_mesh: true };
+  };
   const solid = (id: string, p: V3, deg: number, half: V3) =>
     out.push({
       id,
@@ -152,7 +157,7 @@ export function nexoSeed(): Seeded[] {
     });
 
   /* --- Suelo, faro y borde --- */
-  mesh("nexo_floor", "nexo_floor", [CX, 0, CZ], yaw(0));
+  floorMesh("nexo_floor", "nexo_floor", [CX, 0, CZ], yaw(0));
   mesh("nexo_beacon", "nexo_beacon", [CX, 0, CZ], yaw(0), 1, [0.9, 1, 0.9]);
   out.push({
     id: "nexo_beacon_light",

@@ -146,7 +146,15 @@ export function districtSeed(d: District, toNexo: { p: V3; yaw: number }): Seede
   const ground = SEED_ASSETS[`district_${d.id}`];
   if (!ground) throw new Error(`falta el modelo de la forja: district_${d.id}`);
   const lods = ground.lods.map((l) => ({ hash: l.hash, media: "model/gltf-binary" as const, tris: l.tris }));
-  out.push({ id: `${d.id}_ground`, components: { "transform@1": { p: [32, 0, 32], r: [0, 0, 0, 1], s: [1, 1, 1], parent: null }, "mesh@1": { lods } } });
+  // Se pisa su forma real (las capas del suelo están unos centímetros por encima de 0): los pies no se hunden.
+  out.push({
+    id: `${d.id}_ground`,
+    components: {
+      "transform@1": { p: [32, 0, 32], r: [0, 0, 0, 1], s: [1, 1, 1], parent: null },
+      "mesh@1": { lods },
+      "collider@1": { shape: "box", half_extents: [0.5, 0.01, 0.5], trigger: false, from_mesh: true },
+    },
+  });
 
   const solid = (id: string, p: V3, half: V3) =>
     out.push({

@@ -52,6 +52,15 @@ const MAX_PROJECTS_PER_USER = 5;
 export const MAX_SKINS = 3;
 /** Claves de agente por proyecto (para construir en su parcela). */
 export const MAX_AGENT_KEYS_PER_PROJECT = 3;
+
+/**
+ * El personaje de serie de una cuenta sin personaje propio: siempre el mismo (según su id, nunca
+ * según la sesión). La web hace el mismo cálculo (world/presets.ts → useAccountPreset).
+ */
+export async function defaultAvatarFor(userId: string): Promise<{ hash: string; format: "vrm" }> {
+  const i = parseInt((await sha256b64url(userId)).replace(/[^0-9]/g, "").slice(0, 6) || "0", 10) % AVATAR_PRESETS.length;
+  return { hash: AVATAR_PRESETS[i]!.hash, format: "vrm" };
+}
 /** Un archivo subido por una persona que nada usa se borra pasados estos días. */
 export const ORPHAN_GRACE_MS = 7 * 86_400_000;
 const CLEANUP_EVERY_MS = 86_400_000;
@@ -675,8 +684,7 @@ export class Directory extends DurableObject<Env> {
    */
   async effectiveAvatar(u: UserRow): Promise<{ hash: string; format: string }> {
     if (u.avatar_hash) return { hash: u.avatar_hash, format: u.avatar_format ?? "vrm" };
-    const i = parseInt((await sha256b64url(u.id)).replace(/[^0-9]/g, "").slice(0, 6) || "0", 10) % AVATAR_PRESETS.length;
-    return { hash: AVATAR_PRESETS[i]!.hash, format: "vrm" };
+    return defaultAvatarFor(u.id);
   }
 
   /** Su retrato y si es del personaje que lleva ahora (si no, la web hace uno nuevo). */

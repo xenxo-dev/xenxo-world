@@ -21,7 +21,7 @@ import { AvatarBody } from "./Avatars";
 import { createMotion, type Motion } from "./motion";
 import { rng } from "./NexoCity";
 import { playerPos } from "./Player";
-import { npcs } from "./collision";
+import { floorAt, npcs } from "./collision";
 
 interface Loop {
   /** Esquinas en orden (x, z), a la altura `y`. */
@@ -183,13 +183,15 @@ export function Pedestrians({ chunk, count }: { chunk: string; count: number }) 
       }
       g.visible = true;
       const px = p.x - p.dz * w.dir * LANE, pz = p.z + p.dx * w.dir * LANE;
-      g.position.set(px, l.y, pz);
+      // Sobre las capas del suelo (unos centímetros sobre su altura nominal): los pies no se hunden.
+      const py = floorAt(px, pz, l.y + 0.3);
+      g.position.set(px, py, pz);
       g.rotation.y = s.yaw;
       s.motion.speed = blocked ? 0 : w.speed;
       // Para las colisiones del jugador (collision.ts): no se atraviesan.
       if (n < npcs.pos.length / 3) {
         npcs.pos[n * 3] = px;
-        npcs.pos[n * 3 + 1] = l.y;
+        npcs.pos[n * 3 + 1] = py;
         npcs.pos[n * 3 + 2] = pz;
         n++;
       }

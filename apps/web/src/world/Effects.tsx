@@ -19,8 +19,8 @@ export default function Effects({ features, ambience }: { features: Features; am
         mipmapBlur
         luminanceThreshold={1}
         luminanceSmoothing={0.15}
-        intensity={night ? 1.25 : 0.45}
-        radius={0.72}
+        intensity={night ? 0.8 : 0.45}
+        radius={0.6}
       />
     ),
     <ToneMapping key="tone" mode={ToneMappingMode.ACES_FILMIC} />,
