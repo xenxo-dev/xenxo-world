@@ -1,129 +1,427 @@
 {
- "$comment": "Distritos y su plantilla (coordenadas del chunk: X este, Z sur, metros). La usan el servidor (districts.ts), la forja (tools/forge/district.py y city.py) y la web (por GET /districts). Disposición v2: en el centro, la ciudad del distrito (`city`, con una cruz de calles y una plaza); alrededor, una calle en anillo (`ring`: de 10 a 14 y de 50 a 54) y, por fuera, las 16 parcelas de 10×10 m mirando a esa calle (A1–A6 al norte, B1–B3 al oeste, C1–C3 al este y D1–D4 al sur, a los lados de la puerta). El portal del proyecto va al fondo de la parcela. Si cambias algo, vuelve a forjar (npm run forge:districts) y sube DISTRICT_SEED_VERSION; si mueves parcelas, añade su migración (districts.ts).",
+ "$comment": "Distritos y su plantilla (coordenadas del chunk: X este, Z sur, metros). La usan el servidor (districts.ts), la forja (tools/forge/district.py y city.py) y la web (por GET /districts). Disposición v3 (tools/forge/layout_v3.py): 256 × 256 m (`bounds`), más grande que su chunk. En el centro, la ciudad (`city`: 3 × 3 manzanas, la del medio es la plaza); alrededor, dos anillos de calles (`roads`) con 64 parcelas de 15 × 15 m mirando a ellos (N, S, E y W: fila 1 del 1 al 6, fila 2 del 7 al 16) y cuatro avenidas; al sur, la puerta del nexo. Si cambias algo, vuelve a forjar (npm run forge:districts) y sube DISTRICT_SEED_VERSION; si mueves parcelas, añade su migración (districts.ts).",
  "parcel": {
-  "w": 10,
-  "d": 10,
+  "w": 15,
+  "d": 15,
   "frame_back": 3
  },
- "city": {
-  "x0": 14,
-  "z0": 14,
-  "x1": 50,
-  "z1": 50,
-  "cross": 6,
-  "plaza": 7
- },
- "ring": [
-  10,
-  14,
-  50,
-  54
+ "bounds": [
+  -96,
+  160
  ],
+ "city": {
+  "x0": -18,
+  "z0": -18,
+  "x1": 82,
+  "z1": 82,
+  "block": 26,
+  "street": 11,
+  "plaza": 9
+ },
+ "roads": {
+  "ring1": [
+   -28,
+   -18
+  ],
+  "ring2": [
+   -55,
+   -43
+  ],
+  "avenue": 12
+ },
  "gate": {
-  "z": 61.5,
+  "z": 156,
   "span": 8
  },
  "spawn": [
   32,
   0,
-  57.5
+  150
  ],
  "parcels": [
   {
-   "id": "A1",
-   "x": 5,
-   "z": 5,
+   "id": "N1",
+   "x": -19.25,
+   "z": -35.5,
    "facing": 0
   },
   {
-   "id": "A2",
-   "x": 15.8,
-   "z": 5,
+   "id": "N2",
+   "x": -1.75,
+   "z": -35.5,
    "facing": 0
   },
   {
-   "id": "A3",
-   "x": 26.6,
-   "z": 5,
+   "id": "N3",
+   "x": 15.75,
+   "z": -35.5,
    "facing": 0
   },
   {
-   "id": "A4",
-   "x": 37.4,
-   "z": 5,
+   "id": "N4",
+   "x": 48.25,
+   "z": -35.5,
    "facing": 0
   },
   {
-   "id": "A5",
-   "x": 48.2,
-   "z": 5,
+   "id": "N5",
+   "x": 65.75,
+   "z": -35.5,
    "facing": 0
   },
   {
-   "id": "A6",
-   "x": 59,
-   "z": 5,
+   "id": "N6",
+   "x": 83.25,
+   "z": -35.5,
    "facing": 0
   },
   {
-   "id": "B1",
-   "x": 5,
-   "z": 19,
+   "id": "N7",
+   "x": -47.05,
+   "z": -62.5,
+   "facing": 0
+  },
+  {
+   "id": "N8",
+   "x": -31.15,
+   "z": -62.5,
+   "facing": 0
+  },
+  {
+   "id": "N9",
+   "x": -15.25,
+   "z": -62.5,
+   "facing": 0
+  },
+  {
+   "id": "N10",
+   "x": 0.65,
+   "z": -62.5,
+   "facing": 0
+  },
+  {
+   "id": "N11",
+   "x": 16.55,
+   "z": -62.5,
+   "facing": 0
+  },
+  {
+   "id": "N12",
+   "x": 47.45,
+   "z": -62.5,
+   "facing": 0
+  },
+  {
+   "id": "N13",
+   "x": 63.35,
+   "z": -62.5,
+   "facing": 0
+  },
+  {
+   "id": "N14",
+   "x": 79.25,
+   "z": -62.5,
+   "facing": 0
+  },
+  {
+   "id": "N15",
+   "x": 95.15,
+   "z": -62.5,
+   "facing": 0
+  },
+  {
+   "id": "N16",
+   "x": 111.05,
+   "z": -62.5,
+   "facing": 0
+  },
+  {
+   "id": "S1",
+   "x": -19.25,
+   "z": 99.5,
+   "facing": 180
+  },
+  {
+   "id": "S2",
+   "x": -1.75,
+   "z": 99.5,
+   "facing": 180
+  },
+  {
+   "id": "S3",
+   "x": 15.75,
+   "z": 99.5,
+   "facing": 180
+  },
+  {
+   "id": "S4",
+   "x": 48.25,
+   "z": 99.5,
+   "facing": 180
+  },
+  {
+   "id": "S5",
+   "x": 65.75,
+   "z": 99.5,
+   "facing": 180
+  },
+  {
+   "id": "S6",
+   "x": 83.25,
+   "z": 99.5,
+   "facing": 180
+  },
+  {
+   "id": "S7",
+   "x": -47.05,
+   "z": 126.5,
+   "facing": 180
+  },
+  {
+   "id": "S8",
+   "x": -31.15,
+   "z": 126.5,
+   "facing": 180
+  },
+  {
+   "id": "S9",
+   "x": -15.25,
+   "z": 126.5,
+   "facing": 180
+  },
+  {
+   "id": "S10",
+   "x": 0.65,
+   "z": 126.5,
+   "facing": 180
+  },
+  {
+   "id": "S11",
+   "x": 16.55,
+   "z": 126.5,
+   "facing": 180
+  },
+  {
+   "id": "S12",
+   "x": 47.45,
+   "z": 126.5,
+   "facing": 180
+  },
+  {
+   "id": "S13",
+   "x": 63.35,
+   "z": 126.5,
+   "facing": 180
+  },
+  {
+   "id": "S14",
+   "x": 79.25,
+   "z": 126.5,
+   "facing": 180
+  },
+  {
+   "id": "S15",
+   "x": 95.15,
+   "z": 126.5,
+   "facing": 180
+  },
+  {
+   "id": "S16",
+   "x": 111.05,
+   "z": 126.5,
+   "facing": 180
+  },
+  {
+   "id": "W1",
+   "x": -35.5,
+   "z": -19.25,
    "facing": 90
   },
   {
-   "id": "B2",
-   "x": 5,
-   "z": 32,
+   "id": "W2",
+   "x": -35.5,
+   "z": -1.75,
    "facing": 90
   },
   {
-   "id": "B3",
-   "x": 5,
-   "z": 45,
+   "id": "W3",
+   "x": -35.5,
+   "z": 15.75,
    "facing": 90
   },
   {
-   "id": "C1",
-   "x": 59,
-   "z": 19,
+   "id": "W4",
+   "x": -35.5,
+   "z": 48.25,
+   "facing": 90
+  },
+  {
+   "id": "W5",
+   "x": -35.5,
+   "z": 65.75,
+   "facing": 90
+  },
+  {
+   "id": "W6",
+   "x": -35.5,
+   "z": 83.25,
+   "facing": 90
+  },
+  {
+   "id": "W7",
+   "x": -62.5,
+   "z": -47.05,
+   "facing": 90
+  },
+  {
+   "id": "W8",
+   "x": -62.5,
+   "z": -31.15,
+   "facing": 90
+  },
+  {
+   "id": "W9",
+   "x": -62.5,
+   "z": -15.25,
+   "facing": 90
+  },
+  {
+   "id": "W10",
+   "x": -62.5,
+   "z": 0.65,
+   "facing": 90
+  },
+  {
+   "id": "W11",
+   "x": -62.5,
+   "z": 16.55,
+   "facing": 90
+  },
+  {
+   "id": "W12",
+   "x": -62.5,
+   "z": 47.45,
+   "facing": 90
+  },
+  {
+   "id": "W13",
+   "x": -62.5,
+   "z": 63.35,
+   "facing": 90
+  },
+  {
+   "id": "W14",
+   "x": -62.5,
+   "z": 79.25,
+   "facing": 90
+  },
+  {
+   "id": "W15",
+   "x": -62.5,
+   "z": 95.15,
+   "facing": 90
+  },
+  {
+   "id": "W16",
+   "x": -62.5,
+   "z": 111.05,
+   "facing": 90
+  },
+  {
+   "id": "E1",
+   "x": 99.5,
+   "z": -19.25,
    "facing": 270
   },
   {
-   "id": "C2",
-   "x": 59,
-   "z": 32,
+   "id": "E2",
+   "x": 99.5,
+   "z": -1.75,
    "facing": 270
   },
   {
-   "id": "C3",
-   "x": 59,
-   "z": 45,
+   "id": "E3",
+   "x": 99.5,
+   "z": 15.75,
    "facing": 270
   },
   {
-   "id": "D1",
-   "x": 5,
-   "z": 59,
-   "facing": 180
+   "id": "E4",
+   "x": 99.5,
+   "z": 48.25,
+   "facing": 270
   },
   {
-   "id": "D2",
-   "x": 16,
-   "z": 59,
-   "facing": 180
+   "id": "E5",
+   "x": 99.5,
+   "z": 65.75,
+   "facing": 270
   },
   {
-   "id": "D3",
-   "x": 48,
-   "z": 59,
-   "facing": 180
+   "id": "E6",
+   "x": 99.5,
+   "z": 83.25,
+   "facing": 270
   },
   {
-   "id": "D4",
-   "x": 59,
-   "z": 59,
-   "facing": 180
+   "id": "E7",
+   "x": 126.5,
+   "z": -47.05,
+   "facing": 270
+  },
+  {
+   "id": "E8",
+   "x": 126.5,
+   "z": -31.15,
+   "facing": 270
+  },
+  {
+   "id": "E9",
+   "x": 126.5,
+   "z": -15.25,
+   "facing": 270
+  },
+  {
+   "id": "E10",
+   "x": 126.5,
+   "z": 0.65,
+   "facing": 270
+  },
+  {
+   "id": "E11",
+   "x": 126.5,
+   "z": 16.55,
+   "facing": 270
+  },
+  {
+   "id": "E12",
+   "x": 126.5,
+   "z": 47.45,
+   "facing": 270
+  },
+  {
+   "id": "E13",
+   "x": 126.5,
+   "z": 63.35,
+   "facing": 270
+  },
+  {
+   "id": "E14",
+   "x": 126.5,
+   "z": 79.25,
+   "facing": 270
+  },
+  {
+   "id": "E15",
+   "x": 126.5,
+   "z": 95.15,
+   "facing": 270
+  },
+  {
+   "id": "E16",
+   "x": 126.5,
+   "z": 111.05,
+   "facing": 270
   }
  ],
  "districts": [
@@ -158,7 +456,7 @@
    }
   },
   {
-   "id": "agora",
+   "id": "agora", "soon": true,
    "chunk": "c_0_1",
    "category": "social",
    "color": "#6dff8a",
@@ -188,7 +486,7 @@
    }
   },
   {
-   "id": "frontera",
+   "id": "frontera", "soon": true,
    "chunk": "c_1_-1",
    "category": "other",
    "color": "#b8c2d6",
@@ -218,7 +516,7 @@
    }
   },
   {
-   "id": "vertical",
+   "id": "vertical", "soon": true,
    "chunk": "c_-1_1",
    "category": "other",
    "color": "#ff7a45",

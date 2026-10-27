@@ -29,7 +29,7 @@ import {
 import type { Env } from "./index";
 import { randomId, type Principal } from "./auth";
 import { plazaSeed, SEED_VERSION } from "./seed";
-import { districtByChunk, districtSeed, DISTRICT_SEED_VERSION, migrateParcelPose, PARCEL_LAYOUT_VERSION, PARCELS, PARCELS_V1, parcelIdV2, parcelIndex, parcelReserved, parcelSlot } from "./districts";
+import { DISTRICT_BOUNDS, districtByChunk, districtSeed, DISTRICT_SEED_VERSION, migrateParcelPose, migrateSlot, PARCEL_LAYOUT_VERSION, PARCELS, parcelIndex, parcelReserved, parcelSlot } from "./districts";
 import { nexoArrival, NEXO_BOUNDS, NEXO_SEED_VERSION, nexoSeed, SHOWCASE_SLOTS } from "./nexo";
 import { portalEntities, r3, type Seeded } from "./places";
 import { fitsZone, localBox, worldBox, type Zone } from "./zone";
@@ -38,6 +38,8 @@ import { SEED_ASSETS } from "./seed-assets";
 import { isAvatarPreset } from "./avatar-presets-check";
 
 const TICK_HZ = 8;
+/** En lugares más grandes que un chunk, cada uno recibe las poses de quien tiene a menos de esto (m). */
+const AOI_RADIUS = 70;
 
 /** Triángulos de cada LOD de las piezas de la forja (para usarlas sin pasar por R2). */
 const SYSTEM_LODS = new Map(Object.values(SEED_ASSETS).flatMap((a) => a.lods.map((l) => [l.hash, l.tris] as const)));
@@ -231,34 +233,32 @@ export class ChunkRoom extends DurableObject<Env> {
   private migrateParcelLayout() {
     const done = this.sql.exec<{ v: string }>("SELECT v FROM meta WHERE k = 'parcel_layout'").toArray()[0]?.v;
     if (done === PARCEL_LAYOUT_VERSION) return;
+    const from: 1 | 2 = done === "2" ? 2 : 1;
     this.ctx.storage.transactionSync(() => {
-      let moved = 0;
       const rows = this.sql.exec<{ entity_id: string; rev: number; data: string }>("SELECT entity_id, rev, data FROM entities WHERE owner != 'system'").toArray();
       for (const row of rows) {
         const e = JSON.parse(row.data) as Entity;
         const t = e.components["transform@1"] as { p: number[]; r: number[]; s: number[]; parent: string | null } | undefined;
         if (!t || t.parent) continue;
-        const m = migrateParcelPose(t.p as [number, number, number], t.r as [number, number, number, number]);
+        const m = migrateParcelPose(t.p as [number, number, number], t.r as [number, number, number, number], from);
         if (!m) continue;
         (e.components as Record<string, unknown>)["transform@1"] = { ...t, p: m.p, r: m.r };
         e.rev = row.rev + 1;
         this.sql.exec("UPDATE entities SET rev = ?, data = ? WHERE entity_id = ?", e.rev, JSON.stringify(e), row.entity_id);
-        moved++;
       }
-      // Los portales de los proyectos: de su índice en la v1 a su índice en la v2 (en dos pasos: es UNIQUE).
+      // Los portales de los proyectos: de su índice antiguo al de hoy (en dos pasos: es UNIQUE).
       const stands = this.sql.exec<{ project_id: string; slot: number }>("SELECT project_id, slot FROM stands").toArray();
       for (const s of stands) this.sql.exec("UPDATE stands SET slot = ? WHERE project_id = ?", -1 - s.slot, s.project_id);
       for (const s of stands) {
-        const old = PARCELS_V1[s.slot];
-        const i = old ? parcelIndex(parcelIdV2(old.id)) : -1;
+        const i = migrateSlot(s.slot, from);
         if (i >= 0) this.sql.exec("UPDATE stands SET slot = ? WHERE project_id = ?", i, s.project_id);
         else this.sql.exec("DELETE FROM stands WHERE project_id = ?", s.project_id);
       }
       this.logEvent("system", "MIGRATE", "parcel_layout", Number(PARCEL_LAYOUT_VERSION), null);
       this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('parcel_layout', ?)", PARCEL_LAYOUT_VERSION);
-      void moved;
     });
   }
+
 
   /**
    * Siembra o actualiza un lugar del sistema (la plaza, el nexo). Si cambió la semilla (su versión
@@ -324,7 +324,7 @@ export class ChunkRoom extends DurableObject<Env> {
           server_time: Date.now(),
           tick_hz: TICK_HZ,
           budgets: { ...BUDGETS },
-          ...(this.solo ? { solo: true, walk: NEXO_BOUNDS } : {}),
+          ...(this.solo ? { solo: true, walk: NEXO_BOUNDS } : this.big ? { walk: this.bounds } : {}),
         }));
         // En solitario (el nexo) nadie ve a nadie: ni gente, ni poses, ni chat.
         if (this.solo) {
@@ -382,6 +382,19 @@ export class ChunkRoom extends DurableObject<Env> {
     return this.chunkId === PLACES.nexo;
   }
 
+  /** Hasta dónde llega el lugar (X y Z): el nexo y los distritos pueden ser más grandes que su chunk. */
+  private get bounds(): [number, number] {
+    if (this.chunkId === PLACES.nexo) return NEXO_BOUNDS;
+    if (this.chunkId && districtByChunk(this.chunkId)) return DISTRICT_BOUNDS;
+    return [0, CHUNK_SIZE];
+  }
+
+  /** Lugar compartido más grande que un chunk: las poses se reparten solo a quien está cerca. */
+  private get big(): boolean {
+    const [lo, hi] = this.bounds;
+    return !this.solo && (lo < 0 || hi > CHUNK_SIZE);
+  }
+
   /* ---------------------------------------------------------------- */
   /* Tick de poses                                                      */
   /* ---------------------------------------------------------------- */
@@ -410,7 +423,27 @@ export class ChunkRoom extends DurableObject<Env> {
     this.lastTick = now;
     const poses = [...this.dirty].map((id) => this.poses.get(id)).filter((p): p is AvatarPose => !!p);
     this.dirty.clear();
-    this.broadcast(msg("POSES", { t: now, poses }));
+    if (!this.big) return this.broadcast(msg("POSES", { t: now, poses }));
+    // Lugar grande: a cada uno, solo las poses de quien tiene a menos de AOI_RADIUS (y todas si aún
+    // no ha mandado la suya). Ahorra subida: con 100 personas repartidas, cada una recibe unas pocas.
+    const R2 = AOI_RADIUS * AOI_RADIUS;
+    for (const ws of this.ctx.getWebSockets()) {
+      const att = ws.deserializeAttachment() as Attachment | null;
+      if (!att?.hello) continue;
+      const me = this.poses.get(att.session_id)?.head.p;
+      const near = me
+        ? poses.filter((q) => {
+            const dx = q.head.p[0]! - me[0]!, dz = q.head.p[2]! - me[2]!;
+            return dx * dx + dz * dz <= R2;
+          })
+        : poses;
+      if (!near.length) continue;
+      try {
+        ws.send(JSON.stringify(msg("POSES", { t: now, poses: near })));
+      } catch {
+        /* socket cerrado */
+      }
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -912,7 +945,8 @@ export class ChunkRoom extends DurableObject<Env> {
     if (!r.success) throw new MutationError("bad_message", "componentes no válidos", r.error.issues.slice(0, 5));
     const c = r.data;
     if (!this.inBounds(c["transform@1"].p)) {
-      throw new MutationError("budget_exceeded", `la posición debe estar dentro del chunk (0..${CHUNK_SIZE} en x/z, -16..256 en y)`);
+      const [lo, hi] = this.bounds;
+      throw new MutationError("budget_exceeded", `la posición debe estar dentro del lugar (${lo}..${hi} en x/z, -16..256 en y)`);
     }
     const tris = estimateTris(c);
     if (tris > BUDGETS.maxTrisPerEntity) throw new MutationError("budget_exceeded", "demasiados triángulos para una entidad", { tris, max: BUDGETS.maxTrisPerEntity });
@@ -1014,7 +1048,8 @@ export class ChunkRoom extends DurableObject<Env> {
 
   private inBounds(p: readonly number[]): boolean {
     const [x = NaN, y = NaN, z = NaN] = p;
-    return x >= 0 && x < CHUNK_SIZE && z >= 0 && z < CHUNK_SIZE && y >= -16 && y <= 256;
+    const [lo, hi] = this.bounds;
+    return x >= lo && x < hi && z >= lo && z < hi && y >= -16 && y <= 256;
   }
 
   private peerOf(att: Attachment): Peer {

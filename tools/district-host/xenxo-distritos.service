@@ -9,6 +9,8 @@ User=xenxo
 Group=xenxo
 WorkingDirectory=/opt/xenxo-distritos
 EnvironmentFile=/etc/xenxo-distritos.env
+# Si el NAS tiene el relevo, no arranca (sin fallar ni reintentar).
+ExecCondition=+/opt/xenxo-distritos/relevo-check.sh antes
 ExecStart=/opt/xenxo-distritos/workerd serve /opt/xenxo-distritos/distritos.capnp --experimental
 Restart=always
 RestartSec=3

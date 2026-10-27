@@ -14,7 +14,9 @@ import { CarsMesh, CityBoxes, CityClock, CityGround, NEON, rng, type Box, type C
 const C = CHUNK_SIZE / 2;
 /** Margen alrededor del chunk caminable: ahí no se pone nada. */
 const KEEP = 10;
-const REACH = 190;
+const REACH = 300;
+/** Lo que mide el distrito (districts.json): la ciudad de alrededor empieza fuera. */
+const [B0, B1] = districts.bounds as unknown as [number, number];
 
 type Rand = () => number;
 type Theme = (x: number, z: number, r: Rand, color: string, far: number) => Box[];
@@ -158,16 +160,17 @@ function skylineBoxes(id: string, color: string, density: number): Box[] {
   if (!theme) return [];
   const r = rng(id.split("").reduce((a, c) => a * 31 + c.charCodeAt(0), 7));
   const out: Box[] = [];
-  const P = theme.pitch;
+  const P = theme.pitch * 1.4;
   for (let gx = C - REACH; gx <= C + REACH; gx += P) {
     for (let gz = C - REACH; gz <= C + REACH; gz += P) {
       const x = gx + (r() - 0.5) * P * 0.4;
       const z = gz + (r() - 0.5) * P * 0.4;
-      const inside = x > -KEEP - P / 2 && x < CHUNK_SIZE + KEEP + P / 2 && z > -KEEP - P / 2 && z < CHUNK_SIZE + KEEP + P / 2;
+      const inside = x > B0 - KEEP - P / 2 && x < B1 + KEEP + P / 2 && z > B0 - KEEP - P / 2 && z < B1 + KEEP + P / 2;
       const dist = Math.hypot(x - C, z - C);
       if (inside || dist > REACH) continue;
-      if (r() > theme.fill * density) continue;
-      const far = Math.min(1, Math.max(0, (dist - 50) / 120));
+      // Lejos, menos edificios (la bruma se los come y la Quest lo agradece).
+      if (r() > theme.fill * density * (dist > 230 ? 0.55 : 1)) continue;
+      const far = Math.min(1, Math.max(0, (dist - 150) / 130));
       out.push(...theme.build(x, z, r, color, far));
     }
   }
@@ -185,9 +188,10 @@ function skylineCars(id: string, color: string, density: number): Car[] {
       out.push({ a: [C, C, radius + (r() - 0.5) * 2, y + (r() - 0.5) * 2], b: [speed / radius, (i / count) * Math.PI * 2 + r() * 0.3, 0, 0], glow: r() < 0.5 ? color : pick(r, NEON) });
     }
   };
-  ring(70, 26, 10, 18);
-  ring(95, 40, 12, -22);
-  ring(130, 55, 12, 26);
+  // Por fuera del distrito (mide 256 m) y por encima de sus torres.
+  ring(185, 70, 12, 22);
+  ring(225, 82, 14, -26);
+  ring(265, 96, 14, 30);
   return out;
 }
 

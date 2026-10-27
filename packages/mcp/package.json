@@ -1,6 +1,6 @@
 {
   "name": "@xenxo/mcp",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "license": "MIT",
   "type": "module",
   "description": "Servidor MCP de xenxo: tu agente (Claude Code, Cursor…) construye en la parcela de tu proyecto",

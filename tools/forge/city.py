@@ -1,7 +1,7 @@
 """
-La ciudad del centro de cada distrito (disposición v2 de districts.json): una manzana de 36×36 m
-con una cruz de calles que lleva a una plaza central con el monumento del distrito, y cuatro
-cuadrantes con edificios de su tema. Alrededor, la calle en anillo y las parcelas.
+La ciudad del centro de cada distrito (disposición v3 de districts.json): 100 × 100 m, 3 × 3
+manzanas de 26 m con calles de 11 m; la del medio es la plaza con el monumento del distrito y sus
+puestos de actividad, y las otras ocho llevan edificios de su tema (dos parcelas por manzana).
 
 Todo sale de `plan(lay, d)`, puro y determinista: lo usan el modelo (`build`) y las colisiones
 (`colliders`), que la forja escribe en apps/realtime/src/district-cities.json para el servidor.
@@ -43,47 +43,66 @@ def _box(p: Part, x0, z0, x1, z1, y0, y1, m, skip=()):
     p.box(lo, hi, m, skip=skip)
 
 
-def _quadrants(lay: dict):
-    """Cuatro cuadrantes (x0, z0, x1, z1) y su esquina hacia la plaza (sx, sz = signo hacia fuera)."""
+def _blocks(lay: dict):
+    """Las 8 manzanas de la ciudad (sin la del medio, que es la plaza): (i, j, x0, z0, x1, z1) en bruto."""
     c = lay["city"]
-    half = c["cross"] / 2
-    a0, a1 = c["x0"] + 1, C - half - 3  # de la calle en anillo a la acera de la cruz
-    b0, b1 = C + half + 3, c["x1"] - 1
-    return [(a0, a0, a1, a1, -1, -1), (b0, a0, b1, a1, 1, -1), (a0, b0, a1, b1, -1, 1), (b0, b0, b1, b1, 1, 1)]
+    blk, st = c["block"], c["street"]
+    out = []
+    for j in range(3):
+        for i in range(3):
+            if i == 1 and j == 1:
+                continue
+            x0 = c["x0"] + i * (blk + st)
+            z0 = c["z0"] + j * (blk + st)
+            out.append((i, j, x0, z0, x0 + blk, z0 + blk))
+    return out
 
 
 # --------------------------------------------------------------------------------------
-# Plan: qué edificio va en cada cuadrante, con su caja de colisión
+# Plan: qué edificios van en cada manzana, con sus cajas de colisión
 # --------------------------------------------------------------------------------------
+
+SIDEWALK = 1.5
+ALLEY = 2.0
+
 
 def plan(lay: dict, d: dict) -> dict:
     rnd = random.Random(_seed(d["id"]))
     theme = d["id"]
     out = {"buildings": [], "props": [], "landmark": None}
-    for qi, (x0, z0, x1, z1, sx, sz) in enumerate(_quadrants(lay)):
-        w = x1 - x0
+    for (i, j, bx0, bz0, bx1, bz1) in _blocks(lay):
+        x0, z0, x1, z1 = bx0 + SIDEWALK, bz0 + SIDEWALK, bx1 - SIDEWALK, bz1 - SIDEWALK
+        q = 2 if j == 2 else 0  # la puerta mira a la calle de la plaza (norte → su cara sur)
+        midx = (x0 + x1) / 2
+        lots = [[x0, z0, midx - ALLEY / 2, z1], [midx + ALLEY / 2, z0, x1, z1]]
         if theme in ("arcade", "cero"):
-            hmax = 34 if theme == "arcade" else 46
-            h = rnd.uniform(hmax * 0.65, hmax)
-            out["buildings"].append({"style": "tower", "rect": [x0, z0, x1, z1], "h": round(h, 2), "q": qi})
+            hmin, hmax = (28, 48) if theme == "arcade" else (38, 64)
+            for lot in lots:
+                out["buildings"].append({"style": "tower", "rect": lot, "h": round(rnd.uniform(hmin, hmax), 2), "q": q})
         elif theme == "pixel":
-            out["buildings"].append({"style": "voxel", "rect": [x0, z0, x1, z1], "h": round(rnd.uniform(16, 24), 2), "q": qi})
+            for lot in lots:
+                out["buildings"].append({"style": "voxel", "rect": lot, "h": round(rnd.uniform(16, 30), 2), "q": q})
         elif theme == "agora":
-            # Dos casas encaladas por cuadrante, una más alta que otra.
-            mid = x0 + w * rnd.uniform(0.45, 0.55)
-            out["buildings"].append({"style": "house", "rect": [x0, z0, mid - 0.4, z1], "h": round(rnd.uniform(6.5, 9.5), 2), "q": qi})
-            out["buildings"].append({"style": "house", "rect": [mid + 0.4, z0, x1, z1], "h": round(rnd.uniform(6.5, 11), 2), "q": qi})
+            midz = (z0 + z1) / 2
+            for (a, b) in ((x0, midx - ALLEY / 2), (midx + ALLEY / 2, x1)):
+                out["buildings"].append({"style": "house", "rect": [a, z0, b, midz - ALLEY / 2], "h": round(rnd.uniform(7, 11), 2), "q": 0})
+                out["buildings"].append({"style": "house", "rect": [a, midz + ALLEY / 2, b, z1], "h": round(rnd.uniform(7, 12), 2), "q": 2})
         elif theme == "taller":
-            out["buildings"].append({"style": "hall", "rect": [x0, z0, x1, z1], "h": round(rnd.uniform(8, 11), 2), "q": qi})
+            for lot in lots:
+                out["buildings"].append({"style": "hall", "rect": lot, "h": round(rnd.uniform(10, 14), 2), "q": q})
         elif theme == "frontera":
-            out["buildings"].append({"style": "outpost", "rect": [x0, z0, x1, z1], "h": round(rnd.uniform(5, 7), 2), "q": qi})
+            midz = (z0 + z1) / 2
+            for lot in lots:
+                out["buildings"].append({"style": "outpost", "rect": [lot[0], z0, lot[2], midz - ALLEY / 2], "h": 6.0, "q": 0})
+                out["buildings"].append({"style": "outpost", "rect": [lot[0], midz + ALLEY / 2, lot[2], z1], "h": 6.0, "q": 2})
         elif theme == "vertical":
-            out["buildings"].append({"style": "stack", "rect": [x0 + 1, z0 + 1, x1 - 1, z1 - 1], "h": round(3.1 * rnd.randint(6, 9), 2), "q": qi})
-        # Atrezo del tema en la acera de la cruz (dos por cuadrante).
-        ax = x1 + 1.6 if sx < 0 else x0 - 1.6
-        az = z1 + 1.6 if sz < 0 else z0 - 1.6
-        out["props"].append({"x": round(ax, 2), "z": round(z0 + (z1 - z0) * 0.35, 2), "rot": 90 if sx < 0 else -90})
-        out["props"].append({"x": round(x0 + (x1 - x0) * 0.35, 2), "z": round(az, 2), "rot": 0 if sz < 0 else 180})
+            for lot in lots:
+                out["buildings"].append({"style": "stack", "rect": [lot[0] + 0.5, lot[1] + 0.5, lot[2] - 0.5, lot[3] - 0.5], "h": round(3.1 * rnd.randint(7, 12), 2), "q": q})
+        # Atrezo del tema en las aceras que dan a las calles de dentro de la ciudad.
+        if i != 1:
+            out["props"].append({"x": round(bx1 - 0.8 if i == 0 else bx0 + 0.8, 2), "z": round((bz0 + bz1) / 2, 2), "rot": 90 if i == 0 else -90})
+        if j != 1:
+            out["props"].append({"x": round((bx0 + bx1) / 2, 2), "z": round(bz1 - 0.8 if j == 0 else bz0 + 0.8, 2), "rot": 0 if j == 0 else 180})
     out["landmark"] = {"x": C, "z": C}
     return out
 
@@ -98,7 +117,7 @@ def colliders(lay: dict, d: dict) -> list[list[float]]:
     for pr in pl["props"]:
         boxes.append([pr["x"], 1.0, pr["z"], 0.7, 1.0, 0.7])
     lm = pl["landmark"]
-    boxes.append([lm["x"], 2.0, lm["z"], 2.2, 2.0, 2.2])
+    boxes.append([lm["x"], 2.5, lm["z"], 3.2, 2.5, 3.2])
     return boxes
 
 
@@ -329,11 +348,11 @@ def build(lay: dict, d: dict, detail: int = 1):
     lm = pl["landmark"]
     # Peana de la plaza con su anillo de luz, y el monumento encima.
     seg = 32 if detail else 16
-    p.cylinder((0, 0, 0), 2.6, 0.5, mat("metal", "#1b1f2e"), segments=seg)
-    p.lathe((0, 0, 0), [(2.65, 0.3), (2.65, 0.45)], mat("neon", color), segments=seg, smooth=False)
+    p.cylinder((0, 0, 0), 3.6, 0.6, mat("metal", "#1b1f2e"), segments=seg)
+    p.lathe((0, 0, 0), [(3.65, 0.35), (3.65, 0.5)], mat("neon", color), segments=seg, smooth=False)
     item = decor.BUILDERS[name](color)
     target = Part("lm")
-    target.merge(item, Matrix.Translation((0, 0, 0.5)) @ Matrix.Scale(scale, 4))
+    target.merge(item, Matrix.Translation((0, 0, 0.6)) @ Matrix.Scale(scale * 1.35, 4))
     item.bm.free()
     p.merge(target, Matrix.Translation((lm["x"] - C, -(lm["z"] - C), 0)))
     target.bm.free()

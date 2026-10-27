@@ -6,7 +6,7 @@ paredes, rótulos de neón, una luz y tus propios modelos `.glb`.
 
 Es un cliente más del protocolo de xenxo: entra con una **clave de parcela** y todo lo que hace pasa
 por la misma puerta que cualquiera (`MUTATE_WORLD`), con las mismas reglas. La clave solo sirve
-para tu parcela (10 × 10 m y 12 m de alto) y la puedes revocar cuando quieras.
+para tu parcela (15 × 15 m y 12 m de alto) y la puedes revocar cuando quieras.
 
 ## 1. Saca tu clave
 
@@ -60,7 +60,7 @@ Coordenadas en metros, de la parcela: `x` de 0 a 10 de izquierda a derecha miran
 portal ocupa el fondo: el servidor deja libre la zona `x` 2,5–7,5, `z` 4,4–10 por debajo de 3,6 m (el
 marco, la peana y la franja que abre la ficha). Se llega desde la calle, mirando al portal.
 
-Presupuesto de una parcela: 32 piezas, 16.000 triángulos y 1 luz.
+Presupuesto de una parcela: 48 piezas, 24.000 triángulos y 1 luz.
 
 ## Desarrollo
 

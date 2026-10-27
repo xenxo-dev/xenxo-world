@@ -1,0 +1,8 @@
+# Si el NAS ha tomado el relevo (existe <NAS>/RELEVO), este equipo se aparta: para el túnel y el
+# servidor para que nunca atiendan los dos a la vez. Lo lanza xenxo-relevo.timer cada minuto.
+[Unit]
+Description=xenxo: apartarse si el NAS tiene el relevo
+
+[Service]
+Type=oneshot
+ExecStart=/opt/xenxo-distritos/relevo-check.sh vigilar

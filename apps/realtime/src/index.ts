@@ -376,6 +376,18 @@ function remoteChunk(env: Env, id: string) {
 }
 
 /** URL del WebSocket de un chunk para quien ya tiene su token de sesión (pase si vive fuera). */
+/**
+ * ¿Está cerrado este chunk para esta persona? Un distrito «próximamente» solo admite a moderación
+ * (y a la clave de administración). Solo cuesta una llamada al Directory al intentar entrar en uno.
+ */
+async function closedFor(env: Env, chunkId: string, p: Principal): Promise<boolean> {
+  if (!DISTRICTS.some((d) => d.chunk === chunkId && d.soon)) return false;
+  if (p.scopes.includes("admin")) return false;
+  const uid = userIdOf(p);
+  return !(uid && (await directory(env).isModerator(uid)));
+}
+const SOON = { error: "soon", message: "este distrito abrirá pronto" };
+
 async function socketFor(env: Env, req: Request, chunkId: string, p: Principal, token: string): Promise<string> {
   if (isRemote(env, chunkId)) {
     const ticket = await signRemote(env.DISTRICT_SIGNING_KEY!, { typ: "ticket", chunk: chunkId, principal: p, exp: Date.now() + TICKET_TTL_MS });
@@ -1048,6 +1060,7 @@ export default {
         if (p.zone && !(await directory(env).agentKeyAlive(p.sub.replace(/^agt_/, "")))) {
           return json({ error: "unauthorized", message: "tu clave de agente ya no vale" }, 401, h);
         }
+        if (await closedFor(env, chunkId, p)) return json(SOON, 403, h);
         return json({ url: await socketFor(env, req, chunkId, p, raw), remote: isRemote(env, chunkId) }, 200, { ...h, "Cache-Control": "no-store" });
       }
 
@@ -1085,6 +1098,7 @@ export default {
         if (p.zone && !(await directory(env).agentKeyAlive(p.sub.replace(/^agt_/, "")))) {
           return json({ error: "unauthorized", message: "tu clave de agente ya no vale" }, 401, h);
         }
+        if (await closedFor(env, chunkId, p)) return json(SOON, 403, h);
         headers.set("X-Principal", JSON.stringify(p));
         headers.set("Upgrade", "websocket");
         return stub.fetch(new Request("https://do/ws", { headers }));

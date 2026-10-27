@@ -98,6 +98,8 @@ function veilMaterial(color: string) {
   return m;
 }
 const unitPlane = new THREE.PlaneGeometry(1, 1);
+/** Velo de una puerta cerrada («próximamente»): apagado, para que no invite a cruzar. */
+const CLOSED_COLOR = "#2a3140";
 
 /* ------------------------------------------------------------------ */
 /* Vista de un portal                                                   */
@@ -118,7 +120,7 @@ const PortalView = memo(function PortalView({ entity, coverWidth }: { entity: En
       {coverMat ? (
         <mesh geometry={unitPlane} material={coverMat} position={[0, 0, 0.02]} scale={[w, h, 1]} />
       ) : (
-        <mesh geometry={unitPlane} material={veilMaterial(portal.data.color ?? categoryColor(portal.data.category))} scale={[w, h, 1]} renderOrder={2} />
+        <mesh geometry={unitPlane} material={veilMaterial(portal.data.closed ? CLOSED_COLOR : (portal.data.color ?? categoryColor(portal.data.category)))} scale={[w, h, 1]} renderOrder={2} />
       )}
     </group>
   );
@@ -201,6 +203,10 @@ function PortalSensor({ portals, active }: { portals: Entity[]; active: boolean 
 function enter(z: Zone) {
   const to = z.portal.to;
   const title = z.portal.title ? labelText({ text: z.portal.title, i18n: z.portal.i18n }, getLang()) : "";
+  if (to.kind === "chunk" && z.portal.closed) {
+    portalHud.soon(title);
+    return;
+  }
   if (to.kind === "chunk") {
     portalHud.travel(title);
     travel(to.chunk_id, to.spawn ?? [32, 0, 40], to.yaw ?? 0);

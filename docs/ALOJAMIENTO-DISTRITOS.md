@@ -1,6 +1,6 @@
 # Distritos como ciudades completas: cómo y dónde alojarlos sin salir del plan gratuito
 
-Decidido el 27-10-2026: los distritos irán en el portátil (MSI GP62VR, i7-7700HQ, 16 GB, SSD; fibra de 600 Mb). El DL380 queda de reserva. Instalación: `tools/district-host/README.md`. Contexto: `docs/LIMITES-CLOUDFLARE.md`.
+Decidido el 27-10-2026: los distritos irán en el portátil (MSI GP62VR, i7-7700HQ, 16 GB, SSD; fibra de 600 Mb), con relevo en frío en el NAS (Synology DS1815+, `tools/district-host/relevo/`). El DL380 queda para cuando crezca. Instalación: `tools/district-host/README.md`. Contexto: `docs/LIMITES-CLOUDFLARE.md`.
 
 ## La meta
 
@@ -57,7 +57,8 @@ cuenta aguanta unas 950 visitas al día. Con ciudades grandes y gente quedándos
   pasan a ser HTTP firmado entre el Worker y tu servidor.
 - **Interés por distancia** en el reparto de poses y una sala por distrito con límites de caminar.
 - **En tu servidor:** workerd como servicio, `cloudflared` para el túnel (`rt-distritos.xenxo.io`),
-  copia nocturna de las bases SQLite al NAS y un aviso si se cae. Si tu casa se cae, los distritos
+  copia de las bases SQLite al NAS cada 15 minutos, un aviso si se cae y el relevo en el NAS
+  (`tools/district-host/relevo/`). Si tu casa se cae, los distritos
   dicen «fuera de servicio» y el resto del mundo sigue.
 
 ## Cuánto aguanta tu casa

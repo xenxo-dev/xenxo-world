@@ -17,10 +17,14 @@ fi
 install -m 644 "$REPO/tools/district-host/xenxo-distritos.service" /etc/systemd/system/
 install -m 644 "$REPO/tools/district-host/xenxo-distritos-backup.service" /etc/systemd/system/
 install -m 644 "$REPO/tools/district-host/xenxo-distritos-backup.timer" /etc/systemd/system/
+install -m 644 "$REPO/tools/district-host/xenxo-relevo.service" "$REPO/tools/district-host/xenxo-relevo.timer" /etc/systemd/system/
+# El túnel no arranca mientras el NAS tenga el relevo (relevo/README.md).
+install -d /etc/systemd/system/cloudflared.service.d
+install -m 644 "$REPO/tools/district-host/cloudflared-relevo.conf" /etc/systemd/system/cloudflared.service.d/relevo.conf
 systemctl daemon-reload
 # El portátil no se suspende al cerrar la tapa.
 mkdir -p /etc/systemd/logind.conf.d
 printf '[Login]\nHandleLidSwitch=ignore\nHandleLidSwitchExternalPower=ignore\nHandleLidSwitchDocked=ignore\n' > /etc/systemd/logind.conf.d/xenxo-tapa.conf
 XENXO_REPO="$REPO" bash "$REPO/tools/district-host/update.sh"
-systemctl enable --now xenxo-distritos xenxo-distritos-backup.timer
+systemctl enable --now xenxo-distritos xenxo-distritos-backup.timer xenxo-relevo.timer
 echo "Listo. Falta el túnel de Cloudflare (README.md, paso 5)."

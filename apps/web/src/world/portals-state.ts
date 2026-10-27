@@ -14,7 +14,7 @@ export interface PortalCardState {
 
 class PortalHud {
   card: PortalCardState | null = null;
-  travelling: { title: string; at: number } | null = null;
+  travelling: { title: string; at: number; soon?: boolean } | null = null;
   private version = 0;
   private listeners = new Set<() => void>();
 
@@ -35,6 +35,12 @@ class PortalHud {
   }
   close(projectId?: string) {
     if (!this.card || (projectId && this.card.projectId !== projectId)) return;
+    this.card = null;
+    this.bump();
+  }
+  /** Puerta cerrada («próximamente»): solo el aviso, sin viajar. */
+  soon(title: string) {
+    this.travelling = { title, at: Date.now(), soon: true };
     this.card = null;
     this.bump();
   }

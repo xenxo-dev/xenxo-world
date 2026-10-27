@@ -1,7 +1,7 @@
 """
-Distritos (disposición v2): suelo con la ciudad en el centro (su cruz de calles y su plaza; los
-edificios, en city.py), la calle en anillo y las 16 parcelas de 10×10 m alrededor, bordeadas de luz
-del color del distrito, y la puerta de vuelta al nexo. Más el emblema de cada distrito (su
+Distritos (disposición v3, 256 × 256 m): suelo con la ciudad en el centro (3 × 3 manzanas y la
+plaza; los edificios, en city.py), dos anillos de calles, cuatro avenidas, las 64 parcelas de
+15 × 15 m bordeadas de luz del color del distrito, la zona de actividades y la puerta del nexo. Más el emblema de cada distrito (su
 monumento en el nexo).
 
 La disposición sale de apps/realtime/src/districts.json (la misma que usan el servidor y la web).
@@ -43,51 +43,77 @@ def _frame_lines(p: Part, x0: float, z0: float, x1: float, z1: float, y: float, 
     _rect(p, x1 - w, z0 + w, x1, z1 - w, y, y + 0.004, m)
 
 
+def _square_ring(p: Part, a: float, b: float, m, y0: float = 0.0, y1: float = 0.003) -> None:
+    """Calle en anillo cuadrado entre las coordenadas a..b (por fuera) y su simétrica (64 − b..64 − a)."""
+    S = CHUNK
+    lo0, lo1 = a, b
+    hi0, hi1 = S - b, S - a
+    _rect(p, lo0, lo0, hi1, lo1, y0, y1, m)        # norte
+    _rect(p, lo0, hi0, hi1, hi1, y0, y1, m)        # sur
+    _rect(p, lo0, lo1, lo1, hi0, y0, y1, m)        # oeste
+    _rect(p, hi0, lo1, hi1, hi0, y0, y1, m)        # este
+
+
 def ground(lay: dict, d: dict, detail: int = 1):
+    """Suelo del distrito v3 (256 × 256 m): calles, ciudad, parcelas, zona de actividades y puerta."""
     color = d["color"]
     floor = mat("panel", "#252c38")
     street = mat("panel", "#323b4b")
     pad = mat("scifi", "#2a3140")
     void = mat("oscuro", "#04060a")
+    park = mat("panel", "#1f2a2c")
     neon = mat("neon", color)
     white = mat("neon", "#cfe8ff")
     p = Part(f"district_{d['id']}")
-    S = CHUNK
-    # Base del chunk (el vacío se ve por debajo de los bordes)
-    p.box((-S / 2, -S / 2, -0.62), (S / 2, S / 2, -0.6), void, skip=("-z",))
-    _rect(p, 0, 0, S, S, -0.6, 0.0, floor)
-    # Calle en anillo alrededor de la ciudad, un tono más clara, con sus bordes de luz blanca fría.
-    r0, r1, r2, r3_ = lay["ring"]
-    for (x0, z0, x1, z1) in ((0.5, r0, S - 0.5, r1), (0.5, r2, S - 0.5, r3_), (r0, r1, r1, r2), (r2, r1, r3_, r2)):
-        _rect(p, x0, z0, x1, z1, 0.0, 0.003, street)
-    for x in (r0, r3_ - 0.06):
-        _rect(p, x, r1, x + 0.06, r2, 0.003, 0.007, white)
-    for z in (r0, r3_ - 0.06):
-        _rect(p, 0.5, z, S - 0.5, z + 0.06, 0.003, 0.007, white)
-    # La ciudad: acera del color del distrito en el borde, cruz de calles y plaza central.
+    b0, b1 = lay["bounds"]
+    # Base (el vacío se ve por debajo de los bordes) y suelo.
+    _rect(p, b0, b0, b1, b1, -0.62, -0.6, void)
+    _rect(p, b0, b0, b1, b1, -0.6, 0.0, floor)
+    # Franja exterior: zona de actividades y parques (un tono verdoso), con su borde de luz.
+    r = lay["roads"]
+    edge = r["ring2"][0] - lay["parcel"]["d"]
+    for (x0, z0, x1, z1) in ((b0, b0, b1, edge), (b0, CHUNK - edge, b1, b1), (b0, edge, edge, CHUNK - edge), (CHUNK - edge, edge, b1, CHUNK - edge)):
+        _rect(p, x0, z0, x1, z1, 0.0, 0.002, park)
+    _frame_lines(p, b0 + 0.4, b0 + 0.4, b1 - 0.4, b1 - 0.4, 0.002, 0.12, neon)
+    # Dos anillos de calles y cuatro avenidas del centro a los bordes, con bordes de luz fría.
+    _square_ring(p, r["ring1"][0], r["ring1"][1], street)
+    _square_ring(p, r["ring2"][0], r["ring2"][1], street)
+    h = r["avenue"] / 2
+    C2 = CHUNK / 2
+    _rect(p, C2 - h, b0, C2 + h, b1, 0.003, 0.005, street)
+    _rect(p, b0, C2 - h, b1, C2 + h, 0.003, 0.005, street)
+    for x in (C2 - h, C2 + h - 0.08):
+        _rect(p, x, b0, x + 0.08, b1, 0.005, 0.008, white)
+        _rect(p, b0, x, b1, x + 0.08, 0.005, 0.008, white)
+    # La ciudad: losa, borde de luz del distrito, calles entre manzanas y la plaza del medio.
     c = lay["city"]
     pave = mat("losa", "#3a4252")
-    _rect(p, c["x0"], c["z0"], c["x1"], c["z1"], 0.0, 0.004, pave)
-    _frame_lines(p, c["x0"], c["z0"], c["x1"], c["z1"], 0.004, 0.1, neon)
-    h = c["cross"] / 2
-    C2 = S / 2
-    _rect(p, C2 - h, c["z0"], C2 + h, c["z1"], 0.004, 0.006, street)
-    _rect(p, c["x0"], C2 - h, c["x1"], C2 + h, 0.004, 0.006, street)
-    seg = 48 if detail else 24
-    p.lathe((0, 0, 0), [(c["plaza"], 0.008), (c["plaza"] - 0.15, 0.008)], neon, segments=seg, smooth=False)
-    # Parcelas: rejilla octogonal y contorno de luz del color del distrito
+    _rect(p, c["x0"], c["z0"], c["x1"], c["z1"], 0.0, 0.006, pave)
+    _frame_lines(p, c["x0"], c["z0"], c["x1"], c["z1"], 0.006, 0.12, neon)
+    blk, st = c["block"], c["street"]
+    for k in (1, 2):
+        a = c["x0"] + k * blk + (k - 1) * st
+        _rect(p, a, c["z0"], a + st, c["z1"], 0.006, 0.008, street)
+        _rect(p, c["x0"], a, c["x1"], a + st, 0.006, 0.008, street)
+    pa = c["x0"] + blk + st
+    plaza = mat("losa", "#4a4f5c")
+    _rect(p, pa, pa, pa + blk, pa + blk, 0.008, 0.01, plaza)
+    seg = 64 if detail else 32
+    p.lathe((0, 0, 0), [(c["plaza"], 0.012), (c["plaza"] - 0.2, 0.012)], neon, segments=seg, smooth=False)
+    # Cuatro puestos de actividad en las esquinas de la plaza (círculos de luz, para minijuegos).
+    for (ax, az) in ((pa + 4, pa + 4), (pa + blk - 4, pa + 4), (pa + 4, pa + blk - 4), (pa + blk - 4, pa + blk - 4)):
+        ox, oy = _W(ax, az)
+        p.lathe((ox, oy, 0.0), [(2.2, 0.012), (2.05, 0.012)], white, segments=32 if detail else 16, smooth=False)
+    # Parcelas: rejilla octogonal y contorno de luz del color del distrito.
     W, D = lay["parcel"]["w"], lay["parcel"]["d"]
     for q in lay["parcels"]:
         x0, z0 = q["x"] - W / 2, q["z"] - D / 2
-        _rect(p, x0, z0, x0 + W, z0 + D, 0.0, 0.005, pad)
-        _frame_lines(p, x0, z0, x0 + W, z0 + D, 0.005, 0.08, neon)
-    # Borde del chunk
-    _frame_lines(p, 0.4, 0.4, S - 0.4, S - 0.4, 0.0, 0.08, neon)
+        _rect(p, x0, z0, x0 + W, z0 + D, 0.0, 0.007, pad)
+        _frame_lines(p, x0, z0, x0 + W, z0 + D, 0.007, 0.1, neon)
     # Emblema del punto de llegada
     sx, _, sz = lay["spawn"]
     ox, oy = _W(sx, sz)
-    seg = 48 if detail else 24
-    p.lathe((ox, oy, 0.0), [(1.7, 0.008), (1.58, 0.008)], neon, segments=seg, smooth=False)
+    p.lathe((ox, oy, 0.0), [(1.7, 0.01), (1.58, 0.01)], neon, segments=48 if detail else 24, smooth=False)
     # Puerta de vuelta al nexo: dos pilares y dintel con luz por dentro
     g = lay["gate"]
     body = mat("metal", "#1a202b")

@@ -4,6 +4,7 @@ import { at, FRAME, r3, yaw, type Seeded, type Slot, type V3 } from "./places";
 import { PORTAL_ZONE_DEPTH } from "@xenxo/protocol";
 import { SEED_ASSETS } from "./seed-assets";
 import legacyV1 from "./districts-v1-parcels.json";
+import legacyV2 from "./districts-v2-parcels.json";
 import cities from "./district-cities.json";
 
 /**
@@ -19,7 +20,7 @@ import cities from "./district-cities.json";
 export const DISTRICT_SEED_VERSION = 2;
 
 /** Versión de la disposición de las parcelas (la guarda cada chunk de distrito en su `meta`). */
-export const PARCEL_LAYOUT_VERSION = "2";
+export const PARCEL_LAYOUT_VERSION = "3";
 
 export interface District {
   id: string;
@@ -29,6 +30,8 @@ export interface District {
   emblem: string;
   name: { es: string; en: string };
   desc: { es: string; en: string };
+  /** Próximamente: su isla está en el nexo con la puerta cerrada; solo entra moderación y no se publica en él. */
+  soon?: boolean;
 }
 
 export interface Parcel {
@@ -44,6 +47,11 @@ const L = districtsLayout;
 export const DISTRICTS: District[] = L.districts;
 export const PARCELS: Parcel[] = L.parcels;
 export const DISTRICT_SPAWN: V3 = L.spawn as V3;
+/**
+ * Hasta dónde llega un distrito (mín. y máx. en X y en Z, metros del chunk). Puede ser más grande
+ * que su chunk: entonces WELCOME lo dice en `walk` y las poses se reparten por cercanía.
+ */
+export const DISTRICT_BOUNDS = L.bounds as [number, number];
 
 export function districtById(id: unknown): District | null {
   return DISTRICTS.find((d) => d.id === id) ?? null;
@@ -153,8 +161,8 @@ export function districtSeed(d: District, toNexo: { p: V3; yaw: number }): Seede
   const boxes = (cities.cities as Record<string, number[][]>)[d.id] ?? [];
   boxes.forEach(([x, y, z, hx, hy, hz], n) => solid(`${d.id}_city_${n}`, [x!, y!, z!], [hx!, hy!, hz!]));
 
-  /* --- Nombre del distrito en luz, en el suelo de la calle del sur, al llegar --- */
-  label(`${d.id}_floor_name`, [32, 0.03, 52], FLAT, d.name.en.toLowerCase(), { es: d.name.es.toLowerCase(), en: d.name.en.toLowerCase() }, 1.5);
+  /* --- Nombre del distrito en luz, en el suelo de la avenida del sur, al llegar --- */
+  label(`${d.id}_floor_name`, [32, 0.03, 140], FLAT, d.name.en.toLowerCase(), { es: d.name.es.toLowerCase(), en: d.name.en.toLowerCase() }, 1.5);
 
   /* --- Número de cada parcela, en el borde que da a su calle --- */
   PARCELS.forEach((q, i) => {
@@ -164,8 +172,9 @@ export function districtSeed(d: District, toNexo: { p: V3; yaw: number }): Seede
   });
 
   /* --- Luces: la plaza del centro y las esquinas de la calle en anillo --- */
-  const [r0, r1, r2, r3_] = L.ring as [number, number, number, number];
-  const lights: [number, number][] = [[32, 32], [(r0 + r1) / 2, (r0 + r1) / 2], [(r2 + r3_) / 2, (r0 + r1) / 2], [(r0 + r1) / 2, (r2 + r3_) / 2], [(r2 + r3_) / 2, (r2 + r3_) / 2]];
+  const [a, b] = L.roads.ring1 as [number, number];
+  const m1 = (a + b) / 2, m2 = 64 - m1; // esquinas del anillo 1
+  const lights: [number, number][] = [[32, 32], [m1, m1], [m2, m1], [m1, m2], [m2, m2], [32, 140]];
   for (const [lx, lz] of lights) {
     out.push({
       id: `${d.id}_light_${lx}_${lz}`,
@@ -192,34 +201,56 @@ function multiply(a: [number, number, number, number], b: [number, number, numbe
 }
 
 /* ------------------------------------------------------------------ */
-/* Migración de la disposición v1 (avenida y 4 filas) a la v2 (ciudad)  */
+/* Migración de disposiciones anteriores de las parcelas                */
 /* ------------------------------------------------------------------ */
+/*
+ * v1: avenida y 4 filas de 10 × 10 m (A1–D4). v2: ciudad pequeña en el centro y 16 parcelas de
+ * 10 × 10 m en anillo (A1–A6, B1–B3, C1–C3, D1–D4). v3: distrito de 256 m con 64 parcelas de
+ * 15 × 15 m (N, S, E, W). Cada chunk guarda en su `meta` la versión que tiene (sin nada = v1).
+ */
 
-/** Parcelas de la v1 (para encontrar lo que había en cada una). */
+/** Parcelas de la v1 y la v2 (siempre de 10 × 10 m), para encontrar lo que había en cada una. */
 export const PARCELS_V1: Parcel[] = legacyV1;
+export const PARCELS_V2: Parcel[] = legacyV2;
 
-/** Ids de la v1 que ya no existen en la v2: su proyecto pasa a la parcela nueva del norte. */
-export const RENAMED_PARCELS: Record<string, string> = { B4: "A5", C4: "A6" };
+/** De la v1 a la v2: B4 y C4 desaparecieron y su proyecto pasó a A5 y A6. */
+const V1_TO_V2: Record<string, string> = { B4: "A5", C4: "A6" };
+/** De la v2 a la v3: cada lado a su lado y lo de junto a la puerta, junto a la avenida del sur. */
+const V2_TO_V3: Record<string, string> = {
+  A1: "N1", A2: "N2", A3: "N3", A4: "N4", A5: "N5", A6: "N6",
+  B1: "W1", B2: "W2", B3: "W3", C1: "E1", C2: "E2", C3: "E3",
+  D1: "S2", D2: "S3", D3: "S4", D4: "S5",
+};
 
-export function parcelIdV2(oldId: string): string {
-  return RENAMED_PARCELS[oldId] ?? oldId;
+/** Id de hoy de una parcela de una versión anterior. */
+export function currentParcelId(oldId: string, from: 1 | 2): string {
+  const v2 = from === 1 ? V1_TO_V2[oldId] ?? oldId : oldId;
+  return V2_TO_V3[v2] ?? v2;
 }
 
-/** Parcela de la v1 que contiene un punto (con medio metro de margen), o null. */
-export function parcelV1At(x: number, z: number): Parcel | null {
-  const hw = L.parcel.w / 2 + 0.5, hd = L.parcel.d / 2 + 0.5;
-  return PARCELS_V1.find((q) => Math.abs(x - q.x) <= hw && Math.abs(z - q.z) <= hd) ?? null;
+/** Renombres que el Directory aplica a los proyectos (en orden: v1→v2 y luego v2→v3). */
+export const RENAMED_PARCELS: [string, string][] = [...Object.entries(V1_TO_V2), ...Object.entries(V2_TO_V3)];
+
+const OLD_HALF = 5 + 0.5; // las parcelas de la v1 y la v2 medían 10 m (más medio metro de margen)
+
+function oldParcelAt(list: Parcel[], x: number, z: number): Parcel | null {
+  return list.find((q) => Math.abs(x - q.x) <= OLD_HALF && Math.abs(z - q.z) <= OLD_HALF) ?? null;
+}
+
+/** Parcela de hoy a la que va un slot (índice) de una versión anterior, o -1. */
+export function migrateSlot(slot: number, from: 1 | 2): number {
+  const old = (from === 1 ? PARCELS_V1 : PARCELS_V2)[slot];
+  return old ? parcelIndex(currentParcelId(old.id, from)) : -1;
 }
 
 /**
- * Lleva una pieza de su parcela v1 a la misma parcela en la v2: la gira lo que haya girado la
- * parcela (alrededor de su centro) y la traslada. Devuelve null si la pieza no estaba en una parcela.
+ * Lleva una pieza de su parcela de una versión anterior a la misma parcela hoy: la gira lo que haya
+ * girado la parcela (alrededor de su centro) y la traslada. null si la pieza no estaba en una parcela.
  */
-export function migrateParcelPose(p: V3, r: [number, number, number, number]): { p: V3; r: [number, number, number, number] } | null {
-  const old = parcelV1At(p[0], p[2]);
+export function migrateParcelPose(p: V3, r: [number, number, number, number], from: 1 | 2): { p: V3; r: [number, number, number, number] } | null {
+  const old = oldParcelAt(from === 1 ? PARCELS_V1 : PARCELS_V2, p[0], p[2]);
   if (!old) return null;
-  const i = parcelIndex(parcelIdV2(old.id));
-  const now = PARCELS[i];
+  const now = PARCELS[parcelIndex(currentParcelId(old.id, from))];
   if (!now) return null;
   const delta = now.facing - old.facing;
   const np = at(now.x, now.z, delta, p[0] - old.x, p[1], p[2] - old.z);

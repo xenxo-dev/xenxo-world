@@ -22,6 +22,8 @@ jobs:
       - run: npm run build
       # El servidor de distritos (workerd en una máquina propia): que siga compilando.
       - run: npm run build:district-host
+      # Y sus scripts (portátil y relevo del NAS): que al menos se lean bien.
+      - run: for f in tools/district-host/*.sh tools/district-host/relevo/*.sh; do bash -n "$f"; done
 
       # La plantilla de juegos: crea uno 2D y otro 3D con el SDK empaquetado y los compila.
       - name: Juegos de ejemplo (ficha xenxo.json válida)

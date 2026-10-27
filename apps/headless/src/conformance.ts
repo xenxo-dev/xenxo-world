@@ -20,7 +20,7 @@ const agentKey = process.env.XENXO_AGENT_KEY;
 const adminKey = process.env.XENXO_ADMIN_KEY;
 
 /** Primera parcela libre de un distrito (para publicar en las pruebas). */
-async function freeParcel(district = "frontera"): Promise<string> {
+async function freeParcel(district = "taller"): Promise<string> {
   const r = await fetch(new URL("/districts", baseUrl));
   const { districts } = (await r.json()) as { districts: { id: string; parcels: { id: string; project_id: string | null }[] }[] };
   const q = districts.find((d) => d.id === district)?.parcels.find((p) => !p.project_id);
@@ -29,7 +29,7 @@ async function freeParcel(district = "frontera"): Promise<string> {
 }
 
 /** Parcela libre en el primer distrito que la tenga (las pruebas repetidas llenan los distritos). */
-async function freeSpot(order = ["arcade", "pixel", "cero", "vertical", "agora", "taller", "frontera"]): Promise<{ district: string; parcel: string }> {
+async function freeSpot(order = ["arcade", "pixel", "cero", "taller"]): Promise<{ district: string; parcel: string }> {
   for (const district of order) {
     const parcel = await freeParcel(district).catch(() => null);
     if (parcel) return { district, parcel };
@@ -511,13 +511,16 @@ await scenario("nexo y distritos: el nexo lleva a la plaza y a los distritos, y 
   // Todos los distritos (también los nuevos) tienen su puerta en el nexo, y la vuelta deja dentro de lo caminable.
   const all = (await (await fetch(`${baseUrl}/districts`)).json()) as { districts: { id: string; chunk_id: string; parcels: { id: string; x: number; z: number }[] }[] };
   for (const d of all.districts) {
-    assert(d.parcels.length === 16 && d.parcels.every((q) => q.x + 5 <= 14 || q.x - 5 >= 50 || q.z + 5 <= 14 || q.z - 5 >= 50), `las parcelas de ${d.id} rodean la ciudad, no la pisan`);
+    // Disposición v3: 64 parcelas de 15 m alrededor de la ciudad del centro (-18..82), sin pisarla.
+    assert(d.parcels.length === 64 && d.parcels.every((q) => q.x + 7.5 <= -18 || q.x - 7.5 >= 82 || q.z + 7.5 <= -18 || q.z - 7.5 >= 82), `las parcelas de ${d.id} rodean la ciudad, no la pisan`);
   }
   const nexoWalk = c.welcome.walk ?? [0, 64];
   for (const d of all.districts) {
     const to = c.snapshot.entities.find((e) => e.entity_id === `nexo_portal_${d.id}`)?.components["portal@1"] as { to: { chunk_id?: string } } | undefined;
     assert(to?.to.chunk_id === d.chunk_id, `falta la puerta del nexo al distrito ${d.id}`);
-    const dc = await XenxoClient.connect({ baseUrl, chunkId: d.chunk_id });
+    // Los «próximamente» solo admiten a moderación (se comprueban dentro con la clave de administración).
+    if ((d as { soon?: boolean }).soon && !adminKey) continue;
+    const dc = await XenxoClient.connect({ baseUrl, chunkId: d.chunk_id, agentKey: (d as { soon?: boolean }).soon ? adminKey : undefined });
     const back = dc.snapshot.entities.find((e) => (e.components["portal@1"] as { to?: { chunk_id?: string } } | undefined)?.to?.chunk_id === PLACES.nexo)?.components["portal@1"] as
       | { to: { spawn: number[] } }
       | undefined;
@@ -550,7 +553,7 @@ await scenario("nexo y distritos: el nexo lleva a la plaza y a los distritos, y 
   const d = await XenxoClient.connect({ baseUrl, chunkId: "c_1_0" });
   const gate = d.snapshot.entities.find((e) => e.entity_id === "arcade_gate_portal")?.components["portal@1"] as { to: { chunk_id?: string } } | undefined;
   assert(gate?.to.chunk_id === PLACES.nexo, "la puerta del distrito debería llevar al nexo");
-  assert(d.snapshot.entities.some((e) => e.entity_id === "arcade_parcel_A1"), "faltan los números de parcela del distrito");
+  assert(d.snapshot.entities.some((e) => e.entity_id === "arcade_parcel_N1"), "faltan los números de parcela del distrito");
   d.close();
   const p = await XenxoClient.connect({ baseUrl });
   const back = p.snapshot.entities.find((e) => e.entity_id === "gate_portal")?.components["portal@1"] as { to: { chunk_id?: string } } | undefined;
@@ -558,13 +561,65 @@ await scenario("nexo y distritos: el nexo lleva a la plaza y a los distritos, y 
   p.close();
 });
 
+await scenario("próximamente: un distrito cerrado sale en /districts, su puerta del nexo está cerrada, no se publica en él y solo entra moderación", async () => {
+  const r = (await (await fetch(new URL("/districts", baseUrl))).json()) as { districts: { id: string; chunk_id: string; soon: boolean }[] };
+  const soon = r.districts.find((d) => d.soon);
+  assert(!!soon && r.districts.some((d) => !d.soon), "hay distritos abiertos y alguno «próximamente»");
+  const nexo = await XenxoClient.connect({ baseUrl, chunkId: PLACES.nexo });
+  const doors = nexo.snapshot.entities
+    .map((e) => e.components["portal@1"] as { to: { chunk_id?: string }; closed?: boolean } | undefined)
+    .filter((p) => p?.to.chunk_id);
+  nexo.close();
+  assert(doors.some((p) => p!.to.chunk_id === soon!.chunk_id && p!.closed), "su puerta del nexo está cerrada");
+  assert(doors.some((p) => !p!.closed), "las de los abiertos, no");
+  let refused = "";
+  await XenxoClient.connect({ baseUrl, chunkId: soon!.chunk_id }).then((c) => c.close(), (e: Error) => (refused = e.message));
+  assert(/403/.test(refused), `un invitado no entra (${refused || "entró"})`);
+  const api = new Api(baseUrl);
+  await api.register(`conf ${randomUUID().slice(0, 6)}`);
+  const pub = await api.call("POST", "/projects", { title: "En un cerrado", url: "https://example.org", district: soon!.id, parcel: "N1" });
+  assert(!pub.ok && pub.error === "district_soon", `publicar en él → district_soon (${!pub.ok && pub.error})`);
+  if (adminKey) {
+    const mod = await XenxoClient.connect({ baseUrl, chunkId: soon!.chunk_id, agentKey: adminKey });
+    assert(!!mod.welcome.session_id, "la administración sí entra");
+    mod.close();
+  }
+});
+
+await scenario("distrito grande: WELCOME.walk de 256 m y cada uno recibe solo las poses de quien tiene cerca", async () => {
+  const chunkId = "c_0_-1";
+  const a = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-lejos-a" });
+  const b = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-lejos-b" });
+  const c = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-cerca-c" });
+  const walk = a.welcome.walk;
+  assert(!!walk && walk[1] - walk[0] >= 256 && !a.welcome.solo, "un distrito dice hasta dónde se camina (más que su chunk) y no es en solitario");
+  // b y c mandan su pose primero (el servidor sabe dónde están); luego a, junto a c y lejos de b.
+  b.pose([140, 1.6, 140], 0);
+  c.pose([-70, 1.6, -70], 0);
+  await new Promise((r) => setTimeout(r, 400));
+  const seenByC = c.next("POSES", (m) => m.payload.poses.some((p) => p.session_id === a.welcome.session_id), 3000);
+  for (let i = 0; i < 4; i++) {
+    a.pose([-75, 1.6, -75], 0);
+    await new Promise((r) => setTimeout(r, 220));
+  }
+  await seenByC;
+  assert(!b.received.some((m) => m.type === "POSES" && m.payload.poses.some((p) => p.session_id === a.welcome.session_id)), "quien está a 300 m no recibe la pose");
+  a.close();
+  b.close();
+  c.close();
+});
+
 await scenario("pase: /chunk/<id>/ticket dice dónde conectar (aquí con el mismo token, o fuera con un pase firmado)", async () => {
   const g = await fetch(new URL("/auth/guest", baseUrl), { method: "POST" });
   const token = ((await g.json()) as { token: string }).token;
   assert((await fetch(new URL("/chunk/c_0_-1/ticket", baseUrl), { method: "POST" })).status === 401, "sin token no hay pase");
-  const ds = ((await (await fetch(new URL("/districts", baseUrl))).json()) as { districts: { chunk_id: string; remote?: boolean }[] }).districts;
+  const ds = ((await (await fetch(new URL("/districts", baseUrl))).json()) as { districts: { chunk_id: string; remote?: boolean; soon?: boolean }[] }).districts;
   for (const d of ds) {
     const r = await fetch(new URL(`/chunk/${d.chunk_id}/ticket`, baseUrl), { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+    if (d.soon) {
+      assert(r.status === 403, `a un distrito «próximamente» no se da pase (${d.chunk_id})`);
+      continue;
+    }
     assert(r.ok, `pase para ${d.chunk_id}`);
     const t = (await r.json()) as { url: string; remote: boolean };
     assert(t.remote === !!d.remote, `remote coincide con /districts en ${d.chunk_id}`);
@@ -615,8 +670,8 @@ await scenario("portada: solo imágenes de verdad y con medidas razonables", asy
 await scenario("proyecto: exige portada, monumento, distrito y parcela libre; su portal va a la parcela y al escaparate del nexo", async () => {
   const api = new Api(baseUrl);
   await api.register(`conf ${randomUUID().slice(0, 6)}`);
-  const parcel = await freeParcel("frontera");
-  const base = { title: "Proyecto de prueba", summary: "Creado por el banco de conformidad", url: "https://github.com/xenxo-dev/xenxo-world", district: "frontera", parcel };
+  const parcel = await freeParcel("taller");
+  const base = { title: "Proyecto de prueba", summary: "Creado por el banco de conformidad", url: "https://github.com/xenxo-dev/xenxo-world", district: "taller", parcel };
   const noCover = await api.call("POST", "/projects", base);
   assert(!noCover.ok && noCover.error === "cover_required", `sin portada → cover_required (${!noCover.ok && noCover.error})`);
   const cover = await api.upload(makeCoverPng(), "cover");
@@ -630,12 +685,12 @@ await scenario("proyecto: exige portada, monumento, distrito y parcela libre; su
   const badParcel = await api.call("POST", "/projects", { ...full, parcel: "Z9" });
   assert(!badParcel.ok && badParcel.error === "bad_parcel", "parcela inexistente → bad_parcel");
 
-  const district = await XenxoClient.connect({ baseUrl, chunkId: "c_1_-1" });
+  const district = await XenxoClient.connect({ baseUrl, chunkId: "c_0_-1" });
   const nexo = await XenxoClient.connect({ baseUrl, chunkId: PLACES.nexo });
   const delta = district.next("DELTA", (m) => m.payload.changes.some((c) => c.kind === "upsert" && c.entity.entity_id.startsWith("standm_")), 4000);
   const created = await api.call<{ project: { id: string; in_world: boolean; category: string; district: string; parcel: string; review: string } }>("POST", "/projects", full);
   assert(created.ok && created.data.project.in_world, `el proyecto debería tener portal: ${JSON.stringify(created)}`);
-  assert(created.data.project.category === "other" && created.data.project.parcel === parcel, "categoría del distrito y parcela elegida");
+  assert(created.data.project.category === "tool" && created.data.project.parcel === parcel, "categoría del distrito y parcela elegida");
   const d = await delta;
   const id = created.data.project.id;
   const up = (eid: string) => d.payload.changes.find((c) => c.kind === "upsert" && c.entity.entity_id === eid);
@@ -675,8 +730,8 @@ await scenario("RGPD: exportar mis datos y borrar la cuenta retira su contenido"
     title: "Para borrar",
     summary: "",
     url: "https://example.org",
-    district: "frontera",
-    parcel: await freeParcel("frontera"),
+    district: "taller",
+    parcel: await freeParcel("taller"),
     cover_hash: cover.data.hash,
     mesh_hash: model.data.hash,
   });
@@ -696,7 +751,7 @@ await scenario("RGPD: exportar mis datos y borrar la cuenta retira su contenido"
     loginFailed = true;
   }
   assert(loginFailed, "la passkey de una cuenta borrada no debería servir");
-  const c = await XenxoClient.connect({ baseUrl, chunkId: "c_1_-1" });
+  const c = await XenxoClient.connect({ baseUrl, chunkId: "c_0_-1" });
   assert(!c.snapshot.entities.some((e) => e.entity_id === `stand_${created.data.project.id}`), "el portal debería haber desaparecido");
   c.close();
 });
@@ -847,7 +902,7 @@ await scenario("parcela: la clave de agente de un proyecto construye solo dentro
     budgets: { maxEntities: number; maxHeight: number };
   };
   const z = auth.principal.zone;
-  assert(z?.chunk_id === "c_-1_0" && z.owner === `prj_${pid}` && z.x1 - z.x0 === 10, `zona: ${JSON.stringify(z)}`);
+  assert(z?.chunk_id === "c_-1_0" && z.owner === `prj_${pid}` && z.x1 - z.x0 === 15, `zona: ${JSON.stringify(z)}`);
   // A 1,5 m del lado de la parcela: fuera de lo reservado para el portal (el centro del fondo).
   const cx = z.x0 + 1.5, cz = (z.z0 + z.z1) / 2;
   const box = (p: number[], size = [1, 1, 1]) => ({

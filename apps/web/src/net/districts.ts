@@ -3,6 +3,7 @@
  * llevar a alguien delante del portal de un proyecto.
  */
 import { useSyncExternalStore } from "react";
+import layout from "../../../realtime/src/districts.json";
 import { REALTIME_URL } from "../config";
 import { registerPlaceName } from "../i18n";
 
@@ -25,12 +26,14 @@ export interface DistrictInfo {
   parcels: ParcelInfo[];
   /** Vive en el servidor de distritos: para entrar hay que pedir un pase (ver session.ts). */
   remote?: boolean;
+  /** Próximamente: la puerta está cerrada (solo entra moderación) y no se publica en él. */
+  soon?: boolean;
 }
 
 /** Dónde se aparece al entrar en un distrito (junto a su puerta, mirando a la avenida). */
-export const DISTRICT_SPAWN: [number, number, number] = [32, 0, 57.5];
+export const DISTRICT_SPAWN = layout.spawn as unknown as [number, number, number];
 /** Distancia del marco del portal al centro de la parcela, hacia el fondo (districts.json). */
-const PARCEL_D = 10;
+const PARCEL_D = layout.parcel.d;
 
 let cache: DistrictInfo[] | null = null;
 let loadedAt = 0;

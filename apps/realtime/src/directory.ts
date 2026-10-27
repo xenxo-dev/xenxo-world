@@ -225,9 +225,9 @@ export class Directory extends DurableObject<Env> {
     // Migración: distrito y parcela (una parcela publicada solo puede tener un proyecto).
     if (!pcols.includes("district")) this.sql.exec("ALTER TABLE projects ADD COLUMN district TEXT");
     if (!pcols.includes("parcel")) this.sql.exec("ALTER TABLE projects ADD COLUMN parcel TEXT");
-    // Disposición v2 de los distritos: las parcelas B4 y C4 ya no existen; sus proyectos pasan a A5 y A6
-    // (el chunk mueve lo que hubiera en ellas: ver migrateParcelLayout en chunk-room.ts).
-    for (const [from, to] of Object.entries(RENAMED_PARCELS)) this.sql.exec("UPDATE projects SET parcel = ? WHERE parcel = ?", to, from);
+    // Disposiciones v2 y v3 de los distritos: las parcelas cambian de nombre (B4 → A5 → N5, D2 → S3…);
+    // el chunk mueve lo que hubiera en ellas (migrateParcelLayout en chunk-room.ts).
+    for (const [from, to] of RENAMED_PARCELS) this.sql.exec("UPDATE projects SET parcel = ? WHERE parcel = ?", to, from);
     this.sql.exec(
       "CREATE UNIQUE INDEX IF NOT EXISTS projects_parcel ON projects(district, parcel) WHERE status = 'published' AND district IS NOT NULL",
     );
@@ -1001,6 +1001,7 @@ export class Directory extends DurableObject<Env> {
     if (!url) return fail(400, "bad_url", "el proyecto necesita un enlace que empiece por https://");
     const district = districtById(body.district);
     if (!district) return fail(400, "bad_district", `el distrito debe ser uno de: ${DISTRICTS.map((d) => d.id).join(", ")}`);
+    if (district.soon) return fail(400, "district_soon", `${district.name.es} abrirá pronto: elige uno de ${DISTRICTS.filter((d) => !d.soon).map((d) => d.id).join(", ")}`);
     if (parcelIndex(body.parcel) < 0) return fail(400, "bad_parcel", `la parcela debe ser una de: ${PARCELS.map((q) => q.id).join(", ")}`);
     const parcel = body.parcel as string;
     const taken = this.sql
@@ -1921,6 +1922,7 @@ export class Directory extends DurableObject<Env> {
         color: d.color,
         name: d.name,
         desc: d.desc,
+        soon: !!d.soon,
         parcels: PARCELS.map((q) => {
           const r = mine.get(q.id);
           return { id: q.id, x: q.x, z: q.z, facing: q.facing, project_id: r?.id ?? null, title: r?.title ?? null };

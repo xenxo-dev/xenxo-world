@@ -15,6 +15,8 @@ import { presetFor } from "./presets";
 
 /** Se dibuja a los demás con este retraso para tener siempre dos poses entre las que interpolar (a 5 Hz llegan cada 200 ms). */
 const INTERP_DELAY_MS = 320;
+/** Sin poses nuevas en este tiempo (lugares grandes), la persona está lejos: no se dibuja. */
+const STALE_MS = 3500;
 export const EYE_HEIGHT = 1.6;
 
 const _a = new THREE.Vector3();
@@ -151,6 +153,9 @@ function RemoteAvatar({ sessionId, name, avatar }: { sessionId: string; name: st
     const buf = world.poseBuffers.get(sessionId);
     if (!buf || buf.length === 0 || !body.current) return;
     const rt = world.serverNow() - INTERP_DELAY_MS;
+    // En los lugares grandes solo llegan las poses de quien está cerca: quien se aleja deja de
+    // actualizarse y se oculta (no se queda congelado donde se le vio por última vez).
+    body.current.visible = !world.big || rt - buf[buf.length - 1]!.t < STALE_MS;
 
     let i = buf.length - 1;
     while (i > 0 && buf[i - 1]!.t > rt) i--;

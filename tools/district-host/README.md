@@ -6,7 +6,7 @@ mismo código que en Cloudflare. Por qué y cuánto aguanta: `docs/ALOJAMIENTO-D
 ```
 navegador ──wss──▶ Cloudflare (túnel) ──▶ cloudflared ──▶ workerd :8788 (solo en la máquina)
                         ▲                                     │ SQLite por distrito (/var/lib/xenxo-distritos)
-api.xenxo.io (Worker) ──┘ pases y llamadas firmadas          └─▶ copia cada noche al NAS
+api.xenxo.io (Worker) ──┘ pases y llamadas firmadas          └─▶ copia cada 15 min al NAS (y relevo)
 ```
 
 - La web, las cuentas, el nexo, la plaza y los archivos siguen en Cloudflare.
@@ -27,7 +27,7 @@ api.xenxo.io (Worker) ──┘ pases y llamadas firmadas          └─▶ cop
    curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
    sudo apt-get install -y nodejs git
    ```
-7. El NAS montado en `/mnt/nas` (NFS o SMB) con una carpeta `xenxo-distritos` para las copias.
+7. La carpeta `xenxo-distritos` del NAS montada en `/mnt/nas/xenxo-distritos` (NFS; ver `relevo/README.md`, paso 1).
 
 ## 2. Instalar
 
@@ -37,7 +37,8 @@ sudo bash /opt/xenxo-world/tools/district-host/install.sh
 ```
 
 El instalador crea el usuario `xenxo`, las carpetas, el servicio `xenxo-distritos` (workerd en
-`127.0.0.1:8788`), la copia nocturna al NAS (04:30) y hace que cerrar la tapa no suspenda.
+`127.0.0.1:8788`), la copia al NAS cada 15 minutos, la vigilancia del relevo y hace que cerrar la
+tapa no suspenda.
 
 ## 3. Las claves (una vez)
 
@@ -96,8 +97,9 @@ que los distritos se procesan en un servidor propio en España, sin guardar IP.
 - **Actualizar** (después de cada cambio en el repo que toque los chunks):
   `sudo /opt/xenxo-world/tools/district-host/update.sh`
 - **Estado:** `systemctl status xenxo-distritos` · registros: `journalctl -u xenxo-distritos -f`
-- **Copias:** `/mnt/nas/xenxo-distritos/AAAA-MM-DD/` (30 días). Restaurar: parar el servicio, copiar
-  los `.sqlite` del día a `/var/lib/xenxo-distritos/datos/`, arrancar.
+- **Copias:** `/mnt/nas/xenxo-distritos/ultima/` (cada 15 min) y `AAAA-MM-DD/` (una al día, 30 días).
+  Restaurar: parar el servicio, copiar los `.sqlite` a `/var/lib/xenxo-distritos/datos/`, arrancar.
+- **Relevo en el NAS** si el portátil cae: `relevo/README.md`.
 - **Actualizaciones de seguridad:** automáticas (`unattended-upgrades`).
 - **Pasar al DL380 algún día:** misma instalación allí, copiar `/var/lib/xenxo-distritos/datos/` con el
   servicio parado y cambiar el túnel al nuevo equipo.

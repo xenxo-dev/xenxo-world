@@ -1,0 +1,32 @@
+# Relevo de los distritos en el NAS (Synology, Container Manager). No lo arranques a mano: lo levanta
+# vigia.sh cuando el portátil cae, y lo para devolver.sh. Guía: README.md (esta carpeta).
+#
+# Carpetas (en la carpeta compartida del NAS donde el portátil deja las copias, p. ej.
+# /volume1/xenxo-distritos):
+#   bundle/          el mismo servidor que el portátil (lo copia update.sh en cada actualización)
+#   ultima/          la última copia de los distritos (cada 15 min)
+#   relevo/          esta carpeta: este archivo, los scripts, distritos.env, tunel.env y datos/
+name: xenxo-relevo
+services:
+  distritos:
+    image: debian:bookworm-slim
+    command: ["/bundle/workerd", "serve", "/bundle/distritos.capnp", "--experimental"]
+    working_dir: /bundle
+    env_file: distritos.env
+    volumes:
+      - ../bundle:/bundle:ro
+      - ./datos:/var/lib/xenxo-distritos/datos
+    tmpfs: [/tmp]
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+  # El mismo túnel que el portátil (su token, solo en tunel.env). Comparte la red del servidor para
+  # llegar a 127.0.0.1:8788, como en el portátil.
+  tunel:
+    image: cloudflare/cloudflared:2026.10.3
+    command: ["tunnel", "--no-autoupdate", "run"]
+    env_file: tunel.env
+    network_mode: "service:distritos"
+    depends_on: [distritos]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped

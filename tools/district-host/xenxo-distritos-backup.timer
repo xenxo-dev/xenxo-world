@@ -1,9 +1,10 @@
 [Unit]
-Description=xenxo: copia de los distritos cada noche
+Description=xenxo: copia de los distritos al NAS cada 15 minutos
 
 [Timer]
-OnCalendar=*-*-* 04:30:00
+OnCalendar=*:0/15
 Persistent=true
+RandomizedDelaySec=30
 
 [Install]
 WantedBy=timers.target

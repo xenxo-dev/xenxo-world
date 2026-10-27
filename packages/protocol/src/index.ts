@@ -62,7 +62,7 @@ export const BUDGETS = {
  * Lo que puede construir el agente de una parcela (10 × 10 m, hasta maxHeight m de alto). Cuenta
  * lo de su proyecto, no lo del chunk: 16 parcelas llenas caben en un distrito y en unas gafas.
  */
-export const PARCEL_BUDGETS = { maxEntities: 32, maxTris: 16_000, maxLights: 1, maxHeight: 12 } as const;
+export const PARCEL_BUDGETS = { maxEntities: 48, maxTris: 24_000, maxLights: 1, maxHeight: 12 } as const;
 
 /* ------------------------------------------------------------------ */
 /* Componentes (versionados: "<nombre>@<versión>")                      */
@@ -196,6 +196,11 @@ export const PortalV1 = z.object({
   category: z.string().regex(/^[a-z0-9_]{1,16}$/).optional(),
   /** Color del velo de luz (sin portada). Si no está, el de la categoría. */
   color: HexColor.optional(),
+  /**
+   * Cerrado («próximamente»): el cliente lo dibuja apagado y, al entrar en su franja, solo avisa;
+   * no viaja. El servidor del destino tampoco deja entrar (salvo a moderación).
+   */
+  closed: z.boolean().optional(),
 });
 
 /**
@@ -428,8 +433,9 @@ export const WelcomeMsg = envelope(
      */
     solo: z.boolean().optional(),
     /**
-     * Hasta dónde se puede caminar, en metros del chunk (mín. y máx. en X y en Z). Solo en lugares
-     * en solitario, que pueden ser más grandes que su chunk. Sin el campo: 1..CHUNK_SIZE-1.
+     * Hasta dónde se puede caminar, en metros del chunk (mín. y máx. en X y en Z). En lugares más
+     * grandes que su chunk (el nexo, en solitario, y los distritos grandes, compartidos: en ellos las
+     * poses llegan solo de quien está cerca). Sin el campo: 1..CHUNK_SIZE-1.
      */
     walk: z.tuple([z.number(), z.number()]).optional(),
   }),

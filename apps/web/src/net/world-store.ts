@@ -31,6 +31,8 @@ class WorldStore {
   solo = false;
   /** Hasta dónde se camina (mín. y máx. en X y Z): lo dice el servidor; si no, el chunk. */
   walk: [number, number] = [1, CHUNK_SIZE - 1];
+  /** Lugar compartido más grande que un chunk: poses y contenido de la gente, por cercanía. */
+  big = false;
   status: ConnectionStatus = "idle";
   lastError: string | null = null;
   /** serverTime ≈ Date.now() + clockOffset */
@@ -74,6 +76,7 @@ class WorldStore {
   beginTravel(chunkId: string) {
     this.chunkId = chunkId;
     this.solo = false;
+    this.big = false;
     // Sin límites hasta que el lugar diga los suyos en WELCOME: el punto de llegada (p. ej. una
     // isla del nexo) puede estar fuera del chunk.
     this.walk = [-Infinity, Infinity];
@@ -92,6 +95,7 @@ class WorldStore {
         this.canBuild = m.payload.principal.scopes.includes("build");
         this.solo = m.payload.solo === true;
         this.walk = m.payload.walk ?? [1, CHUNK_SIZE - 1];
+        this.big = !this.solo && (this.walk[0] < 0 || this.walk[1] > CHUNK_SIZE);
         this.clockOffset = m.payload.server_time - Date.now();
         this.bump();
         break;

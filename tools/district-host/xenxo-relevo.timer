@@ -1,0 +1,9 @@
+[Unit]
+Description=xenxo: comprobar cada minuto si el NAS tiene el relevo
+
+[Timer]
+OnBootSec=20
+OnUnitActiveSec=60
+
+[Install]
+WantedBy=timers.target

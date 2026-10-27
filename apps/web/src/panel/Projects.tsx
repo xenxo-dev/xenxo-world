@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import layout from "../../../realtime/src/districts.json";
 import { REALTIME_URL } from "../config";
 import { errorText, t, useLang } from "../i18n";
 import { refreshDistricts, useDistricts, type DistrictInfo } from "../net/districts";
@@ -266,7 +267,7 @@ function PublishForm({ onDone }: { onDone: () => void }) {
               role="radio"
               aria-checked={on}
               key={d.id}
-              disabled={free === 0}
+              disabled={free === 0 || d.soon}
               onClick={() => {
                 setDistrictId(d.id);
                 setParcel("");
@@ -278,7 +279,7 @@ function PublishForm({ onDone }: { onDone: () => void }) {
                 {d.name[lang] ?? d.name.en}
               </span>
               <span className="block text-xs text-cal/55">{d.desc[lang] ?? d.desc.en}</span>
-              <span className="mt-1 block text-xs text-cal/40">{t("nexo.freeParcels", { n: free })}</span>
+              <span className="mt-1 block text-xs text-cal/40">{d.soon ? t("nexo.soon") : t("nexo.freeParcels", { n: free, total: d.parcels.length })}</span>
             </button>
           );
         })}
@@ -336,27 +337,52 @@ function PublishForm({ onDone }: { onDone: () => void }) {
 }
 
 /**
- * Plano del distrito (visto desde arriba, el norte arriba): avenida, calles y las 16 parcelas.
- * Las ocupadas no se pueden elegir; la elegida se marca con el color del distrito.
+ * Plano del distrito (visto desde arriba, el norte arriba): la ciudad del centro, los dos anillos de
+ * calles, las avenidas y las parcelas. La geometría sale de districts.json (la misma del servidor);
+ * las parcelas y quién las ocupa, de GET /districts. Las ocupadas no se pueden elegir.
  */
 function ParcelMap({ district, value, onChange }: { district: DistrictInfo; value: string; onChange: (id: string) => void }) {
-  const pct = (v: number) => `${(v / 64) * 100}%`;
+  const L = layout as unknown as {
+    bounds: [number, number];
+    parcel: { w: number };
+    city: { x0: number; x1: number; block: number; street: number };
+    roads: { ring1: [number, number]; ring2: [number, number]; avenue: number };
+    gate: { z: number; span: number };
+  };
+  const [B0, B1] = L.bounds;
+  const span = B1 - B0;
+  const pct = (v: number) => `${((v - B0) / span) * 100}%`;
+  const len = (v: number) => `${(v / span) * 100}%`;
+  const PW = L.parcel.w;
+  const road = "absolute bg-cal/[0.07]";
+  const ring = ([a, b]: [number, number]) => {
+    const lo = a, hi = 64 - a, w = b - a;
+    return (
+      <>
+        <div className={road} style={{ left: pct(lo), top: pct(lo), width: len(hi - lo), height: len(w) }} />
+        <div className={road} style={{ left: pct(lo), top: pct(hi - w), width: len(hi - lo), height: len(w) }} />
+        <div className={road} style={{ left: pct(lo), top: pct(lo), width: len(w), height: len(hi - lo) }} />
+        <div className={road} style={{ left: pct(hi - w), top: pct(lo), width: len(w), height: len(hi - lo) }} />
+      </>
+    );
+  };
+  const c = L.city;
+  const plaza = c.x0 + c.block + c.street;
   return (
-    <div className="relative mx-auto aspect-square w-full max-w-sm overflow-hidden rounded-xl border border-cal/10 bg-[#0b0f18]">
-      {/* Calle en anillo y la ciudad del centro (con su cruz de calles) */}
-      <div className="absolute bg-cal/[0.07]" style={{ top: pct(10), height: pct(4), left: 0, right: 0 }} />
-      <div className="absolute bg-cal/[0.07]" style={{ top: pct(50), height: pct(4), left: 0, right: 0 }} />
-      <div className="absolute bg-cal/[0.07]" style={{ left: pct(10), width: pct(4), top: pct(14), height: pct(36) }} />
-      <div className="absolute bg-cal/[0.07]" style={{ left: pct(50), width: pct(4), top: pct(14), height: pct(36) }} />
-      <div className="absolute rounded-sm border" style={{ left: pct(14), top: pct(14), width: pct(36), height: pct(36), borderColor: `${district.color}55`, background: `${district.color}14` }} />
-      <div className="absolute bg-cal/[0.06]" style={{ left: pct(29), width: pct(6), top: pct(14), height: pct(36) }} />
-      <div className="absolute bg-cal/[0.06]" style={{ top: pct(29), height: pct(6), left: pct(14), width: pct(36) }} />
-      <span className="absolute -translate-x-1/2 -translate-y-1/2 text-[10px] text-cal/45" style={{ left: "50%", top: "50%" }}>
+    <div className="relative mx-auto aspect-square w-full max-w-md overflow-hidden rounded-xl border border-cal/10 bg-[#0b0f18]">
+      {/* Avenidas, anillos y la ciudad del centro (la plaza, en medio) */}
+      <div className={road} style={{ left: pct(32 - L.roads.avenue / 2), width: len(L.roads.avenue), top: 0, bottom: 0 }} />
+      <div className={road} style={{ top: pct(32 - L.roads.avenue / 2), height: len(L.roads.avenue), left: 0, right: 0 }} />
+      {ring(L.roads.ring1)}
+      {ring(L.roads.ring2)}
+      <div className="absolute rounded-sm border" style={{ left: pct(c.x0), top: pct(c.x0), width: len(c.x1 - c.x0), height: len(c.x1 - c.x0), borderColor: `${district.color}55`, background: `${district.color}14` }} />
+      <div className="absolute rounded-sm bg-cal/[0.08]" style={{ left: pct(plaza), top: pct(plaza), width: len(c.block), height: len(c.block) }} />
+      <span className="absolute -translate-x-1/2 -translate-y-1/2 text-[10px] text-cal/45" style={{ left: pct(32), top: pct(32) }}>
         {t("projects.city")}
       </span>
       {/* Puerta al nexo */}
-      <div className="absolute rounded-sm" style={{ left: pct(28), width: pct(8), top: pct(61), height: pct(1.2), background: district.color }} />
-      <span className="absolute -translate-x-1/2 text-[10px] text-cal/45" style={{ left: "50%", top: pct(56.5) }}>
+      <div className="absolute rounded-sm" style={{ left: pct(32 - L.gate.span / 2), width: len(L.gate.span), top: pct(L.gate.z - 0.6), height: len(1.2), background: district.color }} />
+      <span className="absolute -translate-x-1/2 text-[10px] text-cal/45" style={{ left: pct(32), top: pct(L.gate.z - 7) }}>
         {t("projects.gate")}
       </span>
       {district.parcels.map((q) => {
@@ -371,19 +397,19 @@ function ParcelMap({ district, value, onChange }: { district: DistrictInfo; valu
             aria-label={taken ? `${q.id}: ${q.title ?? ""}` : q.id}
             aria-pressed={on}
             onClick={() => onChange(q.id)}
-            className="absolute flex flex-col items-center justify-center rounded-md border text-xs transition"
+            className="absolute flex flex-col items-center justify-center rounded-sm border text-[9px] leading-none transition"
             style={{
-              left: pct(q.x - 5),
-              top: pct(q.z - 5),
-              width: pct(10),
-              height: pct(10),
+              left: pct(q.x - PW / 2),
+              top: pct(q.z - PW / 2),
+              width: len(PW),
+              height: len(PW),
               borderColor: on ? district.color : taken ? "transparent" : `${district.color}66`,
               background: on ? `${district.color}40` : taken ? "rgb(255 255 255 / 0.06)" : "transparent",
               color: taken ? "rgb(246 241 231 / 0.35)" : "rgb(246 241 231 / 0.85)",
             }}
           >
             <span className="font-medium">{q.id}</span>
-            {taken && <span className="line-clamp-1 px-0.5 text-[9px]">{q.title}</span>}
+
             {/* La raya marca hacia dónde mira el portal (su calle) */}
             <span
               aria-hidden

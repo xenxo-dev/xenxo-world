@@ -1,5 +1,5 @@
 import { PLACES, type Components } from "@xenxo/protocol";
-import { DISTRICTS, DISTRICT_SPAWN } from "./districts";
+import { DISTRICTS, DISTRICT_BOUNDS, DISTRICT_SPAWN } from "./districts";
 import nexoLayout from "./nexo-layout.json";
 import { at, r3, r6, spawnInFront, yaw, type Q, type Seeded, type Slot, type V3 } from "./places";
 import { plazaSeed } from "./seed";
@@ -19,7 +19,7 @@ import { SEED_ASSETS } from "./seed-assets";
  * La disposición sale de nexo-layout.json (la misma que usa la forja). Sube NEXO_SEED_VERSION
  * si cambias el significado de algo; los cambios de contenido se detectan solos por la huella.
  */
-export const NEXO_SEED_VERSION = 5;
+export const NEXO_SEED_VERSION = 6;
 
 export type { Seeded } from "./places";
 
@@ -175,6 +175,8 @@ export function nexoSeed(): Seeded[] {
     desc: Record<string, string>;
     to: NonNullable<Components["portal@1"]>["to"];
     emblem: string;
+    /** Próximamente: la puerta, cerrada y con su cartel. */
+    soon?: boolean;
     /** Lo que se ve en el holograma: recibe cómo poner una pieza en la maqueta. */
     hologram: (put: (id: string, meshComp: NonNullable<Components["mesh@1"]>, d: V3, r: Q, s: V3) => void) => void;
   }) => {
@@ -259,9 +261,19 @@ export function nexoSeed(): Seeded[] {
       id: `nexo_portal_${k}`,
       components: {
         "transform@1": { p: at(g.x, g.z, g.facing, 0, G.bottom + G.h / 2, 0), r: yaw(g.facing), s: [1, 1, 1], parent: null },
-        "portal@1": { to: spec.to, size: [G.w, G.h], title: spec.name.en!, i18n: spec.name, category: "district", color: spec.color },
+        "portal@1": { to: spec.to, size: [G.w, G.h], title: spec.name.en!, i18n: spec.name, category: "district", color: spec.color, ...(spec.soon ? { closed: true } : {}) },
       },
     });
+    if (spec.soon) {
+      // Cartel delante de la puerta cerrada (dato del mundo, en sus idiomas).
+      out.push({
+        id: `nexo_soon_${k}`,
+        components: {
+          "transform@1": { p: at(g.x, g.z, g.facing, 0, G.bottom + G.h / 2, 0.08), r: yaw(g.facing), s: [1, 1, 1], parent: null },
+          "label@1": { text: "Coming soon", i18n: { es: "Próximamente", en: "Coming soon" }, billboard: false, size: 0.55, style: "neon", color: spec.color },
+        },
+      });
+    }
     out.push({
       id: `nexo_band_${k}`,
       components: {
@@ -424,11 +436,14 @@ export function nexoSeed(): Seeded[] {
       desc: { es: d.desc.es, en: d.desc.en },
       to: { kind: "chunk", chunk_id: d.chunk, spawn: DISTRICT_SPAWN, yaw: 0 },
       emblem: `emblem_${d.id}`,
+      soon: d.soon,
       hologram: (put) => {
-        const s = H.scale;
+        // La maqueta del distrito entero (suelo y ciudad), del mismo ancho que la de un chunk de
+        // 64 m a escala H.scale aunque el distrito sea más grande (256 m en la v3).
+        const span = DISTRICT_BOUNDS[1] - DISTRICT_BOUNDS[0];
+        const s = r6((H.scale * 64 * 1.25) / span);
         put(`nexo_holo_${d.id}_ground`, { lods: lodsOf(`district_${d.id}`) }, [0, 0.62 * s, 0], [0, 0, 0, 1], [s, s, s]);
-        const fit = fitInto(`emblem_${d.id}`, 3.2);
-        put(`nexo_holo_${d.id}_emblem`, { lods: lodsOf(`emblem_${d.id}`) }, [fit.cx, 0.62 * s + fit.lift, fit.cz], [0, 0, 0, 1], [fit.scale, fit.scale, fit.scale]);
+        if (SEED_ASSETS[`district_city_${d.id}`]) put(`nexo_holo_${d.id}_city`, { lods: lodsOf(`district_city_${d.id}`) }, [0, 0.62 * s, 0], [0, 0, 0, 1], [s, s, s]);
       },
     });
     mesh(`nexo_spires_${d.id}`, `nexo_spires_${d.id}`, [isl.x, I.y, isl.z], yaw(isl.facing));

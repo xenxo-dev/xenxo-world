@@ -64,7 +64,7 @@ const floor = await call("place_shape", { size: [2, 1, 2], position: [1.5, 0, 6]
 expect(floor.ok, "suelo");
 const label = await call("place_label", { text: "Taller de prueba", position: [5, 2.5, 3], style: "neon", color: "#ffd54f" });
 expect(label.ok, "rótulo");
-expect(!(await call("place_shape", { size: [2, 2, 2], position: [9.5, 0, 2], color: "#ff0000" })).ok, "fuera de la parcela → error explicado");
+expect(!(await call("place_shape", { size: [2, 2, 2], position: [14.5, 0, 2], color: "#ff0000" })).ok, "fuera de la parcela → error explicado");
 const up = await call("upload_model", { path: glb });
 console.log("   size:", JSON.stringify(up.data?.size));
 expect(up.ok, "subir modelo");

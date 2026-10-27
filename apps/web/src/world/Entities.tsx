@@ -1,3 +1,4 @@
+import { isNear, useNearby } from "./nearby";
 import { Component, memo, Suspense, useMemo, useRef, type ReactNode } from "react";
 import { Billboard, Text, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
@@ -451,12 +452,13 @@ function Fader({ max, children }: { max: number; children: ReactNode }) {
 
 export function Entities({ features, ambience }: { features: Features; ambience: Ambience }) {
   useWorldVersion();
+  useNearby();
   const lang = useLang();
   const dim = world.chunkId === PLACES.nexo ? NEXO_DIM : 1;
   return (
     <>
       <HologramClock />
-      {[...world.entities.values()].map((e) => (
+      {[...world.entities.values()].filter((e) => isNear(e.entity_id)).map((e) => (
         <EntityView key={`${e.entity_id}:${e.rev}`} entity={e} lang={lang} features={features} ambience={ambience} dim={dim} />
       ))}
     </>

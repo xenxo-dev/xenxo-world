@@ -116,7 +116,7 @@ export function TravelToast() {
   const name = tr.title || placeName(place);
   return (
     <div className={`pointer-events-none absolute left-1/2 top-1/3 -translate-x-1/2 px-5 py-3 text-lg text-cal ${box}`}>
-      {t("hud.travel", { place: name })}
+      {t(tr.soon ? "hud.soon" : "hud.travel", { place: name })}
     </div>
   );
 }

@@ -3,12 +3,13 @@ import { PLACES } from "@xenxo/protocol";
 import { assetUrl } from "../config";
 import { t, useLang, type Key } from "../i18n";
 import { DISTRICT_SPAWN, districtOf, parcelArrival, refreshDistricts, useDistricts, type DistrictInfo } from "../net/districts";
-import { avatarMode } from "../net/account";
+import { avatarMode, useAccount } from "../net/account";
 import { refreshProjects, useProjects } from "../net/projects";
 import { travel } from "../net/session";
 import { fitsHere, visitorDevice } from "../games/device";
 import { gameName, openGame } from "../games/state";
 import { JamBlock } from "./Jam";
+import { useRoles } from "./Moderation";
 import { Block, card } from "./ui";
 
 /** Viaja al distrito de un proyecto y aparece delante de su portal, mirándolo. */
@@ -26,6 +27,7 @@ export function NexoSection({ onEnter }: { onEnter: () => void }) {
   const projects = useProjects();
   const districts = useDistricts();
   const [filter, setFilter] = useState<string>("all");
+  const staff = useRoles(useAccount()?.id).moderator;
   useEffect(() => {
     void refreshProjects(true);
     void refreshDistricts(true);
@@ -58,6 +60,9 @@ export function NexoSection({ onEnter }: { onEnter: () => void }) {
               title={name(d)}
               desc={d.desc[lang] ?? d.desc.en!}
               free={d.parcels.filter((q) => !q.project_id).length}
+              total={d.parcels.length}
+              soon={d.soon}
+              staff={staff}
               onGo={() => {
                 travel(d.chunk_id, DISTRICT_SPAWN, 0);
                 onEnter();
@@ -155,7 +160,28 @@ export function NexoSection({ onEnter }: { onEnter: () => void }) {
   );
 }
 
-function DistrictCard({ cover, color, title, desc, free, onGo }: { cover: string; color: string; title: string; desc: string; free?: number; onGo: () => void }) {
+function DistrictCard({
+  cover,
+  color,
+  title,
+  desc,
+  free,
+  total,
+  soon,
+  staff,
+  onGo,
+}: {
+  cover: string;
+  color: string;
+  title: string;
+  desc: string;
+  free?: number;
+  total?: number;
+  /** Próximamente: sin entrar (salvo moderación). */
+  soon?: boolean;
+  staff?: boolean;
+  onGo: () => void;
+}) {
   const [broken, setBroken] = useState(false);
   return (
     <li className={`${card} flex flex-col overflow-hidden`} style={{ borderColor: `${color}40` }}>
@@ -169,12 +195,20 @@ function DistrictCard({ cover, color, title, desc, free, onGo }: { cover: string
           {title}
         </p>
         <p className="text-sm leading-relaxed text-soft">{desc}</p>
-        {free !== undefined && <p className="meta text-xs text-muted">{t("nexo.freeParcels", { n: free })}</p>}
-        <div className="mt-auto pt-2">
-          <button onClick={onGo} className="btn-ghost rounded-xl px-5 py-2.5 text-base font-medium">
-            {t("nexo.go")} →
-          </button>
-        </div>
+        {soon ? (
+          <p className="meta text-xs uppercase tracking-[0.14em]" style={{ color }}>
+            {t("nexo.soon")}
+          </p>
+        ) : (
+          free !== undefined && <p className="meta text-xs text-muted">{t("nexo.freeParcels", { n: free, total: total ?? 0 })}</p>
+        )}
+        {(!soon || staff) && (
+          <div className="mt-auto pt-2">
+            <button onClick={onGo} className="btn-ghost rounded-xl px-5 py-2.5 text-base font-medium">
+              {soon ? t("nexo.modEnter") : t("nexo.go")} →
+            </button>
+          </div>
+        )}
       </div>
     </li>
   );

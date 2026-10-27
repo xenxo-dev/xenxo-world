@@ -83,7 +83,7 @@ npm run agent:build    # el agente coloca un bloque en la plaza
 Al entrar en xenxo se aparece en el **nexo**, una plataforma flotante sobre una megaciudad cyberpunk, con un planeta con anillos en el cielo (de día o de noche, según elijas en Personalizar): suelo oscuro con líneas de luz cian, «xenxo» escrito con luz en el centro, un faro fino y las **puertas de los distritos**. Cada puerta está abierta: a su izquierda, el emblema del distrito; a través de ella y detrás, su isla flotante con el distrito en pequeño. En el nexo solo hay distritos (los proyectos están en sus parcelas) y quedan huecos para distritos futuros.
 
 - **La Plaza**: el distrito con historia (su arco devuelve al nexo).
-- **Arcade** (juegos 3D), **Píxel** (juegos 2D), **Ágora** (social), **Taller** (herramientas), **Frontera** (lo demás), **Distrito Cero** (la ciudad ciberpunk de Xen: ciencia ficción e IA) y **Vertical** (torres de caravanas apiladas: webs personales y primeros proyectos): cada uno con **su ciudad en el centro** (una cruz de calles y una plaza con su monumento) y, alrededor de una calle en anillo, **16 parcelas** de 10×10 m. Quien publica elige distrito y parcela libre; su portal va al fondo de la parcela con su portada, su monumento en la peana y su nombre en neón. Al acercarte se abre su ficha con el enlace (nunca se abre nada sin pulsar). En la fase 2, la parcela será también el terreno que su dueño o su agente pueda construir.
+- **Arcade** (juegos 3D), **Píxel** (juegos 2D), **Ágora** (social), **Taller** (herramientas), **Frontera** (lo demás), **Distrito Cero** (la ciudad ciberpunk de Xen: ciencia ficción e IA) y **Vertical** (torres de caravanas apiladas: webs personales y primeros proyectos): cada uno de **256 × 256 m**, con **su ciudad en el centro** (ocho manzanas de su tema alrededor de una plaza con su monumento y puestos de actividad) y, alrededor de dos anillos de calles, **64 parcelas** de 15 × 15 m. Quien publica elige distrito y parcela libre; su portal va al fondo de la parcela con su portada, su monumento en la peana y su nombre en neón. Al acercarte se abre su ficha con el enlace (nunca se abre nada sin pulsar). En la fase 2, la parcela será también el terreno que su dueño o su agente pueda construir.
 
 Para quien no quiera moverse en 3D, el panel tiene el **nexo 2D**: las mismas portadas en tarjetas grandes, filtro por categoría, *Abrir* el proyecto o *Ver su portal* (te lleva delante de él).
 
@@ -95,8 +95,8 @@ Quien publica un proyecto puede dejar que su agente (Claude Code, Cursor o cualq
 construya en su parcela: en *Proyectos → Construir con tu agente* crea una **clave de parcela**
 (`xk_…`), descarga el servidor MCP (`xenxo.io/mcp/xenxo-mcp.mjs`, un solo archivo) y se lo conecta
 a su agente. El agente es un cliente más del protocolo: todo pasa por `MUTATE_WORLD` y el servidor
-comprueba que cada pieza quepa entera en la parcela (10 × 10 m, 12 m de alto) y su presupuesto
-(32 piezas, 16.000 triángulos, 1 luz). Detalles en [`packages/mcp/README.md`](packages/mcp/README.md).
+comprueba que cada pieza quepa entera en la parcela (15 × 15 m, 12 m de alto) y su presupuesto
+(48 piezas, 24.000 triángulos, 1 luz). Detalles en [`packages/mcp/README.md`](packages/mcp/README.md).
 
 ## Haz tu juego: `npm create xenxo`
 
@@ -178,7 +178,7 @@ El agente de ejemplo usa la variable `XENXO_URL=https://api.xenxo.io` y el secre
 - [x] Exportar y borrar datos (RGPD), denuncias y moderación (DSA), páginas legales en borrador
 - [ ] Agente con LLM y servidor MCP del mundo ("trae tu propio agente")
 - [x] Nexo de entrada con portales (3D y 2D) y paso de un lugar a otro
-- [x] Distritos temáticos con 16 parcelas: cada proyecto elige la suya
+- [x] Distritos temáticos de 256 m con su ciudad y 64 parcelas: cada proyecto elige la suya
 - [x] Construir en tu parcela con tu agente (MCP): clave de parcela y servidor MCP
 - [x] Arquitectura generada (forja), texturas escaneadas y cielo real en lugar de primitivas
 - [x] Personas realistas de serie con animaciones VRMA, gestos en red y colisiones
