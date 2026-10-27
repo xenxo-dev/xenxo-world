@@ -19,6 +19,7 @@ import { Sky, SKY } from "./Sky";
 import { Skyline } from "./Skyline";
 import { NexoBackdrop } from "./NexoBackdrop";
 import { NexoCity } from "./NexoCity";
+import { DistrictSkyline } from "./DistrictSkyline";
 import skyDay from "./sky-day.json";
 
 /** Una sola tienda XR para toda la app. Activa foveation para ganar rendimiento en Quest. */
@@ -312,6 +313,7 @@ function Scene({ active }: { active: boolean }) {
       {inPlaza && <Skyline count={f.skyline} ambience={ambience} pbr={f.pbr} />}
       {inNexo && <NexoBackdrop ambience={ambience} hd={f.textures >= 1024} />}
       {inNexo && <NexoCity ambience={ambience} density={f.nexoCity} />}
+      {!inNexo && !inPlaza && <DistrictSkyline chunk={place} density={f.nexoCity} />}
       <Lighting profile={profile} features={f} />
       <Environment ambience={ambience} profile={profile} probe={f.probe} sky={dayEnv} />
       {/* Los textos cargan su fuente de forma asíncrona: que nunca bloqueen la escena ni el panel. */}

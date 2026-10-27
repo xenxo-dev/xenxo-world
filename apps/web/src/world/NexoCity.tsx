@@ -37,7 +37,7 @@ const shared = {
 };
 
 /** Generador con semilla: la misma ciudad para todos. */
-function rng(seed: number) {
+export function rng(seed: number) {
   let s = seed >>> 0;
   return () => {
     s = (s + 0x6d2b79f5) >>> 0;
@@ -69,7 +69,7 @@ const OUT = /* glsl */ `
 /* ------------------------------------------------------------------ */
 
 /** kind: 0 = torre con ventanas, 1 = panel de neón (anuncio sin letras), 2 = baliza que parpadea. */
-interface Box {
+export interface Box {
   x: number;
   y0: number;
   z: number;
@@ -81,7 +81,7 @@ interface Box {
 }
 
 const FACADE_DAY = ["#5f7d99", "#7b93a8", "#4f6b85", "#8fa5b5", "#6a8597", "#a3b2bd", "#3f5a73", "#8a8f99"];
-const NEON = ["#36d9ff", "#ff4fd8", "#a26bff", "#ff4f8b", "#4fa3ff", "#6dffd8"];
+export const NEON = ["#36d9ff", "#ff4fd8", "#a26bff", "#ff4f8b", "#4fa3ff", "#6dffd8"];
 
 function cityBoxes(density: number): Box[] {
   const r = rng(4242);
@@ -204,8 +204,13 @@ const BUILDING_FS = /* glsl */ `
   }`;
 
 function Buildings({ density }: { density: number }) {
+  const boxes = useMemo(() => cityBoxes(density), [density]);
+  return <CityBoxes boxes={boxes} />;
+}
+
+/** Cajas de la ciudad en un solo draw call (también las usa el horizonte de los distritos). */
+export function CityBoxes({ boxes }: { boxes: Box[] }) {
   const mesh = useMemo(() => {
-    const boxes = cityBoxes(density);
     const geo = new THREE.BoxGeometry(1, 1, 1);
     geo.translate(0, 0.5, 0);
     const tint = new Float32Array(boxes.length * 3);
@@ -230,7 +235,7 @@ function Buildings({ density }: { density: number }) {
     geo.setAttribute("aInfo", new THREE.InstancedBufferAttribute(info, 2));
     m.frustumCulled = false;
     return m;
-  }, [density]);
+  }, [boxes]);
   useEffect(() => () => disposeMesh(mesh), [mesh]);
   return <primitive object={mesh} />;
 }
@@ -266,10 +271,15 @@ const GROUND_FS = /* glsl */ `
   }`;
 
 function Ground() {
+  return <CityGround y={GROUND} size={EXTENT * 2.2} />;
+}
+
+/** Suelo de calles con farolas (también el de alrededor de los distritos). */
+export function CityGround({ y, size }: { y: number; size: number }) {
   const mesh = useMemo(() => {
-    const geo = new THREE.PlaneGeometry(EXTENT * 2.2, EXTENT * 2.2);
+    const geo = new THREE.PlaneGeometry(size, size);
     geo.rotateX(-Math.PI / 2);
-    geo.translate(C, GROUND, C);
+    geo.translate(C, y, C);
     const m = new THREE.Mesh(
       geo,
       new THREE.ShaderMaterial({
@@ -280,7 +290,7 @@ function Ground() {
     );
     m.frustumCulled = false;
     return m;
-  }, []);
+  }, [y, size]);
   useEffect(() => () => disposeMesh(mesh), [mesh]);
   return <primitive object={mesh} />;
 }
@@ -289,7 +299,7 @@ function Ground() {
 /* Tráfico: coches voladores y coches de la calle                       */
 /* ------------------------------------------------------------------ */
 
-interface Car {
+export interface Car {
   /** Círculo: (cx, cz, radio, y). Recta: (x0, z0, y, largo). */
   a: [number, number, number, number];
   /** Círculo: (vel. angular, fase, 0, 0). Recta: (vel., fase, ángulo, 1). */
@@ -384,8 +394,13 @@ const CAR_FS = /* glsl */ `
   }`;
 
 function Traffic({ density }: { density: number }) {
+  const list = useMemo(() => cars(density), [density]);
+  return <CarsMesh list={list} />;
+}
+
+/** Coches (voladores o de calle) movidos en el shader; un draw call. */
+export function CarsMesh({ list }: { list: Car[] }) {
   const mesh = useMemo(() => {
-    const list = cars(density);
     const geo = new THREE.InstancedBufferGeometry();
     const box = new THREE.BoxGeometry(1, 1, 1);
     geo.index = box.index;
@@ -408,7 +423,7 @@ function Traffic({ density }: { density: number }) {
     const m = new THREE.Mesh(geo, new THREE.ShaderMaterial({ uniforms: shared, vertexShader: CAR_VS, fragmentShader: CAR_FS }));
     m.frustumCulled = false;
     return m;
-  }, [density]);
+  }, [list]);
   useEffect(() => () => disposeMesh(mesh), [mesh]);
   return <primitive object={mesh} />;
 }
@@ -512,7 +527,7 @@ function disposeMesh(m: THREE.Mesh | THREE.InstancedMesh) {
 }
 
 /** Reloj y ambiente: lo único que cambia por frame (dos números, sin objetos nuevos). */
-function CityClock({ ambience }: { ambience: Ambience }) {
+export function CityClock({ ambience }: { ambience: Ambience }) {
   useEffect(() => {
     const night = ambience === "night";
     shared.uNight.value = night ? 1 : 0;
