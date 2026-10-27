@@ -28,7 +28,7 @@ export interface HostEnv {
 }
 
 const MAX_RPC_BYTES = 64 * 1024;
-/** Mover un distrito entero (loadState) puede pesar más. */
+/** Mover un distrito entero (loadState) o montar uno de la comunidad (installDistrict) puede pesar más. */
 const MAX_LOAD_BYTES = 16 * 1024 * 1024;
 
 function json(data: unknown, status = 200, extra: Record<string, string> = {}): Response {
@@ -72,7 +72,7 @@ export default {
       const method = r[2]!;
       if (!hosted.has(id) || !REMOTE_METHODS.has(method)) return json({ error: "not_found" }, 404);
       const body = await req.text();
-      if (body.length > (method === "loadState" ? MAX_LOAD_BYTES : MAX_RPC_BYTES)) return json({ error: "too_large" }, 413);
+      if (body.length > (method === "loadState" || method === "installDistrict" ? MAX_LOAD_BYTES : MAX_RPC_BYTES)) return json({ error: "too_large" }, 413);
       const call = await verifyRemote<RemoteCall>(env.DISTRICT_PUBLIC_KEY, req.headers.get("X-Xenxo-Call") ?? "");
       if (!call || call.typ !== "rpc" || call.chunk !== id || call.method !== method || call.body !== (await sha256B64(body))) {
         return json({ error: "unauthorized" }, 401);

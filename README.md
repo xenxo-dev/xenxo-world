@@ -110,6 +110,18 @@ Crea un juego **2D o 3D** listo para xenxo: «Entrar con xenxo», el personaje V
 en tu cuenta gratuita de Cloudflare (o cualquier alojamiento estático). Detalles en
 [`packages/create-xenxo/README.md`](packages/create-xenxo/README.md).
 
+## Crea tu distrito
+
+```bash
+npm create xenxo@latest mi-distrito -- --district
+cd mi-distrito && npm install && npm run validate
+```
+
+Un distrito entero de 256 × 256 m (tu ciudad, tus actividades y portales a tus juegos) descrito en
+`xenxo-district.json`, con sus modelos `.glb`. El kit (`@xenxo/district-kit`, MIT) comprueba en tu
+equipo lo mismo que comprobará xenxo; luego lo subes en *Cuenta → Tu distrito*, queda en borrador
+para que lo pruebes y moderación lo revisa. Las reglas están en el `AGENTS.md` de la plantilla.
+
 ## «Entrar con xenxo» en tu juego
 
 xenxo es proveedor de identidad (OpenID Connect) para juegos web: registras tu juego en
@@ -194,5 +206,5 @@ El agente de ejemplo usa la variable `XENXO_URL=https://api.xenxo.io` y el secre
 ## Licencia
 
 - **El mundo** (servidor, web y herramientas): [AGPL-3.0](LICENSE). Puedes usarlo, cambiarlo y montar tu propia copia, pero si la abres al público tienes que publicar tu código con tus cambios. Así nadie puede cerrar xenxo y quedarse con una versión privada.
-- **Lo que usan los creadores** (`packages/protocol`, `packages/assets`, `apps/headless`, `packages/mcp`, `packages/sdk` y `packages/create-xenxo`): **MIT**. Conectar tu juego o tu agente a xenxo no cambia la licencia de tu código: sigue siendo tuyo.
+- **Lo que usan los creadores** (`packages/protocol`, `packages/assets`, `apps/headless`, `packages/mcp`, `packages/sdk`, `packages/district-kit` y `packages/create-xenxo`): **MIT**. Conectar tu juego o tu agente a xenxo no cambia la licencia de tu código: sigue siendo tuyo.
 - **Recursos gráficos**: ver [`CREDITS.md`](CREDITS.md).

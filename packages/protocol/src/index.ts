@@ -438,6 +438,11 @@ export const WelcomeMsg = envelope(
      * poses llegan solo de quien está cerca). Sin el campo: 1..CHUNK_SIZE-1.
      */
     walk: z.tuple([z.number(), z.number()]).optional(),
+    /**
+     * Pista de decorado de un distrito: qué ciudad de fondo dibujar alrededor (uno de
+     * DISTRICT_THEMES) y su color. Un cliente que no la entienda la ignora.
+     */
+    theme: z.object({ id: z.string().regex(/^[a-z0-9_-]{1,24}$/), color: z.string().regex(/^#[0-9a-fA-F]{6}$/) }).optional(),
   }),
 );
 
@@ -594,3 +599,4 @@ export const GameManifest = z
   })
   .strict();
 export type GameManifest = z.infer<typeof GameManifest>;
+export * from "./district-kit";

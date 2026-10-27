@@ -25,6 +25,13 @@ jobs:
       # Y sus scripts (portátil y relevo del NAS): que al menos se lean bien.
       - run: for f in tools/district-host/*.sh tools/district-host/relevo/*.sh; do bash -n "$f"; done
 
+      # El kit de distritos: compila y la plantilla de distrito pasa su propia comprobación.
+      - name: Kit de distritos
+        run: |
+          npm run build -w @xenxo/district-kit
+          node packages/create-xenxo/index.mjs "$RUNNER_TEMP/distrito-ci" --district --yes
+          node packages/district-kit/dist/xenxo-district.mjs validate "$RUNNER_TEMP/distrito-ci" --lang es
+
       # La plantilla de juegos: crea uno 2D y otro 3D con el SDK empaquetado y los compila.
       - name: Juegos de ejemplo (ficha xenxo.json válida)
         run: |

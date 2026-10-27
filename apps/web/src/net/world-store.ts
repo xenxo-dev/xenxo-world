@@ -33,6 +33,8 @@ class WorldStore {
   walk: [number, number] = [1, CHUNK_SIZE - 1];
   /** Lugar compartido más grande que un chunk: poses y contenido de la gente, por cercanía. */
   big = false;
+  /** Ciudad de fondo del distrito (WELCOME.theme): la de un distrito del sistema o la que eligió su autor. */
+  theme: { id: string; color: string } | null = null;
   status: ConnectionStatus = "idle";
   lastError: string | null = null;
   /** serverTime ≈ Date.now() + clockOffset */
@@ -77,6 +79,7 @@ class WorldStore {
     this.chunkId = chunkId;
     this.solo = false;
     this.big = false;
+    this.theme = null;
     // Sin límites hasta que el lugar diga los suyos en WELCOME: el punto de llegada (p. ej. una
     // isla del nexo) puede estar fuera del chunk.
     this.walk = [-Infinity, Infinity];
@@ -96,6 +99,7 @@ class WorldStore {
         this.solo = m.payload.solo === true;
         this.walk = m.payload.walk ?? [1, CHUNK_SIZE - 1];
         this.big = !this.solo && (this.walk[0] < 0 || this.walk[1] > CHUNK_SIZE);
+        this.theme = m.payload.theme ?? null;
         this.clockOffset = m.payload.server_time - Date.now();
         this.bump();
         break;
@@ -220,6 +224,11 @@ export function useChatVersion() {
 /** Re-renderiza solo cuando cambia de lugar (nexo, plaza…). */
 export function usePlace(): string {
   return useSyncExternalStore(world.subscribe, () => world.chunkId);
+}
+
+/** La ciudad de fondo del lugar (cambia al llegar a un distrito). */
+export function usePlaceTheme(): { id: string; color: string } | null {
+  return useSyncExternalStore(world.subscribe, () => world.theme);
 }
 
 /** Re-renderiza solo ante cambios estructurales. */

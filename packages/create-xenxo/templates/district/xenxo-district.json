@@ -1,0 +1,514 @@
+{
+  "schema": "xenxo.district/0",
+  "slug": "{{slug}}",
+  "name": {
+    "es": "{{title}}",
+    "en": "{{title}}"
+  },
+  "description": {
+    "es": "Mi distrito en xenxo: una plaza con sus torres. Cámbialo todo.",
+    "en": "My district in xenxo: a square with its towers. Change everything."
+  },
+  "color": "#33ddff",
+  "theme": "cero",
+  "floor": "#161b26",
+  "cover": "portada.png",
+  "emblem": "emblema.glb",
+  "models": {
+    "torre": {
+      "file": "models/torre.glb"
+    },
+    "quiosco": {
+      "file": "models/quiosco.glb"
+    },
+    "farola": {
+      "file": "models/farola.glb"
+    }
+  },
+  "pieces": [
+    {
+      "model": "torre",
+      "p": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "model": "torre",
+      "p": [
+        64,
+        0,
+        0
+      ]
+    },
+    {
+      "model": "torre",
+      "p": [
+        -8,
+        0,
+        32
+      ]
+    },
+    {
+      "model": "torre",
+      "p": [
+        72,
+        0,
+        32
+      ]
+    },
+    {
+      "model": "torre",
+      "p": [
+        0,
+        0,
+        64
+      ]
+    },
+    {
+      "model": "torre",
+      "p": [
+        64,
+        0,
+        64
+      ]
+    },
+    {
+      "model": "quiosco",
+      "p": [
+        18,
+        0,
+        32
+      ],
+      "yaw": 90
+    },
+    {
+      "model": "quiosco",
+      "p": [
+        46,
+        0,
+        32
+      ],
+      "yaw": 270
+    },
+    {
+      "model": "quiosco",
+      "p": [
+        32,
+        0,
+        18
+      ],
+      "yaw": 0
+    },
+    {
+      "model": "farola",
+      "p": [
+        26,
+        0,
+        60
+      ]
+    },
+    {
+      "model": "farola",
+      "p": [
+        38,
+        0,
+        60
+      ]
+    },
+    {
+      "model": "farola",
+      "p": [
+        26,
+        0,
+        80
+      ]
+    },
+    {
+      "model": "farola",
+      "p": [
+        38,
+        0,
+        80
+      ]
+    },
+    {
+      "model": "farola",
+      "p": [
+        26,
+        0,
+        100
+      ]
+    },
+    {
+      "model": "farola",
+      "p": [
+        38,
+        0,
+        100
+      ]
+    },
+    {
+      "model": "farola",
+      "p": [
+        26,
+        0,
+        120
+      ]
+    },
+    {
+      "model": "farola",
+      "p": [
+        38,
+        0,
+        120
+      ]
+    }
+  ],
+  "primitives": [
+    {
+      "shape": "cylinder",
+      "size": [
+        40,
+        0.05,
+        40
+      ],
+      "p": [
+        32,
+        0.025,
+        32
+      ],
+      "color": "#22293a"
+    },
+    {
+      "shape": "box",
+      "size": [
+        8,
+        0.04,
+        100
+      ],
+      "p": [
+        32,
+        0.02,
+        100
+      ],
+      "color": "#2a3142"
+    },
+    {
+      "shape": "box",
+      "size": [
+        0.3,
+        0.06,
+        100
+      ],
+      "p": [
+        27.8,
+        0.03,
+        100
+      ],
+      "color": "#33ddff",
+      "emissive": true
+    },
+    {
+      "shape": "box",
+      "size": [
+        0.3,
+        0.06,
+        100
+      ],
+      "p": [
+        36.2,
+        0.03,
+        100
+      ],
+      "color": "#33ddff",
+      "emissive": true
+    }
+  ],
+  "colliders": [
+    {
+      "p": [
+        0,
+        15,
+        0
+      ],
+      "half": [
+        4,
+        15,
+        4
+      ]
+    },
+    {
+      "p": [
+        64,
+        15,
+        0
+      ],
+      "half": [
+        4,
+        15,
+        4
+      ]
+    },
+    {
+      "p": [
+        -8,
+        15,
+        32
+      ],
+      "half": [
+        4,
+        15,
+        4
+      ]
+    },
+    {
+      "p": [
+        72,
+        15,
+        32
+      ],
+      "half": [
+        4,
+        15,
+        4
+      ]
+    },
+    {
+      "p": [
+        0,
+        15,
+        64
+      ],
+      "half": [
+        4,
+        15,
+        4
+      ]
+    },
+    {
+      "p": [
+        64,
+        15,
+        64
+      ],
+      "half": [
+        4,
+        15,
+        4
+      ]
+    },
+    {
+      "p": [
+        18,
+        1.4,
+        32
+      ],
+      "half": [
+        2,
+        1.4,
+        1.5
+      ],
+      "yaw": 90
+    },
+    {
+      "p": [
+        46,
+        1.4,
+        32
+      ],
+      "half": [
+        2,
+        1.4,
+        1.5
+      ],
+      "yaw": 270
+    },
+    {
+      "p": [
+        32,
+        1.4,
+        18
+      ],
+      "half": [
+        2,
+        1.4,
+        1.5
+      ],
+      "yaw": 0
+    },
+    {
+      "p": [
+        26,
+        2,
+        60
+      ],
+      "half": [
+        0.15,
+        2,
+        0.15
+      ]
+    },
+    {
+      "p": [
+        38,
+        2,
+        60
+      ],
+      "half": [
+        0.15,
+        2,
+        0.15
+      ]
+    },
+    {
+      "p": [
+        26,
+        2,
+        80
+      ],
+      "half": [
+        0.15,
+        2,
+        0.15
+      ]
+    },
+    {
+      "p": [
+        38,
+        2,
+        80
+      ],
+      "half": [
+        0.15,
+        2,
+        0.15
+      ]
+    },
+    {
+      "p": [
+        26,
+        2,
+        100
+      ],
+      "half": [
+        0.15,
+        2,
+        0.15
+      ]
+    },
+    {
+      "p": [
+        38,
+        2,
+        100
+      ],
+      "half": [
+        0.15,
+        2,
+        0.15
+      ]
+    },
+    {
+      "p": [
+        26,
+        2,
+        120
+      ],
+      "half": [
+        0.15,
+        2,
+        0.15
+      ]
+    },
+    {
+      "p": [
+        38,
+        2,
+        120
+      ],
+      "half": [
+        0.15,
+        2,
+        0.15
+      ]
+    }
+  ],
+  "lights": [
+    {
+      "p": [
+        32,
+        4,
+        32
+      ],
+      "color": "#33ddff",
+      "intensity": 3,
+      "range": 20
+    },
+    {
+      "p": [
+        32,
+        4,
+        60
+      ],
+      "color": "#fff2c8",
+      "intensity": 2,
+      "range": 12
+    },
+    {
+      "p": [
+        32,
+        4,
+        90
+      ],
+      "color": "#fff2c8",
+      "intensity": 2,
+      "range": 12
+    },
+    {
+      "p": [
+        32,
+        4,
+        120
+      ],
+      "color": "#fff2c8",
+      "intensity": 2,
+      "range": 12
+    }
+  ],
+  "labels": [
+    {
+      "p": [
+        32,
+        7,
+        48
+      ],
+      "text": {
+        "es": "Bienvenida a {{title}}",
+        "en": "Welcome to {{title}}"
+      },
+      "size": 1.2,
+      "style": "sign",
+      "color": "#33ddff"
+    },
+    {
+      "p": [
+        32,
+        3.2,
+        18
+      ],
+      "yaw": 0,
+      "text": {
+        "es": "Abierto",
+        "en": "Open"
+      },
+      "size": 0.5,
+      "style": "neon",
+      "color": "#ffd54f"
+    }
+  ],
+  "portals": [],
+  "author": "{{author}}",
+  "contact": "{{contact}}"
+}

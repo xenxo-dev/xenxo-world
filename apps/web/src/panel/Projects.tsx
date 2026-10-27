@@ -258,7 +258,7 @@ function PublishForm({ onDone }: { onDone: () => void }) {
       <input id="pj-url" required type="url" pattern="https://.*" maxLength={300} value={url} onChange={(e) => setUrl(e.target.value)} className={input} placeholder="https://…" />
       <p className="mb-1.5 mt-4 text-sm text-cal/70">{t("projects.district")}</p>
       <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label={t("projects.district")}>
-        {districts?.map((d) => {
+        {districts?.filter((d) => !d.community).map((d) => {
           const free = d.parcels.filter((q) => !q.project_id).length;
           const on = d.id === districtId;
           return (

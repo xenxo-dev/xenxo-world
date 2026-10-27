@@ -32,6 +32,7 @@ import { plazaSeed, SEED_VERSION } from "./seed";
 import { DISTRICT_BOUNDS, districtByChunk, districtSeed, DISTRICT_SEED_VERSION, migrateParcelPose, migrateSlot, PARCEL_LAYOUT_VERSION, PARCELS, parcelIndex, parcelReserved, parcelSlot } from "./districts";
 import { nexoArrival, NEXO_BOUNDS, NEXO_SEED_VERSION, nexoSeed, SHOWCASE_SLOTS } from "./nexo";
 import { portalEntities, r3, type Seeded } from "./places";
+import { isCommunityChunk, type CommunityMeta } from "./community";
 import { fitsZone, localBox, worldBox, type Zone } from "./zone";
 import { assetKey } from "./assets";
 import { SEED_ASSETS } from "./seed-assets";
@@ -125,11 +126,15 @@ export interface ChunkDump {
   entities: { entity_id: string; owner: string; rev: number; tris: number; data: string }[];
   stands: { project_id: string; slot: number }[];
   chat: { id: string; ts: number; sender: string; kind: string; display_name: string; session_id: string; text: string; hidden: number }[];
+  /** Distrito de la comunidad: lo que es (con lo del sistema que lleva). Ausente en los demás. */
+  community?: string | null;
 }
 
 export class ChunkRoom extends DurableObject<Env> {
   private sql: SqlStorage;
   private chunkId: string | null = null;
+  /** Si es un distrito de la comunidad (community.ts): qué es. Se guarda en meta 'community'. */
+  private community: CommunityMeta | null = null;
   private poses = new Map<string, AvatarPose>();
   private dirty = new Set<string>();
   private lastPoseAt = new Map<string, number>();
@@ -221,6 +226,10 @@ export class ChunkRoom extends DurableObject<Env> {
       if (d) {
         this.migrateParcelLayout();
         this.applySeed(`district_${d.id}`, DISTRICT_SEED_VERSION, districtSeed(d, nexoArrival(d.id)));
+      } else if (isCommunityChunk(this.chunkId)) {
+        const raw = this.sql.exec<{ v: string }>("SELECT v FROM meta WHERE k = 'community'").toArray()[0]?.v;
+        this.community = raw ? (JSON.parse(raw) as CommunityMeta) : null;
+        if (this.community) this.applySeed(`community_${this.community.id}`, 1, this.community.system);
       }
     }
   }
@@ -325,6 +334,7 @@ export class ChunkRoom extends DurableObject<Env> {
           tick_hz: TICK_HZ,
           budgets: { ...BUDGETS },
           ...(this.solo ? { solo: true, walk: NEXO_BOUNDS } : this.big ? { walk: this.bounds } : {}),
+          ...this.themeHint(),
         }));
         // En solitario (el nexo) nadie ve a nadie: ni gente, ni poses, ni chat.
         if (this.solo) {
@@ -385,8 +395,15 @@ export class ChunkRoom extends DurableObject<Env> {
   /** Hasta dónde llega el lugar (X y Z): el nexo y los distritos pueden ser más grandes que su chunk. */
   private get bounds(): [number, number] {
     if (this.chunkId === PLACES.nexo) return NEXO_BOUNDS;
-    if (this.chunkId && districtByChunk(this.chunkId)) return DISTRICT_BOUNDS;
+    if (this.chunkId && (districtByChunk(this.chunkId) || this.community)) return DISTRICT_BOUNDS;
     return [0, CHUNK_SIZE];
+  }
+
+  /** La ciudad de fondo de un distrito (el suyo, o el que eligió quien creó uno de la comunidad). */
+  private themeHint(): { theme?: { id: string; color: string } } {
+    if (this.community) return { theme: { id: this.community.theme, color: this.community.color } };
+    const d = this.chunkId ? districtByChunk(this.chunkId) : null;
+    return d ? { theme: { id: d.id, color: d.color } } : {};
   }
 
   /** Lugar compartido más grande que un chunk: las poses se reparten solo a quien está cerca. */
@@ -813,6 +830,7 @@ export class ChunkRoom extends DurableObject<Env> {
       entities: this.sql.exec<ChunkDump["entities"][number]>("SELECT entity_id, owner, rev, tris, data FROM entities WHERE owner != 'system'").toArray(),
       stands: this.sql.exec<ChunkDump["stands"][number]>("SELECT project_id, slot FROM stands").toArray(),
       chat: this.sql.exec<ChunkDump["chat"][number]>("SELECT id, ts, sender, kind, display_name, session_id, text, hidden FROM chat").toArray(),
+      community: this.sql.exec<{ v: string }>("SELECT v FROM meta WHERE k = 'community'").toArray()[0]?.v ?? null,
     };
   }
 
@@ -832,10 +850,43 @@ export class ChunkRoom extends DurableObject<Env> {
         this.sql.exec("INSERT INTO chat (id, ts, sender, kind, display_name, session_id, text, hidden) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", c.id, c.ts, c.sender, c.kind, c.display_name, c.session_id, c.text, c.hidden);
       }
       if (d.parcel_layout) this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('parcel_layout', ?)", d.parcel_layout);
+      if (d.community) {
+        this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('community', ?)", d.community);
+        this.community = JSON.parse(d.community) as CommunityMeta;
+      }
       this.logEvent("system", "IMPORT", this.chunkId!, d.entities.length, null);
     });
+    if (this.community) this.applySeed(`community_${this.community.id}`, 1, this.community.system);
     for (const ws of this.ctx.getWebSockets()) ws.close(1012, "el distrito se ha movido de servidor: vuelve a entrar");
     return { entities: d.entities.length, stands: d.stands.length, chat: d.chat.length };
+  }
+
+  /**
+   * Distrito de la comunidad: pone lo de su ficha (de `dst_<id>`) y lo del sistema (suelo y puerta),
+   * o lo quita todo (`null`). Lo llama el Worker al guardar la ficha. Quien esté dentro vuelve a
+   * entrar solo (el cliente se reconecta) y ve el distrito nuevo.
+   */
+  async installDistrict(spec: { meta: CommunityMeta; content: Seeded[] } | null): Promise<{ entities: number }> {
+    this.ensureChunk(null);
+    if (!isCommunityChunk(this.chunkId!)) throw new Error("solo en los chunks de la comunidad");
+    const owner = (id: string) => `dst_${id}`;
+    this.ctx.storage.transactionSync(() => {
+      if (this.community) this.sql.exec("DELETE FROM entities WHERE owner = ?", owner(this.community.id));
+      if (!spec) {
+        this.sql.exec("DELETE FROM entities WHERE owner = 'system'");
+        this.sql.exec("DELETE FROM meta WHERE k IN ('community', 'seed_version')");
+        this.sql.exec("DELETE FROM chat");
+        this.community = null;
+      } else {
+        for (const e of spec.content) this.insertEntity(e.id, owner(spec.meta.id), e.components);
+        this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('community', ?)", JSON.stringify(spec.meta));
+        this.community = spec.meta;
+      }
+      this.logEvent("system", spec ? "INSTALL" : "UNINSTALL", this.chunkId!, spec?.content.length ?? 0, null);
+    });
+    if (spec) this.applySeed(`community_${spec.meta.id}`, 1, spec.meta.system);
+    for (const ws of this.ctx.getWebSockets()) ws.close(1012, "el distrito ha cambiado: vuelve a entrar");
+    return { entities: spec?.content.length ?? 0 };
   }
 
   async purgeOwner(owner: string): Promise<number> {

@@ -314,6 +314,46 @@ Se publican también la media real y el número de votos. Quién votó qué no s
 Errores: `bad_slug`, `bad_dates`, `slug_taken`, `jam_closed`, `jam_needs_game`, `jam_rejected`,
 `jam_one_entry`, `jam_removed`, `jam_not_voting`, `jam_own_vote`, `jam_account_too_new`, `note_required`.
 
+## 9 sexies. Distritos de la comunidad (kit de distritos)
+
+Cualquiera con cuenta puede crear **un** distrito con el kit (`packages/district-kit`, MIT) y la
+plantilla (`npm create xenxo@latest mi-distrito -- --district`). Mide lo mismo que los del sistema
+(256 × 256 m, X e Z de −96 a 160) y vive en su propio chunk `c_1000_<n>` (no se reutiliza).
+
+- **La ficha** `xenxo-district.json` (esquema `xenxo.district/0`, `DistrictManifest` en el protocolo):
+  `slug`, `name`/`description` (es y en obligatorios), `color`, `theme` (ciudad de fondo: uno de
+  `DISTRICT_THEMES`), `floor`, `cover` (16:9), `emblem` (monumento, presupuesto `monument`), `models`
+  (`{nombre: {file, lod1?}}`), `pieces` (`{model, p, yaw, scale}`), `primitives`, `colliders` (cajas,
+  `half` y `yaw`), `lights`, `labels` (texto con es y en), `portals` (`{p, yaw, size, game}`: el
+  enlace `xenxo.io/j/<game>` de un juego **suyo** publicado), `author` y `contact`.
+- **Presupuestos** (`DISTRICT_KIT_BUDGETS`): 32 modelos (cada uno con el presupuesto de subida
+  `model`), 160 piezas, 300.000 triángulos colocados, `lod1` obligatorio por encima de 8.000
+  (como mucho la mitad), 40 MB de modelos, 200 primitivas, 300 colisiones, 12 luces, 48 rótulos y
+  12 portales. Altura máxima 120 m. La **zona de la puerta** (X 22–42, Z 138–160) solo admite suelo
+  plano: ahí el servidor pone la puerta de vuelta al nexo y la llegada (32, 0, 150).
+- **Comprobación:** `checkDistrict` (protocolo) la usan el kit, la web y el servidor; el servidor
+  mide los modelos con lo que guardó al subirlos (R2), nunca con lo que diga el cliente.
+- **Identidad:** el distrito no tiene código ni login propio. Quien entra lo hace con su cuenta de
+  xenxo; las actividades son juegos de xenxo (con su `xenxo.json` y «Entrar con xenxo», §9 quater).
+
+| Ruta | Quién | Qué |
+|---|---|---|
+| `GET /me/district` | persona | Su distrito (o `null`), con la ficha, el estado y el motivo de moderación |
+| `PUT /me/district` | persona | Envía la ficha **con hashes** (`DistrictSubmission`; cada archivo subido por ella con su tipo: `model`, `monument`, `cover`; los modelos del sistema valen sin subir). `400 bad_manifest`, `422 district_problems` (en `detail`, cada problema con `code`, `at` y su explicación `es`/`en`), `400 not_your_file`, `400 bad_portal`, `409 district_slug_taken`, `429 rate_limited` (40 envíos al día). Queda en **borrador** y se monta en su chunk (owner `dst_<id>`; lo del sistema, suelo y puerta, owner `system`) |
+| `POST /me/district/submit` | persona | Borrador o rechazado → `pending` |
+| `DELETE /me/district` | persona | Lo borra (el chunk queda vacío) |
+| `GET /mod/districts` | moderación | Pendientes primero; con el contacto de su autor |
+| `POST /mod/districts/<id>/review` | moderación | `{decision: approved \| rejected \| hidden, note}`; rechazar u ocultar exige motivo (lo ve su autor) y queda en `moderation_log`. Nadie revisa lo suyo |
+
+- **Estados:** `draft` → `pending` → `approved` / `rejected`; `approved` → `hidden`. Volver a enviar la
+  ficha lo devuelve a `draft` (lo aprobado era la versión anterior).
+- **Quién entra:** aprobado, cualquiera (sale en `GET /districts` con `community: true`, su portada,
+  su tema y su autor, sin el contacto). Si no, solo su autor y moderación (`403 soon` al pedir pase).
+- **WELCOME** lleva `walk` (256 m) y `theme` (`{id, color}`): la ciudad de fondo que dibuja el cliente.
+- **Servidor de distritos:** `REMOTE_CHUNKS` admite prefijos (`c_1000_*`) para llevarlos todos a la
+  máquina propia; `installDistrict` está en `REMOTE_METHODS`.
+- **Fase 3 (pendiente):** el anillo exterior del nexo con la puerta de cada distrito aprobado.
+
 ## 10. Códigos de error
 
 `bad_message` · `unsupported_version` · `unauthorized` · `forbidden` · `not_found` · `version_conflict` · `budget_exceeded` · `unknown_component` · `rate_limited` · `duplicate`
@@ -334,7 +374,7 @@ El mundo solo se escribe por WebSocket (`MUTATE_WORLD`). Lo que no es mundo va p
 | `GET /auth/google/start?mode=login\|register&origin=…` · `GET /auth/google/callback` · `POST /auth/google/finish` | cualquiera | Entrar con Google (OpenID Connect, código + PKCE, solo `openid`). Al volver, la web recibe un código de un solo uso (60 s) y lo cambia por la sesión; el token nunca viaja en una URL. Para darse de alta se mandan `name`, `age=1` y `terms` como con passkey |
 | `GET /me/logins` · `POST /me/logins/google` · `DELETE /me/logins/google` · `POST /me/passkeys/options` · `/verify` | persona | Formas de entrar de la cuenta: vincular o quitar Google (siempre queda al menos una passkey o Google) y añadir más passkeys |
 | `POST /assets?kind=avatar\|model\|monument\|cover\|portrait` | persona o agente | Sube un GLB/VRM (o, con `cover` o `portrait`, una imagen; el retrato, cuadrado de 128 a 512 px y ≤ 120 KB). El servidor lo inspecciona, aplica el presupuesto, calcula el hash y lo guarda en R2. Las portadas se comprueban por su firma (WebP, JPEG o PNG, nunca por lo que diga el cliente) y se sirven con su tipo real |
-| | | Topes: 30 subidas al día y 100 MB por persona (`413 quota_exceeded`), 1000 subidas al día entre todos (`429 storage_busy`); el almacén entero tiene un tope de 8 GB para no salir del plan gratuito de R2 (`507 storage_full`). Las lecturas `GET /assets/<hash>` pasan por la caché de Cloudflare |
+| | | Topes: 80 subidas al día y 100 MB por persona (`413 quota_exceeded`), 1000 subidas al día entre todos (`429 storage_busy`); el almacén entero tiene un tope de 8 GB para no salir del plan gratuito de R2 (`507 storage_full`). Las lecturas `GET /assets/<hash>` pasan por la caché de Cloudflare |
 | `GET /assets/<sha256-hex>` | público | Sirve el asset, inmutable y cacheable para siempre. Los **assets del sistema** (la plaza y los avatares de serie, generados por la forja) se sirven desde los recursos estáticos del Worker con la misma ruta |
 | `GET /me` · `PATCH /me` · `POST /me/avatar` | persona | Perfil (con `player_no`), nombre visible y personaje (uno subido o uno de serie). Devuelven un token nuevo con nombre, avatar y número |
 | `GET /me/agent-keys` · `POST /me/agent-keys { project_id, label? }` · `DELETE /me/agent-keys/<id>` | persona | Claves de parcela de sus proyectos publicados (máximo 3 por proyecto). La clave en claro solo llega al crearla (`{ key, info }`); se guarda su huella. Revocar corta al momento las conexiones de ese agente |

@@ -586,6 +586,81 @@ await scenario("próximamente: un distrito cerrado sale en /districts, su puerta
   }
 });
 
+await scenario("distrito de la comunidad: la ficha se comprueba, queda en borrador solo para su autor, se revisa con motivo y se puede borrar", async () => {
+  const api = new Api(baseUrl);
+  await api.register(`conf ${randomUUID().slice(0, 6)}`);
+  const tall = await api.upload(await makeBoxGlb({ segments: 2, height: 8, color: [Math.random(), 0.3, 0.9, 1] }), "model");
+  const emblem = await api.upload(await makeBoxGlb({ segments: 1, color: [0.9, Math.random(), 0.2, 1] }), "monument");
+  const cover = await api.upload(makeCoverPng(320, 180, [Math.floor(Math.random() * 255), 60, 160]), "cover");
+  assert(tall.ok && emblem.ok && cover.ok, "subidas del distrito");
+  const slug = `conf-${randomUUID().slice(0, 8)}`;
+  const base = {
+    schema: "xenxo.district/0",
+    slug,
+    name: { es: "Distrito de prueba", en: "Test district" },
+    description: { es: "Hecho por el banco de conformidad", en: "Made by the conformance suite" },
+    color: "#33ddff",
+    theme: "cero",
+    cover: cover.data.hash,
+    emblem: emblem.data.hash,
+    models: { torre: { file: tall.data.hash } },
+    pieces: [{ model: "torre", p: [32, 0, 32] }],
+    colliders: [{ p: [32, 4, 32], half: [0.5, 4, 0.5] }],
+    labels: [{ p: [32, 9, 32], text: { es: "Hola", en: "Hello" } }],
+    author: "Banco de conformidad",
+    contact: "contact@xenxo.io",
+  };
+  // Fuera del distrito y en la puerta: se rechaza con los problemas explicados.
+  const bad = await api.call<unknown>("PUT", "/me/district", { ...base, pieces: [{ model: "torre", p: [200, 0, 32] }, { model: "torre", p: [32, 0, 150] }] });
+  const codes = !bad.ok ? ((bad.detail as { code: string }[] | undefined) ?? []).map((p) => p.code) : [];
+  assert(!bad.ok && bad.error === "district_problems" && codes.includes("out_of_area") && codes.includes("gate_zone"), `piezas fuera y en la puerta → out_of_area y gate_zone (${codes.join(", ")})`);
+  const noPortal = await api.call("PUT", "/me/district", { ...base, portals: [{ p: [10, 1.2, 10], game: "no-existe-nunca" }] });
+  assert(!noPortal.ok && noPortal.error === "bad_portal", "un portal a un juego que no es tuyo → bad_portal");
+  const stranger = new Api(baseUrl);
+  await stranger.register(`conf ${randomUUID().slice(0, 6)}`);
+  const stolen = await stranger.call("PUT", "/me/district", { ...base, slug: `${slug}-x` });
+  assert(!stolen.ok && stolen.error === "not_your_file", "usar archivos que subió otra persona → not_your_file");
+
+  const saved = await api.call<{ district: { id: string; chunk_id: string; status: string } }>("PUT", "/me/district", base);
+  assert(saved.ok && saved.data.district.status === "draft" && /^c_1000_\d+$/.test(saved.data.district.chunk_id), "la ficha válida queda en borrador en su chunk c_1000_<n>");
+  const { id, chunk_id } = saved.data.district;
+  // Su autor entra (y ve lo suyo y la puerta al nexo); nadie más.
+  const mine = await XenxoClient.connect({ baseUrl, chunkId: chunk_id, token: api.token });
+  assert(mine.snapshot.entities.some((e) => e.entity_id === `cd_${id}_piece_0` && !!e.components["mesh@1"]), "el autor ve su pieza");
+  const back = mine.snapshot.entities.find((e) => e.entity_id === `cd_${id}_gate_portal`)?.components["portal@1"] as { to: { chunk_id?: string } } | undefined;
+  assert(back?.to.chunk_id === PLACES.nexo, "el servidor pone la puerta de vuelta al nexo");
+  assert(!!mine.welcome.walk && mine.welcome.walk[1] - mine.welcome.walk[0] >= 256, "mide 256 m (WELCOME.walk)");
+  assert(mine.welcome.theme?.id === "cero" && mine.welcome.theme.color === "#33ddff", "WELCOME dice su ciudad de fondo (theme)");
+  mine.close();
+  let refused = "";
+  await XenxoClient.connect({ baseUrl, chunkId: chunk_id, token: stranger.token }).then((c) => c.close(), (e: Error) => (refused = e.message));
+  assert(/403/.test(refused), `otra persona no entra en un borrador (${refused || "entró"})`);
+  const sent = await api.call<{ district: { status: string } }>("POST", "/me/district/submit");
+  assert(sent.ok && sent.data.district.status === "pending", "enviar a revisión → pending");
+  const exp = await api.call<{ community_district: { slug: string } | null }>("GET", "/me/export");
+  assert(exp.ok && exp.data.community_district?.slug === slug, "la exportación incluye el distrito");
+  if (adminKey) {
+    const admin = new Api(baseUrl);
+    await admin.agentToken(adminKey);
+    const q = await admin.call<{ districts: { id: string; status: string }[] }>("GET", "/mod/districts");
+    assert(q.ok && q.data.districts.some((d) => d.id === id && d.status === "pending"), "moderación ve el distrito pendiente");
+    const noNote = await admin.call("POST", `/mod/districts/${id}/review`, { decision: "rejected" });
+    assert(!noNote.ok && noNote.error === "note_required", "rechazar exige motivo");
+    const okd = await admin.call("POST", `/mod/districts/${id}/review`, { decision: "approved" });
+    assert(okd.ok, "aprobar");
+    const list = (await (await fetch(new URL("/districts", baseUrl))).json()) as { districts: { id: string; community?: boolean; contact?: string }[] };
+    const pub = list.districts.find((d) => d.id === slug);
+    assert(!!pub?.community && !JSON.stringify(pub).includes("contact@"), "aprobado: sale en /districts, sin el contacto de su autor");
+    const guest = await XenxoClient.connect({ baseUrl, chunkId: chunk_id });
+    assert(guest.snapshot.entities.some((e) => e.entity_id === `cd_${id}_piece_0`), "aprobado: entra cualquiera");
+    guest.close();
+  }
+  const gone = await api.call("DELETE", "/me/district");
+  assert(gone.ok, "borrar el distrito");
+  const after = (await (await fetch(new URL("/districts", baseUrl))).json()) as { districts: { id: string }[] };
+  assert(!after.districts.some((d) => d.id === slug), "borrado: ya no sale");
+});
+
 await scenario("distrito grande: WELCOME.walk de 256 m y cada uno recibe solo las poses de quien tiene cerca", async () => {
   const chunkId = "c_0_-1";
   const a = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-lejos-a" });

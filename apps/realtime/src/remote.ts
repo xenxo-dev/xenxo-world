@@ -86,9 +86,13 @@ export const TICKET_TTL_MS = 60_000;
 export const CALL_TTL_MS = 30_000;
 
 /** Lista de chunks de una variable ("c_1_0,c_-1_0"); vacía = ninguno. */
-export function chunkList(v: string | undefined): Set<string> {
-  return new Set((v ?? "").split(",").map((s) => s.trim()).filter(Boolean));
+export function chunkList(v: string | undefined): { has(id: string): boolean } {
+  const items = (v ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const exact = new Set(items.filter((s) => !s.endsWith("*")));
+  // «c_1000_*»: todos los que empiezan así (los distritos de la comunidad, por ejemplo).
+  const prefixes = items.filter((s) => s.endsWith("*")).map((s) => s.slice(0, -1));
+  return { has: (id: string) => exact.has(id) || prefixes.some((p) => p.length > 0 && id.startsWith(p)) };
 }
 
 /** Métodos del chunk que el Worker puede llamar en otro servidor (y nada más). */
-export const REMOTE_METHODS = new Set(["placeStand", "removeStand", "purgeOwner", "kick", "chatMessage", "chatOf", "hideChat", "dumpState", "loadState"]);
+export const REMOTE_METHODS = new Set(["placeStand", "removeStand", "purgeOwner", "kick", "chatMessage", "chatOf", "hideChat", "dumpState", "loadState", "installDistrict"]);

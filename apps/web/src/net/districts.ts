@@ -28,6 +28,10 @@ export interface DistrictInfo {
   remote?: boolean;
   /** Próximamente: la puerta está cerrada (solo entra moderación) y no se publica en él. */
   soon?: boolean;
+  /** Distrito de la comunidad (hecho con el kit): sin parcelas, con su portada y su autor. */
+  community?: boolean;
+  cover?: string;
+  author?: { display_name: string; player_no: number | null };
 }
 
 /** Dónde se aparece al entrar en un distrito (junto a su puerta, mirando a la avenida). */

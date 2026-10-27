@@ -6,6 +6,7 @@
  *   npm create xenxo@latest mi-juego -- --3d
  *   npm create xenxo@latest mi-juego -- --2d --lang en
  *   npm create xenxo@latest mi-juego -- --3d --multi   (con sala multijugador en tu Cloudflare)
+ *   npm create xenxo@latest mi-distrito -- --district  (un distrito de la comunidad, con el kit)
  *
  * Sin dependencias: copia la plantilla, pone el nombre y explica los siguientes pasos.
  * Licencia MIT: lo que crees con ella es tuyo.
@@ -17,6 +18,7 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SDK_VERSION = "^0.3.0";
+const KIT_VERSION = "^0.1.0";
 const WRANGLER_VERSION = "^4.150.0";
 
 const args = process.argv.slice(2);
@@ -38,6 +40,10 @@ const T = {
     badName: "\n  Nombre no válido: usa letras minúsculas, números y guiones (p. ej. mi-juego).\n",
     done: (d, k, m) => `\n  Listo: juego ${k.toUpperCase()}${m ? " multijugador" : ""} en ./${d}\n`,
     nextMulti: "  Multijugador: en otra terminal, npm run sala (la sala en tu equipo). README.md → Multijugador.\n",
+    district: (d) =>
+      `\n  Listo: distrito en ./${d}\n\n  Siguientes pasos:\n\n    cd ${d}\n    npm install\n    npm run validate\n\n` +
+      "  Cambia xenxo-district.json y los modelos (o pídeselo a tu IA: lee AGENTS.md).\n" +
+      "  Cuando pase la comprobación, súbelo desde xenxo.io → Cuenta → Tu distrito.\n",
     next: (d) =>
       `  Siguientes pasos:\n\n    cd ${d}\n    npm install\n    npm run dev\n\n` +
       "  Se abre con un jugador de prueba (el simulador de xenxo, abajo a la izquierda).\n" +
@@ -54,6 +60,10 @@ const T = {
     badName: "\n  Invalid name: use lowercase letters, numbers and dashes (e.g. my-game).\n",
     done: (d, k, m) => `\n  Done: ${k.toUpperCase()}${m ? " multiplayer" : ""} game in ./${d}\n`,
     nextMulti: "  Multiplayer: in another terminal, npm run sala (the room on your machine). README.md → Multiplayer.\n",
+    district: (d) =>
+      `\n  Done: district in ./${d}\n\n  Next steps:\n\n    cd ${d}\n    npm install\n    npm run validate\n\n` +
+      "  Edit xenxo-district.json and the models (or ask your AI: it reads AGENTS.md).\n" +
+      "  Once it passes, upload it from xenxo.io → Account → Your district.\n",
     next: (d) =>
       `  Next steps:\n\n    cd ${d}\n    npm install\n    npm run dev\n\n` +
       "  It opens with a test player (the xenxo simulator, bottom left).\n" +
@@ -76,6 +86,7 @@ async function main() {
   const interactive = process.stdin.isTTY && !flag("--yes") && !flag("--sí");
   const rl = interactive ? createInterface({ input: process.stdin, output: process.stdout }) : null;
   try {
+    if (flag("--district") || flag("--distrito")) return await district(rl);
     let dir = positional[0] ?? (await ask(rl, t.folder, lang === "en" ? "my-xenxo-game" : "mi-juego-xenxo"));
     let kind = flag("--2d") ? "2d" : flag("--3d") ? "3d" : value("--plantilla") ?? value("--template");
     if (kind !== "2d" && kind !== "3d") kind = (await ask(rl, t.kind, "3d")).toLowerCase() === "2d" ? "2d" : "3d";
@@ -150,6 +161,43 @@ async function main() {
   } finally {
     rl?.close();
   }
+}
+
+/** Un distrito de la comunidad: la ficha, modelos de ejemplo, AGENTS.md y el kit para comprobarlo. */
+async function district(rl) {
+  const dir = positional[0] ?? (await ask(rl, t.folder, lang === "en" ? "my-district" : "mi-distrito"));
+  const target = resolve(process.cwd(), dir);
+  const name = basename(target).toLowerCase();
+  if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(name)) {
+    console.error(t.badName);
+    process.exit(1);
+  }
+  if (existsSync(target) && readdirSync(target).length > 0) {
+    console.error(t.exists(dir));
+    process.exit(1);
+  }
+  mkdirSync(target, { recursive: true });
+  cpSync(join(here, "templates", "district"), target, { recursive: true });
+  if (existsSync(join(target, "_gitignore"))) renameSync(join(target, "_gitignore"), join(target, ".gitignore"));
+  // El nombre corto del distrito: 3–24 caracteres, empieza por letra y sin «xenxo».
+  let slug = name.replace(/xenxo/g, "").replace(/^[^a-z]+/, "").replace(/-+/g, "-").slice(0, 24).replace(/-$/, "");
+  if (slug.length < 3) slug = "mi-distrito";
+  const title = (name.replace(/-/g, " ").replace(/^./, (c) => c.toUpperCase())).slice(0, 40);
+  const vars = {
+    "{{name}}": name,
+    "{{slug}}": slug,
+    "{{title}}": title,
+    "{{author}}": lang === "en" ? "Your name" : "Tu nombre",
+    "{{contact}}": lang === "en" ? "you@example.com" : "tu@ejemplo.com",
+    "{{kitVersion}}": KIT_VERSION,
+  };
+  for (const f of ["xenxo-district.json", "AGENTS.md", "README.md", "package.json"]) {
+    const p = join(target, f);
+    let s = readFileSync(p, "utf8");
+    for (const [k, v] of Object.entries(vars)) s = s.split(k).join(v);
+    writeFileSync(p, s);
+  }
+  console.log(t.district(relative(process.cwd(), target) || "."));
 }
 
 main().catch((e) => {

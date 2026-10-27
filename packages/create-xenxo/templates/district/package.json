@@ -1,0 +1,11 @@
+{
+  "name": "{{name}}",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "validate": "xenxo-district validate"
+  },
+  "devDependencies": {
+    "@xenxo/district-kit": "{{kitVersion}}"
+  }
+}

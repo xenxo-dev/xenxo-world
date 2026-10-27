@@ -55,11 +55,11 @@ export function NexoSection({ onEnter }: { onEnter: () => void }) {
           {districts?.map((d) => (
             <DistrictCard
               key={d.id}
-              cover={`/covers/${d.id}.webp`}
+              cover={d.community && d.cover ? assetUrl(d.cover) : `/covers/${d.id}.webp`}
               color={d.color}
               title={name(d)}
               desc={d.desc[lang] ?? d.desc.en!}
-              free={d.parcels.filter((q) => !q.project_id).length}
+              free={d.community ? undefined : d.parcels.filter((q) => !q.project_id).length}
               total={d.parcels.length}
               soon={d.soon}
               staff={staff}

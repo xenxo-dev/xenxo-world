@@ -140,6 +140,9 @@ async function api<T>(method: string, path: string, body?: unknown, raw?: Blob):
   return data as T;
 }
 
+/** Llamada a la API con la sesión (para otros módulos de la web). */
+export const authedApi = api;
+
 function adopt(r: { token: string; user: User; principal: { exp: number } }) {
   store({ token: r.token, user: r.user, exp: r.principal.exp });
   reconnect();

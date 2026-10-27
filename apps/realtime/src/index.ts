@@ -1,5 +1,7 @@
 import { ASSET_BUDGETS } from "@xenxo/assets";
-import { ChunkId, PARCEL_BUDGETS, PLACES } from "@xenxo/protocol";
+import { checkDistrict, ChunkId, describeDistrictProblem, DistrictSubmission, PARCEL_BUDGETS, PLACES } from "@xenxo/protocol";
+import { communityContent, communitySystem, isCommunityChunk, submissionFiles, type ModelInfo } from "./community";
+import { SEED_ASSETS } from "./seed-assets";
 import { assetMeta, assetKey, forgetAssets, handleGet, handleUpload } from "./assets";
 import { isAvatarPreset } from "./avatar-presets-check";
 import { randomId, resolveAgent, signToken, verifyToken, type Principal } from "./auth";
@@ -381,12 +383,62 @@ function remoteChunk(env: Env, id: string) {
  * (y a la clave de administración). Solo cuesta una llamada al Directory al intentar entrar en uno.
  */
 async function closedFor(env: Env, chunkId: string, p: Principal): Promise<boolean> {
+  // Un distrito de la comunidad: abierto si está aprobado; si no, solo su autor y moderación.
+  if (isCommunityChunk(chunkId)) return !p.scopes.includes("admin") && !(await directory(env).districtAccess(chunkId, userIdOf(p)));
   if (!DISTRICTS.some((d) => d.chunk === chunkId && d.soon)) return false;
   if (p.scopes.includes("admin")) return false;
   const uid = userIdOf(p);
   return !(uid && (await directory(env).isModerator(uid)));
 }
 const SOON = { error: "soon", message: "este distrito abrirá pronto" };
+
+/** Medidas de los modelos del sistema (los de la forja se pueden usar en un distrito sin subirlos). */
+const SYSTEM_MODELS = new Map<string, ModelInfo>(
+  Object.values(SEED_ASSETS).flatMap((a) => a.lods.map((l) => [l.hash, { triangles: l.tris, bytes: l.bytes, bounds: l.bounds }] as const)),
+);
+
+/**
+ * Lee y comprueba una ficha de distrito como el kit: esquema, presupuestos y posiciones, con las
+ * medidas que guardó el servidor al subir cada modelo (nunca las que diga el cliente).
+ */
+async function checkSubmission(env: Env, req: Request): Promise<{ ok: true; sub: DistrictSubmission; models: Record<string, ModelInfo> } | { ok: false; status: number; body: Record<string, unknown> }> {
+  const text = await req.text();
+  if (text.length > 512 * 1024) return { ok: false, status: 413, body: { error: "too_large", message: "la ficha pasa de 512 KB" } };
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return { ok: false, status: 400, body: { error: "bad_manifest", message: "la ficha no es JSON" } };
+  }
+  const parsed = DistrictSubmission.safeParse(raw);
+  if (!parsed.success) {
+    return { ok: false, status: 400, body: { error: "bad_manifest", message: "la ficha no cumple el esquema (xenxo.district/0)", detail: parsed.error.issues.slice(0, 20) } };
+  }
+  const sub = parsed.data;
+  const models: Record<string, ModelInfo> = {};
+  for (const f of submissionFiles(sub)) {
+    if (f.kind !== "model" || models[f.hash]) continue;
+    const sys = SYSTEM_MODELS.get(f.hash);
+    if (sys) { models[f.hash] = sys; continue; }
+    const head = await env.ASSETS.head(assetKey(f.hash));
+    const m = head?.customMetadata;
+    if (m) models[f.hash] = { triangles: Number(m.tris ?? 0), bytes: Number(m.bytes ?? head!.size), bounds: m.bounds ? JSON.parse(m.bounds) : null };
+  }
+  const problems = checkDistrict(sub, models);
+  if (problems.length) {
+    return {
+      ok: false,
+      status: 422,
+      body: {
+        error: "district_problems",
+        message: `la ficha tiene ${problems.length} problema(s)`,
+        // En `detail`, como los demás errores: cada problema con su código, dónde está y su explicación.
+        detail: problems.map((p) => ({ ...p, es: describeDistrictProblem(p, "es"), en: describeDistrictProblem(p, "en") })),
+      },
+    };
+  }
+  return { ok: true, sub, models };
+}
 
 async function socketFor(env: Env, req: Request, chunkId: string, p: Principal, token: string): Promise<string> {
   if (isRemote(env, chunkId)) {
@@ -639,7 +691,22 @@ export default {
       /* --- Distritos y parcelas (lectura pública) --- */
       if (path === "/districts" && req.method === "GET") {
         // `remote`: el distrito vive en el servidor de distritos (hay que pedir pase para entrar).
-        const list = (await dir.districts()).map((d) => (isRemote(env, d.chunk_id) ? { ...d, remote: true } : d));
+        // Los de la comunidad aprobados van detrás, sin parcelas (de momento) y sin el contacto de su autor.
+        const community = (await dir.communityDistricts()).map((d) => ({
+          id: d.slug,
+          chunk_id: d.chunk_id,
+          category: "community",
+          color: d.manifest.color,
+          name: d.manifest.name,
+          desc: d.manifest.description,
+          theme: d.manifest.theme,
+          cover: d.manifest.cover,
+          emblem: d.manifest.emblem,
+          author: d.author,
+          parcels: [],
+          community: true,
+        }));
+        const list = [...(await dir.districts()), ...community].map((d) => (isRemote(env, d.chunk_id) ? { ...d, remote: true } : d));
         return json({ districts: list }, 200, { ...h, "Cache-Control": "public, max-age=10" });
       }
 
@@ -826,11 +893,36 @@ export default {
             "Content-Disposition": 'attachment; filename="xenxo-mis-datos.json"',
           });
         }
+        /* --- Mi distrito de la comunidad (kit de distritos; community.ts) --- */
+        if (path === "/me/district" && req.method === "GET") return json({ district: await dir.myDistrict(uid) }, 200, h);
+        if (path === "/me/district" && req.method === "PUT") {
+          const c = await checkSubmission(env, req);
+          if (!c.ok) return json(c.body, c.status, h);
+          const r = await dir.saveDistrict(uid, c.sub);
+          if (!r.ok) return failure(r, h);
+          const d = r.data;
+          await chunk(env, d.chunk_id).installDistrict({
+            meta: { id: d.id, name: { es: c.sub.name.es, en: c.sub.name.en }, color: c.sub.color, theme: c.sub.theme, system: communitySystem(d.id, c.sub) },
+            content: communityContent(d.id, c.sub, c.models, d.portals),
+          });
+          return json({ district: d }, 200, h);
+        }
+        if (path === "/me/district" && req.method === "DELETE") {
+          const r = await dir.deleteDistrict(uid);
+          if (!r.ok) return failure(r, h);
+          await chunk(env, r.data.chunk_id).installDistrict(null);
+          return json({ deleted: true }, 200, h);
+        }
+        if (path === "/me/district/submit" && req.method === "POST") {
+          const r = await dir.submitDistrict(uid);
+          return r.ok ? json({ district: r.data }, 200, h) : failure(r, h);
+        }
         if (path === "/me" && req.method === "DELETE") {
           const before = await dir.card(uid);
           const r = await dir.deleteAccount(uid);
           if (!r.ok) return failure(r, h);
           for (const p of r.data.projects) await clearParcel(env, p.district, p.id, r.data.agents);
+          if (r.data.community) await chunk(env, r.data.community.chunk_id).installDistrict(null);
           for (const c of CHAT_CHUNKS) await chunk(env, c).purgeOwner(`usr_${uid}`);
           await syncShowcase(env, dir);
           await forgetAssets(env.ASSETS, req.url, r.data.orphanHashes);
@@ -943,6 +1035,14 @@ export default {
       if (path.startsWith("/mod/")) {
         const modId = isAdmin ? `admin:${principal!.sub}` : uid && (await dir.isModerator(uid)) ? `usr_${uid}` : null;
         if (!modId) return json({ error: "forbidden", message: "solo moderación" }, 403, h);
+        // Distritos de la comunidad: la cola y la decisión (aprobar, rechazar u ocultar, con motivo).
+        if (path === "/mod/districts" && req.method === "GET") return json({ districts: await dir.modDistricts() }, 200, h);
+        const dr = path.match(/^\/mod\/districts\/([A-Za-z0-9_-]{4,24})\/review$/);
+        if (dr && req.method === "POST") {
+          const body = await readJson(req);
+          const r = await dir.reviewDistrict(modId, dr[1]!, body.decision, body.note);
+          return r.ok ? json({ district: r.data }, 200, h) : failure(r, h);
+        }
         // Mover un chunk de servidor: copia lo de la gente de Cloudflare al servidor de distritos (o al
         // revés). Solo con la clave de administración. Primero se copia; después se cambia REMOTE_CHUNKS.
         const mv = path.match(/^\/mod\/chunks\/([^/]+)\/move$/);

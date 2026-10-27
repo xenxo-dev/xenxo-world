@@ -31,6 +31,9 @@ import {
 import { type ProjectCategory } from "@xenxo/protocol";
 import { DISTRICTS, districtById, PARCELS, parcelIndex, parcelRect, RENAMED_PARCELS } from "./districts";
 import { gameInfo, manifestAvatar, slugFrom, validSlug, type GameInfo } from "./games";
+import { COMMUNITY_SCHEMA, communityChunk, MAX_DISTRICT_SAVES_PER_DAY, submissionFiles, type CommunityStatus, type ResolvedPortal } from "./community";
+import { isSystemAsset } from "./assets";
+import type { DistrictSubmission } from "@xenxo/protocol";
 import { badJamDates, JAM_SCHEMA, jamPhase, jamRanking, jamText, jamTime, MAX_ENTRIES_PER_USER, validJamSlug, type Jam, type JamResult } from "./jam";
 import type { GameManifest } from "@xenxo/protocol";
 
@@ -51,7 +54,7 @@ export const MAX_AGENT_KEYS_PER_PROJECT = 3;
 /** Un archivo subido por una persona que nada usa se borra pasados estos días. */
 export const ORPHAN_GRACE_MS = 7 * 86_400_000;
 const CLEANUP_EVERY_MS = 86_400_000;
-const MAX_UPLOADS_PER_DAY = 30;
+const MAX_UPLOADS_PER_DAY = 80;
 /**
  * Topes de almacenamiento para no salir nunca del plan gratuito de R2 (10 GB-mes).
  * Al llegar al tope global se rechazan subidas nuevas; nada se cobra.
@@ -78,6 +81,17 @@ export type OidcClientRow = { client_id: string; name: string; redirect_uris: st
 export type AgentKeyRow = { id: string; project_id: string; project_title: string; label: string | null; created_at: number; last_used: number | null };
 export type AgentZone = { chunk_id: string; district: string; parcel: string; owner: string; x0: number; z0: number; x1: number; z1: number; facing: number };
 export type AgentZoneGrant = { key_id: string; user_id: string; name: string; zone: AgentZone };
+
+type CommunityRow = {
+  id: string; user_id: string; slug: string; chunk_id: string; manifest: string; portals: string; rev: number; status: string;
+  review_note: string | null; reviewed_at: number | null; created_at: number; updated_at: number; saves_day: string | null; saves: number;
+};
+/** Un distrito de la comunidad tal como lo ven su autor y moderación (el contacto, solo ellos). */
+export type CommunityDistrict = {
+  id: string; slug: string; chunk_id: string; status: CommunityStatus; review_note: string | null; rev: number;
+  manifest: DistrictSubmission; portals: ResolvedPortal[]; created_at: number; updated_at: number;
+  author: { display_name: string; player_no: number | null };
+};
 
 export type SkinRow = { hash: string; format: string; label: string | null; created_at: number };
 
@@ -215,6 +229,8 @@ export class Directory extends DurableObject<Env> {
     `);
     // Jams: convocatorias, juegos apuntados y votos (ver jam.ts).
     this.sql.exec(JAM_SCHEMA);
+    // Distritos de la comunidad (ver community.ts).
+    this.sql.exec(COMMUNITY_SCHEMA);
     // Migración: tamaño de cada subida (para los topes de almacenamiento).
     const cols = this.sql.exec<{ name: string }>("PRAGMA table_info(uploads)").toArray().map((c) => c.name);
     if (!cols.includes("bytes")) this.sql.exec("ALTER TABLE uploads ADD COLUMN bytes INTEGER NOT NULL DEFAULT 0");
@@ -828,6 +844,8 @@ export class Directory extends DurableObject<Env> {
       // Si moderas: tus decisiones (el registro que pide la DSA).
       moderation_decisions: this.sql.exec("SELECT ts, action, target_type, target_id, note FROM moderation_log WHERE moderator = ?", `usr_${id}`).toArray(),
       moderator_since: this.sql.exec<{ added_at: number }>("SELECT added_at FROM moderators WHERE user_id = ?", id).toArray()[0]?.added_at ?? null,
+      // Tu distrito de la comunidad (su ficha, con el contacto que pusiste, y su estado).
+      community_district: this.myDistrict(id),
     });
   }
 
@@ -835,11 +853,16 @@ export class Directory extends DurableObject<Env> {
    * Derecho de supresión (RGPD art. 17). Devuelve los assets que solo subió
    * esta persona, para que el Worker los borre de R2, y sus proyectos, para retirar los stands.
    */
-  deleteAccount(id: string): Result<{ orphanHashes: string[]; projects: { id: string; district: string | null }[]; agents: string[] }> {
+  deleteAccount(id: string): Result<{ orphanHashes: string[]; projects: { id: string; district: string | null }[]; agents: string[]; community: { id: string; chunk_id: string } | null }> {
     const sub = `usr_${id}`;
     if (!this.user(id)) return fail(404, "not_found", "la cuenta no existe");
     const projects = this.sql.exec<{ id: string; district: string | null }>("SELECT id, district FROM projects WHERE user_id = ?", id).toArray();
     const agents = this.sql.exec<{ id: string }>("SELECT id FROM agent_keys WHERE user_id = ?", id).toArray().map((r) => `agt_${r.id}`);
+    const community = this.sql.exec<{ id: string; chunk_id: string }>("SELECT id, chunk_id FROM community_districts WHERE user_id = ?", id).toArray()[0] ?? null;
+    if (community) {
+      this.sql.exec("DELETE FROM community_files WHERE district_id = ?", community.id);
+      this.sql.exec("DELETE FROM community_districts WHERE id = ?", community.id);
+    }
     // Lo subido por la persona y por los agentes de sus parcelas (prj_<id>).
     const uploaders = [sub, ...projects.map((p) => `prj_${p.id}`)];
     const marks = uploaders.map(() => "?").join(",");
@@ -868,7 +891,7 @@ export class Directory extends DurableObject<Env> {
       this.sql.exec("DELETE FROM moderators WHERE user_id = ?", id);
       this.sql.exec("DELETE FROM users WHERE id = ?", id);
     });
-    return ok({ orphanHashes, projects, agents });
+    return ok({ orphanHashes, projects, agents, community });
   }
 
   async alarm() {
@@ -890,7 +913,8 @@ export class Directory extends DurableObject<Env> {
     return (
       this.sql.exec("SELECT 1 FROM projects WHERE mesh_hash = ? OR cover_hash = ? LIMIT 1", hash, hash).toArray().length > 0 ||
       this.sql.exec("SELECT 1 FROM users WHERE avatar_hash = ? OR portrait_hash = ? LIMIT 1", hash, hash).toArray().length > 0 ||
-      this.sql.exec("SELECT 1 FROM skins WHERE hash = ? LIMIT 1", hash).toArray().length > 0
+      this.sql.exec("SELECT 1 FROM skins WHERE hash = ? LIMIT 1", hash).toArray().length > 0 ||
+      this.sql.exec("SELECT 1 FROM community_files WHERE hash = ? LIMIT 1", hash).toArray().length > 0
     );
   }
 
@@ -919,6 +943,7 @@ export class Directory extends DurableObject<Env> {
       }
       if (r.kind === "portrait") return this.sql.exec("SELECT 1 FROM users WHERE id = ? AND portrait_hash = ?", uid, r.hash).toArray().length > 0;
       const col = r.kind === "cover" ? "cover_hash" : "mesh_hash";
+      if (this.sql.exec("SELECT 1 FROM community_files WHERE hash = ? LIMIT 1", r.hash).toArray().length > 0) return true;
       return this.sql.exec(`SELECT 1 FROM projects WHERE ${col} = ?`, r.hash).toArray().length > 0;
     };
     const orphans = rows.filter((r) => !used(r)).slice(0, limit);
@@ -1249,6 +1274,147 @@ export class Directory extends DurableObject<Env> {
     }
     this.logDecision(moderator, `report_${status}`, "report", String(id), note || null);
     return ok({ ok: true });
+  }
+
+  /* --- Distritos de la comunidad (community.ts; fase 2) --- */
+
+  private districtView(r: CommunityRow): CommunityDistrict {
+    const u = this.user(r.user_id);
+    return {
+      id: r.id,
+      slug: r.slug,
+      chunk_id: r.chunk_id,
+      status: r.status as CommunityStatus,
+      review_note: r.review_note,
+      rev: r.rev,
+      manifest: JSON.parse(r.manifest) as DistrictSubmission,
+      portals: JSON.parse(r.portals) as ResolvedPortal[],
+      created_at: r.created_at,
+      updated_at: r.updated_at,
+      author: { display_name: u?.display_name ?? "", player_no: u?.player_no ?? null },
+    };
+  }
+
+  private districtRows(where: string, ...args: (string | number)[]): CommunityRow[] {
+    return this.sql.exec<CommunityRow>(`SELECT * FROM community_districts WHERE ${where}`, ...args).toArray();
+  }
+
+  /** El distrito de esta persona (como mucho uno). */
+  myDistrict(userId: string): CommunityDistrict | null {
+    const r = this.districtRows("user_id = ?", userId)[0];
+    return r ? this.districtView(r) : null;
+  }
+
+  /**
+   * Guarda la ficha (ya comprobada por el Worker: esquema, presupuestos y posiciones) y la deja en
+   * borrador. Aquí se mira lo que solo sabe el Directory: que cada archivo lo subió esta persona con
+   * su tipo, que los portales van a juegos suyos publicados y que el nombre corto está libre.
+   */
+  saveDistrict(userId: string, m: DistrictSubmission): Result<CommunityDistrict> {
+    if (!this.user(userId)) return fail(404, "not_found", "la cuenta no existe");
+    const prev = this.districtRows("user_id = ?", userId)[0];
+    const today = new Date().toISOString().slice(0, 10);
+    if (prev && prev.saves_day === today && prev.saves >= MAX_DISTRICT_SAVES_PER_DAY) {
+      return fail(429, "rate_limited", `hoy ya has enviado tu distrito ${MAX_DISTRICT_SAVES_PER_DAY} veces; vuelve mañana`);
+    }
+    if (this.districtRows("slug = ? AND user_id != ?", m.slug, userId).length) return fail(409, "district_slug_taken", "ese nombre corto ya es de otro distrito");
+    const uploader = `usr_${userId}`;
+    for (const f of submissionFiles(m)) {
+      const kind = this.sql.exec<{ kind: string }>("SELECT kind FROM uploads WHERE hash = ? AND uploader = ?", f.hash, uploader).toArray()[0]?.kind;
+      const system = f.kind === "model" && isSystemAsset(f.hash.slice(7));
+      if (!system && kind !== f.kind) {
+        return fail(400, "not_your_file", `${f.hash.slice(0, 19)}…: súbelo tú como «${f.kind}» antes de usarlo`, { hash: f.hash, kind: f.kind });
+      }
+    }
+    const portals: ResolvedPortal[] = [];
+    for (const q of m.portals) {
+      const g = this.sql
+        .exec<{ id: string; user_id: string; title: string; cover_hash: string | null; category: string; status: string; review: string }>(
+          "SELECT id, user_id, title, cover_hash, category, status, review FROM projects WHERE slug = ? AND game IS NOT NULL",
+          q.game,
+        )
+        .toArray()[0];
+      if (!g || g.user_id !== userId || g.status !== "published" || g.review === "rejected") {
+        return fail(400, "bad_portal", `«${q.game}» no es un juego tuyo publicado en xenxo (xenxo.io/j/${q.game})`, { game: q.game });
+      }
+      portals.push({ game: q.game, project_id: g.id, title: g.title, cover: g.cover_hash, category: g.category });
+    }
+    const now = Date.now();
+    let id = prev?.id;
+    this.ctx.storage.transactionSync(() => {
+      if (!prev) {
+        id = randomId("d", 8);
+        this.sql.exec("INSERT OR IGNORE INTO counters (k, v) VALUES ('next_community', 0)");
+        const n = this.sql.exec<{ v: number }>("SELECT v FROM counters WHERE k = 'next_community'").one().v;
+        this.sql.exec("UPDATE counters SET v = ? WHERE k = 'next_community'", n + 1);
+        this.sql.exec(
+          "INSERT INTO community_districts (id, user_id, slug, chunk_id, manifest, portals, rev, status, created_at, updated_at, saves_day, saves) VALUES (?, ?, ?, ?, ?, ?, 1, 'draft', ?, ?, ?, 1)",
+          id, userId, m.slug, communityChunk(n), JSON.stringify(m), JSON.stringify(portals), now, now, today,
+        );
+      } else {
+        // Cambiar un distrito lo devuelve a borrador: lo que se aprobó era la ficha anterior.
+        this.sql.exec(
+          "UPDATE community_districts SET slug = ?, manifest = ?, portals = ?, rev = rev + 1, status = 'draft', updated_at = ?, saves = ?, saves_day = ? WHERE id = ?",
+          m.slug, JSON.stringify(m), JSON.stringify(portals), now, prev.saves_day === today ? prev.saves + 1 : 1, today, id!,
+        );
+      }
+      this.sql.exec("DELETE FROM community_files WHERE district_id = ?", id!);
+      for (const f of submissionFiles(m)) this.sql.exec("INSERT OR IGNORE INTO community_files (district_id, hash) VALUES (?, ?)", id!, f.hash);
+    });
+    return ok(this.districtView(this.districtRows("id = ?", id!)[0]!));
+  }
+
+  /** Pedir la revisión (desde borrador o tras un rechazo). */
+  submitDistrict(userId: string): Result<CommunityDistrict> {
+    const r = this.districtRows("user_id = ?", userId)[0];
+    if (!r) return fail(404, "not_found", "aún no tienes distrito");
+    if (r.status !== "draft" && r.status !== "rejected") return fail(409, "bad_state", "tu distrito no está en borrador");
+    this.sql.exec("UPDATE community_districts SET status = 'pending', updated_at = ? WHERE id = ?", Date.now(), r.id);
+    return ok(this.districtView(this.districtRows("id = ?", r.id)[0]!));
+  }
+
+  /** Borrar el distrito propio (su chunk no se reutiliza). */
+  deleteDistrict(userId: string): Result<{ id: string; chunk_id: string }> {
+    const r = this.districtRows("user_id = ?", userId)[0];
+    if (!r) return fail(404, "not_found", "aún no tienes distrito");
+    this.sql.exec("DELETE FROM community_files WHERE district_id = ?", r.id);
+    this.sql.exec("DELETE FROM community_districts WHERE id = ?", r.id);
+    return ok({ id: r.id, chunk_id: r.chunk_id });
+  }
+
+  /**
+   * ¿Puede entrar esta persona en este chunk de la comunidad? Aprobado: cualquiera. Si no: su autor
+   * y moderación. Un chunk sin distrito (borrado o que nunca existió): nadie salvo administración.
+   */
+  districtAccess(chunkId: string, userId: string | null): boolean {
+    const r = this.districtRows("chunk_id = ?", chunkId)[0];
+    if (!r) return false;
+    if (r.status === "approved") return true;
+    return !!userId && (r.user_id === userId || this.isModerator(userId));
+  }
+
+  /** Los aprobados (para /districts y, en la fase 3, el anillo exterior del nexo). */
+  communityDistricts(): CommunityDistrict[] {
+    return this.districtRows("status = 'approved' ORDER BY reviewed_at ASC").map((r) => this.districtView(r));
+  }
+
+  /** Para moderación: lo pendiente primero y luego lo demás (sin los borradores). */
+  modDistricts(): CommunityDistrict[] {
+    return this.districtRows("status != 'draft' ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, updated_at DESC LIMIT 100").map((r) => this.districtView(r));
+  }
+
+  reviewDistrict(moderator: string, id: string, decision: unknown, rawNote: unknown): Result<CommunityDistrict> {
+    if (decision !== "approved" && decision !== "rejected" && decision !== "hidden") return fail(400, "bad_message", "decision: approved, rejected o hidden");
+    const r = this.districtRows("id = ?", id)[0];
+    if (!r) return fail(404, "not_found", "ese distrito no existe");
+    const founder = (this.env.FOUNDER_USER_ID ?? "").replace(/^usr_/, "").trim();
+    if (moderator === `usr_${r.user_id}` && r.user_id !== founder) return fail(403, "own_project", "no puedes revisar tu propio distrito");
+    const note = typeof rawNote === "string" ? rawNote.trim().slice(0, 500) : "";
+    if (decision !== "approved" && note.length < 3) return fail(400, "note_required", "explica el motivo: lo verá su autor");
+    if (decision === "approved" && r.status !== "pending") return fail(409, "bad_state", "solo se aprueba lo que está pendiente de revisión");
+    this.sql.exec("UPDATE community_districts SET status = ?, review_note = ?, reviewed_at = ? WHERE id = ?", decision, note || null, Date.now(), id);
+    this.logDecision(moderator, `district_${decision}`, "district", id, note || null);
+    return ok(this.districtView(this.districtRows("id = ?", id)[0]!));
   }
 
   /* --- Jams: convocatorias con tema y fechas (ver jam.ts) --- */

@@ -25,6 +25,7 @@
     "@react-three/xr": "^6.6.0",
     "@simplewebauthn/browser": "^14.0.0",
     "@xenxo/assets": "*",
+    "@xenxo/district-kit": "*",
     "@xenxo/protocol": "*",
     "postprocessing": "^6.39.5",
     "react": "^19.1.0",

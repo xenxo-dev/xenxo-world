@@ -1,0 +1,54 @@
+{
+  "name": "@xenxo/district-kit",
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "description": "Kit de distritos de xenxo: comprueba en tu equipo que tu distrito cumple los requisitos (tamaño, triángulos, colisiones, textos, zona de la puerta) antes de subirlo",
+  "bin": {
+    "xenxo-district": "dist/xenxo-district.mjs"
+  },
+  "exports": {
+    ".": "./src/check.ts"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "esbuild src/cli.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/xenxo-district.mjs --banner:js=\"#!/usr/bin/env node\"",
+    "validate": "tsx src/cli.ts validate",
+    "sample": "tsx scripts/sample.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@xenxo/assets": "*",
+    "@xenxo/protocol": "*",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.20.0",
+    "zod": "^4.1.0",
+    "@gltf-transform/core": "^4.5.1"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xenxo-dev/xenxo-world.git",
+    "directory": "packages/district-kit"
+  },
+  "homepage": "https://xenxo.io",
+  "keywords": [
+    "xenxo",
+    "metaverse",
+    "district",
+    "webxr",
+    "glb",
+    "validator"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

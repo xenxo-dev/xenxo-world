@@ -34,6 +34,7 @@ import { CardSettings } from "./CardSettings";
 import { JamAdmin } from "./JamAdmin";
 import { ModeratorsAdmin } from "./ModeratorsAdmin";
 import { Moderation, useRoles } from "./Moderation";
+import { ModDistricts, MyDistrict } from "./District";
 import { ConnectedGames } from "./Games";
 import { ModelPicker } from "./ModelPicker";
 import { Block, Button, card, input, Label, Notice, Segmented } from "./ui";
@@ -43,6 +44,8 @@ export interface CustomizeProps {
   setGuestName: (n: string) => void;
   /** Aviso al volver de Google (error o vinculado). */
   authNotice?: { tone: "ok" | "error"; text: string } | null;
+  /** Cerrar el panel y entrar en el mundo (al ir a un distrito). */
+  onEnter?: () => void;
 }
 
 /** La vista previa 3D se descarga aparte (Three.js) y solo cuando se ve la sección Cuenta. */
@@ -69,6 +72,11 @@ export function AccountSection(props: CustomizeProps) {
         </Block>
       )}
       {moderator && (
+        <Block title={t("district.modTitle")}>
+          <ModDistricts onEnter={props.onEnter} />
+        </Block>
+      )}
+      {moderator && (
         <Block title={t("jamAdmin.title")}>
           <JamAdmin />
         </Block>
@@ -76,6 +84,12 @@ export function AccountSection(props: CustomizeProps) {
       {moderator && (
         <Block title={t("modTeam.title")}>
           <ModeratorsAdmin founder={founder} />
+        </Block>
+      )}
+
+      {user && (
+        <Block title={t("district.title")}>
+          <MyDistrict onEnter={props.onEnter} />
         </Block>
       )}
 

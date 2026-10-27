@@ -9,6 +9,7 @@
 import { useMemo } from "react";
 import { CHUNK_SIZE } from "@xenxo/protocol";
 import districts from "../../../realtime/src/districts.json";
+import { usePlaceTheme } from "../net/world-store";
 import { CarsMesh, CityBoxes, CityClock, CityGround, NEON, rng, type Box, type Car } from "./NexoCity";
 
 const C = CHUNK_SIZE / 2;
@@ -198,9 +199,12 @@ function skylineCars(id: string, color: string, density: number): Car[] {
 const BY_CHUNK = new Map((districts.districts as { id: string; chunk: string; color: string }[]).map((d) => [d.chunk, d]));
 
 export function DistrictSkyline({ chunk, density }: { chunk: string; density: number }) {
-  const d = BY_CHUNK.get(chunk);
-  const boxes = useMemo(() => (d ? skylineBoxes(d.id, d.color, density) : []), [d, density]);
-  const cars = useMemo(() => (d ? skylineCars(d.id, d.color, density) : []), [d, density]);
+  // Los del sistema, por su chunk; los de la comunidad, por la pista de WELCOME (su tema y su color).
+  const hint = usePlaceTheme();
+  const d = BY_CHUNK.get(chunk) ?? (hint && THEMES[hint.id] ? { id: hint.id, chunk, color: hint.color } : undefined);
+  const id = d?.id, color = d?.color;
+  const boxes = useMemo(() => (id && color ? skylineBoxes(id, color, density) : []), [id, color, density]);
+  const cars = useMemo(() => (id && color ? skylineCars(id, color, density) : []), [id, color, density]);
   if (!d || density <= 0) return null;
   return (
     <>
