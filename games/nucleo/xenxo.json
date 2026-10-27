@@ -1,0 +1,29 @@
+{
+  "schema": "xenxo.game/0",
+  "name": {
+    "es": "Núcleo",
+    "en": "Core"
+  },
+  "description": {
+    "es": "Piratea la puerta del núcleo de Distrito Cero: elige códigos alternando fila y columna para que en la memoria aparezcan las secuencias de sus tres cerraduras, antes de que se acabe el tiempo.",
+    "en": "Hack the core door of District Zero: pick codes alternating row and column so the buffer spells out the sequences of its three locks, before time runs out."
+  },
+  "category": "game2d",
+  "devices": [
+    "pc",
+    "mobile",
+    "vr"
+  ],
+  "multiplayer": false,
+  "avatar": "badge",
+  "ageRating": "all",
+  "monetization": {
+    "hasAds": false,
+    "hasPurchases": false
+  },
+  "author": "xenxo",
+  "contact": "https://github.com/xenxo-dev/xenxo-world/tree/main/games/nucleo",
+  "privacy": "https://xenxo-nucleo.xenxo.workers.dev/privacidad.html",
+  "thumbnail": "/portada.webp",
+  "embed": true
+}

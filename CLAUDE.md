@@ -22,7 +22,7 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 | `packages/sdk` | `@xenxo/sdk` (MIT): «Entrar con xenxo», simulador local y `xenxo.back()` para juegos web; se sirve en `xenxo.io/sdk/` con un juego de ejemplo y se publica en npm |
 | `packages/district-kit` | Kit de distritos (MIT): `xenxo-district validate` y la comprobación que usa también la web (`checkDistrictFolder`); la ficha y sus reglas están en `packages/protocol` (`district-kit.ts`) |
 | `packages/create-xenxo` | Plantilla (MIT): `npm create xenxo` crea un juego 2D o 3D con el SDK, `xenxo.json` y `AGENTS.md`; con `--multi`, una sala (Worker + Durable Object) para la cuenta de Cloudflare del creador |
-| `games/` | Juegos de ejemplo hechos como cualquier creador (cada uno con su licencia, su `NOTICE.md` y su dominio): `hexgl` (Arcade; uso no comercial), `2048` (Píxel; MIT) y `hextris` (Píxel; GPL-3.0) |
+| `games/` | Juegos de ejemplo hechos como cualquier creador (cada uno con su licencia, su `NOTICE.md` y su dominio): `hexgl` (Arcade; uso no comercial), `2048` (Píxel; MIT), `hextris` (Píxel; GPL-3.0) y `nucleo` (Distrito Cero; MIT, original de xenxo: el pirateo de la puerta del núcleo) |
 | `tools/district-host` | El servidor de distritos en una máquina propia: workerd (`src/district-host.ts`, `wrangler.district.toml`), servicios, copias al NAS y guía (`README.md`) |
 | `docs/PROTOCOL.md` | Explicación del contrato |
 

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Núcleo · xenxo</title>
+  <meta name="description" content="Núcleo: piratea la puerta del núcleo de Distrito Cero. Un juego de xenxo.io.">
+  <meta name="theme-color" content="#05070f">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <header class="top">
+      <div class="brand">
+        <h1 class="title">NÚCLEO</h1>
+        <p class="sub" data-t="sub">Distrito Cero · acceso restringido</p>
+      </div>
+      <div id="xenxo-bar" class="xbar"></div>
+    </header>
+
+    <section class="hud" aria-live="polite">
+      <div class="stat"><span class="k" data-t="level">Nivel</span><span class="v" id="level">1</span></div>
+      <div class="stat timer"><span class="k" data-t="time">Tiempo</span><span class="v" id="time">--</span><div class="bar"><i id="timebar"></i></div></div>
+      <div class="stat"><span class="k" data-t="score">Puntos</span><span class="v" id="score">0</span></div>
+      <div class="stat"><span class="k" data-t="best">Récord</span><span class="v" id="best">0</span></div>
+    </section>
+
+    <main class="board">
+      <section class="panel matrix-panel">
+        <h2 class="ph" data-t="matrix">Matriz de códigos</h2>
+        <div id="matrix" class="matrix" role="grid" aria-label="Matriz"></div>
+        <p class="hint" id="hint" data-t="hintStart">Empieza por cualquier código de la fila marcada.</p>
+      </section>
+
+      <section class="panel side">
+        <div class="door" id="door" aria-hidden="true">
+          <svg viewBox="0 0 200 240">
+            <defs>
+              <linearGradient id="g-door" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0" stop-color="#1a2236"/>
+                <stop offset="1" stop-color="#0b101c"/>
+              </linearGradient>
+              <radialGradient id="g-core" cx="0.5" cy="0.5" r="0.5">
+                <stop offset="0" stop-color="#ffffff"/>
+                <stop offset="0.35" stop-color="#36d9ff"/>
+                <stop offset="1" stop-color="#36d9ff" stop-opacity="0"/>
+              </radialGradient>
+            </defs>
+            <rect x="8" y="8" width="184" height="224" rx="10" fill="#070a14" stroke="#24304a" stroke-width="3"/>
+            <circle class="core" cx="100" cy="120" r="70" fill="url(#g-core)"/>
+            <g class="leaf leaf-l"><rect x="16" y="16" width="84" height="208" fill="url(#g-door)" stroke="#2c3a58" stroke-width="2"/><path d="M30 40 H86 M30 200 H86" stroke="#ff4fd8" stroke-width="2" opacity="0.6"/></g>
+            <g class="leaf leaf-r"><rect x="100" y="16" width="84" height="208" fill="url(#g-door)" stroke="#2c3a58" stroke-width="2"/><path d="M114 40 H170 M114 200 H170" stroke="#ff4fd8" stroke-width="2" opacity="0.6"/></g>
+            <g class="locks">
+              <circle class="lock" data-i="0" cx="100" cy="72" r="11"/>
+              <circle class="lock" data-i="1" cx="100" cy="120" r="11"/>
+              <circle class="lock" data-i="2" cx="100" cy="168" r="11"/>
+            </g>
+          </svg>
+        </div>
+        <h2 class="ph" data-t="locks">Cerraduras</h2>
+        <ol id="seqs" class="seqs"></ol>
+        <h2 class="ph" data-t="buffer">Memoria</h2>
+        <div id="buffer" class="buffer"></div>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <button id="sound" class="btn ghost" type="button" data-t="soundOn">Sonido: sí</button>
+      <span class="credits"><span data-t="credits">Un juego de ejemplo de xenxo.io (MIT).</span> · <a href="privacidad.html" target="_blank" rel="noopener" data-t="privacy">Privacidad</a></span>
+    </footer>
+  </div>
+
+  <div id="overlay" class="overlay">
+    <div class="card">
+      <h2 id="ov-title" class="ov-title">NÚCLEO</h2>
+      <div id="ov-body" class="ov-body"></div>
+      <div class="ov-actions">
+        <button id="ov-go" class="btn primary" type="button">Empezar</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="game.js"></script>
+</body>
+</html>
