@@ -122,6 +122,11 @@ export function modHide(projectId: string, note: string) {
   return call("POST", `/mod/projects/${encodeURIComponent(projectId)}/hide`, { note });
 }
 
+/** Vuelve a colocar las máquinas-portal de las plazas con los juegos de cada distrito. */
+export function modSyncShowcase() {
+  return call<{ synced: boolean }>("POST", "/mod/showcase/sync");
+}
+
 export function modReport(id: number, status: "actioned" | "dismissed", note: string) {
   return call("POST", `/mod/reports/${id}`, { status, note });
 }

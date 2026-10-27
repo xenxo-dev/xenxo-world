@@ -13,7 +13,10 @@ interface DistrictActivities {
   hunts?: { id: string; piece: string; radius: number; items: { p: V3; note?: Record<string, string> }[] }[];
   boards?: { kind: "race" | "hunt"; id: string; p: V3; yaw: number; size: [number, number]; title?: { es: string; en: string } }[];
   props?: { piece: string; p: V3; yaw: number; half: V3 }[];
-  labels?: { text: { es: string; en: string }; p: V3; yaw: number; size: number }[];
+  labels?: { text: { es: string; en: string }; p: V3; yaw: number; size: number; flat?: boolean }[];
+  races?: { id: string; radius: number; start: { p: V3; radius: number }; cps: V3[]; finish: { p: V3; radius: number } }[];
+  boosts?: { p: V3; yaw: number; speed?: number; seconds?: number; radius?: number }[];
+  cabinets?: { p: V3; yaw: number }[];
 }
 
 /**
@@ -117,6 +120,11 @@ export function parcelReserved(i: number) {
   return { x0: Math.min(...xs), x1: Math.max(...xs), z0: Math.min(...zs), z1: Math.max(...zs), y1: 3.6 };
 }
 
+/** Huecos de las máquinas-portal de un distrito (las llena el Worker con sus juegos: syncCabinets). */
+export function cabinetSlots(id: string): { p: V3; yaw: number }[] {
+  return (activities as unknown as Record<string, DistrictActivities | undefined>)[id]?.cabinets ?? [];
+}
+
 export function districtSeed(d: District, toNexo: { p: V3; yaw: number }): Seeded[] {
   const out: Seeded[] = [];
   const ground = SEED_ASSETS[`district_${d.id}`];
@@ -214,7 +222,26 @@ export function districtSeed(d: District, toNexo: { p: V3; yaw: number }): Seede
     // la colisión ya la pone la ciudad (la peana de la escultura de Xen).
     if (pr.half[1] > 0) solid(`${d.id}_prop_${n + 1}_box`, [pr.p[0], r3(pr.p[1] + pr.half[1]), pr.p[2]], pr.half);
   });
-  (acts?.labels ?? []).forEach((lb, n) => label(`${d.id}_sign_${n + 1}`, lb.p, yaw(lb.yaw), lb.text.en, lb.text, lb.size));
+  (acts?.labels ?? []).forEach((lb, n) =>
+    label(`${d.id}_sign_${n + 1}`, lb.p, lb.flat ? multiply(yaw(lb.yaw), FLAT) : yaw(lb.yaw), lb.text.en, lb.text, lb.size),
+  );
+  /* --- Carreras: salida, puntos en orden y meta (checkpoint@1); placas de impulso (boost@1) --- */
+  for (const rc of acts?.races ?? []) {
+    const cp = (id: string, p: V3, role: "start" | "cp" | "finish", order: number, radius: number) =>
+      out.push({ id, components: { "transform@1": { p, r: [0, 0, 0, 1], s: [1, 1, 1], parent: null }, "checkpoint@1": { race: rc.id, role, order, radius } } as Components });
+    cp(`${d.id}_${rc.id}_start`, rc.start.p, "start", 0, rc.start.radius);
+    rc.cps.forEach((p, n) => cp(`${d.id}_${rc.id}_cp${n + 1}`, p, "cp", n + 1, rc.radius));
+    cp(`${d.id}_${rc.id}_finish`, rc.finish.p, "finish", 0, rc.finish.radius);
+  }
+  (acts?.boosts ?? []).forEach((b, n) =>
+    out.push({
+      id: `${d.id}_boost_${n + 1}`,
+      components: {
+        "transform@1": { p: b.p, r: yaw(b.yaw), s: [1, 1, 1], parent: null },
+        "boost@1": { speed: b.speed ?? 9, seconds: b.seconds ?? 2, radius: b.radius ?? 1.8 },
+      } as Components,
+    }),
+  );
 
   /* --- Nombre del distrito en luz, en el suelo de la avenida del sur, al llegar --- */
   label(`${d.id}_floor_name`, [32, 0.03, 140], FLAT, d.name.en.toLowerCase(), { es: d.name.es.toLowerCase(), en: d.name.en.toLowerCase() }, 1.5);

@@ -2097,14 +2097,15 @@ export class Directory extends DurableObject<Env> {
     });
   }
 
-  /** Los proyectos más nuevos con portal, para el escaparate del nexo. */
-  showcase(limit: number) {
+  /** Los proyectos más nuevos con portal, para el escaparate del nexo (o los de un distrito, para sus máquinas). */
+  showcase(limit: number, district?: string) {
     return this.sql
       .exec<{ id: string; title: string; category: string; cover_hash: string; mesh_hash: string; district: string; parcel: string }>(
         `SELECT id, title, category, cover_hash, mesh_hash, district, parcel FROM projects
          WHERE status = 'published' AND review = 'approved' AND district IS NOT NULL AND cover_hash IS NOT NULL AND in_world = 1
+         ${district ? "AND district = ?" : ""}
          ORDER BY created_at DESC LIMIT ?`,
-        limit,
+        ...(district ? [district, limit] : [limit]),
       )
       .toArray();
   }

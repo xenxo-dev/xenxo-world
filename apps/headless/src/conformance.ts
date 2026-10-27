@@ -700,6 +700,10 @@ await scenario("actividades: el servidor comprueba la cercanía, el orden y el r
   const fin = await put([0, 0, 120], { "checkpoint@1": { race: `r${tag}`, role: "finish" } });
   const boardRace = await put([5, 2, 100], { "scoreboard@1": { kind: "race", id: `r${tag}` } });
   const boardHunt = await put([5, 2, 110], { "scoreboard@1": { kind: "hunt", id: `h${tag}` } });
+  // Placa de impulso: se acepta como cualquier componente; más de 12 m/s, no (anularía las carreras).
+  await put([0, 0, 105], { "boost@1": { speed: 9, seconds: 2, radius: 1.8 } });
+  const tooFast = await admin.mutate({ op: "SPAWN", components: { "transform@1": { p: [0, 0, 106], r: [0, 0, 0, 1], s: [1, 1, 1], parent: null }, "boost@1": { speed: 20 } } });
+  assert(tooFast.type === "ERROR", "una placa de más de 12 m/s se rechaza");
   admin.close();
 
   const guest = await XenxoClient.connect({ baseUrl, chunkId });
@@ -785,6 +789,19 @@ await scenario("Rastro de datos (Distrito Cero): 12 fragmentos del sistema con s
   const above = await u.activity("COLLECT", high.entity_id);
   assert(above.type === "COLLECTED" && above.payload.count === 2, "desde la pasarela, sí");
   u.close();
+});
+
+await scenario("Circuito Neón (Arcade): carrera del sistema con salida, 11 puntos y meta, placas de impulso, 50 monedas y sus marcadores", async () => {
+  const c = await XenxoClient.connect({ baseUrl, chunkId: "c_1_0" });
+  const sys = c.snapshot.entities.filter((e) => e.owner === "system");
+  const cps = sys.filter((e) => (e.components["checkpoint@1"] as { race?: string } | undefined)?.race === "circuito");
+  const roles = (r: string) => cps.filter((e) => (e.components["checkpoint@1"] as { role: string }).role === r).length;
+  assert(roles("start") === 1 && roles("finish") === 1 && roles("cp") === 11, `salida, 11 puntos y meta (${roles("start")}/${roles("cp")}/${roles("finish")})`);
+  assert(sys.filter((e) => e.components["boost@1"]).length === 6, "seis placas de impulso");
+  assert(sys.filter((e) => (e.components["collectible@1"] as { set?: string } | undefined)?.set === "monedas").length === 50, "cincuenta monedas");
+  const boards = sys.filter((e) => e.components["scoreboard@1"]).map((e) => (e.components["scoreboard@1"] as { id: string }).id);
+  assert(boards.includes("circuito") && boards.includes("monedas"), "marcador de la carrera y de las monedas");
+  c.close();
 });
 
 await scenario("distrito grande: WELCOME.walk de 256 m y cada uno recibe solo las poses de quien tiene cerca", async () => {

@@ -10,10 +10,10 @@ import { memo, Suspense, useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Text } from "@react-three/drei";
 import * as THREE from "three";
-import { CheckpointV1, CollectibleV1, ScoreboardV1, TransformV1, type Entity } from "@xenxo/protocol";
+import { BoostV1, CheckpointV1, CollectibleV1, ScoreboardV1, TransformV1, type Entity } from "@xenxo/protocol";
 import { t } from "../i18n";
 import { accountToken } from "../net/account";
-import { activity, formatRaceTime, sendActivity, useActivity } from "../net/activity-store";
+import { activity, boost, formatRaceTime, sendActivity, useActivity } from "../net/activity-store";
 import { useWorldVersion, world } from "../net/world-store";
 import { SIGN_FONT_URL, FONT_URL } from "./font";
 import { playerPos } from "./Player";
@@ -24,10 +24,14 @@ interface Zone {
   y: number;
   z: number;
   r: number;
-  kind: "collect" | "checkpoint";
+  kind: "collect" | "checkpoint" | "boost";
   role?: "start" | "cp" | "finish";
   race?: string;
   order?: number;
+  /** Placas de impulso: velocidad, segundos y hacia dónde apuntan las flechas (giro en Y). */
+  speed?: number;
+  seconds?: number;
+  yaw?: number;
 }
 
 const COLORS = { start: "#33ddff", cp: "#ffd54f", finish: "#ff4fd8" } as const;
@@ -56,6 +60,12 @@ function zonesOf(list: Entity[]): Zone[] {
     if (col.success) out.push({ id: e.entity_id, x: x + ox, y, z: z + oz, r: col.data.radius, kind: "collect" });
     const cp = CheckpointV1.safeParse(e.components["checkpoint@1"]);
     if (cp.success) out.push({ id: e.entity_id, x: x + ox, y, z: z + oz, r: cp.data.radius, kind: "checkpoint", role: cp.data.role, race: cp.data.race, order: cp.data.order });
+    const bo = BoostV1.safeParse(e.components["boost@1"]);
+    if (bo.success) {
+      const [qx, qy, qz, qw] = tr.data.r;
+      const yaw = Math.atan2(2 * (qw * qy + qx * qz), 1 - 2 * (qy * qy + qx * qx));
+      out.push({ id: e.entity_id, x: x + ox, y, z: z + oz, r: bo.data.radius, kind: "boost", speed: bo.data.speed, seconds: bo.data.seconds, yaw });
+    }
   }
   return out;
 }
@@ -80,6 +90,12 @@ function Sensor({ zones }: { zones: Zone[] }) {
       const isIn = dx * dx + dz * dz <= zn.r * zn.r && Math.abs(playerPos.y - zn.y) <= 4 + zn.r;
       if (!isIn) {
         inside.current.delete(zn.id);
+        continue;
+      }
+      // Placa de impulso: solo en el cliente (no se avisa al servidor), también para invitados.
+      if (zn.kind === "boost") {
+        boost.until = now + (zn.seconds ?? 2) * 1000;
+        boost.speed = zn.speed ?? 9;
         continue;
       }
       const last = inside.current.get(zn.id);
@@ -140,6 +156,44 @@ function cpOrder(cps: Zone[], race: string, n: number): number | undefined {
     .at(n - 1);
 }
 
+/* --- Placas de impulso: tres flechas de luz que avanzan (un material para todas) --- */
+
+const chevronGeo = (() => {
+  const shape = new THREE.Shape();
+  shape.moveTo(-0.5, -0.15);
+  shape.lineTo(0, 0.25);
+  shape.lineTo(0.5, -0.15);
+  shape.lineTo(0.5, 0.1);
+  shape.lineTo(0, 0.5);
+  shape.lineTo(-0.5, 0.1);
+  shape.closePath();
+  const g = new THREE.ShapeGeometry(shape);
+  g.rotateX(-Math.PI / 2); // tumbada; la punta hacia −Z (adelante)
+  return g;
+})();
+const CHEVRON_MATS = [0, 1, 2].map(() => new THREE.MeshBasicMaterial({ color: "#36d9ff", transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+
+function BoostPads({ zones }: { zones: Zone[] }) {
+  const pads = zones.filter((z) => z.kind === "boost");
+  useFrame((s) => {
+    const t = s.clock.elapsedTime;
+    // Una ola que recorre las flechas de atrás adelante: dice hacia dónde empuja.
+    CHEVRON_MATS.forEach((m, k) => (m.opacity = 0.25 + 0.6 * Math.max(0, Math.sin(t * 6 - k * 1.1))));
+  });
+  return (
+    <>
+      {pads.map((z) => (
+        <group key={z.id} position={[z.x, z.y + 0.04, z.z]} rotation={[0, z.yaw ?? 0, 0]}>
+          <mesh geometry={ringGeo} material={glow("#36d9ff", 0.5)} scale={[z.r, 1, z.r]} />
+          {CHEVRON_MATS.map((m, k) => (
+            <mesh key={k} geometry={chevronGeo} material={m} scale={[z.r * 1.1, 1, z.r * 1.1]} position={[0, 0.01 * k, (0.55 - k * 0.55) * z.r]} />
+          ))}
+        </group>
+      ))}
+    </>
+  );
+}
+
 /* --- Marcadores --- */
 
 const PANEL_MAT = new THREE.MeshBasicMaterial({ color: "#0b0f18", transparent: true, opacity: 0.86 });
@@ -186,12 +240,13 @@ export function Activities() {
   useWorldVersion();
   const list = [...world.entities.values()];
   const key = list.length + ":" + world.getVersion();
-  const zones = useMemo(() => zonesOf(list.filter((e) => e.components["collectible@1"] || e.components["checkpoint@1"])), [key]); // eslint-disable-line react-hooks/exhaustive-deps
+  const zones = useMemo(() => zonesOf(list.filter((e) => e.components["collectible@1"] || e.components["checkpoint@1"] || e.components["boost@1"])), [key]); // eslint-disable-line react-hooks/exhaustive-deps
   const boards = list.filter((e) => e.components["scoreboard@1"]);
   return (
     <>
       <Sensor zones={zones} />
       <Checkpoints zones={zones} />
+      <BoostPads zones={zones} />
       <Suspense fallback={null}>
         {boards.map((e) => (
           <Scoreboard key={`${e.entity_id}:${e.rev}`} entity={e} />

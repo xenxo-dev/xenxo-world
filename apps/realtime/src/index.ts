@@ -7,7 +7,7 @@ import { isAvatarPreset } from "./avatar-presets-check";
 import { randomId, resolveAgent, signToken, verifyToken, type Principal } from "./auth";
 import { CALL_TTL_MS, chunkList, REMOTE_METHODS, sha256B64, signRemote, TICKET_TTL_MS } from "./remote";
 import type { ChunkRoom, ShowcaseItem } from "./chunk-room";
-import { DISTRICTS, districtById, parcelIndex, parcelSpawn } from "./districts";
+import { cabinetSlots, DISTRICTS, districtById, parcelIndex, parcelSpawn } from "./districts";
 import { communityGates, SHOWCASE_SLOTS, type CommunityGate } from "./nexo";
 import { fetchDevManifest, fetchManifest } from "./games";
 import { MAX_AGENT_KEYS_PER_PROJECT, MAX_SKINS, type Directory, type UserRow } from "./directory";
@@ -180,6 +180,15 @@ async function syncShowcase(env: Env, dir: ReturnType<typeof directory>) {
     });
   }
   await chunk(env, PLACES.nexo).syncShowcase(items);
+  // Y las máquinas-portal de las plazas de los distritos que las tienen (Arcade): sus juegos.
+  for (const d of DISTRICTS) {
+    const slots = cabinetSlots(d.id);
+    if (!slots.length) continue;
+    const games = await dir.showcase(slots.length, d.id);
+    await chunk(env, d.chunk)
+      .syncCabinets(games.map((g) => ({ projectId: g.id, title: g.title, category: g.category, cover: g.cover_hash })))
+      .catch((e: Error) => console.warn("máquinas-portal:", d.id, e.message));
+  }
 }
 
 function inJurisdiction<T extends Rpc.DurableObjectBranded | undefined>(env: Env, ns: DurableObjectNamespace<T>): DurableObjectNamespace<T> {
@@ -1068,6 +1077,11 @@ export default {
         if (!modId) return json({ error: "forbidden", message: "solo moderación" }, 403, h);
         // Distritos de la comunidad: la cola y la decisión (aprobar, rechazar u ocultar, con motivo).
         if (path === "/mod/districts" && req.method === "GET") return json({ districts: await dir.modDistricts() }, 200, h);
+        // Vuelve a colocar el escaparate y las máquinas-portal (tras un despliegue que las añade).
+        if (path === "/mod/showcase/sync" && req.method === "POST") {
+          await syncShowcase(env, dir);
+          return json({ synced: true }, 200, h);
+        }
         const dr = path.match(/^\/mod\/districts\/([A-Za-z0-9_-]{4,24})\/review$/);
         if (dr && req.method === "POST") {
           const body = await readJson(req);

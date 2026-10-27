@@ -1,5 +1,5 @@
 {
-  "$comment": "Actividades del sistema en cada distrito (coordenadas del chunk: X este, Z sur, metros). Las siembra districts.ts como entidades con dueño `system` (collectible@1, checkpoint@1, scoreboard@1), y su atrezo modelado (`props`: pieza de seed-assets, posición, giro y caja de colisión). Las posiciones salen del diseño de cada ciudad (tools/forge/cero.py…): si mueves la ciudad, revisa esto. Los textos van como datos (`note`, `title`) en ES y EN.",
+  "$comment": "Actividades del sistema en cada distrito (coordenadas del chunk: X este, Z sur, metros). Las siembra districts.ts como entidades con dueño `system` (collectible@1, checkpoint@1, scoreboard@1), sus carreras (`races`: salida, puntos y meta), placas de impulso (`boosts`), máquinas-portal (`cabinets`, las llena el Worker con los juegos del distrito), carteles (`labels`) y su atrezo modelado (`props`: pieza de seed-assets, posición, giro y caja de colisión). Las posiciones salen del diseño de cada ciudad (tools/forge/cero.py…): si mueves la ciudad, revisa esto. Los textos van como datos (`note`, `title`) en ES y EN.",
   "cero": {
     "hunts": [
       {
@@ -275,6 +275,709 @@
         ],
         "yaw": 0,
         "size": 0.3
+      }
+    ]
+  },
+  "arcade": {
+    "hunts": [
+      {
+        "id": "monedas",
+        "piece": "arcade_coin",
+        "radius": 1.3,
+        "items": [
+          {
+            "p": [
+              50.5,
+              1.2,
+              62.0
+            ]
+          },
+          {
+            "p": [
+              50.5,
+              1.2,
+              64.5
+            ]
+          },
+          {
+            "p": [
+              50.5,
+              1.2,
+              67.0
+            ]
+          },
+          {
+            "p": [
+              65.0,
+              1.2,
+              87.0
+            ]
+          },
+          {
+            "p": [
+              67.5,
+              1.2,
+              87.0
+            ]
+          },
+          {
+            "p": [
+              70.0,
+              1.2,
+              87.0
+            ]
+          },
+          {
+            "p": [
+              87.0,
+              1.2,
+              50.0
+            ]
+          },
+          {
+            "p": [
+              87.0,
+              1.2,
+              47.5
+            ]
+          },
+          {
+            "p": [
+              87.0,
+              1.2,
+              45.0
+            ]
+          },
+          {
+            "p": [
+              87.0,
+              1.2,
+              18.0
+            ]
+          },
+          {
+            "p": [
+              87.0,
+              1.2,
+              15.5
+            ]
+          },
+          {
+            "p": [
+              87.0,
+              1.2,
+              13.0
+            ]
+          },
+          {
+            "p": [
+              70.0,
+              1.2,
+              -23.0
+            ]
+          },
+          {
+            "p": [
+              67.5,
+              1.2,
+              -23.0
+            ]
+          },
+          {
+            "p": [
+              65.0,
+              1.2,
+              -23.0
+            ]
+          },
+          {
+            "p": [
+              20.0,
+              1.2,
+              -23.0
+            ]
+          },
+          {
+            "p": [
+              17.5,
+              1.2,
+              -23.0
+            ]
+          },
+          {
+            "p": [
+              15.0,
+              1.2,
+              -23.0
+            ]
+          },
+          {
+            "p": [
+              -23.0,
+              1.2,
+              0.0
+            ]
+          },
+          {
+            "p": [
+              -23.0,
+              1.2,
+              2.5
+            ]
+          },
+          {
+            "p": [
+              -23.0,
+              1.2,
+              5.0
+            ]
+          },
+          {
+            "p": [
+              -23.0,
+              1.2,
+              50.0
+            ]
+          },
+          {
+            "p": [
+              -23.0,
+              1.2,
+              52.5
+            ]
+          },
+          {
+            "p": [
+              -23.0,
+              1.2,
+              55.0
+            ]
+          },
+          {
+            "p": [
+              -5.0,
+              1.2,
+              87.0
+            ]
+          },
+          {
+            "p": [
+              -2.5,
+              1.2,
+              87.0
+            ]
+          },
+          {
+            "p": [
+              0.0,
+              1.2,
+              87.0
+            ]
+          },
+          {
+            "p": [
+              13.5,
+              1.2,
+              72.0
+            ]
+          },
+          {
+            "p": [
+              13.5,
+              1.2,
+              69.5
+            ]
+          },
+          {
+            "p": [
+              13.5,
+              1.2,
+              67.0
+            ]
+          },
+          {
+            "p": [
+              -5,
+              1.2,
+              -5
+            ]
+          },
+          {
+            "p": [
+              32,
+              1.2,
+              -5
+            ]
+          },
+          {
+            "p": [
+              69,
+              1.2,
+              -5
+            ]
+          },
+          {
+            "p": [
+              -5,
+              1.2,
+              69
+            ]
+          },
+          {
+            "p": [
+              32,
+              1.2,
+              69
+            ]
+          },
+          {
+            "p": [
+              69,
+              1.2,
+              69
+            ]
+          },
+          {
+            "p": [
+              -5,
+              1.2,
+              32
+            ]
+          },
+          {
+            "p": [
+              69,
+              1.2,
+              32
+            ]
+          },
+          {
+            "p": [
+              -49,
+              1.2,
+              -49
+            ]
+          },
+          {
+            "p": [
+              113,
+              1.2,
+              -49
+            ]
+          },
+          {
+            "p": [
+              -49,
+              1.2,
+              113
+            ]
+          },
+          {
+            "p": [
+              113,
+              1.2,
+              113
+            ]
+          },
+          {
+            "p": [
+              32,
+              1.2,
+              -49
+            ]
+          },
+          {
+            "p": [
+              113,
+              1.2,
+              32
+            ]
+          },
+          {
+            "p": [
+              -49,
+              1.2,
+              32
+            ]
+          },
+          {
+            "p": [
+              32,
+              1.2,
+              113
+            ]
+          },
+          {
+            "p": [
+              32,
+              1.2,
+              18.8
+            ]
+          },
+          {
+            "p": [
+              36.8,
+              1.2,
+              27.5
+            ]
+          },
+          {
+            "p": [
+              32,
+              1.2,
+              140
+            ]
+          },
+          {
+            "p": [
+              32,
+              1.2,
+              125
+            ]
+          }
+        ]
+      }
+    ],
+    "races": [
+      {
+        "id": "circuito",
+        "radius": 3.0,
+        "start": {
+          "p": [
+            40.5,
+            0,
+            43.5
+          ],
+          "radius": 2.5
+        },
+        "cps": [
+          [
+            50.5,
+            0,
+            50.5
+          ],
+          [
+            50.5,
+            0,
+            87
+          ],
+          [
+            87,
+            0,
+            87
+          ],
+          [
+            87,
+            0,
+            32
+          ],
+          [
+            87,
+            0,
+            -23
+          ],
+          [
+            32,
+            0,
+            -23
+          ],
+          [
+            -23,
+            0,
+            -23
+          ],
+          [
+            -23,
+            0,
+            32
+          ],
+          [
+            -23,
+            0,
+            87
+          ],
+          [
+            13.5,
+            0,
+            87
+          ],
+          [
+            13.5,
+            0,
+            50.5
+          ]
+        ],
+        "finish": {
+          "p": [
+            23.5,
+            0,
+            43.5
+          ],
+          "radius": 2.5
+        }
+      }
+    ],
+    "boosts": [
+      {
+        "p": [
+          87,
+          0,
+          70
+        ],
+        "yaw": 0
+      },
+      {
+        "p": [
+          87,
+          0,
+          25
+        ],
+        "yaw": 0
+      },
+      {
+        "p": [
+          50,
+          0,
+          -23
+        ],
+        "yaw": 90
+      },
+      {
+        "p": [
+          -2,
+          0,
+          -23
+        ],
+        "yaw": 90
+      },
+      {
+        "p": [
+          -23,
+          0,
+          20
+        ],
+        "yaw": 180
+      },
+      {
+        "p": [
+          -23,
+          0,
+          70
+        ],
+        "yaw": 180
+      }
+    ],
+    "boards": [
+      {
+        "kind": "race",
+        "id": "circuito",
+        "p": [
+          32,
+          11.0,
+          21.45
+        ],
+        "yaw": 0,
+        "size": [
+          12,
+          7.4
+        ]
+      },
+      {
+        "kind": "hunt",
+        "id": "monedas",
+        "p": [
+          42,
+          2.4,
+          21.8
+        ],
+        "yaw": 0,
+        "size": [
+          3.6,
+          2.6
+        ],
+        "title": {
+          "es": "MONEDAS",
+          "en": "COINS"
+        }
+      }
+    ],
+    "labels": [
+      {
+        "text": {
+          "es": "CIRCUITO NEÓN",
+          "en": "NEON CIRCUIT"
+        },
+        "p": [
+          32,
+          17.4,
+          21.2
+        ],
+        "yaw": 0,
+        "size": 0.9
+      },
+      {
+        "text": {
+          "es": "SALIDA",
+          "en": "START"
+        },
+        "p": [
+          40.5,
+          0.04,
+          43.5
+        ],
+        "yaw": 0,
+        "size": 0.6,
+        "flat": true
+      },
+      {
+        "text": {
+          "es": "META",
+          "en": "FINISH"
+        },
+        "p": [
+          23.5,
+          0.04,
+          43.5
+        ],
+        "yaw": 0,
+        "size": 0.6,
+        "flat": true
+      }
+    ],
+    "props": [
+      {
+        "piece": "arcade_cabinet",
+        "p": [
+          23.137,
+          0,
+          30.437
+        ],
+        "yaw": -100,
+        "half": [
+          0.45,
+          0.95,
+          0.45
+        ]
+      },
+      {
+        "piece": "arcade_cabinet",
+        "p": [
+          24.206,
+          0,
+          36.5
+        ],
+        "yaw": -60,
+        "half": [
+          0.45,
+          0.95,
+          0.45
+        ]
+      },
+      {
+        "piece": "arcade_cabinet",
+        "p": [
+          28.922,
+          0,
+          40.457
+        ],
+        "yaw": -20,
+        "half": [
+          0.45,
+          0.95,
+          0.45
+        ]
+      },
+      {
+        "piece": "arcade_cabinet",
+        "p": [
+          35.078,
+          0,
+          40.457
+        ],
+        "yaw": 20,
+        "half": [
+          0.45,
+          0.95,
+          0.45
+        ]
+      },
+      {
+        "piece": "arcade_cabinet",
+        "p": [
+          39.794,
+          0,
+          36.5
+        ],
+        "yaw": 60,
+        "half": [
+          0.45,
+          0.95,
+          0.45
+        ]
+      },
+      {
+        "piece": "arcade_cabinet",
+        "p": [
+          40.863,
+          0,
+          30.437
+        ],
+        "yaw": 100,
+        "half": [
+          0.45,
+          0.95,
+          0.45
+        ]
+      }
+    ],
+    "cabinets": [
+      {
+        "p": [
+          23.137,
+          0,
+          30.437
+        ],
+        "yaw": -100
+      },
+      {
+        "p": [
+          24.206,
+          0,
+          36.5
+        ],
+        "yaw": -60
+      },
+      {
+        "p": [
+          28.922,
+          0,
+          40.457
+        ],
+        "yaw": -20
+      },
+      {
+        "p": [
+          35.078,
+          0,
+          40.457
+        ],
+        "yaw": 20
+      },
+      {
+        "p": [
+          39.794,
+          0,
+          36.5
+        ],
+        "yaw": 60
+      },
+      {
+        "p": [
+          40.863,
+          0,
+          30.437
+        ],
+        "yaw": 100
       }
     ]
   }

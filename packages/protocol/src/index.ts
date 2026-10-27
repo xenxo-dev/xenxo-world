@@ -248,6 +248,17 @@ export const CheckpointV1 = z.object({
   radius: z.number().min(0.5).max(8).default(2.5),
 });
 
+/**
+ * Placa de impulso: quien la pisa corre más durante unos segundos (en el cliente; el servidor no
+ * cuenta nada). Para las carreras: `speed` no pasa de 12 m/s, por debajo del límite con el que el
+ * servidor anula un tiempo imposible. Las gafas la ignoran (allí manda el casco).
+ */
+export const BoostV1 = z.object({
+  speed: z.number().min(6).max(12).default(9),
+  seconds: z.number().min(0.5).max(4).default(2),
+  radius: z.number().min(0.5).max(5).default(1.8),
+});
+
 /** Marcador de una carrera o una búsqueda de este lugar (y del mismo dueño). El cliente pide SCORES. */
 export const ScoreboardV1 = z.object({
   kind: z.enum(["race", "hunt"]),
@@ -277,6 +288,7 @@ export const COMPONENTS = {
   "collectible@1": CollectibleV1,
   "checkpoint@1": CheckpointV1,
   "scoreboard@1": ScoreboardV1,
+  "boost@1": BoostV1,
   "behavior@1": BehaviorV1,
 } as const;
 
@@ -293,6 +305,7 @@ export const ACCEPTED_IN_V0: readonly ComponentKey[] = [
   "collectible@1",
   "checkpoint@1",
   "scoreboard@1",
+  "boost@1",
 ];
 
 /**
@@ -312,6 +325,7 @@ export const ComponentsStrict = z
     "collectible@1": CollectibleV1.optional(),
     "checkpoint@1": CheckpointV1.optional(),
     "scoreboard@1": ScoreboardV1.optional(),
+    "boost@1": BoostV1.optional(),
     "behavior@1": BehaviorV1.optional(),
   })
   .strict();

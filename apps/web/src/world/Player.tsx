@@ -10,6 +10,7 @@ import { useAccount } from "../net/account";
 import { AvatarBody, ChatBubble } from "./Avatars";
 import { createMotion, smoothSpeed } from "./motion";
 import { cameraReach, findSeat, resolveCircle } from "./collision";
+import { boost } from "../net/activity-store";
 import { BODY_HEIGHT, STEP_UP, createBody, placeBody, requestJump, stepBody } from "./locomotion";
 import { useChosenPreset } from "./presets";
 import { input, setFirstPerson, view } from "./input";
@@ -143,7 +144,9 @@ export function Player({ active }: { active: boolean }) {
         _right.set(-_fwd.z, 0, _fwd.x);
         const amount = Math.min(1, Math.hypot(input.move.x, input.move.y));
         // En móvil, el joystick a tope también corre.
-        const speed = input.run || (controls.autoRun && amount > 0.92) ? RUN : WALK;
+        let speed = input.run || (controls.autoRun && amount > 0.92) ? RUN : WALK;
+        // Placa de impulso (boost@1): más rápido unos segundos, mientras te muevas.
+        if (boost.until > performance.now()) speed = Math.max(speed, boost.speed);
         const wantX = (_fwd.x * input.move.y + _right.x * input.move.x) * speed;
         const wantZ = (_fwd.z * input.move.y + _right.z * input.move.x) * speed;
 

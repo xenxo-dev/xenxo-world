@@ -96,6 +96,12 @@ export function useActivity() {
   return activity;
 }
 
+/**
+ * Impulso de una placa (boost@1): hasta cuándo (reloj de performance) y a qué velocidad. Lo
+ * escribe el sensor de Activities y lo lee el movimiento del jugador; sin React ni red.
+ */
+export const boost = { until: 0, speed: 0 };
+
 /** Los avisos de actividad llevan este prefijo en su id: sus errores no van al chat. */
 export const ACTIVITY_REF = "act_";
 let n = 0;

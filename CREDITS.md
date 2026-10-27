@@ -25,7 +25,7 @@ resultados para entrenar modelos de IA, y esa restricción acompaña a estas im�
   paneles generados con Higgsfield (GPT Image 2.5, plan Plus, 26-10-2026) y unidos con `stitch.py`.
 - **Modelos 3D de la vida de las ciudades** (`tools/models/generated/`, cada uno con su
   `meta.json`): coche volador (`hover_car`), dron de reparto (`drone`) y máquina expendedora
-  (`vending`). Generados con Higgsfield (Tripo, plan Plus, 27-10-2026); `tools/forge/pack.mjs` los
+  (`vending`) y máquina recreativa de Arcade (`arcade_cabinet`). Generados con Higgsfield (Tripo, plan Plus, 27-10-2026); `tools/forge/pack.mjs` los
   pone a su tamaño y los optimiza.
 - **Escultura de Xen** en Distrito Cero (`tools/models/generated/xen_statue/`): el modelo 3D del
   personaje oficial de xenxo.io, generado por Pencho con **Tripo** a partir de su diseño. Si viene

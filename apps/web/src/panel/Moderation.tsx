@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { assetUrl } from "../config";
 import { errorText, getLang, t, type Key } from "../i18n";
 import { avatarMode, type Project } from "../net/account";
-import { modHide, modLog, modQueue, modReport, modReview, myRoles, type LogEntry, type Report } from "../net/games";
+import { modHide, modLog, modQueue, modReport, modReview, modSyncShowcase, myRoles, type LogEntry, type Report } from "../net/games";
 import { gameName, openGame } from "../games/state";
 import { Button, card, input, Notice } from "./ui";
 
@@ -78,6 +78,12 @@ export function Moderation() {
     <div className="flex flex-col gap-4">
       <p className="text-sm text-cal/65">{t("mod.intro")}</p>
       {error && <Notice tone="error">{error}</Notice>}
+      <div className="flex flex-wrap items-center gap-3">
+        <Button disabled={busy} onClick={() => void run(modSyncShowcase)}>
+          {t("mod.syncCabinets")}
+        </Button>
+        <span className="text-xs text-cal/55">{t("mod.syncCabinetsHint")}</span>
+      </div>
 
       <h3 className="text-sm font-medium text-cal/80">{t("mod.pending", { n: pending?.length ?? 0 })}</h3>
       {pending?.length === 0 && <p className="text-sm text-cal/45">{t("mod.nothing")}</p>}

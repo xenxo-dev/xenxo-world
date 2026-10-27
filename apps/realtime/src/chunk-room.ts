@@ -32,9 +32,12 @@ import {
 import type { Env } from "./index";
 import { randomId, type Principal } from "./auth";
 import { plazaSeed, SEED_VERSION } from "./seed";
-import { DISTRICT_BOUNDS, districtByChunk, districtSeed, DISTRICT_SEED_VERSION, migrateParcelPose, migrateSlot, PARCEL_LAYOUT_VERSION, PARCELS, parcelIndex, parcelReserved, parcelSlot } from "./districts";
+import { cabinetSlots, DISTRICT_BOUNDS, districtByChunk, districtSeed, DISTRICT_SEED_VERSION, migrateParcelPose, migrateSlot, PARCEL_LAYOUT_VERSION, PARCELS, parcelIndex, parcelReserved, parcelSlot } from "./districts";
 import { nexoArrival, NEXO_BOUNDS, NEXO_SEED_VERSION, nexoSeed, SHOWCASE_SLOTS } from "./nexo";
-import { portalEntities, r3, type Seeded } from "./places";
+import { at, portalEntities, r3, yaw, type Seeded } from "./places";
+
+/** Pantalla de la máquina recreativa (tools/models/generated/arcade_cabinet): centro y tamaño. */
+const CABINET_SCREEN = { y: 1.18, z: 0.34, size: [0.56, 0.5] as [number, number] };
 import { isCommunityChunk, type CommunityMeta } from "./community";
 import { fitsZone, localBox, worldBox, type Zone } from "./zone";
 import { assetKey } from "./assets";
@@ -924,6 +927,38 @@ export class ChunkRoom extends DurableObject<Env> {
     if (spec) this.applySeed(`community_${spec.meta.id}`, 1, spec.meta.system);
     for (const ws of this.ctx.getWebSockets()) ws.close(1012, "el distrito ha cambiado: vuelve a entrar");
     return { entities: spec?.content.length ?? 0 };
+  }
+
+  /**
+   * Máquinas-portal de la plaza de un distrito (district-activities.json → `cabinets`): en la
+   * pantalla de cada máquina, la portada de uno de los juegos del distrito (los más nuevos), que
+   * abre ese juego. Las máquinas son del sembrado; aquí solo van las pantallas (dueño `cabinets`).
+   */
+  async syncCabinets(items: { projectId: string; title: string; category: string; cover: string }[]): Promise<{ shown: number }> {
+    this.ensureChunk(null);
+    const district = districtByChunk(this.chunkId!);
+    const slots = district ? cabinetSlots(district.id) : [];
+    const OWNER = "cabinets";
+    const seed: Seeded[] = items.slice(0, slots.length).map((it, n) => {
+      const sl = slots[n]!;
+      return {
+        id: `cab_${n + 1}`,
+        components: {
+          "transform@1": { p: at(sl.p[0], sl.p[2], sl.yaw, 0, CABINET_SCREEN.y, CABINET_SCREEN.z), r: yaw(sl.yaw), s: [1, 1, 1], parent: null },
+          "portal@1": { to: { kind: "project", project_id: it.projectId }, size: CABINET_SCREEN.size, cover: it.cover, title: it.title, category: it.category },
+        } as Components,
+      };
+    });
+    const before = this.sql.exec<{ entity_id: string }>("SELECT entity_id FROM entities WHERE owner = ?", OWNER).toArray().map((r) => r.entity_id);
+    const changes: ({ kind: "remove"; entity_id: string } | { kind: "upsert"; entity: Entity })[] = [];
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec("DELETE FROM entities WHERE owner = ?", OWNER);
+      for (const id of before) if (!seed.some((x) => x.id === id)) changes.push({ kind: "remove", entity_id: id });
+      for (const e of seed) changes.push({ kind: "upsert", entity: this.insertEntity(e.id, OWNER, e.components) });
+      this.logEvent("system", "CABINETS", this.chunkId!, seed.length, null);
+    });
+    if (changes.length) this.broadcast(msg("DELTA", { changes }));
+    return { shown: seed.length };
   }
 
   /** Puertas de los distritos de la comunidad en el nexo (nexo.ts → communityGates). */
