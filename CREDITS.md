@@ -18,6 +18,8 @@ plan y prompt). Son de xenxo según las condiciones de cada plataforma, que dan 
 uso comercial de lo generado, pero **no son CC0**: las condiciones de Higgsfield prohíben usar sus
 resultados para entrenar modelos de IA, y esa restricción acompaña a estas imágenes.
 
+- **Conceptos de las cuatro ciudades** (`docs/conceptos/`, con su `meta.json`): ocho imágenes de
+  referencia de estilo para Distrito Cero, Arcade, Píxel y Taller. No se sirven en el mundo.
 - **Fondo panorámico del nexo** (`tools/materials/generated/nexo-panorama/`, servido como
   `apps/web/public/sky/nexo-*.webp`): megaciudad cyberpunk y espacio, de noche y de día. Seis
   paneles generados con Higgsfield (GPT Image 2.5, plan Plus, 26-10-2026) y unidos con `stitch.py`.

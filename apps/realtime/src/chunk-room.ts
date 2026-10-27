@@ -10,8 +10,11 @@ import { DurableObject } from "cloudflare:workers";
 import {
   ACCEPTED_IN_V0,
   BUDGETS,
+  CheckpointV1,
   CHUNK_SIZE,
   ClientMessage,
+  CollectibleV1,
+  ScoreboardV1,
   ComponentsStrict,
   ENTITY_SCHEMA,
   estimateTris,
@@ -35,6 +38,7 @@ import { portalEntities, r3, type Seeded } from "./places";
 import { isCommunityChunk, type CommunityMeta } from "./community";
 import { fitsZone, localBox, worldBox, type Zone } from "./zone";
 import { assetKey } from "./assets";
+import { ACTIVITY_SCHEMA, activityKey, minRaceMs, near, POSE_MAX_AGE_MS, RACE_TIMEOUT_MS, SCORES_LIMIT, type RaceRun } from "./activities";
 import { SEED_ASSETS } from "./seed-assets";
 import { isAvatarPreset } from "./avatar-presets-check";
 
@@ -107,6 +111,8 @@ interface Attachment {
   display_name: string;
   /** Avatar de serie elegido en HELLO (invitados y agentes). */
   preset?: { hash: string; format: "vrm" };
+  /** Carrera en curso (activities.ts). */
+  run?: RaceRun;
 }
 
 class MutationError extends Error {
@@ -126,6 +132,8 @@ export interface ChunkDump {
   entities: { entity_id: string; owner: string; rev: number; tris: number; data: string }[];
   stands: { project_id: string; slot: number }[];
   chat: { id: string; ts: number; sender: string; kind: string; display_name: string; session_id: string; text: string; hidden: number }[];
+  /** Actividades: lo recogido, las búsquedas completas y los mejores tiempos (activities.ts). */
+  activities?: { collected: Record<string, unknown>[]; hunts: Record<string, unknown>[]; races: Record<string, unknown>[] };
   /** Distrito de la comunidad: lo que es (con lo del sistema que lleva). Ausente en los demás. */
   community?: string | null;
 }
@@ -140,6 +148,7 @@ export class ChunkRoom extends DurableObject<Env> {
   private lastPoseAt = new Map<string, number>();
   private mutationLog = new Map<string, number[]>();
   private chatLog = new Map<string, number[]>();
+  private activityLog = new Map<string, number[]>();
   /** Último reparto de poses (ms) y el temporizador corto que se deja solo si hace falta (ver `scheduleTick`). */
   private lastTick = 0;
   private tickTimer: ReturnType<typeof setTimeout> | null = null;
@@ -162,6 +171,7 @@ export class ChunkRoom extends DurableObject<Env> {
         id TEXT PRIMARY KEY, ts INTEGER NOT NULL, sender TEXT NOT NULL, kind TEXT NOT NULL,
         display_name TEXT NOT NULL, session_id TEXT NOT NULL, text TEXT NOT NULL, hidden INTEGER NOT NULL DEFAULT 0);
       CREATE INDEX IF NOT EXISTS chat_ts ON chat (ts);
+      ${ACTIVITY_SCHEMA}
     `);
   }
 
@@ -346,6 +356,7 @@ export class ChunkRoom extends DurableObject<Env> {
           msg("SNAPSHOT", { entities: this.allEntities(), peers: this.peers(), poses: [...this.poses.values()], chat: this.recentChat() }),
         );
         this.broadcast(msg("PEER_JOIN", this.peerOf(att)), ws);
+        if (att.principal.kind === "user") this.send(ws, msg("PROGRESS", this.progressOf(att.principal.sub)));
         return;
       }
       case "POSE": {
@@ -367,6 +378,12 @@ export class ChunkRoom extends DurableObject<Env> {
         return this.send(ws, msg("PONG", { t: m.payload.t, server_time: Date.now() }));
       case "MUTATE_WORLD":
         return await this.handleMutation(ws, att, m.id, m.payload);
+      case "COLLECT":
+        return this.handleCollect(ws, att, m.id, m.payload.entity_id);
+      case "CHECKPOINT":
+        return this.handleCheckpoint(ws, att, m.id, m.payload.entity_id);
+      case "SCORES_GET":
+        return this.handleScores(ws, m.id, m.payload.entity_id);
     }
   }
 
@@ -384,6 +401,7 @@ export class ChunkRoom extends DurableObject<Env> {
     this.poses.delete(att.session_id);
     this.dirty.delete(att.session_id);
     this.lastPoseAt.delete(att.session_id);
+    this.activityLog.delete(att.session_id);
     if (att.hello && !this.solo) this.broadcast(msg("PEER_LEAVE", { session_id: att.session_id }), ws);
   }
 
@@ -831,6 +849,11 @@ export class ChunkRoom extends DurableObject<Env> {
       stands: this.sql.exec<ChunkDump["stands"][number]>("SELECT project_id, slot FROM stands").toArray(),
       chat: this.sql.exec<ChunkDump["chat"][number]>("SELECT id, ts, sender, kind, display_name, session_id, text, hidden FROM chat").toArray(),
       community: this.sql.exec<{ v: string }>("SELECT v FROM meta WHERE k = 'community'").toArray()[0]?.v ?? null,
+      activities: {
+        collected: this.sql.exec("SELECT * FROM act_collected").toArray(),
+        hunts: this.sql.exec("SELECT * FROM act_hunt_done").toArray(),
+        races: this.sql.exec("SELECT * FROM act_race_best").toArray(),
+      },
     };
   }
 
@@ -850,6 +873,20 @@ export class ChunkRoom extends DurableObject<Env> {
         this.sql.exec("INSERT INTO chat (id, ts, sender, kind, display_name, session_id, text, hidden) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", c.id, c.ts, c.sender, c.kind, c.display_name, c.session_id, c.text, c.hidden);
       }
       if (d.parcel_layout) this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('parcel_layout', ?)", d.parcel_layout);
+      if (d.activities) {
+        this.sql.exec("DELETE FROM act_collected");
+        this.sql.exec("DELETE FROM act_hunt_done");
+        this.sql.exec("DELETE FROM act_race_best");
+        for (const r of d.activities.collected as { sub: string; entity_id: string; set_key: string; ts: number }[]) {
+          this.sql.exec("INSERT OR IGNORE INTO act_collected (sub, entity_id, set_key, ts) VALUES (?, ?, ?, ?)", r.sub, r.entity_id, r.set_key, r.ts);
+        }
+        for (const r of d.activities.hunts as { set_key: string; sub: string; name: string; player_no: number | null; ts: number }[]) {
+          this.sql.exec("INSERT OR IGNORE INTO act_hunt_done (set_key, sub, name, player_no, ts) VALUES (?, ?, ?, ?, ?)", r.set_key, r.sub, r.name, r.player_no, r.ts);
+        }
+        for (const r of d.activities.races as { race_key: string; sub: string; name: string; player_no: number | null; ms: number; ts: number }[]) {
+          this.sql.exec("INSERT OR IGNORE INTO act_race_best (race_key, sub, name, player_no, ms, ts) VALUES (?, ?, ?, ?, ?, ?)", r.race_key, r.sub, r.name, r.player_no, r.ms, r.ts);
+        }
+      }
       if (d.community) {
         this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('community', ?)", d.community);
         this.community = JSON.parse(d.community) as CommunityMeta;
@@ -913,6 +950,9 @@ export class ChunkRoom extends DurableObject<Env> {
     this.ctx.storage.transactionSync(() => {
       this.sql.exec("DELETE FROM entities WHERE owner = ?", owner);
       this.sql.exec("DELETE FROM chat WHERE sender = ?", owner);
+      this.sql.exec("DELETE FROM act_collected WHERE sub = ?", owner);
+      this.sql.exec("DELETE FROM act_hunt_done WHERE sub = ?", owner);
+      this.sql.exec("DELETE FROM act_race_best WHERE sub = ?", owner);
       this.sql.exec("UPDATE events SET actor = 'deleted' WHERE actor = ?", owner);
       if (ids.length) this.logEvent("system", "PURGE", "owner", ids.length, null);
     });
@@ -1001,6 +1041,168 @@ export class ChunkRoom extends DurableObject<Env> {
   }
 
   /** Para la exportación de datos (RGPD). */
+  /* ---------------------------------------------------------------- */
+  /* Actividades: búsquedas, carreras y marcadores (activities.ts)       */
+  /* ---------------------------------------------------------------- */
+
+  /** Lo de las actividades de una persona en este lugar (para exportar sus datos). */
+  async activityOf(sub: string) {
+    this.ensureChunk(null);
+    return {
+      chunk: this.chunkId,
+      collected: this.sql.exec("SELECT entity_id, set_key, ts FROM act_collected WHERE sub = ? ORDER BY ts", sub).toArray(),
+      hunts_completed: this.sql.exec("SELECT set_key, ts FROM act_hunt_done WHERE sub = ?", sub).toArray(),
+      best_times: this.sql.exec("SELECT race_key, ms, ts FROM act_race_best WHERE sub = ?", sub).toArray(),
+    };
+  }
+
+  /** Entidades de actividad del lugar, ya leídas (componente y posición). */
+  private activityEntities() {
+    const out: { id: string; owner: string; p: number[]; col?: { set: string; radius: number }; cp?: { race: string; role: "start" | "cp" | "finish"; order: number; radius: number } }[] = [];
+    for (const r of this.sql.exec<{ entity_id: string; owner: string; data: string }>("SELECT entity_id, owner, data FROM entities").toArray()) {
+      if (!r.data.includes("collectible@1") && !r.data.includes("checkpoint@1")) continue;
+      const e = JSON.parse(r.data) as Entity;
+      const p = (e.components["transform@1"] as { p?: number[] } | undefined)?.p;
+      if (!p) continue;
+      const col = CollectibleV1.safeParse(e.components["collectible@1"]);
+      const cp = CheckpointV1.safeParse(e.components["checkpoint@1"]);
+      out.push({ id: r.entity_id, owner: r.owner, p, ...(col.success ? { col: col.data } : {}), ...(cp.success ? { cp: cp.data } : {}) });
+    }
+    return out;
+  }
+
+  private progressOf(sub: string) {
+    const collected = this.sql.exec<{ entity_id: string }>("SELECT entity_id FROM act_collected WHERE sub = ?", sub).toArray().map((r) => r.entity_id);
+    const best: Record<string, number> = {};
+    for (const a of this.activityEntities()) {
+      if (a.cp?.role !== "start") continue;
+      const row = this.sql.exec<{ ms: number }>("SELECT ms FROM act_race_best WHERE race_key = ? AND sub = ?", activityKey(a.owner, a.cp.race), sub).toArray()[0];
+      if (row) best[a.id] = row.ms;
+    }
+    return { collected, best };
+  }
+
+  /** ¿Está esta sesión cerca de verdad (su última pose, reciente) de `p`? */
+  private sessionNear(att: Attachment, p: number[], r: number): boolean {
+    const pose = this.poses.get(att.session_id);
+    const age = Date.now() - (this.lastPoseAt.get(att.session_id) ?? 0);
+    return !!pose && age <= POSE_MAX_AGE_MS && near(pose.head.p, p, r);
+  }
+
+  /** Tope de mensajes de actividad por sesión (como el del chat): 40 cada 10 s. */
+  private activityAllowed(att: Attachment): boolean {
+    const now = Date.now();
+    const log = (this.activityLog.get(att.session_id) ?? []).filter((t) => now - t < 10_000);
+    if (log.length >= 40) return false;
+    log.push(now);
+    this.activityLog.set(att.session_id, log);
+    return true;
+  }
+
+  private handleCollect(ws: WebSocket, att: Attachment, ref: string | undefined, entityId: string) {
+    if (this.solo) return this.sendError(ws, ref, "forbidden", "en el nexo no hay actividades");
+    if (att.principal.kind !== "user") return this.sendError(ws, ref, "forbidden", "crea una cuenta para guardar lo que encuentras");
+    if (!this.activityAllowed(att)) return this.sendError(ws, ref, "rate_limited", "demasiados avisos; espera un poco");
+    const all = this.activityEntities();
+    const it = all.find((a) => a.id === entityId && a.col);
+    if (!it?.col) return this.sendError(ws, ref, "not_found", "eso no se puede recoger");
+    if (!this.sessionNear(att, it.p, it.col.radius)) return this.sendError(ws, ref, "forbidden", "estás demasiado lejos");
+    const sub = att.principal.sub;
+    const key = activityKey(it.owner, it.col.set);
+    const ids = all.filter((a) => a.owner === it.owner && a.col?.set === it.col!.set).map((a) => a.id);
+    this.sql.exec("INSERT OR IGNORE INTO act_collected (sub, entity_id, set_key, ts) VALUES (?, ?, ?, ?)", sub, entityId, key, Date.now());
+    const mine = new Set(this.sql.exec<{ entity_id: string }>("SELECT entity_id FROM act_collected WHERE sub = ? AND set_key = ?", sub, key).toArray().map((r) => r.entity_id));
+    const count = ids.filter((id) => mine.has(id)).length;
+    const complete = count >= ids.length;
+    if (complete) {
+      this.sql.exec(
+        "INSERT OR IGNORE INTO act_hunt_done (set_key, sub, name, player_no, ts) VALUES (?, ?, ?, ?, ?)",
+        key, sub, att.principal.name ?? att.display_name, att.principal.no ?? null, Date.now(),
+      );
+    }
+    this.send(ws, msg("COLLECTED", { entity_id: entityId, set: it.col.set, count, total: ids.length, complete }));
+  }
+
+  private handleCheckpoint(ws: WebSocket, att: Attachment, ref: string | undefined, entityId: string) {
+    if (this.solo) return this.sendError(ws, ref, "forbidden", "en el nexo no hay actividades");
+    if (att.principal.kind !== "user") return this.sendError(ws, ref, "forbidden", "crea una cuenta para que cuenten tus tiempos");
+    if (!this.activityAllowed(att)) return this.sendError(ws, ref, "rate_limited", "demasiados avisos; espera un poco");
+    const all = this.activityEntities();
+    const it = all.find((a) => a.id === entityId && a.cp);
+    if (!it?.cp) return this.sendError(ws, ref, "not_found", "eso no es un punto de carrera");
+    if (!this.sessionNear(att, it.p, it.cp.radius)) return this.sendError(ws, ref, "forbidden", "estás demasiado lejos");
+    const now = Date.now();
+    const race = it.cp.race;
+    const key = activityKey(it.owner, race);
+    const points = all.filter((a) => a.owner === it.owner && a.cp?.race === race);
+    const cps = points.filter((a) => a.cp!.role === "cp").sort((a, b) => a.cp!.order - b.cp!.order);
+    const save = (run: RaceRun | undefined) => {
+      att.run = run;
+      ws.serializeAttachment(att);
+    };
+    let run = att.run && att.run.key === key && now - att.run.t0 <= RACE_TIMEOUT_MS ? att.run : undefined;
+
+    if (it.cp.role === "start") {
+      save({ key, race, owner: it.owner, t0: now, next: 1, total: cps.length });
+      return this.send(ws, msg("RACE", { race, state: "start", next: 1, total: cps.length }));
+    }
+    if (!run) return; // sin salida no hay carrera: se ignora en silencio (se puede pasar por un punto sin correr)
+    if (it.cp.role === "cp") {
+      if (cps.at(run.next - 1)?.id !== it.id) return; // no es el que toca (o ya pasó por él)
+      run = { ...run, next: run.next + 1 };
+      save(run);
+      return this.send(ws, msg("RACE", { race, state: "cp", next: run.next, total: run.total }));
+    }
+    // Meta: con todos los puntos y sin ir más rápido de lo posible.
+    if (run.next !== cps.length + 1) return;
+    const start = points.find((a) => a.cp!.role === "start");
+    const ms = now - run.t0;
+    save(undefined);
+    if (!start || ms < minRaceMs([start.p, ...cps.map((c) => c.p), it.p])) {
+      return this.send(ws, msg("RACE", { race, state: "reset" }));
+    }
+    const sub = att.principal.sub;
+    const prev = this.sql.exec<{ ms: number }>("SELECT ms FROM act_race_best WHERE race_key = ? AND sub = ?", key, sub).toArray()[0]?.ms;
+    if (prev === undefined || ms < prev) {
+      this.sql.exec(
+        "INSERT OR REPLACE INTO act_race_best (race_key, sub, name, player_no, ms, ts) VALUES (?, ?, ?, ?, ?, ?)",
+        key, sub, att.principal.name ?? att.display_name, att.principal.no ?? null, ms, now,
+      );
+    }
+    const best = Math.min(ms, prev ?? ms);
+    const rank = 1 + this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM act_race_best WHERE race_key = ? AND ms < ?", key, best).one().n;
+    this.send(ws, msg("RACE", { race, state: "finish", ms, best, rank }));
+  }
+
+  private handleScores(ws: WebSocket, ref: string | undefined, entityId: string) {
+    const row = this.getRow(entityId);
+    const sb = row ? ScoreboardV1.safeParse((JSON.parse(row.data) as Entity).components["scoreboard@1"]) : null;
+    if (!row || !sb?.success) return this.sendError(ws, ref, "not_found", "eso no es un marcador");
+    const key = activityKey(row.owner, sb.data.id);
+    const rows =
+      sb.data.kind === "race"
+        ? this.sql
+            .exec<{ name: string; player_no: number | null; value: number; ts: number }>(
+              "SELECT name, player_no, ms AS value, ts FROM act_race_best WHERE race_key = ? ORDER BY ms ASC, ts ASC LIMIT ?",
+              key, SCORES_LIMIT,
+            )
+            .toArray()
+        : this.sql
+            .exec<{ name: string; player_no: number | null; value: number; ts: number }>(
+              "SELECT name, player_no, ts AS value, ts FROM act_hunt_done WHERE set_key = ? ORDER BY ts ASC LIMIT ?",
+              key, SCORES_LIMIT,
+            )
+            .toArray();
+    this.send(
+      ws,
+      msg("SCORES", {
+        entity_id: entityId,
+        kind: sb.data.kind,
+        rows: rows.map((r) => ({ name: r.name, ...(r.player_no !== null ? { player_no: r.player_no } : {}), value: r.value, ts: r.ts })),
+      }),
+    );
+  }
+
   async chatOf(sender: string) {
     this.ensureChunk(null);
     return this.sql.exec("SELECT id, ts, display_name, text, hidden FROM chat WHERE sender = ? ORDER BY ts", sender).toArray();

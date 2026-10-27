@@ -682,6 +682,80 @@ await scenario("distrito de la comunidad: la ficha se comprueba, queda en borrad
   }
 });
 
+await scenario("actividades: el servidor comprueba la cercanía, el orden y el reloj; guarda lo recogido, los tiempos y los marcadores", async () => {
+  if (!adminKey) return console.log("    (sin XENXO_ADMIN_KEY: se omite: las actividades de prueba las pone la administración)");
+  const chunkId = "c_-1_-1";
+  const tag = randomUUID().slice(0, 6);
+  const admin = await XenxoClient.connect({ baseUrl, chunkId, agentKey: adminKey });
+  const put = async (p: number[], extra: Record<string, unknown>) => {
+    const r = await admin.mutate({ op: "SPAWN", components: { "transform@1": { p, r: [0, 0, 0, 1], s: [1, 1, 1], parent: null }, ...extra } });
+    assert(r.type === "ACK", `spawn de actividad: ${JSON.stringify(r.payload)}`);
+    return (r.payload as { entity_id: string }).entity_id;
+  };
+  const prim = { "primitive@1": { shape: "sphere", size: [0.6, 0.6, 0.6], color: "#ffd54f", emissive: true } };
+  const a = await put([10, 1, 10], { ...prim, "collectible@1": { set: `h${tag}` } });
+  const b = await put([20, 1, 10], { ...prim, "collectible@1": { set: `h${tag}` } });
+  const start = await put([0, 0, 100], { "checkpoint@1": { race: `r${tag}`, role: "start" } });
+  const cp = await put([0, 0, 110], { "checkpoint@1": { race: `r${tag}`, role: "cp", order: 1 } });
+  const fin = await put([0, 0, 120], { "checkpoint@1": { race: `r${tag}`, role: "finish" } });
+  const boardRace = await put([5, 2, 100], { "scoreboard@1": { kind: "race", id: `r${tag}` } });
+  const boardHunt = await put([5, 2, 110], { "scoreboard@1": { kind: "hunt", id: `h${tag}` } });
+  admin.close();
+
+  const guest = await XenxoClient.connect({ baseUrl, chunkId });
+  const g = await guest.activity("COLLECT", a);
+  assert(g.type === "ERROR" && g.payload.code === "forbidden", "un invitado no guarda lo que recoge");
+  guest.close();
+
+  const api = new Api(baseUrl);
+  const name = `conf ${randomUUID().slice(0, 6)}`;
+  await api.register(name);
+  const u = await XenxoClient.connect({ baseUrl, chunkId, token: api.token });
+  const at = async (p: [number, number, number]) => {
+    u.pose(p);
+    await new Promise((r) => setTimeout(r, 260));
+  };
+  await at([10, 1.6, 10]);
+  const c1 = await u.activity("COLLECT", a);
+  assert(c1.type === "COLLECTED" && c1.payload.count === 1 && c1.payload.total === 2 && !c1.payload.complete, `recoger el primero → 1 de 2 (${JSON.stringify(c1.payload)})`);
+  const far = await u.activity("COLLECT", b);
+  assert(far.type === "ERROR" && far.payload.code === "forbidden", "de lejos no se recoge");
+  await at([20, 1.6, 10]);
+  const c2 = await u.activity("COLLECT", b);
+  assert(c2.type === "COLLECTED" && c2.payload.count === 2 && c2.payload.complete, "el segundo completa la búsqueda");
+
+  // Carrera: demasiado rápida → se anula; a un ritmo posible → tiempo, mejor marca y puesto.
+  await at([0, 1.6, 100]);
+  const s1 = await u.activity("CHECKPOINT", start);
+  assert(s1.type === "RACE" && s1.payload.state === "start" && s1.payload.total === 1, "la salida empieza la carrera");
+  await at([0, 1.6, 110]);
+  const k1 = await u.activity("CHECKPOINT", cp);
+  assert(k1.type === "RACE" && k1.payload.state === "cp" && k1.payload.next === 2, "el punto que toca avanza");
+  await at([0, 1.6, 120]);
+  const fast = await u.activity("CHECKPOINT", fin);
+  assert(fast.type === "RACE" && fast.payload.state === "reset", "llegar antes de lo posible anula la carrera");
+  await at([0, 1.6, 100]);
+  await u.activity("CHECKPOINT", start);
+  await at([0, 1.6, 110]);
+  await u.activity("CHECKPOINT", cp);
+  await new Promise((r) => setTimeout(r, 1400));
+  await at([0, 1.6, 120]);
+  const done = await u.activity("CHECKPOINT", fin);
+  assert(done.type === "RACE" && done.payload.state === "finish" && (done.payload.ms ?? 0) >= 1400 && done.payload.rank === 1, `meta: tiempo y puesto (${JSON.stringify(done.payload)})`);
+  const sr = await u.activity("SCORES_GET", boardRace);
+  assert(sr.type === "SCORES" && sr.payload.rows[0]?.name === name && sr.payload.rows[0]?.value === done.payload.best, "el marcador de la carrera");
+  const sh = await u.activity("SCORES_GET", boardHunt);
+  assert(sh.type === "SCORES" && sh.payload.rows.some((r) => r.name === name), "el marcador de la búsqueda");
+  u.close();
+
+  const again = await XenxoClient.connect({ baseUrl, chunkId, token: api.token });
+  const prog = await again.next("PROGRESS");
+  assert(prog.payload.collected.includes(a) && prog.payload.collected.includes(b) && prog.payload.best[start] === done.payload.best, "al volver, PROGRESS dice lo que ya tiene");
+  again.close();
+  const exp = await api.call<{ activities: { chunk: string; collected: unknown[] }[] }>("GET", "/me/export");
+  assert(exp.ok && exp.data.activities.some((x) => x.chunk === chunkId && x.collected.length === 2), "la exportación incluye las actividades");
+});
+
 await scenario("distrito grande: WELCOME.walk de 256 m y cada uno recibe solo las poses de quien tiene cerca", async () => {
   const chunkId = "c_0_-1";
   const a = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-lejos-a" });

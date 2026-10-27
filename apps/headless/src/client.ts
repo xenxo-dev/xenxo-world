@@ -156,6 +156,18 @@ export class XenxoClient {
     return reply;
   }
 
+  /**
+   * Actividades: COLLECT, CHECKPOINT o SCORES_GET sobre una entidad; resuelve con su respuesta
+   * (COLLECTED, RACE o SCORES) o con el ERROR. Un punto de carrera fuera de orden no responde nada.
+   */
+  async activity(type: "COLLECT" | "CHECKPOINT" | "SCORES_GET", entity_id: string, timeoutMs = 3000) {
+    const id = randomUUID();
+    const want = type === "COLLECT" ? "COLLECTED" : type === "CHECKPOINT" ? "RACE" : "SCORES";
+    const reply = this.either((m) => m.type === want || (m.type === "ERROR" && m.payload.ref === id), timeoutMs, `timeout esperando ${want}`);
+    this.sendRaw(msg(type, { entity_id }, { id }));
+    return reply;
+  }
+
   /** Envía un mensaje de chat y resuelve con el CHAT_MSG propio o con el ERROR. */
   async chat(text: string) {
     const id = randomUUID();

@@ -20,6 +20,7 @@ import { Skyline } from "./Skyline";
 import { NexoBackdrop } from "./NexoBackdrop";
 import { NexoCity } from "./NexoCity";
 import { DistrictSkyline } from "./DistrictSkyline";
+import { Activities } from "./Activities";
 import skyDay from "./sky-day.json";
 
 /** Una sola tienda XR para toda la app. Activa foveation para ganar rendimiento en Quest. */
@@ -320,6 +321,7 @@ function Scene({ active }: { active: boolean }) {
       <Suspense fallback={null}>
         <Entities features={f} ambience={ambience} />
         <Portals features={f} active={active} />
+        {!inNexo && <Activities />}
         <Avatars />
       </Suspense>
       <Player active={active} />

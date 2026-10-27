@@ -214,6 +214,41 @@ export const HologramV1 = z.object({
   opacity: z.number().min(0.05).max(1).default(0.6),
 });
 
+/* --- Actividades (búsquedas, carreras y marcadores). Las valida el servidor del lugar. --- */
+
+/** Nombre corto de una búsqueda o una carrera (único por dueño dentro del lugar). */
+export const ActivityId = z.string().regex(/^[a-z0-9_-]{1,32}$/);
+
+/**
+ * Objeto de una búsqueda: se recoge al acercarse (`radius` m). El cliente avisa con COLLECT y el
+ * servidor comprueba que la pose de esa sesión esté cerca de verdad. Cada cuenta lleva su cuenta;
+ * lo recogido deja de dibujarse para quien ya lo tiene. Lo que se ve es su `mesh@1` o `primitive@1`.
+ */
+export const CollectibleV1 = z.object({
+  set: ActivityId,
+  radius: z.number().min(0.5).max(5).default(1.5),
+});
+
+/**
+ * Punto de una carrera: `start` (salida), `cp` (en orden por `order`, desde 1) y `finish` (meta).
+ * El cliente avisa con CHECKPOINT al entrar en el círculo de `radius` m; el tiempo lo mide el
+ * servidor, que exige el orden y la cercanía y rechaza lo imposible de rápido.
+ */
+export const CheckpointV1 = z.object({
+  race: ActivityId,
+  role: z.enum(["start", "cp", "finish"]),
+  order: z.number().int().min(0).max(63).default(0),
+  radius: z.number().min(0.5).max(8).default(2.5),
+});
+
+/** Marcador de una carrera o una búsqueda de este lugar (y del mismo dueño). El cliente pide SCORES. */
+export const ScoreboardV1 = z.object({
+  kind: z.enum(["race", "hunt"]),
+  id: ActivityId,
+  /** Tamaño del panel (ancho × alto, m). */
+  size: z.tuple([z.number().min(1).max(12), z.number().min(1).max(8)]).default([4, 3]),
+});
+
 /** Reservado en v0: el servidor lo rechaza hasta que exista el sandbox WASM. */
 export const BehaviorV1 = z.object({
   module: Hash,
@@ -232,6 +267,9 @@ export const COMPONENTS = {
   "light@1": LightV1,
   "portal@1": PortalV1,
   "hologram@1": HologramV1,
+  "collectible@1": CollectibleV1,
+  "checkpoint@1": CheckpointV1,
+  "scoreboard@1": ScoreboardV1,
   "behavior@1": BehaviorV1,
 } as const;
 
@@ -245,6 +283,9 @@ export const ACCEPTED_IN_V0: readonly ComponentKey[] = [
   "light@1",
   "portal@1",
   "hologram@1",
+  "collectible@1",
+  "checkpoint@1",
+  "scoreboard@1",
 ];
 
 /**
@@ -261,6 +302,9 @@ export const ComponentsStrict = z
     "light@1": LightV1.optional(),
     "portal@1": PortalV1.optional(),
     "hologram@1": HologramV1.optional(),
+    "collectible@1": CollectibleV1.optional(),
+    "checkpoint@1": CheckpointV1.optional(),
+    "scoreboard@1": ScoreboardV1.optional(),
     "behavior@1": BehaviorV1.optional(),
   })
   .strict();
@@ -385,7 +429,12 @@ export const PingMsg = envelope("PING", z.object({ t: z.number() }));
 /** Chat de la plaza. Solo personas registradas y agentes; los invitados lo leen. */
 export const ChatMsg = envelope("CHAT", z.object({ text: z.string().min(1).max(BUDGETS.maxChatChars) }));
 
-export const ClientMessage = z.discriminatedUnion("type", [HelloMsg, PoseMsg, MutateWorldMsg, PingMsg, ChatMsg]);
+/** Actividades: «estoy en este objeto / este punto de carrera» y «dame el marcador». */
+export const CollectMsg = envelope("COLLECT", z.object({ entity_id: EntityId }));
+export const CheckpointMsg = envelope("CHECKPOINT", z.object({ entity_id: EntityId }));
+export const ScoresRequestMsg = envelope("SCORES_GET", z.object({ entity_id: EntityId }));
+
+export const ClientMessage = z.discriminatedUnion("type", [HelloMsg, PoseMsg, MutateWorldMsg, PingMsg, ChatMsg, CollectMsg, CheckpointMsg, ScoresRequestMsg]);
 export type ClientMessage = z.infer<typeof ClientMessage>;
 
 /* --- servidor → cliente --- */
@@ -496,7 +545,51 @@ export const ChatBroadcastMsg = envelope("CHAT_MSG", ChatMessage);
 /** Moderación: un mensaje retirado. */
 export const ChatRemovedMsg = envelope("CHAT_REMOVED", z.object({ id: z.string() }));
 
+/** Lo que esta cuenta ya tiene en este lugar (tras el SNAPSHOT; solo personas registradas). */
+export const ProgressMsg = envelope(
+  "PROGRESS",
+  z.object({
+    collected: z.array(EntityId),
+    /** Mejor tiempo (ms) de cada carrera de este lugar, por la entidad de su salida. */
+    best: z.record(z.string(), z.number().int().nonnegative()),
+  }),
+);
+/** Un objeto recogido: cuántos lleva de su búsqueda y si la ha completado. */
+export const CollectedMsg = envelope(
+  "COLLECTED",
+  z.object({ entity_id: EntityId, set: ActivityId, count: z.number().int(), total: z.number().int(), complete: z.boolean() }),
+);
+/**
+ * Estado de la carrera de esta sesión: `start` (el servidor empieza a contar), `cp` (`next` = el
+ * siguiente punto que toca), `finish` (`ms`, `best` y `rank` en el marcador) o `reset` (se canceló).
+ */
+export const RaceMsg = envelope(
+  "RACE",
+  z.object({
+    race: ActivityId,
+    state: z.enum(["start", "cp", "finish", "reset"]),
+    next: z.number().int().optional(),
+    total: z.number().int().optional(),
+    ms: z.number().int().nonnegative().optional(),
+    best: z.number().int().nonnegative().optional(),
+    rank: z.number().int().positive().optional(),
+  }),
+);
+/** Marcador (los 10 primeros): tiempo en ms en las carreras; fecha en la que se completó, en las búsquedas. */
+export const ScoresMsg = envelope(
+  "SCORES",
+  z.object({
+    entity_id: EntityId,
+    kind: z.enum(["race", "hunt"]),
+    rows: z.array(z.object({ name: z.string(), player_no: z.number().int().min(0).optional(), value: z.number(), ts: z.number() })),
+  }),
+);
+
 export const ServerMessage = z.discriminatedUnion("type", [
+  ProgressMsg,
+  CollectedMsg,
+  RaceMsg,
+  ScoresMsg,
   WelcomeMsg,
   SnapshotMsg,
   DeltaMsg,

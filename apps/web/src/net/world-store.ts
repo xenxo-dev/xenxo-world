@@ -5,6 +5,7 @@
  * lee en useFrame. React solo se entera de cambios ESTRUCTURALES (entra/sale
  * una entidad o un avatar), nunca de cada pose.
  */
+import { activity, ACTIVITY_REF } from "./activity-store";
 import { useSyncExternalStore } from "react";
 import { CHUNK_SIZE, PLACES, type AvatarPose, type ChatMessage, type Entity, type Peer, type ServerMessage } from "@xenxo/protocol";
 import type { ConnectionStatus } from "./NetworkAdapter";
@@ -87,6 +88,7 @@ class WorldStore {
     this.peers.clear();
     this.poseBuffers.clear();
     chat.reset([]);
+    activity.reset();
     this.bump();
   }
 
@@ -141,7 +143,15 @@ class WorldStore {
       case "CHAT_REMOVED":
         chat.remove(m.payload.id);
         break;
+      case "PROGRESS":
+      case "COLLECTED":
+      case "RACE":
+      case "SCORES":
+        activity.apply(m);
+        break;
       case "ERROR":
+        // Los avisos de actividad (demasiado lejos, fuera de orden…) no son errores para el chat.
+        if (m.payload.ref?.startsWith(ACTIVITY_REF)) break;
         this.lastError = `${m.payload.code}: ${m.payload.message}`;
         console.warn("[xenxo]", this.lastError, m.payload.detail ?? "");
         if (m.payload.code === "rate_limited" || m.payload.code === "forbidden") chat.notice(m.payload.code);

@@ -6,6 +6,7 @@ import { HologramV1, LabelV1, labelText, LightV1, MeshV1, PLACES, PrimitiveV1, T
 import { assetUrl } from "../config";
 import { useLang } from "../i18n";
 import { useWorldVersion, world } from "../net/world-store";
+import { useCollected } from "../net/activity-store";
 import { FONT_URL, NEON_FONT_URL, SIGN_FONT_URL } from "./font";
 import type { Ambience, Features } from "./graphics";
 import { useFrame } from "@react-three/fiber";
@@ -453,12 +454,14 @@ function Fader({ max, children }: { max: number; children: ReactNode }) {
 export function Entities({ features, ambience }: { features: Features; ambience: Ambience }) {
   useWorldVersion();
   useNearby();
+  // Lo que esta cuenta ya ha recogido en una búsqueda deja de dibujarse.
+  const collected = useCollected();
   const lang = useLang();
   const dim = world.chunkId === PLACES.nexo ? NEXO_DIM : 1;
   return (
     <>
       <HologramClock />
-      {[...world.entities.values()].filter((e) => isNear(e.entity_id)).map((e) => (
+      {[...world.entities.values()].filter((e) => isNear(e.entity_id) && !collected.has(e.entity_id)).map((e) => (
         <EntityView key={`${e.entity_id}:${e.rev}`} entity={e} lang={lang} features={features} ambience={ambience} dim={dim} />
       ))}
     </>
