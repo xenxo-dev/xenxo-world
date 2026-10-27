@@ -20,7 +20,7 @@ portátil: xenxo-relevo.timer ve la marca RELEVO ──▶ para su túnel y su s
 
 ## 1. Preparar el NAS (una vez)
 
-1. **DSM 7.2** con **Container Manager** (Centro de paquetes). En DSM 7.1 se llama «Docker» y vale igual.
+1. El paquete **Docker** (DSM 7.1; en DSM 7.2 se llama Container Manager). El DS1815+ ya lo tiene.
 2. Carpeta compartida `xenxo-distritos` en `volume1`. Permisos: lectura y escritura para el portátil.
 3. **NFS** (Panel de control → Servicios de archivos → NFS → activar) y en la carpeta, **Permisos NFS**:
    IP del portátil, lectura/escritura, «Asignar todos los usuarios a admin». En el portátil:

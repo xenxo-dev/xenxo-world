@@ -8,8 +8,8 @@ BASE=${XENXO_NAS_DIR:-$(cd "$(dirname "$0")/.." && pwd)}
 HERE="$BASE/relevo"
 [ -e "$BASE/RELEVO" ] || { echo "el NAS no tiene el relevo: nada que devolver"; exit 1; }
 touch "$HERE/PARADO"   # el vigía no lo vuelve a levantar
-if docker compose version >/dev/null 2>&1; then docker compose -f "$HERE/docker-compose.yml" down
-else docker-compose -f "$HERE/docker-compose.yml" down; fi
+if docker compose version >/dev/null 2>&1; then docker compose -p xenxo-relevo -f "$HERE/docker-compose.yml" down
+else docker-compose -p xenxo-relevo -f "$HERE/docker-compose.yml" down; fi
 rm -rf "$BASE/devuelto"
 cp -a "$HERE/datos" "$BASE/devuelto"
 date -Is > "$BASE/devuelto/HECHA"

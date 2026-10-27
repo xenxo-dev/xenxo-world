@@ -16,8 +16,8 @@ COUNT="$HERE/.fallos"
 LOG="$HERE/vigia.log"
 
 compose() {
-  if docker compose version >/dev/null 2>&1; then docker compose -f "$HERE/docker-compose.yml" "$@"
-  else docker-compose -f "$HERE/docker-compose.yml" "$@"; fi
+  if docker compose version >/dev/null 2>&1; then docker compose -p xenxo-relevo -f "$HERE/docker-compose.yml" "$@"
+  else docker-compose -p xenxo-relevo -f "$HERE/docker-compose.yml" "$@"; fi
 }
 log() { echo "$(date -Is) $*" >> "$LOG"; }
 

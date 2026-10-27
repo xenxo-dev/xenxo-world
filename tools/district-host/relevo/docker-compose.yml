@@ -6,7 +6,9 @@
 #   bundle/          el mismo servidor que el portátil (lo copia update.sh en cada actualización)
 #   ultima/          la última copia de los distritos (cada 15 min)
 #   relevo/          esta carpeta: este archivo, los scripts, distritos.env, tunel.env y datos/
-name: xenxo-relevo
+# El DS1815+ lleva DSM 7.1 con el paquete Docker (docker-compose 1.x): por eso `version` y el nombre
+# del proyecto va en los scripts (-p xenxo-relevo).
+version: "3.8"
 services:
   distritos:
     image: debian:bookworm-slim
