@@ -1,5 +1,5 @@
 {
-  "$comment": "Actividades del sistema en cada distrito (coordenadas del chunk: X este, Z sur, metros). Las siembra districts.ts como entidades con dueño `system` (collectible@1, checkpoint@1, scoreboard@1), sus carreras (`races`: salida, puntos y meta), placas de impulso (`boosts`), máquinas-portal (`cabinets`, las llena el Worker con los juegos del distrito), carteles (`labels`), tableros de baldosas (`tiles`) y su atrezo modelado (`props`: pieza de seed-assets, posición, giro y caja de colisión). Las posiciones salen del diseño de cada ciudad (tools/forge/cero.py…): si mueves la ciudad, revisa esto. Los textos van como datos (`note`, `title`) en ES y EN.",
+  "$comment": "Actividades del sistema en cada distrito (coordenadas del chunk: X este, Z sur, metros). Las siembra districts.ts como entidades con dueño `system` (collectible@1, checkpoint@1, scoreboard@1), sus carreras (`races`: salida, puntos y meta), placas de impulso (`boosts`), máquinas-portal (`cabinets`, las llena el Worker con los juegos del distrito), carteles (`labels`), tableros de baldosas (`tiles`), la zona de pruebas (`sandbox`: rectángulo donde cualquier cuenta construye con piezas básicas; se vacía cada día) y su atrezo modelado (`props`: pieza de seed-assets, posición, giro y caja de colisión). Las posiciones salen del diseño de cada ciudad (tools/forge/cero.py…): si mueves la ciudad, revisa esto. Los textos van como datos (`note`, `title`) en ES y EN.",
   "cero": {
     "hunts": [
       {
@@ -1260,6 +1260,112 @@
           38
         ],
         "yaw": -90
+      }
+    ]
+  },
+  "taller": {
+    "sandbox": {
+      "x0": 20.5,
+      "z0": 57.5,
+      "x1": 43.5,
+      "z1": 80.5,
+      "max_y": 10,
+      "per_person": 30,
+      "lights": 2
+    },
+    "labels": [
+      {
+        "text": {
+          "es": "PUBLICA TU PROYECTO\nPanel → Proyectos → Publicar el mío: nombre, enlace, distrito, parcela libre, portada y monumento.",
+          "en": "PUBLISH YOUR PROJECT\nPanel → Projects → Publish mine: name, link, district, free plot, cover and monument."
+        },
+        "p": [
+          22.564,
+          2.2,
+          22.564
+        ],
+        "yaw": 45,
+        "size": 0.16,
+        "width": 3.3,
+        "style": "sign",
+        "max_distance": 18
+      },
+      {
+        "text": {
+          "es": "CONSTRUYE CON TU AGENTE\nPanel → Agentes: pide la clave xk_ de tu parcela y conecta a tu agente el servidor MCP de xenxo.",
+          "en": "BUILD WITH YOUR AGENT\nPanel → Agents: get your plot's xk_ key and connect the xenxo MCP server to your agent."
+        },
+        "p": [
+          41.436,
+          2.2,
+          22.564
+        ],
+        "yaw": -45,
+        "size": 0.16,
+        "width": 3.3,
+        "style": "sign",
+        "max_distance": 18
+      },
+      {
+        "text": {
+          "es": "HAZ UN JUEGO\nnpm create xenxo: plantilla 2D o 3D con «Entrar con xenxo». Publícalo y tendrá su portal aquí.",
+          "en": "MAKE A GAME\nnpm create xenxo: a 2D or 3D template with “Sign in with xenxo”. Publish it and it gets its portal here."
+        },
+        "p": [
+          22.564,
+          2.2,
+          41.436
+        ],
+        "yaw": 135,
+        "size": 0.16,
+        "width": 3.3,
+        "style": "sign",
+        "max_distance": 18
+      },
+      {
+        "text": {
+          "es": "HAZ TU DISTRITO\nnpm create xenxo --district, compruébalo con xenxo-district y súbelo en Panel → Cuenta → Tu distrito.",
+          "en": "MAKE YOUR DISTRICT\nnpm create xenxo --district, check it with xenxo-district and upload it in Panel → Account → Your district."
+        },
+        "p": [
+          41.436,
+          2.2,
+          41.436
+        ],
+        "yaw": -135,
+        "size": 0.16,
+        "width": 3.3,
+        "style": "sign",
+        "max_distance": 18
+      },
+      {
+        "text": {
+          "es": "ZONA DE PRUEBAS",
+          "en": "TEST ZONE"
+        },
+        "p": [
+          32,
+          4.45,
+          57.3
+        ],
+        "yaw": 180,
+        "size": 0.42
+      },
+      {
+        "text": {
+          "es": "Construye aquí con tu cuenta · se vacía cada día",
+          "en": "Build here with your account · cleared every day"
+        },
+        "p": [
+          32,
+          3.25,
+          57.25
+        ],
+        "yaw": 180,
+        "size": 0.2,
+        "style": "sign",
+        "width": 5,
+        "max_distance": 25
       }
     ]
   }

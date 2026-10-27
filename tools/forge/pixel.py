@@ -30,24 +30,25 @@ def board(p: Part, detail: int) -> None:
     w = COLS * TILE
     x0, z0 = CX - w / 2, CZ - w / 2
     slab = mat("azulejo", "#1d2033")
-    _box(p, x0 - 0.4, z0 - 0.4, x0 + w + 0.4, z0 + w + 0.4, 0, 0.04, mat("metal", "#14161f"))
+    # Por encima de la plaza (0,06 m) con holgura: sin capas a la misma altura (z-fighting).
+    _box(p, x0 - 0.4, z0 - 0.4, x0 + w + 0.4, z0 + w + 0.4, 0.075, 0.09, mat("metal", "#14161f"))
     gap = 0.12
     for r in range(ROWS):
         for c in range(COLS):
             a, b = x0 + c * TILE + gap, z0 + r * TILE + gap
-            _box(p, a, b, a + TILE - 2 * gap, b + TILE - 2 * gap, 0.04, 0.08, slab)
+            _box(p, a, b, a + TILE - 2 * gap, b + TILE - 2 * gap, 0.09, 0.12, slab)
     # Marco de luz del tablero (blanco cálido) y un filo de color por lado.
     line = mat("neon", "#cfe8ff")
     t = 0.08
     for k in range(COLS + 1):
         x = x0 + k * TILE
-        _box(p, x - t / 2, z0, x + t / 2, z0 + w, 0.04, 0.06, line)
+        _box(p, x - t / 2, z0, x + t / 2, z0 + w, 0.09, 0.105, line)
     for k in range(ROWS + 1):
         z = z0 + k * TILE
-        _box(p, x0, z - t / 2, x0 + w, z + t / 2, 0.04, 0.06, line)
+        _box(p, x0, z - t / 2, x0 + w, z + t / 2, 0.09, 0.105, line)
     for k, (a0, b0, a1, b1) in enumerate(((x0 - 0.4, z0 - 0.4, x0 + w + 0.4, z0 - 0.2), (x0 - 0.4, z0 + w + 0.2, x0 + w + 0.4, z0 + w + 0.4),
                                          (x0 - 0.4, z0 - 0.4, x0 - 0.2, z0 + w + 0.4), (x0 + w + 0.2, z0 - 0.4, x0 + w + 0.4, z0 + w + 0.4))):
-        _box(p, a0, b0, a1, b1, 0.04, 0.1, mat("neon", TINTS[k]))
+        _box(p, a0, b0, a1, b1, 0.09, 0.13, mat("neon", TINTS[k]))
 
 
 def heart(p: Part, detail: int) -> None:
@@ -66,7 +67,7 @@ def heart(p: Part, detail: int) -> None:
             _box(p, x, CZ - 0.5, x + s, CZ + 0.5, y, y + s, dark)
             _box(p, x + 0.06, CZ - 0.56, x + s - 0.06, CZ + 0.56, y + 0.06, y + s - 0.06, red)
     # Mástil fino de luz hasta el tablero (para que «flote» atado a la plaza).
-    _box(p, CX - 0.06, CZ - 0.06, CX + 0.06, CZ + 0.06, 0.08, HEART_Y, mat("neon", "#ff4f6d"))
+    _box(p, CX - 0.06, CZ - 0.06, CX + 0.06, CZ + 0.06, 0.12, HEART_Y, mat("neon", "#ff4f6d"))
 
 
 def colliders() -> list[list[float]]:

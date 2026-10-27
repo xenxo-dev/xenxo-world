@@ -32,6 +32,8 @@ const SEND_EVERY_MS = 200;
 const HEARTBEAT_MS = 1000;
 /** Dónde está el jugador ahora (lo leen los portales; se copia cada frame, sin crear objetos). */
 export const playerPos = new THREE.Vector3(...spawn.p);
+/** Hacia dónde mira (giro en radianes; adelante = (−sin, −cos)). Lo lee la zona de pruebas. */
+export const playerLook = { yaw: 0 };
 
 // Objetos reutilizados: nada de `new` dentro de useFrame (evita tirones del GC en Quest).
 const _fwd = new THREE.Vector3();
@@ -141,6 +143,7 @@ export function Player({ active }: { active: boolean }) {
         }
 
         _fwd.set(-Math.sin(l.yaw), 0, -Math.cos(l.yaw));
+        playerLook.yaw = l.yaw;
         _right.set(-_fwd.z, 0, _fwd.x);
         const amount = Math.min(1, Math.hypot(input.move.x, input.move.y));
         // En móvil, el joystick a tope también corre.

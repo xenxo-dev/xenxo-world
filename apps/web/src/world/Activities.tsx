@@ -222,7 +222,7 @@ function TileBoard({ entity }: { entity: Entity }) {
     const x0 = x + ox - (cols * size) / 2, z0 = z + oz - (rows * size) / 2;
     for (let r = 0; r < rows; r++)
       for (let c = 0; c < cols; c++) {
-        _tm.makeScale(size * 0.92, 1, size * 0.92).setPosition(x0 + (c + 0.5) * size, y + 0.1, z0 + (r + 0.5) * size);
+        _tm.makeScale(size * 0.92, 1, size * 0.92).setPosition(x0 + (c + 0.5) * size, y + 0.14, z0 + (r + 0.5) * size);
         im.setMatrixAt(r * cols + c, _tm);
       }
     im.instanceMatrix.needsUpdate = true;

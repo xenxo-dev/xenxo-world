@@ -6,6 +6,7 @@
  * una entidad o un avatar), nunca de cada pose.
  */
 import { activity, ACTIVITY_REF } from "./activity-store";
+import { sandbox, SANDBOX_REF } from "./sandbox";
 import { useSyncExternalStore } from "react";
 import { CHUNK_SIZE, PLACES, type AvatarPose, type ChatMessage, type Entity, type Peer, type ServerMessage } from "@xenxo/protocol";
 import type { ConnectionStatus } from "./NetworkAdapter";
@@ -150,9 +151,17 @@ class WorldStore {
       case "TILES":
         activity.apply(m);
         break;
+      case "ACK":
+        if (m.payload.ref?.startsWith(SANDBOX_REF)) sandbox.ack(m.payload.ref, m.payload.entity_id);
+        break;
       case "ERROR":
         // Los avisos de actividad (demasiado lejos, fuera de orden…) no son errores para el chat.
         if (m.payload.ref?.startsWith(ACTIVITY_REF)) break;
+        // Los de la zona de pruebas, a su panel.
+        if (m.payload.ref?.startsWith(SANDBOX_REF)) {
+          sandbox.error(m.payload.ref, m.payload.code, m.payload.message);
+          break;
+        }
         this.lastError = `${m.payload.code}: ${m.payload.message}`;
         console.warn("[xenxo]", this.lastError, m.payload.detail ?? "");
         if (m.payload.code === "rate_limited" || m.payload.code === "forbidden") chat.notice(m.payload.code);

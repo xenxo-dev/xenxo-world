@@ -20,6 +20,7 @@ from mathutils import Matrix
 
 import arcade
 import pixel
+import taller
 import cero
 import decor
 from kit import CHUNK, Part, finish, mat
@@ -93,6 +94,8 @@ def plan(lay: dict, d: dict) -> dict:
                 out["buildings"].append({"style": "house", "rect": [a, z0, b, midz - ALLEY / 2], "h": round(rnd.uniform(7, 11), 2), "q": 0})
                 out["buildings"].append({"style": "house", "rect": [a, midz + ALLEY / 2, b, z1], "h": round(rnd.uniform(7, 12), 2), "q": 2})
         elif theme == "taller":
+            if (i, j) == (1, 2):  # la zona de pruebas (taller.py): sin naves
+                lots = []
             for lot in lots:
                 out["buildings"].append({"style": "hall", "rect": lot, "h": round(rnd.uniform(10, 14), 2), "q": q})
         elif theme == "frontera":
@@ -112,7 +115,7 @@ def plan(lay: dict, d: dict) -> dict:
         for (px, pz, rot) in spots:
             if theme == "cero":
                 px, pz = cero.prop_shift(px, pz)
-            elif theme in ("arcade", "pixel"):  # el atrezo no tapa el callejón entre los dos edificios
+            elif theme in ("arcade", "pixel", "taller"):  # el atrezo no tapa el callejón ni la entrada de la zona de pruebas
                 if abs(px - (bx0 + bx1) / 2) < 0.01:
                     px += 6
                 if abs(pz - (bz0 + bz1) / 2) < 0.01:
@@ -139,6 +142,8 @@ def colliders(lay: dict, d: dict) -> list[list[float]]:
         boxes += cero.colliders()
     if d["id"] == "arcade":
         boxes += arcade.colliders()
+    if d["id"] == "taller":
+        boxes += taller.colliders()
     return boxes
 
 
@@ -360,6 +365,8 @@ def build(lay: dict, d: dict, detail: int = 1):
         arcade.build(p, [b for b in pl["buildings"] if b["style"] == "cabinet"], rnd, detail)
     if d["id"] == "pixel":
         pixel.build(p, detail)
+    if d["id"] == "taller":
+        taller.build(p, detail)
     for b in pl["buildings"]:
         if b["style"] == "cabinet":
             continue

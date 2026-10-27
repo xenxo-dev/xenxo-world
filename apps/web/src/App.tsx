@@ -9,6 +9,7 @@ import { Emotes } from "./hud/Emotes";
 import { People } from "./hud/People";
 import { PortalCard, TravelToast } from "./hud/PortalCard";
 import { ActivityHud } from "./hud/ActivityHud";
+import { SandboxTools } from "./hud/SandboxTools";
 import { errorText, placeName, t, useLang } from "./i18n";
 import { setGuestName as setSessionGuestName, startSession, travel } from "./net/session";
 import { completeGoogleReturn, refreshSession, useAccount } from "./net/account";
@@ -213,6 +214,7 @@ export function App() {
           <PortalCard />
           <TravelToast />
           <ActivityHud />
+          <SandboxTools />
           {/* Primera persona y gestos en una fila; en táctil, por encima del botón de saltar (o del
               joystick, si va a la derecha). */}
           <div

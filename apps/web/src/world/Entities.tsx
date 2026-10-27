@@ -21,7 +21,7 @@ const chunkOrigin = (chunkId: string) => world.offsetOf(chunkId);
  * Lo que no reconoce, no lo dibuja (compatibilidad hacia delante).
  */
 /** Si un modelo no carga (borrado, red), la entidad simplemente no lo dibuja; el resto del mundo sigue. */
-class SkipOnError extends Component<{ children: ReactNode }, { failed: boolean }> {
+export class SkipOnError extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() {
     return { failed: true };
@@ -164,7 +164,7 @@ function poolMaterial(color: string, strength: number) {
   return m;
 }
 /** Altura del suelo de la plaza; las luces más altas (balizas) no pintan charco. */
-const POOL_FLOOR_Y = 0.02;
+const POOL_FLOOR_Y = 0.09; // por encima de las capas del suelo de los distritos (hasta 0,072 m)
 const POOL_MAX_HEIGHT = 8;
 
 const EntityView = memo(function EntityView({

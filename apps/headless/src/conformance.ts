@@ -837,6 +837,30 @@ await scenario("Plaza tablero (Píxel): el servidor enciende una figura, cuenta 
   assert(exp.ok && exp.data.activities.some((x) => (x.daily_points ?? []).length > 0), "la exportación incluye los puntos");
 });
 
+await scenario("zona de pruebas (Taller): cualquier cuenta construye piezas básicas dentro, con tope; fuera o con modelos, no", async () => {
+  const chunkId = "c_0_-1";
+  const api = new Api(baseUrl);
+  await api.register(`conf sandbox ${randomUUID().slice(0, 6)}`);
+  const u = await XenxoClient.connect({ baseUrl, chunkId, token: api.token });
+  const T = (p: [number, number, number]) => ({ p, r: [0, 0, 0, 1], s: [1, 1, 1], parent: null });
+  const piece = (p: [number, number, number]) => ({ "transform@1": T(p), "primitive@1": { shape: "box", size: [1, 1, 1], color: "#ff4fd8" }, "collider@1": { shape: "box", half_extents: [0.5, 0.5, 0.5], trigger: false } });
+  const ok = await u.mutate({ op: "SPAWN", components: piece([30, 0.5, 68]) });
+  assert(ok.type === "ACK", `una caja dentro de la zona (${JSON.stringify(ok.payload)})`);
+  const out = await u.mutate({ op: "SPAWN", components: piece([30, 0.5, 40]) });
+  assert(out.type === "ERROR" && out.payload.code === "forbidden", "fuera de la zona, no");
+  const model = await u.mutate({ op: "SPAWN", components: { "transform@1": T([32, 0, 70]), "portal@1": { to: { kind: "chunk", chunk_id: "c_0_0" } } } });
+  assert(model.type === "ERROR", "un portal en la zona, no");
+  const guest = await XenxoClient.connect({ baseUrl, chunkId });
+  const g = await guest.mutate({ op: "SPAWN", components: piece([31, 0.5, 70]) });
+  assert(g.type === "ERROR" && g.payload.code === "forbidden", "un invitado no construye");
+  const steal = await guest.mutate({ op: "DESPAWN", entity_id: (ok as { payload: { entity_id: string } }).payload.entity_id, base_rev: 1 });
+  assert(steal.type === "ERROR", "nadie borra lo de otro");
+  guest.close();
+  const del = await u.mutate({ op: "DESPAWN", entity_id: (ok as { payload: { entity_id: string } }).payload.entity_id, base_rev: 1 });
+  assert(del.type === "ACK", "lo suyo sí lo borra");
+  u.close();
+});
+
 await scenario("distrito grande: WELCOME.walk de 256 m y cada uno recibe solo las poses de quien tiene cerca", async () => {
   const chunkId = "c_0_-1";
   const a = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-lejos-a" });

@@ -14,10 +14,11 @@ interface DistrictActivities {
   tiles?: { id: string; p: V3; cols: number; rows: number; size: number }[];
   boards?: { kind: "race" | "hunt"; id: string; p: V3; yaw: number; size: [number, number]; title?: { es: string; en: string } }[];
   props?: { piece: string; p: V3; yaw: number; half: V3 }[];
-  labels?: { text: { es: string; en: string }; p: V3; yaw: number; size: number; flat?: boolean }[];
+  labels?: { text: { es: string; en: string }; p: V3; yaw: number; size: number; flat?: boolean; style?: string; width?: number; max_distance?: number }[];
   races?: { id: string; radius: number; start: { p: V3; radius: number }; cps: V3[]; finish: { p: V3; radius: number } }[];
   boosts?: { p: V3; yaw: number; speed?: number; seconds?: number; radius?: number }[];
   cabinets?: { p: V3; yaw: number }[];
+  sandbox?: SandboxRect;
 }
 
 /**
@@ -119,6 +120,12 @@ export function parcelReserved(i: number) {
   const bx = at(s.x, s.z, s.facing, hw, 0, 0);
   const xs = [a[0], b[0], bx[0]], zs = [a[2], b[2]];
   return { x0: Math.min(...xs), x1: Math.max(...xs), z0: Math.min(...zs), z1: Math.max(...zs), y1: 3.6 };
+}
+
+/** Zona de pruebas de un distrito (Taller): rectángulo, altura y topes por persona. */
+export interface SandboxRect { x0: number; z0: number; x1: number; z1: number; max_y: number; per_person: number; lights: number }
+export function sandboxOf(id: string): SandboxRect | null {
+  return (activities as unknown as Record<string, DistrictActivities | undefined>)[id]?.sandbox ?? null;
 }
 
 /** Huecos de las máquinas-portal de un distrito (las llena el Worker con sus juegos: syncCabinets). */
@@ -228,9 +235,15 @@ export function districtSeed(d: District, toNexo: { p: V3; yaw: number }): Seede
     // la colisión ya la pone la ciudad (la peana de la escultura de Xen).
     if (pr.half[1] > 0) solid(`${d.id}_prop_${n + 1}_box`, [pr.p[0], r3(pr.p[1] + pr.half[1]), pr.p[2]], pr.half);
   });
-  (acts?.labels ?? []).forEach((lb, n) =>
-    label(`${d.id}_sign_${n + 1}`, lb.p, lb.flat ? multiply(yaw(lb.yaw), FLAT) : yaw(lb.yaw), lb.text.en, lb.text, lb.size),
-  );
+  (acts?.labels ?? []).forEach((lb, n) => {
+    label(`${d.id}_sign_${n + 1}`, lb.p, lb.flat ? multiply(yaw(lb.yaw), FLAT) : yaw(lb.yaw), lb.text.en, lb.text, lb.size);
+    // Estilo, ancho (texto en varias líneas) y distancia a la que se apaga, si los pide.
+    const e = out[out.length - 1]!;
+    const l = e.components["label@1"]!;
+    if (lb.style) l.style = lb.style;
+    if (lb.width) l.width = lb.width;
+    if (lb.max_distance) l.max_distance = lb.max_distance;
+  });
   /* --- Carreras: salida, puntos en orden y meta (checkpoint@1); placas de impulso (boost@1) --- */
   for (const rc of acts?.races ?? []) {
     const cp = (id: string, p: V3, role: "start" | "cp" | "finish", order: number, radius: number) =>

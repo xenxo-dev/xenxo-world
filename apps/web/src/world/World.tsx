@@ -7,7 +7,7 @@ import { XR, createXRStore, useXR } from "@react-three/xr";
 import { CHUNK_SIZE, PLACES } from "@xenxo/protocol";
 import { usePlace, usePlaceTheme, world } from "../net/world-store";
 import { Avatars } from "./Avatars";
-import { Entities } from "./Entities";
+import { Entities, SkipOnError } from "./Entities";
 import { graphics, useGraphics, type Ambience, type Features } from "./graphics";
 import { attachDesktopInput, input } from "./input";
 import { PhotoTaker } from "./Photo";
@@ -303,6 +303,9 @@ function Scene({ active }: { active: boolean }) {
   // versión de día y de noche. Los distritos usan la luz abierta del nexo.
   const ambience: Ambience = g.ambience;
   const profile: LightProfile = inPlaza ? ambience : ambience === "day" ? "nexoDay" : "nexo";
+  // Sombras del sol solo en la plaza (hecha para ellas): en los distritos, de 256 m y con torres de
+  // 60 m, el mapa de sombras no da para tanto y el suelo parpadea al andar (acné de sombra).
+  const lightFeatures = useMemo(() => (inPlaza ? f : { ...f, shadows: 0 as const }), [inPlaza, f]);
   // Sonido ambiente del lugar (sintetizado: ambient-audio.ts).
   const hint = usePlaceTheme();
   const soundTheme = inPlaza ? "plaza" : inNexo ? "nexo" : (DISTRICT_IDS.get(place) ?? hint?.id ?? "community");
@@ -326,12 +329,18 @@ function Scene({ active }: { active: boolean }) {
       {!inNexo && !inPlaza && <DistrictSkyline chunk={place} density={f.nexoCity} ambience={ambience} />}
       {!inNexo && !inPlaza && (
         <Suspense fallback={null}>
-          <Pedestrians chunk={place} count={f.pedestrians} />
-          <Traffic chunk={place} count={f.traffic} features={f} ambience={ambience} />
+          {/* Decorado: si un modelo no carga, se queda sin él (nunca tumba la escena). */}
+          <SkipOnError>
+            <Pedestrians chunk={place} count={f.pedestrians} />
+          </SkipOnError>
+          <SkipOnError>
+            <Traffic chunk={place} count={f.traffic} features={f} ambience={ambience} />
+          </SkipOnError>
         </Suspense>
       )}
-      <Lighting profile={profile} features={f} />
-      <Environment ambience={ambience} profile={profile} probe={f.probe} sky={dayEnv} />
+      <Lighting profile={profile} features={lightFeatures} />
+      {/* La sonda de reflejos es de la plaza: en los distritos se rehacía al cargar lo cercano al andar y los reflejos del suelo parpadeaban. */}
+      <Environment ambience={ambience} profile={profile} probe={inPlaza ? f.probe : 0} sky={dayEnv} />
       {/* Los textos cargan su fuente de forma asíncrona: que nunca bloqueen la escena ni el panel. */}
       <Suspense fallback={null}>
         <Entities features={f} ambience={ambience} />

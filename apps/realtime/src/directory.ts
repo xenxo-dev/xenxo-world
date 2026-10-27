@@ -1226,6 +1226,11 @@ export class Directory extends DurableObject<Env> {
     return ok({ player_no: no, moderator: on });
   }
 
+  /** Registro (DSA) de una decisión tomada fuera del Directory (vaciar la zona de pruebas). */
+  logModeration(moderator: string, action: string, targetId: string, note: string | null) {
+    this.logDecision(moderator, action, "district", targetId, note);
+  }
+
   private logDecision(moderator: string, action: string, targetType: string, targetId: string, note: string | null) {
     this.sql.exec(
       "INSERT INTO moderation_log (ts, moderator, action, target_type, target_id, note) VALUES (?, ?, ?, ?, ?, ?)",

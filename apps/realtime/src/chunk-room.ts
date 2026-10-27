@@ -33,7 +33,7 @@ import {
 import type { Env } from "./index";
 import { randomId, type Principal } from "./auth";
 import { plazaSeed, SEED_VERSION } from "./seed";
-import { cabinetSlots, DISTRICT_BOUNDS, districtByChunk, districtSeed, DISTRICT_SEED_VERSION, migrateParcelPose, migrateSlot, PARCEL_LAYOUT_VERSION, PARCELS, parcelIndex, parcelReserved, parcelSlot } from "./districts";
+import { cabinetSlots, sandboxOf, type SandboxRect, DISTRICT_BOUNDS, districtByChunk, districtSeed, DISTRICT_SEED_VERSION, migrateParcelPose, migrateSlot, PARCEL_LAYOUT_VERSION, PARCELS, parcelIndex, parcelReserved, parcelSlot } from "./districts";
 import { nexoArrival, NEXO_BOUNDS, NEXO_SEED_VERSION, nexoSeed, SHOWCASE_SLOTS } from "./nexo";
 import { at, portalEntities, r3, yaw, type Seeded } from "./places";
 
@@ -182,6 +182,7 @@ export class ChunkRoom extends DurableObject<Env> {
       CREATE INDEX IF NOT EXISTS chat_ts ON chat (ts);
       ${ACTIVITY_SCHEMA}
       ${TILES_SCHEMA}
+      CREATE TABLE IF NOT EXISTS sandbox (entity_id TEXT PRIMARY KEY, owner TEXT NOT NULL, day TEXT NOT NULL, light INTEGER NOT NULL DEFAULT 0);
     `);
   }
 
@@ -505,13 +506,16 @@ export class ChunkRoom extends DurableObject<Env> {
   ) {
     const actor = att.principal.sub;
     const zone = att.principal.zone;
+    // Zona de pruebas (Taller): cualquier cuenta construye allí con piezas básicas, sin clave.
+    const sandbox = !zone && att.principal.kind === "user" && !att.principal.scopes.includes("build") ? this.sandboxRect() : null;
     try {
       // Los triángulos de un modelo NO se creen al cliente: se leen de lo que midió el servidor al subirlo.
       const resolved = await this.resolveAssets(p.mutation);
       p.mutation = resolved.mu;
       // Un PATCH en una parcela que no cambia el modelo: sus medidas, las del que ya lleva.
       if (zone && p.mutation.op === "PATCH" && !p.mutation.components["mesh@1"]) resolved.meshBounds = await this.boundsOfEntity(p.mutation.entity_id);
-      if (!att.principal.scopes.includes("build")) throw new MutationError("forbidden", "esta sesión no tiene permiso de construcción");
+      if (!att.principal.scopes.includes("build") && !sandbox) throw new MutationError("forbidden", "esta sesión no tiene permiso de construcción");
+      if (sandbox && p.mutation.op !== "DESPAWN" && p.mutation.components["mesh@1"]) throw new MutationError("forbidden", "en la zona de pruebas solo hay piezas básicas");
       if (zone && zone.chunk_id !== this.chunkId) {
         throw new MutationError("forbidden", `esta clave solo construye en su parcela (${zone.district} ${zone.parcel})`, { zone });
       }
@@ -526,7 +530,9 @@ export class ChunkRoom extends DurableObject<Env> {
 
       this.rateLimit(actor);
       const result = this.ctx.storage.transactionSync(() => {
-        const r = this.applyMutation(actor, att.principal.scopes.includes("admin"), p.mutation, zone ? { ...zone, meshBounds: resolved.meshBounds } : null);
+        const r = sandbox
+          ? this.applySandbox(actor, p.mutation, sandbox)
+          : this.applyMutation(actor, att.principal.scopes.includes("admin"), p.mutation, zone ? { ...zone, meshBounds: resolved.meshBounds } : null);
         this.sql.exec("INSERT INTO idem (key, result, ts) VALUES (?, ?, ?)", idemKey, JSON.stringify({ entity_id: r.entity_id, rev: r.rev }), Date.now());
         return r;
       });
@@ -538,6 +544,75 @@ export class ChunkRoom extends DurableObject<Env> {
       console.error("mutation failed", e);
       return this.sendError(ws, ref, "bad_message", "error interno al aplicar la mutación");
     }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Zona de pruebas (Taller): piezas básicas, tope por persona, cada día limpia */
+  /* ---------------------------------------------------------------- */
+
+  private sandboxRect(): SandboxRect | null {
+    const d = this.chunkId ? districtByChunk(this.chunkId) : null;
+    return d ? sandboxOf(d.id) : null;
+  }
+
+  /** Lo de días anteriores se va (la primera vez que algo toca la zona cada día). */
+  private sweepSandbox(): { kind: "remove"; entity_id: string }[] {
+    const today = pointsDay();
+    if (this.sql.exec<{ v: string }>("SELECT v FROM meta WHERE k = 'sandbox_day'").toArray()[0]?.v === today) return [];
+    const old = this.sql.exec<{ entity_id: string }>("SELECT entity_id FROM sandbox WHERE day != ?", today).toArray().map((r) => r.entity_id);
+    const out = this.despawnIds(old, "sandbox_daily");
+    this.sql.exec("DELETE FROM sandbox WHERE day != ?", today);
+    this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('sandbox_day', ?)", today);
+    return out;
+  }
+
+  /** Vacía la zona de pruebas (moderación). */
+  async clearSandbox(): Promise<{ removed: number }> {
+    this.ensureChunk(null);
+    const ids = this.sql.exec<{ entity_id: string }>("SELECT entity_id FROM sandbox").toArray().map((r) => r.entity_id);
+    const changes = this.ctx.storage.transactionSync(() => {
+      const out = this.despawnIds(ids, "sandbox_cleared");
+      this.sql.exec("DELETE FROM sandbox");
+      return out;
+    });
+    if (changes.length) this.broadcast(msg("DELTA", { changes }));
+    return { removed: changes.length };
+  }
+
+  private checkSandbox(c: Components, z: SandboxRect) {
+    const allowed = new Set(["transform@1", "primitive@1", "label@1", "light@1", "collider@1"]);
+    const extra = Object.keys(c).filter((k) => !allowed.has(k));
+    if (extra.length) throw new MutationError("forbidden", "en la zona de pruebas solo hay cajas, cilindros, esferas, carteles y luces", { extra });
+    const [x, y, zz] = c["transform@1"].p;
+    const s = c["primitive@1"]?.size ?? [0.5, 0.5, 0.5];
+    if (s.some((v) => v > 4)) throw new MutationError("budget_exceeded", "cada pieza mide como mucho 4 m");
+    const hx = (s[0] / 2) * Math.max(...c["transform@1"].s), hz = (s[2] / 2) * Math.max(...c["transform@1"].s);
+    if (x! - hx < z.x0 || x! + hx > z.x1 || zz! - hz < z.z0 || zz! + hz > z.z1 || y! < 0 || y! > z.max_y) {
+      throw new MutationError("forbidden", "fuera de la zona de pruebas");
+    }
+    const l = c["light@1"];
+    if (l && (l.intensity > 3 || l.range > 10)) throw new MutationError("budget_exceeded", "en la zona de pruebas, luces de intensidad 3 y alcance 10 como mucho");
+  }
+
+  private applySandbox(actor: string, mu: MutationOp, z: SandboxRect) {
+    const swept = this.sweepSandbox();
+    if (swept.length) this.broadcast(msg("DELTA", { changes: swept }));
+    if (mu.op === "SPAWN") {
+      const c = this.validateComponents(mu.components);
+      this.checkSandbox(c, z);
+      const mine = this.sql.exec<{ n: number; l: number }>("SELECT COUNT(*) AS n, COALESCE(SUM(light), 0) AS l FROM sandbox WHERE owner = ?", actor).one();
+      if (mine.n >= z.per_person) throw new MutationError("budget_exceeded", `en la zona de pruebas, ${z.per_person} piezas por persona como mucho`, { max: z.per_person });
+      if (c["light@1"] && mine.l >= z.lights) throw new MutationError("budget_exceeded", `en la zona de pruebas, ${z.lights} luces por persona como mucho`);
+      const r = this.applyMutation(actor, false, { ...mu, components: c as Record<string, unknown> }, null);
+      this.sql.exec("INSERT INTO sandbox (entity_id, owner, day, light) VALUES (?, ?, ?, ?)", r.entity_id, actor, pointsDay(), c["light@1"] ? 1 : 0);
+      return r;
+    }
+    const mine = this.sql.exec("SELECT 1 FROM sandbox WHERE entity_id = ? AND owner = ?", mu.entity_id, actor).toArray().length > 0;
+    if (!mine) throw new MutationError("forbidden", "solo puedes cambiar tus piezas de la zona de pruebas");
+    const r = this.applyMutation(actor, false, mu, null);
+    if (mu.op === "DESPAWN") this.sql.exec("DELETE FROM sandbox WHERE entity_id = ?", mu.entity_id);
+    else if (r.change.kind === "upsert") this.checkSandbox(r.change.entity.components as Components, z);
+    return r;
   }
 
   /**
@@ -1003,6 +1078,7 @@ export class ChunkRoom extends DurableObject<Env> {
       this.sql.exec("DELETE FROM act_hunt_done WHERE sub = ?", owner);
       this.sql.exec("DELETE FROM act_race_best WHERE sub = ?", owner);
       this.sql.exec("DELETE FROM act_points WHERE sub = ?", owner);
+      this.sql.exec("DELETE FROM sandbox WHERE owner = ?", owner);
       this.sql.exec("UPDATE events SET actor = 'deleted' WHERE actor = ?", owner);
       if (ids.length) this.logEvent("system", "PURGE", "owner", ids.length, null);
     });
@@ -1104,6 +1180,10 @@ export class ChunkRoom extends DurableObject<Env> {
       hunts_completed: this.sql.exec("SELECT set_key, ts FROM act_hunt_done WHERE sub = ?", sub).toArray(),
       best_times: this.sql.exec("SELECT race_key, ms, ts FROM act_race_best WHERE sub = ?", sub).toArray(),
       daily_points: this.sql.exec("SELECT board_key, day, points FROM act_points WHERE sub = ?", sub).toArray(),
+      sandbox_pieces: this.sql
+        .exec<{ entity_id: string; day: string; data: string }>("SELECT s.entity_id, s.day, e.data FROM sandbox s JOIN entities e ON e.entity_id = s.entity_id WHERE s.owner = ?", sub)
+        .toArray()
+        .map((r) => ({ entity_id: r.entity_id, day: r.day, components: (JSON.parse(r.data) as Entity).components })),
     };
   }
 

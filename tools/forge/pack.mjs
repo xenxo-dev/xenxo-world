@@ -140,14 +140,20 @@ for (const folder of existsSync(generatedDir) ? readdirSync(generatedDir).sort()
     if (problems.length) throw new Error(`${meta.name} lod${lod} supera el presupuesto: ${JSON.stringify(problems)}`);
     const hash = "sha256:" + createHash("sha256").update(bytes).digest("hex");
     const file = `${hash.slice(7)}.glb`;
-    if (index[meta.name]) for (const l of index[meta.name].lods) rmSync(join(dest, l.file), { force: true });
     writeFileSync(join(dest, file), bytes);
     total += bytes.byteLength;
     lods.push({ file, hash, tris: report.triangles, bytes: report.bytes, bounds: report.bounds });
     console.log(`${(meta.name + ".lod" + lod).padEnd(18)} ${String(report.triangles).padStart(6)} tri  ${(bytes.byteLength / 1024).toFixed(0).padStart(5)} KB  (IA: ${meta.platform} ${meta.model})`);
   }
+  // Los archivos de la versión anterior que ya no se usan (nunca uno que acabamos de escribir).
+  const fresh = new Set(lods.map((l) => l.file));
+  for (const l of index[meta.name]?.lods ?? []) if (!fresh.has(l.file)) rmSync(join(dest, l.file), { force: true });
   index[meta.name] = { kind: "generated", lods };
 }
+
+// Comprobación final: cada archivo del índice tiene que estar en disco.
+const missing = Object.entries(index).flatMap(([n, e]) => e.lods.filter((l) => !existsSync(join(dest, l.file))).map((l) => `${n}: ${l.file}`));
+if (missing.length) throw new Error(`faltan archivos empaquetados:\n${missing.join("\n")}`);
 
 if (keep) console.log(`(conservadas sin tocar: ${Object.keys(index).filter((n) => !(n in forge) && index[n].kind !== "generated").join(", ") || "ninguna"})`);
 

@@ -68,11 +68,12 @@ def floor(lay: dict, detail: int = 1):
     # La plataforma con canto (alrededor, nada: se ve la ciudad de abajo, que pinta el cliente).
     p.lathe((0, 0, 0), [(R, -0.6), (R, 0.0)], plat, segments=seg, smooth=False)
     p.lathe((0, 0, 0), [(R, 0.0), (0.0001, 0.0)], plat, segments=seg, smooth=False)
-    # Círculo central un tono más claro, enrasado
-    _annulus(p, 0.0001, lay["rings"][0], 0.004, core, seg)
+    # Círculo central un tono más claro. Las capas, a centímetros (con milímetros, el búfer de
+    # profundidad no las distingue de lejos y el suelo parpadea al andar).
+    _annulus(p, 0.0001, lay["rings"][0], 0.02, core, seg)
     # Anillos de luz embutidos
     for r in lay["rings"]:
-        _annulus(p, r - 0.05, r + 0.05, 0.009, neon, seg)
+        _annulus(p, r - 0.05, r + 0.05, 0.045, neon, seg)
     # Línea hacia cada puerta con distrito (del anillo medio al pie de la puerta)
     G = lay["gates"]
     r_in = lay["rings"][1] + 0.3
@@ -80,7 +81,7 @@ def floor(lay: dict, detail: int = 1):
     for i in used_slots(lay):
         a = math.radians(360.0 * i / G["count"])
         bar = Part("l")
-        bar.box((-0.03, r_in, 0.0), (0.03, r_out, 0.009), neon)
+        bar.box((-0.03, r_in, 0.0), (0.03, r_out, 0.03), neon)
         # Bearing φ (0 = norte = −Z del mundo = +Y de Blender), girando hacia el este (+X).
         p.merge(bar, Matrix.Rotation(-a, 4, "Z"))
         bar.bm.free()

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { assetUrl } from "../config";
 import { errorText, getLang, t, type Key } from "../i18n";
 import { avatarMode, type Project } from "../net/account";
-import { modHide, modLog, modQueue, modReport, modReview, modSyncShowcase, myRoles, type LogEntry, type Report } from "../net/games";
+import { modHide, modLog, modQueue, modReport, modReview, modSyncShowcase, modClearSandbox, myRoles, type LogEntry, type Report } from "../net/games";
 import { gameName, openGame } from "../games/state";
 import { Button, card, input, Notice } from "./ui";
 
@@ -83,6 +83,9 @@ export function Moderation() {
           {t("mod.syncCabinets")}
         </Button>
         <span className="text-xs text-cal/55">{t("mod.syncCabinetsHint")}</span>
+        <Button disabled={busy} onClick={() => void run(() => modClearSandbox("taller"))}>
+          {t("mod.clearSandbox")}
+        </Button>
       </div>
 
       <h3 className="text-sm font-medium text-cal/80">{t("mod.pending", { n: pending?.length ?? 0 })}</h3>

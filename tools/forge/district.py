@@ -30,9 +30,18 @@ def _W(x: float, z: float) -> tuple[float, float]:
     return (x - C, -(z - C))
 
 
+# Las capas del suelo (calles, losas, líneas) se separan ×6 en altura: con milímetros entre ellas
+# el búfer de profundidad no las distingue a 50 m y el suelo parpadea al andar (z-fighting).
+LIFT = 6.0
+
+
+def _lift(y: float) -> float:
+    return y * LIFT if 0.0 < y < 0.05 else y
+
+
 def _rect(p: Part, x0: float, z0: float, x1: float, z1: float, y0: float, y1: float, m) -> None:
     a, b = _W(x0, z1), _W(x1, z0)
-    p.box((a[0], a[1], y0), (b[0], b[1], y1), m, skip=("-z",))
+    p.box((a[0], a[1], _lift(y0)), (b[0], b[1], _lift(y1)), m, skip=("-z",))
 
 
 def _frame_lines(p: Part, x0: float, z0: float, x1: float, z1: float, y: float, w: float, m) -> None:
@@ -99,11 +108,11 @@ def ground(lay: dict, d: dict, detail: int = 1):
     plaza = mat("losa", "#4a4f5c")
     _rect(p, pa, pa, pa + blk, pa + blk, 0.008, 0.01, plaza)
     seg = 64 if detail else 32
-    p.lathe((0, 0, 0), [(c["plaza"], 0.012), (c["plaza"] - 0.2, 0.012)], neon, segments=seg, smooth=False)
+    p.lathe((0, 0, 0), [(c["plaza"], _lift(0.012)), (c["plaza"] - 0.2, _lift(0.012))], neon, segments=seg, smooth=False)
     # Cuatro puestos de actividad en las esquinas de la plaza (círculos de luz, para minijuegos).
     for (ax, az) in ((pa + 4, pa + 4), (pa + blk - 4, pa + 4), (pa + 4, pa + blk - 4), (pa + blk - 4, pa + blk - 4)):
         ox, oy = _W(ax, az)
-        p.lathe((ox, oy, 0.0), [(2.2, 0.012), (2.05, 0.012)], white, segments=32 if detail else 16, smooth=False)
+        p.lathe((ox, oy, 0.0), [(2.2, _lift(0.012)), (2.05, _lift(0.012))], white, segments=32 if detail else 16, smooth=False)
     # Parcelas: rejilla octogonal y contorno de luz del color del distrito.
     W, D = lay["parcel"]["w"], lay["parcel"]["d"]
     for q in lay["parcels"]:
@@ -113,7 +122,7 @@ def ground(lay: dict, d: dict, detail: int = 1):
     # Emblema del punto de llegada
     sx, _, sz = lay["spawn"]
     ox, oy = _W(sx, sz)
-    p.lathe((ox, oy, 0.0), [(1.7, 0.01), (1.58, 0.01)], neon, segments=48 if detail else 24, smooth=False)
+    p.lathe((ox, oy, 0.0), [(1.7, _lift(0.012)), (1.58, _lift(0.012))], neon, segments=48 if detail else 24, smooth=False)
     # Puerta de vuelta al nexo: dos pilares y dintel con luz por dentro
     g = lay["gate"]
     body = mat("metal", "#1a202b")

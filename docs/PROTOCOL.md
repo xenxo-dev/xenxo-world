@@ -420,6 +420,10 @@ El mundo solo se escribe por WebSocket (`MUTATE_WORLD`). Lo que no es mundo va p
 - Su arquitectura son modelos `mesh@1` generados por la forja (`tools/forge`), con dos niveles de detalle y la oclusión ambiental horneada en el segundo canal UV.
 - Los chunks se crean con la jurisdicción configurada en `DO_JURISDICTION` (`eu` por defecto): sus datos se guardan y procesan solo en la UE. En local (`wrangler dev`) se desactiva, porque workerd no implementa jurisdicciones.
 
+### Zona de pruebas (Taller)
+
+Un distrito puede tener una zona de pruebas (`district-activities.json` → `sandbox`: rectángulo, altura máxima y topes). Allí, **cualquier cuenta registrada** (sin clave `xk_` ni scope `build`) puede hacer `MUTATE_WORLD` con piezas básicas: `transform@1`, `primitive@1` (lado ≤ 4 m), `label@1`, `light@1` (intensidad ≤ 3, alcance ≤ 10) y `collider@1`, siempre dentro del rectángulo. Tope por persona (30 piezas, 2 luces), solo se cambia o borra lo propio y todo se borra cada día (UTC). Moderación la vacía con `POST /mod/sandbox/<distrito>/clear` (queda en el registro). Los invitados no construyen.
+
 ## 12 bis. Convenciones de los modelos (no son protocolo, son pistas de render)
 
 Un GLB puede nombrar sus materiales `xenxo:<biblioteca>.<tinte>` (p. ej. `xenxo:teja.b5583a`). El cliente web los viste con su biblioteca de texturas (escaneos CC0 y, desde ahora, también texturas generadas con IA; ver `CREDITS.md`) según el nivel gráfico y el ambiente; cualquier otro cliente ve el color base del GLB, que ya es correcto.

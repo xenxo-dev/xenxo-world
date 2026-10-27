@@ -920,7 +920,7 @@ export default {
           const activities = [];
           for (const c of CHAT_CHUNKS.filter((c) => c !== PLACES.nexo)) {
             const a = await chunk(env, c).activityOf(`usr_${uid}`);
-            if (a.collected.length || a.hunts_completed.length || a.best_times.length || a.daily_points.length) activities.push(a);
+            if (a.collected.length || a.hunts_completed.length || a.best_times.length || a.daily_points.length || a.sandbox_pieces.length) activities.push(a);
           }
           return json({ ...r.data, chat_messages: chat, activities }, 200, {
             ...h,
@@ -1077,6 +1077,15 @@ export default {
         if (!modId) return json({ error: "forbidden", message: "solo moderación" }, 403, h);
         // Distritos de la comunidad: la cola y la decisión (aprobar, rechazar u ocultar, con motivo).
         if (path === "/mod/districts" && req.method === "GET") return json({ districts: await dir.modDistricts() }, 200, h);
+        // Vaciar la zona de pruebas de un distrito (lo construido allí sin revisión previa).
+        const sbx = path.match(/^\/mod\/sandbox\/([a-z0-9_-]{2,24})\/clear$/);
+        if (sbx && req.method === "POST") {
+          const d = districtById(sbx[1]!);
+          if (!d) return json({ error: "not_found" }, 404, h);
+          const r = await chunk(env, d.chunk).clearSandbox();
+          await dir.logModeration(modId, "sandbox_clear", d.id, `${r.removed} piezas`);
+          return json(r, 200, h);
+        }
         // Vuelve a colocar el escaparate y las máquinas-portal (tras un despliegue que las añade).
         if (path === "/mod/showcase/sync" && req.method === "POST") {
           await syncShowcase(env, dir);

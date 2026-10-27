@@ -127,6 +127,11 @@ export function modSyncShowcase() {
   return call<{ synced: boolean }>("POST", "/mod/showcase/sync");
 }
 
+/** Vacía la zona de pruebas de un distrito (Taller). */
+export function modClearSandbox(district: string) {
+  return call<{ removed: number }>("POST", `/mod/sandbox/${encodeURIComponent(district)}/clear`);
+}
+
 export function modReport(id: number, status: "actioned" | "dismissed", note: string) {
   return call("POST", `/mod/reports/${id}`, { status, note });
 }
