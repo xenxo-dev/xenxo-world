@@ -77,6 +77,19 @@ export function JumpIcon() {
   );
 }
 
+/** Coche visto de lado (conducir). */
+export function CarIcon() {
+  return (
+    <svg aria-hidden className="h-5 w-5" {...svg}>
+      <path d="M3 15.5v-3l2.2-1 2.3-3.3A2 2 0 0 1 9.1 7.5h5.4a2 2 0 0 1 1.5.7l2.8 3 2.2.8v3.5h-2" />
+      <path d="M7 15.5h8" />
+      <circle cx="5.5" cy="16" r="1.8" />
+      <circle cx="17" cy="16" r="1.8" />
+      <path d="M8.5 11h9" />
+    </svg>
+  );
+}
+
 /** Estilo común de los botones de icono del HUD. */
 export const hudIconButton =
   "grid h-11 w-11 place-items-center rounded-xl border border-cal/10 bg-noche/70 text-[#f4f7ff] backdrop-blur transition hover:border-neon/50 hover:text-neon aria-pressed:border-neon/60 aria-pressed:text-neon active:scale-95";

@@ -399,9 +399,12 @@ export class ChunkRoom extends DurableObject<Env> {
         const now = Date.now();
         if (now - (this.lastPoseAt.get(att.session_id) ?? 0) < MIN_POSE_INTERVAL_MS) return; // descarta en silencio
         this.lastPoseAt.set(att.session_id, now);
-        const { head, hand_l, hand_r, emote } = m.payload;
+        const { head, hand_l, hand_r, emote, vehicle, car } = m.payload;
         if (!this.inBounds(head.p)) return;
-        this.poses.set(att.session_id, { session_id: att.session_id, head, hand_l, hand_r, ...(emote ? { emote } : {}) });
+        // Coches solo en los distritos (en la plaza se va a pie) y dentro de sus límites.
+        const roads = !!districtByChunk(this.chunkId!);
+        const withCar = roads && car && this.inBounds(car.p) ? { car, ...(vehicle ? { vehicle } : {}) } : {};
+        this.poses.set(att.session_id, { session_id: att.session_id, head, hand_l, hand_r, ...(emote ? { emote } : {}), ...withCar });
         this.dirty.add(att.session_id);
         this.scheduleTick();
         this.tilesPose(att, head.p);
@@ -1324,6 +1327,14 @@ export class ChunkRoom extends DurableObject<Env> {
     const it = all.find((a) => a.id === entityId && a.cp);
     if (!it?.cp) return this.sendError(ws, ref, "not_found", "eso no es un punto de carrera");
     if (!this.sessionNear(att, it.p, it.cp.radius)) return this.sendError(ws, ref, "forbidden", "estás demasiado lejos");
+    // Las carreras son a pie: en coche no cuenta (y la que estuviera en marcha se anula).
+    if (this.poses.get(att.session_id)?.vehicle) {
+      if (att.run) {
+        att.run = undefined;
+        ws.serializeAttachment(att);
+      }
+      return this.sendError(ws, ref, "forbidden", "las carreras son a pie: bájate del coche");
+    }
     const now = Date.now();
     const race = it.cp.race;
     const key = activityKey(it.owner, race);

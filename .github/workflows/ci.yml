@@ -20,6 +20,8 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run build
+      # La física del coche (Rapier en Node): se apoya, acelera, frena, gira y no atraviesa paredes.
+      - run: npm run test:vehicle -w @xenxo/web
       # El servidor de distritos (workerd en una máquina propia): que siga compilando.
       - run: npm run build:district-host
       # Y sus scripts (portátil y relevo del NAS): que al menos se lean bien.

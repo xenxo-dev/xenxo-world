@@ -1,0 +1,10 @@
+{
+  "name": "vehicle_car_wheel_l",
+  "platform": "Khronos glTF Sample Assets",
+  "source": "Car Concept (Models/CarConcept), https://github.com/KhronosGroup/glTF-Sample-Assets; a partir de «Free Concept Car 004» de Unity Fan (dominio público). Preparado con concept-car.mjs: sin logotipos, simplificado y en piezas.",
+  "license": "CC-BY-4.0",
+  "attribution": "Car Concept © The Khronos Group (CC BY 4.0), basado en un modelo de dominio público de Unity Fan",
+  "date": "2026-10-27",
+  "keep_origin": true,
+  "lod1_ratio": 0.5
+}

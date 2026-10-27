@@ -240,6 +240,10 @@ function LegalLinks() {
       <a href="https://github.com/xenxo-dev/xenxo-world" target="_blank" rel="noreferrer" className="hover:text-cal/70">
         {t("legal.source")}
       </a>
+      {/* Atribución de lo que no es CC0 (el coche, CC BY 4.0) y del resto de recursos. */}
+      <a href="https://github.com/xenxo-dev/xenxo-world/blob/main/CREDITS.md" target="_blank" rel="noreferrer" className="hover:text-cal/70">
+        {t("legal.credits")}
+      </a>
     </p>
   );
 }

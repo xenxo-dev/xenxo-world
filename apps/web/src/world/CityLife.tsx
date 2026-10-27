@@ -20,7 +20,7 @@ import { lightweight, paintedLights } from "./materials";
 import { AvatarBody } from "./Avatars";
 import { createMotion, type Motion } from "./motion";
 import { rng } from "./NexoCity";
-import { playerPos } from "./Player";
+import { playerBulk, playerPos } from "./Player";
 import { floorAt, NPC_CITY, npcs } from "./collision";
 
 interface Loop {
@@ -50,11 +50,11 @@ const _px = new Float32Array(NPC_CITY), _pz = new Float32Array(NPC_CITY), _py = 
 const _hx = new Float32Array(NPC_CITY), _hz = new Float32Array(NPC_CITY);
 const _slot = new Int16Array(NPC_CITY);
 const _blocked = new Uint8Array(NPC_CITY);
-/** ¿Está (x, y, z) justo delante del peatón i (en su carril)? */
-function ahead(i: number, x: number, y: number, z: number) {
+/** ¿Está (x, y, z) justo delante del peatón i (en su carril)? `r`: cuánto más abulta (un coche). */
+function ahead(i: number, x: number, y: number, z: number, r = 0) {
   const ax = x - _px[i]!, az = z - _pz[i]!;
   const fwd = ax * _hx[i]! + az * _hz[i]!;
-  return fwd > 0 && fwd < 1.2 && Math.abs(ax * _hz[i]! - az * _hx[i]!) < 0.65 && Math.abs(y - _py[i]!) < 1.2;
+  return fwd > 0 && fwd < 1.2 + r && Math.abs(ax * _hz[i]! - az * _hx[i]!) < 0.65 + r && Math.abs(y - _py[i]!) < 1.2;
 }
 
 type City = { x0: number; z0: number; block: number; street: number };
@@ -194,7 +194,7 @@ export function Pedestrians({ chunk, count }: { chunk: string; count: number }) 
     // 2) Quién espera: si el jugador u otro peatón está justo delante. Si dos se tienen delante el
     //    uno al otro (en un cruce), espera solo uno (el de índice mayor): nadie se queda atascado.
     for (let i = 0; i < m; i++) {
-      let b = ahead(i, playerPos.x, playerPos.y, playerPos.z);
+      let b = ahead(i, playerPos.x, playerPos.y, playerPos.z, playerBulk.r - 0.3);
       for (let j = 0; j < m && !b; j++) {
         if (j === i || !ahead(i, _px[j]!, _py[j]!, _pz[j]!)) continue;
         if (!ahead(j, _px[i]!, _py[i]!, _pz[i]!) || i > j) b = true;

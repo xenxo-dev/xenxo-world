@@ -24,6 +24,10 @@ export const input = {
   toggleView: false,
   /** Foto pedida (tecla P o el HUD). La consume la escena tras dibujar. */
   photo: false,
+  /** Sacar o dejar el coche (tecla C o el HUD). Se consume al aplicarlo. */
+  car: false,
+  /** Freno de mano (Espacio mantenido) mientras se conduce. */
+  brake: false,
 };
 
 /** Primera persona activa (lo cambia el jugador con `setFirstPerson`; el HUD se suscribe). */
@@ -60,6 +64,7 @@ function updateFromKeys() {
   input.move.x = r;
   input.move.y = f;
   input.run = keys.has("ShiftLeft") || keys.has("ShiftRight");
+  input.brake = keys.has("Space");
 }
 
 let attached = false;
@@ -79,6 +84,7 @@ export function attachDesktopInput(el: HTMLElement) {
     if (emote && !e.repeat) input.emote = emote;
     if (e.code === "KeyV" && !e.repeat) input.toggleView = true;
     if (e.code === "KeyP" && !e.repeat) input.photo = true;
+    if (e.code === "KeyC" && !e.repeat) input.car = true;
     if (e.code === "KeyF" && !e.repeat) void toggleFullscreen();
     updateFromKeys();
   };

@@ -12,6 +12,14 @@ import { CustomAvatar } from "./CustomAvatar";
 import { FONT_URL } from "./font";
 import { advance, createMotion, smoothSpeed, type Motion } from "./motion";
 import { presetFor } from "./presets";
+import { applyCarPose, CarModel, createCarHandle, createCarPose } from "./vehicle/CarModel";
+import { CAR, paintFor } from "./vehicle/car";
+
+/** Gestos con la puerta del coche abierta (subir y bajar). */
+const DOOR_OPEN = new Set(["car_open", "car_in", "car_out"]);
+const _cp = new THREE.Vector3();
+const _cq = new THREE.Quaternion();
+const _seatQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
 
 /** Se dibuja a los demás con este retraso para tener siempre dos poses entre las que interpolar (a 5 Hz llegan cada 200 ms). */
 const INTERP_DELAY_MS = 320;
@@ -146,10 +154,15 @@ export function ChatBubble({ sessionId, self }: { sessionId?: string; self?: boo
   );
 }
 
-function RemoteAvatar({ sessionId, name, avatar }: { sessionId: string; name: string; avatar?: AvatarRef }) {
+function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; name: string; avatar?: AvatarRef; paint: string }) {
   const body = useRef<THREE.Group>(null);
+  const person = useRef<THREE.Group>(null);
   const motion = useRef(createMotion()).current;
   const last = useRef(new THREE.Vector3(NaN, 0, 0)).current;
+  // Su coche (en marcha o aparcado), con su giro completo; si va dentro, sentado en él.
+  const car = useRef(createCarPose()).current;
+  const carHandle = useRef(createCarHandle()).current;
+  const [hasCar, setHasCar] = useState(false);
 
   useFrame((_, dt) => {
     const buf = world.poseBuffers.get(sessionId);
@@ -174,27 +187,60 @@ function RemoteAvatar({ sessionId, name, avatar }: { sessionId: string; name: st
     last.copy(_a);
     if (dt > 0) smoothSpeed(motion, step / dt, dt);
 
+    // El coche: entre sus dos últimas poses, como la persona.
+    const c1 = s1.car;
+    if (c1 && !hasCar) setHasCar(true);
+    car.visible = !!c1 && body.current.visible;
+    if (c1) {
+      const c0 = s0.car ?? c1;
+      const was = _cp.copy(car.p);
+      car.p.fromArray(c0.p).lerp(_b.fromArray(c1.p), k);
+      car.q.fromArray(c0.r).slerp(_cq.fromArray(c1.r), k);
+      // Las ruedas giran con lo que avanza (hacia delante o hacia atrás).
+      const dz = was.sub(car.p).negate();
+      _b.set(0, 0, 1).applyQuaternion(car.q);
+      if (dz.lengthSq() < 4) car.spin += dz.dot(_b) / CAR.wheelRadius;
+      const want = s1.emote && DOOR_OPEN.has(s1.emote) ? 1 : 0;
+      car.doorL += Math.max(-dt * 2, Math.min(dt * 2, want - car.doorL));
+    }
+    applyCarPose(carHandle, car);
+    const driving = s1.vehicle === "car" && !!c1;
     // Pies bajo la cabeza; el cuerpo solo sigue el giro horizontal. Está en el aire si los pies
     // quedan por encima de lo que pisa (el suelo o una caja: se puede estar de pie en un banco).
-    const feet = Math.max(0, _a.y - EYE_HEIGHT);
-    motion.airborne = feet - groundHeight(_a.x, _a.z, 0.24, feet + 0.1) > 0.05;
+    const feet = Math.max(-0.5, _a.y - EYE_HEIGHT);
+    motion.airborne = !driving && feet - groundHeight(_a.x, _a.z, 0.24, feet + 0.1) > 0.05;
     motion.emote = s1.emote ?? null;
-    body.current.position.set(_a.x, feet, _a.z);
-    body.current.rotation.set(0, _e.setFromQuaternion(_qa, "YXZ").y, 0);
+    if (driving) {
+      // Sentado en el asiento, pegado al coche (sin el desfase entre las dos poses).
+      body.current.position.set(CAR.seat.x, CAR.seat.y, CAR.seat.z).applyQuaternion(car.q).add(car.p);
+      body.current.quaternion.copy(car.q).multiply(_seatQ);
+    } else {
+      body.current.position.set(_a.x, feet, _a.z);
+      body.current.rotation.set(0, _e.setFromQuaternion(_qa, "YXZ").y, 0);
+    }
   });
 
   return (
-    <group ref={body}>
-      <AvatarBody avatar={avatar} seed={sessionId} motion={motion} />
-      <Suspense fallback={null}>
-        <Billboard position={[0, 2.15, 0]}>
-          <Text font={FONT_URL} fontSize={0.22} color="#ffffff" outlineWidth={0.02} outlineColor="#000000">
-            {name}
-          </Text>
-        </Billboard>
-        <ChatBubble sessionId={sessionId} />
-      </Suspense>
-    </group>
+    <>
+      {hasCar && (
+        <Suspense fallback={null}>
+          <CarModel handle={carHandle} paint={paint} />
+        </Suspense>
+      )}
+      <group ref={body}>
+        <group ref={person}>
+          <AvatarBody avatar={avatar} seed={sessionId} motion={motion} />
+        </group>
+        <Suspense fallback={null}>
+          <Billboard position={[0, 2.15, 0]}>
+            <Text font={FONT_URL} fontSize={0.22} color="#ffffff" outlineWidth={0.02} outlineColor="#000000">
+              {name}
+            </Text>
+          </Billboard>
+          <ChatBubble sessionId={sessionId} />
+        </Suspense>
+      </group>
+    </>
   );
 }
 
@@ -207,6 +253,7 @@ export function Avatars() {
           key={`${p.session_id}:${p.avatar?.hash ?? ""}`}
           sessionId={p.session_id}
           avatar={p.avatar}
+          paint={paintFor(p.player_no != null ? `n${p.player_no}` : p.session_id)}
           name={
             p.kind === "agent"
               ? `${t("agents.agentPrefix")} · ${p.display_name}`

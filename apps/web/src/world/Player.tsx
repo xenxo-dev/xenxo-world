@@ -16,6 +16,10 @@ import { guestPreset, useAccountPreset, useChosenPreset } from "./presets";
 import { input, setFirstPerson, view } from "./input";
 import { self } from "./self";
 import { controls } from "../controls";
+import { carForPose, carFrame, carPose, drive, dropCar, requestCar, seated } from "./vehicle/drive";
+import { useDrive } from "./vehicle/drive-state";
+import { applyCarPose, CarModel, createCarHandle } from "./vehicle/CarModel";
+import { CAR, paintFor } from "./vehicle/car";
 
 const WALK = 2.1; // m/s
 const RUN = 5.4;
@@ -46,6 +50,13 @@ const _euler = new THREE.Euler(0, 0, 0, "YXZ");
 const _lastP = new THREE.Vector3(Infinity, 0, 0);
 const _lastQ = new THREE.Quaternion();
 const _xr = { x: 0, z: 0 };
+const _yawE = new THREE.Euler();
+const _carQ = new THREE.Quaternion();
+const _seat = new THREE.Vector3();
+/** Ojos de quien conduce, respecto al origen del coche. */
+const DRIVER_EYE = new THREE.Vector3(CAR.eye.x, CAR.eye.y, CAR.eye.z);
+/** Bulto del jugador para los peatones que le ceden el paso (radio, m): mayor en coche. */
+export const playerBulk = { r: 0.3 };
 
 export function Player({ active }: { active: boolean }) {
   const user = useAccount();
@@ -75,6 +86,47 @@ export function Player({ active }: { active: boolean }) {
   const emoteUntil = useRef(0);
   const lastEmote = useRef<string | null>(null);
   const inXR = useXR((s) => s.session != null);
+  const driving = useDrive();
+  const carHandle = useRef(createCarHandle()).current;
+  const lastPhase = useRef("none");
+  const seqCtx = useRef({ body, motion, bodyYaw }).current;
+
+  /**
+   * Cámara al volante: sigue al coche por detrás y se pone detrás de él cuando se mueve (parado, se
+   * puede mirar alrededor); en primera persona, desde el asiento.
+   */
+  function chaseCamera(dt: number, cam: THREE.Camera, l: { yaw: number; pitch: number }, c3: { dist: number; y: number }) {
+    const q = carPose.q;
+    const carYaw = Math.atan2(2 * (q.w * q.y + q.x * q.z), 1 - 2 * (q.y * q.y + q.x * q.x));
+    const ground = carPose.p.y;
+    c3.y = ground;
+    playerBulk.r = CAR.length / 2;
+    const speed = drive.sim?.state.speed ?? 0;
+    if (Math.abs(speed) > 1.5) {
+      let d = carYaw + Math.PI - l.yaw;
+      d = Math.atan2(Math.sin(d), Math.cos(d));
+      l.yaw += d * Math.min(1, dt * 2.4);
+    }
+    playerLook.yaw = l.yaw;
+    if (view.firstPerson) {
+      _seat.copy(DRIVER_EYE).applyQuaternion(q).add(carPose.p);
+      cam.position.copy(_seat);
+      _carQ.setFromEuler(_euler.set(l.pitch, l.yaw - carYaw, 0));
+      cam.quaternion.copy(q).multiply(_carQ);
+      return;
+    }
+    const dist = Math.max(4.2, c3.dist * 1.75);
+    _camTarget.set(carPose.p.x, ground + 1.7, carPose.p.z);
+    _camWant.set(
+      _camTarget.x + Math.sin(l.yaw) * dist * Math.cos(l.pitch),
+      _camTarget.y + 0.9 - Math.sin(l.pitch) * dist,
+      _camTarget.z + Math.cos(l.yaw) * dist * Math.cos(l.pitch),
+    );
+    const reach = cameraReach(_camTarget.x, _camTarget.y, _camTarget.z, _camWant.x, _camWant.y, _camWant.z);
+    camReach.current = reach < camReach.current ? reach : camReach.current + (reach - camReach.current) * Math.min(1, dt * 3);
+    cam.position.lerpVectors(_camTarget, _camWant, camReach.current);
+    cam.lookAt(_camTarget);
+  }
 
   // En VR: joystick izquierdo para moverse, derecho para girar (giro por pasos, menos mareo).
   useXRControllerLocomotion(origin, { speed: 3 }, { type: "snap", degrees: 30 });
@@ -82,6 +134,8 @@ export function Player({ active }: { active: boolean }) {
   useFrame((state, dt) => {
     const cam = state.camera;
     const l = look.current;
+    /** Quién manda este frame: el personaje, la secuencia del coche o el volante (vehicle/drive.ts). */
+    let mode: ReturnType<typeof carFrame> = "free";
 
     // Aparecer donde manda un portal (o el nexo 2D).
     if (spawn.seq !== spawnSeq.current) {
@@ -92,6 +146,11 @@ export function Player({ active }: { active: boolean }) {
       bodyYaw.current = spawn.yaw;
       motion.emote = null;
       if (inXR) origin.current.position.set(spawn.p[0], 0, spawn.p[2]);
+      // Al ir a otro lugar, el coche se queda.
+      if (drive.phase !== "none") {
+        dropCar();
+        applyCarPose(carHandle, carPose);
+      }
     }
 
     if (inXR) {
@@ -149,6 +208,18 @@ export function Player({ active }: { active: boolean }) {
           input.toggleView = false;
         }
 
+        // Coche: sacarlo, subir o bajar (tecla C o el HUD). Mientras sube o baja, manda la secuencia.
+        if (input.car) {
+          input.car = false;
+          requestCar(body.x, body.y, body.z, l.yaw, inXR);
+        }
+        mode = carFrame(dt, seqCtx);
+        applyCarPose(carHandle, carPose);
+        const free = mode === "free";
+        if (mode === "drive") {
+          chaseCamera(dt, cam, l, c3);
+        } else {
+        playerBulk.r = 0.3;
         _fwd.set(-Math.sin(l.yaw), 0, -Math.cos(l.yaw));
         playerLook.yaw = l.yaw;
         _right.set(-_fwd.z, 0, _fwd.x);
@@ -160,7 +231,7 @@ export function Player({ active }: { active: boolean }) {
         const wantX = (_fwd.x * input.move.y + _right.x * input.move.x) * speed;
         const wantZ = (_fwd.z * input.move.y + _right.z * input.move.x) * speed;
 
-        if (input.jump) {
+        if (input.jump && free) {
           requestJump(body);
           motion.emote = null; // saltar también levanta del banco
           input.jump = false;
@@ -169,13 +240,15 @@ export function Player({ active }: { active: boolean }) {
         // En el nexo (en solitario) se camina más allá del chunk: por las pasarelas hasta las islas.
         // Mientras se viaja (aún sin WELCOME ni suelo del lugar nuevo) el cuerpo espera quieto: si
         // diera pasos, los límites y el suelo del lugar anterior lo dejarían fuera de lo caminable.
-        if (motion.emote !== "sit" && world.status === "open") stepBody(body, wantX, wantZ, dt, world.walk[0], world.walk[1]);
-        smoothSpeed(motion, Math.hypot(body.vx, body.vz), dt);
-        motion.airborne = !body.grounded;
+        if (free && motion.emote !== "sit" && world.status === "open") stepBody(body, wantX, wantZ, dt, world.walk[0], world.walk[1]);
+        if (free) smoothSpeed(motion, Math.hypot(body.vx, body.vz), dt);
+        motion.airborne = free && !body.grounded;
 
         // El cuerpo gira hacia donde camina (la cámara puede mirar a otro lado); en primera
         // persona, hacia donde miras.
-        if (fp) bodyYaw.current = l.yaw;
+        if (!free) {
+          // Lo mueve la secuencia del coche.
+        } else if (fp) bodyYaw.current = l.yaw;
         else if (amount > 0.05) {
           const want = Math.atan2(-wantX, -wantZ);
           let d = want - bodyYaw.current;
@@ -184,7 +257,7 @@ export function Player({ active }: { active: boolean }) {
         }
 
         // Gestos: se piden con el teclado (1-4) o el HUD; moverse los cancela.
-        if (input.emote) {
+        if (input.emote && free) {
           let emote = input.emote;
           if (emote === "sit") {
             // Sentarse en el banco más cercano; sin banco, en cuclillas.
@@ -198,7 +271,7 @@ export function Player({ active }: { active: boolean }) {
           emoteUntil.current = state.clock.elapsedTime + (EMOTE_SECONDS[emote] ?? Infinity);
           input.emote = null;
         }
-        if (motion.emote && (amount > 0.05 || motion.airborne || state.clock.elapsedTime > emoteUntil.current)) motion.emote = null;
+        if (free && motion.emote && (amount > 0.05 || motion.airborne || state.clock.elapsedTime > emoteUntil.current)) motion.emote = null;
 
         // La altura de la cámara sigue al cuerpo con suavidad (al subir un escalón no da un tirón).
         c3.y += (body.y - c3.y) * Math.min(1, dt * (body.grounded ? 10 : 25));
@@ -221,6 +294,7 @@ export function Player({ active }: { active: boolean }) {
           cam.position.lerpVectors(_camTarget, _camWant, camReach.current);
           cam.lookAt(_camTarget);
         }
+        }
       } else {
         // Detrás del panel 2D: paseo lento de cámara por dentro de la plaza, alrededor de la fuente.
         const t = state.clock.elapsedTime * 0.035 + 0.6;
@@ -232,34 +306,49 @@ export function Player({ active }: { active: boolean }) {
       const dy = body.y - visY.current;
       if (body.grounded && Math.abs(dy) < STEP_UP + 0.1) visY.current += dy * Math.min(1, dt * 16);
       else visY.current = body.y;
-      avatar.current.position.set(body.x, visY.current, body.z);
-      avatar.current.rotation.y = bodyYaw.current;
+      if (mode === "seated" || mode === "drive") {
+        // Sentado en el coche (o subiendo y bajando): va con él, con su inclinación.
+        avatar.current.position.copy(seated.pos);
+        avatar.current.quaternion.copy(seated.q);
+        visY.current = body.y;
+      } else {
+        avatar.current.position.set(body.x, visY.current, body.z);
+        avatar.current.rotation.set(0, bodyYaw.current, 0);
+      }
       playerPos.set(body.x, body.y, body.z);
       self.x = body.x;
       self.y = body.y;
       self.z = body.z;
-      // En primera persona no se dibuja el propio cuerpo (taparía la vista).
+      // En primera persona no se dibuja el propio cuerpo (taparía la vista); en coche, tampoco.
       avatar.current.visible = active && !view.firstPerson;
 
-      _headP.set(body.x, EYE + body.y, body.z);
-      _headQ.setFromEuler(_euler.set(l.pitch, bodyYaw.current, 0));
+      if (mode === "seated" || mode === "drive") {
+        // Los pies (más la altura de los ojos) donde está sentado; el coche va aparte (`car`).
+        _headP.set(seated.pos.x, seated.pos.y + EYE, seated.pos.z);
+        _headQ.setFromEuler(_euler.set(0, _yawE.setFromQuaternion(seated.q, "YXZ").y, 0));
+      } else {
+        _headP.set(body.x, EYE + body.y, body.z);
+        _headQ.setFromEuler(_euler.set(l.pitch, bodyYaw.current, 0));
+      }
     }
 
     // Envío de pose: 8 Hz solo si hay cambio real, latido cada segundo. Detrás del panel no se envía.
     if ((!active && !inXR) || world.status !== "open" || !world.sessionId || world.solo) return;
     const now = performance.now();
     if (now - lastSend.current < SEND_EVERY_MS) return;
-    const moved = _headP.distanceToSquared(_lastP) > 1e-4 || _headQ.angleTo(_lastQ) > 0.01 || motion.emote !== lastEmote.current;
+    const moved = _headP.distanceToSquared(_lastP) > 1e-4 || _headQ.angleTo(_lastQ) > 0.01 || motion.emote !== lastEmote.current || drive.phase !== lastPhase.current;
     if (!moved && now - lastSend.current < HEARTBEAT_MS) return;
     lastSend.current = now;
     _lastP.copy(_headP);
     _lastQ.copy(_headQ);
     lastEmote.current = motion.emote;
+    lastPhase.current = drive.phase;
     net.send(
       msg("POSE", {
         t: world.serverNow(),
         head: { p: [_headP.x, _headP.y, _headP.z], r: [_headQ.x, _headQ.y, _headQ.z, _headQ.w] },
         ...(motion.emote ? { emote: motion.emote } : {}),
+        ...carForPose(),
       }) as ClientMessage,
     );
   });
@@ -267,6 +356,11 @@ export function Player({ active }: { active: boolean }) {
   return (
     <>
       <XROrigin ref={origin} />
+      {driving.phase !== "none" && (
+        <Suspense fallback={null}>
+          <CarModel handle={carHandle} paint={paintFor(user?.player_no != null ? `n${user.player_no}` : (world.sessionId ?? "local"))} />
+        </Suspense>
+      )}
       <group ref={avatar}>
         <AvatarBody avatar={myAvatar} seed={world.sessionId ?? "local"} motion={motion} />
         <Suspense fallback={null}>

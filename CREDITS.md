@@ -9,6 +9,14 @@ La excepción son las texturas generadas con IA (abajo), que tienen su propia no
   y sus paquetes de recursos CC0 (pieles, pelo, ropa).
 - **Animaciones**: [Universal Animation Library](https://quaternius.com) de Quaternius (CC0).
 - **Kits de ciudad** (`tools/kits/kenney/`): packs de [Kenney](https://kenney.nl) (CC0), descargados el 27-10-2026. La lista está en `tools/kits/README.md`.
+- **Coche para conducir** (`tools/models/library/vehicle_car*`): «Car Concept», de los modelos de
+  muestra de glTF de Khronos ([KhronosGroup/glTF-Sample-Assets](https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/CarConcept)),
+  © The Khronos Group, con licencia [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); hecho a
+  partir de un modelo de dominio público de Unity Fan. **Modificado** para xenxo con
+  `tools/models/library/concept-car.mjs`: sin los logotipos de Khronos (sus marcas no entran en la
+  licencia), sin piezas ocultas, simplificado, con el cristal sin transmisión y separado en
+  carrocería, puertas y ruedas. No es CC0: hay que mantener esta atribución.
+- **Física del coche**: [Rapier](https://rapier.rs) de Dimforge (Apache-2.0), su vehículo de rayos con suspensión.
 - **Tipografías**: Space Grotesk (titulares y carteles), Inter (texto), IBM Plex Mono (datos técnicos) y Tilt Neon de Andy Clymer (rótulos de neón), todas con licencia SIL Open Font License y empaquetadas con la web (sin CDN).
 
 ## Generado con IA

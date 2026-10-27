@@ -11,14 +11,21 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { VRM } from "@pixiv/three-vrm";
 import { createVRMAnimationClip, VRMAnimationLoaderPlugin, type VRMAnimation } from "@pixiv/three-vrm-animation";
 
-/** Gesto → clip. `once`: se reproduce una vez y vuelve al reposo. */
-export const EMOTE_CLIPS: Record<string, { clip: string; once?: boolean }> = {
+/**
+ * Gesto → clip. `once`: se reproduce una vez y vuelve al reposo; con `hold`, se queda en la última
+ * pose (sentarse en el coche: el siguiente gesto, «sit», sigue desde ahí).
+ */
+export const EMOTE_CLIPS: Record<string, { clip: string; once?: boolean; hold?: boolean }> = {
   dance: { clip: "dance" },
   wave: { clip: "interact", once: true },
   talk: { clip: "talk" },
   sit: { clip: "sit_idle" },
   cheer: { clip: "jump_land", once: true },
   crouch: { clip: "crouch_idle" },
+  // Subir y bajar del coche (world/vehicle): abrir la puerta, sentarse dentro y levantarse.
+  car_open: { clip: "interact", once: true, hold: true },
+  car_in: { clip: "sit_enter", once: true, hold: true },
+  car_out: { clip: "sit_exit", once: true, hold: true },
 };
 
 const LOCOMOTION = ["idle", "walk", "jog", "sprint", "jump_loop"] as const;
@@ -59,7 +66,7 @@ export class VrmAnimator {
   constructor(private vrm: VRM) {
     this.mixer = new THREE.AnimationMixer(vrm.scene);
     this.mixer.addEventListener("finished", (e) => {
-      if (e.action === this.emoteAction) this.onceDone = true;
+      if (e.action === this.emoteAction && !(this.emoteName && EMOTE_CLIPS[this.emoteName]?.hold)) this.onceDone = true;
     });
     for (const name of LOCOMOTION) {
       void this.ensure(name).then((a) => {

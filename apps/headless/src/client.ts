@@ -142,8 +142,9 @@ export class XenxoClient {
     this.ws.send(typeof m === "string" ? m : JSON.stringify(m));
   }
 
-  pose(p: [number, number, number], yaw = 0, emote?: string) {
-    this.sendRaw(msg("POSE", { t: Date.now(), head: { p, r: [0, Math.sin(yaw / 2), 0, Math.cos(yaw / 2)] }, ...(emote ? { emote } : {}) }));
+  pose(p: [number, number, number], yaw = 0, emote?: string, car?: { p: [number, number, number]; inside: boolean }) {
+    const r: [number, number, number, number] = [0, Math.sin(yaw / 2), 0, Math.cos(yaw / 2)];
+    this.sendRaw(msg("POSE", { t: Date.now(), head: { p, r }, ...(emote ? { emote } : {}), ...(car ? { car: { p: car.p, r }, ...(car.inside ? { vehicle: "car" as const } : {}) } : {}) }));
   }
 
   /** Envía una mutación y resuelve con su ACK o su ERROR. */

@@ -27,9 +27,19 @@ interface Box {
   /** Giro alrededor de Y (coseno y seno). */
   c: number;
   s: number;
+  /** No es del mundo (el coche aparcado propio): no entra en la física del coche. */
+  dyn?: boolean;
 }
 
 let boxes: Box[] = [];
+/** El coche propio cuando está quieto (aparcado, o al subir y bajar): el personaje lo rodea. */
+let vehicleBox: Box | null = null;
+let vehicleVersion = 0;
+let seenVehicleVersion = -1;
+export function setVehicleBox(b: Omit<Box, "dyn"> | null) {
+  vehicleBox = b ? { ...b, dyn: true } : null;
+  vehicleVersion++;
+}
 let version = -1;
 let seenMeshVersion = -1;
 
@@ -59,6 +69,27 @@ export function setMeshCollider(id: string, geometry: THREE.BufferGeometry | nul
   meshVersion++;
 }
 
+/**
+ * Lo sólido del lugar para la física del coche (world/vehicle): una versión que cambia cuando
+ * cambian las cajas o las mallas, y las cajas y mallas mismas (ya en coordenadas del lugar).
+ */
+export function solidsVersion(): number {
+  refresh();
+  return version * 4096 + seenMeshVersion;
+}
+export function forEachSolidBox(cb: (b: Readonly<Box>) => void) {
+  refresh();
+  for (const b of boxes) if (!b.dyn) cb(b);
+}
+export function forEachSolidMesh(cb: (id: string, positions: Float32Array, index: Uint32Array | null) => void) {
+  for (const [id, m] of meshCols) {
+    const g = m.bvh.geometry;
+    const pos = g.getAttribute("position").array as Float32Array;
+    const idx = g.getIndex();
+    cb(id, pos, idx ? (idx.array instanceof Uint32Array ? idx.array : Uint32Array.from(idx.array)) : null);
+  }
+}
+
 /** Cuántas mallas de colisión hay (pruebas y depuración). */
 export const meshColliderCount = () => meshCols.size;
 
@@ -71,15 +102,28 @@ const MAX_NPC = 64;
 export const npcs = { count: 0, extra: 0, pos: new Float32Array(MAX_NPC * 3) };
 /** Índice del hueco k de la lista de gente (peatones primero, luego residentes). */
 const npcAt = (k: number) => (k < npcs.count ? k : NPC_CITY + k - npcs.count);
+/** La gente de ahora, en orden (para la física del coche). */
+export const crowd = {
+  get count() {
+    return npcs.count + npcs.extra;
+  },
+  at(k: number, out: { x: number; y: number; z: number }) {
+    const i = npcAt(k);
+    out.x = npcs.pos[i * 3]!;
+    out.y = npcs.pos[i * 3 + 1]!;
+    out.z = npcs.pos[i * 3 + 2]!;
+  },
+};
 
 /** Origen de un chunk respecto al lugar actual (que se dibuja en 0..CHUNK_SIZE). */
 const chunkOrigin = (chunkId: string) => world.offsetOf(chunkId);
 
 function refresh() {
   const v = world.getVersion();
-  if (v === version && meshVersion === seenMeshVersion) return;
+  if (v === version && meshVersion === seenMeshVersion && vehicleVersion === seenVehicleVersion) return;
   version = v;
   seenMeshVersion = meshVersion;
+  seenVehicleVersion = vehicleVersion;
   const out: Box[] = [];
   for (const e of world.entities.values()) {
     const col = ColliderV1.safeParse(e.components["collider@1"]);
@@ -105,6 +149,7 @@ function refresh() {
       s: Math.sin(yaw),
     });
   }
+  if (vehicleBox) out.push(vehicleBox);
   boxes = out;
 }
 

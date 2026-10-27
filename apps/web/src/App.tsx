@@ -6,6 +6,8 @@ import { CONTROL_PX, useControls } from "./controls";
 import { enterFullscreen } from "./fullscreen";
 import { TopTools, ViewTools } from "./hud/CameraTools";
 import { Emotes } from "./hud/Emotes";
+import { CarButton, CarNotice, CarSpeed } from "./hud/CarTools";
+import { useDrive } from "./world/vehicle/drive-state";
 import { People } from "./hud/People";
 import { PortalCard, TravelToast } from "./hud/PortalCard";
 import { ActivityHud } from "./hud/ActivityHud";
@@ -66,6 +68,7 @@ export function App() {
   const xrStore = useXRStore();
   const enterVR = vr && xrStore ? () => void xrStore.enterVR() : null;
   const touch = matchMedia("(pointer: coarse)").matches;
+  const driving = useDrive();
   useWorldVersion();
   useLang();
   const user = useAccount();
@@ -222,18 +225,23 @@ export function App() {
             style={touch ? { bottom: `calc(max(1.5rem, env(safe-area-inset-bottom)) + ${CONTROL_PX[controls.size].stick + 16}px)` } : undefined}
           >
             <ViewTools touch={touch} />
-            {controls.showEmotes && (
+            <div style={touch ? { opacity: controls.opacity } : undefined}>
+              <CarButton touch={touch} />
+            </div>
+            {controls.showEmotes && !driving.on && (
               <div style={touch ? { opacity: controls.opacity } : undefined}>
                 <Emotes />
               </div>
             )}
           </div>
+          <CarNotice className={`absolute left-1/2 top-24 -translate-x-1/2 px-3 py-1.5 text-center text-sm text-cal ${hudBox}`} />
+          <CarSpeed className={`absolute left-1/2 top-[max(1rem,env(safe-area-inset-top))] -translate-x-1/2 px-3 py-1 ${hudBox}`} />
           {touch ? (
             <TouchJoystick />
           ) : (
             <p className={`absolute bottom-5 left-1/2 -translate-x-1/2 px-3 py-1.5 text-center text-xs text-cal/70 ${hudBox}`}>
-              {t("hud.desktopHint")}
-              <span className="block text-cal/45">{t("hud.keys")}</span>
+              {driving.on ? t("car.hint") : t("hud.desktopHint")}
+              {!driving.on && <span className="block text-cal/45">{t("hud.keys")}</span>}
             </p>
           )}
         </div>

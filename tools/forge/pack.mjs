@@ -50,8 +50,16 @@ mkdirSync(dest, { recursive: true });
 const index = {};
 const previous = existsSync(indexFile) ? (await import(indexFile)).SEED_ASSETS : {};
 // Borra solo los modelos de la forja anterior que se rehacen (en la misma carpeta viven los avatares de serie).
+// Los modelos de tools/models/ que ya no tienen carpeta, fuera (los demás se rehacen abajo).
+const modelFolders = new Set(
+  ["generated", "library"].flatMap((d) => {
+    const dir = join(root, "tools", "models", d);
+    return existsSync(dir) ? readdirSync(dir).filter((f) => existsSync(join(dir, f, "meta.json"))).map((f) => JSON.parse(readFileSync(join(dir, f, "meta.json"), "utf8")).name) : [];
+  }),
+);
 for (const [name, entry] of Object.entries(previous)) {
-  if (keep && !(name in forge)) {
+  const gone = (entry.kind === "generated" || entry.kind === "library") && !modelFolders.has(name);
+  if (keep && !(name in forge) && !gone) {
     index[name] = { kind: entry.kind, lods: entry.lods.map((l) => ({ ...l, file: `${l.hash.slice(7)}.glb` })) };
     continue;
   }
@@ -105,7 +113,12 @@ for (const name of Object.keys(forge).sort()) {
 // Modelos generados con IA (tools/models/generated/<carpeta>/: model.glb + meta.json, ver su README):
 // se ponen a su tamaño real (`fit`), de pie en Y = 0 y mirando a +Z (`yaw`), con dos niveles de
 // detalle (texturas a 1024 y 512 px en WebP; el ligero, simplificado) y el mismo presupuesto.
-const generatedDir = join(root, "tools", "models", "generated");
+// Igual con los de bibliotecas libres que hay que preparar antes (tools/models/library/, CC0).
+const MODEL_DIRS = [
+  [join(root, "tools", "models", "generated"), "generated"],
+  [join(root, "tools", "models", "library"), "library"],
+];
+for (const [generatedDir, modelKind] of MODEL_DIRS)
 for (const folder of existsSync(generatedDir) ? readdirSync(generatedDir).sort() : []) {
   const metaFile = join(generatedDir, folder, "meta.json");
   if (!existsSync(metaFile)) continue;
@@ -125,12 +138,16 @@ for (const folder of existsSync(generatedDir) ? readdirSync(generatedDir).sort()
       if (node.getMesh()) transformMesh(node.getMesh(), multiply4(rot, node.getMatrix()));
       node.setMatrix([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
     }
-    const b = getBounds(scene);
-    const size = [b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]];
-    const s = meta.fit.size / (meta.fit.along === "height" ? size[1] : Math.max(size[0], size[2]));
-    const cx = (b.min[0] + b.max[0]) / 2, cz = (b.min[2] + b.max[2]) / 2;
-    const m = [s, 0, 0, 0, 0, s, 0, 0, 0, 0, s, 0, -cx * s, -b.min[1] * s, -cz * s, 1];
-    for (const node of scene.listChildren()) if (node.getMesh()) transformMesh(node.getMesh(), m);
+    // Piezas que van juntas (el coche: carrocería, puertas y ruedas, cada una con su pivote en el
+    // origen): `keep_origin` las deja donde están, a su tamaño real.
+    if (!meta.keep_origin) {
+      const b = getBounds(scene);
+      const size = [b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]];
+      const s = meta.fit.size / (meta.fit.along === "height" ? size[1] : Math.max(size[0], size[2]));
+      const cx = (b.min[0] + b.max[0]) / 2, cz = (b.min[2] + b.max[2]) / 2;
+      const m = [s, 0, 0, 0, 0, s, 0, 0, 0, 0, s, 0, -cx * s, -b.min[1] * s, -cz * s, 1];
+      for (const node of scene.listChildren()) if (node.getMesh()) transformMesh(node.getMesh(), m);
+    }
     await doc.transform(
       // Nivel detallado: tal cual (o reducido con `lod0_ratio` si el original es muy denso); ligero: `lod1_ratio`.
       ...(lod === 1 || meta.lod0_ratio
@@ -151,19 +168,19 @@ for (const folder of existsSync(generatedDir) ? readdirSync(generatedDir).sort()
     writeFileSync(join(dest, file), bytes);
     total += bytes.byteLength;
     lods.push({ file, hash, tris: report.triangles, bytes: report.bytes, bounds: report.bounds });
-    console.log(`${(meta.name + ".lod" + lod).padEnd(18)} ${String(report.triangles).padStart(6)} tri  ${(bytes.byteLength / 1024).toFixed(0).padStart(5)} KB  (IA: ${meta.platform} ${meta.model})`);
+    console.log(`${(meta.name + ".lod" + lod).padEnd(18)} ${String(report.triangles).padStart(6)} tri  ${(bytes.byteLength / 1024).toFixed(0).padStart(5)} KB  (${modelKind === "generated" ? `IA: ${meta.platform} ${meta.model}` : `${meta.platform}, ${meta.license}`})`);
   }
   // Los archivos de la versión anterior que ya no se usan (nunca uno que acabamos de escribir).
   const fresh = new Set(lods.map((l) => l.file));
   for (const l of index[meta.name]?.lods ?? []) if (!fresh.has(l.file)) rmSync(join(dest, l.file), { force: true });
-  index[meta.name] = { kind: "generated", lods };
+  index[meta.name] = { kind: modelKind, lods };
 }
 
 // Comprobación final: cada archivo del índice tiene que estar en disco.
 const missing = Object.entries(index).flatMap(([n, e]) => e.lods.filter((l) => !existsSync(join(dest, l.file))).map((l) => `${n}: ${l.file}`));
 if (missing.length) throw new Error(`faltan archivos empaquetados:\n${missing.join("\n")}`);
 
-if (keep) console.log(`(conservadas sin tocar: ${Object.keys(index).filter((n) => !(n in forge) && index[n].kind !== "generated").join(", ") || "ninguna"})`);
+if (keep) console.log(`(conservadas sin tocar: ${Object.keys(index).filter((n) => !(n in forge) && index[n].kind !== "generated" && index[n].kind !== "library").join(", ") || "ninguna"})`);
 
 // Índice tipado: el servidor siembra entidades con estos hashes y sirve los archivos
 // desde sus recursos estáticos (apps/realtime/seed-assets/s, nombrados por hash).

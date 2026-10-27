@@ -445,11 +445,20 @@ export const HelloMsg = envelope(
  * cada cliente reproduce los que conoce y trata los demás como si no hubiera gesto.
  */
 export const Emote = z.string().regex(/^[a-z_]{1,24}$/);
-export const EMOTES = ["dance", "wave", "sit", "talk", "cheer", "crouch"] as const;
+export const EMOTES = ["dance", "wave", "sit", "talk", "cheer", "crouch", "car_in", "car_out"] as const;
+
+/**
+ * Vehículos de los distritos. `vehicle` dice en qué va la persona si no va a pie ("car": va dentro
+ * de su coche, sentada; `head` sigue siendo su cabeza). `car` dice dónde está su coche (en marcha o
+ * aparcado): `p` es su origen, en el suelo, y `r` su giro completo, con la inclinación. Quien no
+ * conozca los vehículos dibuja a la persona como siempre y no dibuja el coche.
+ */
+export const Vehicle = z.enum(["car"]);
+export type Vehicle = z.infer<typeof Vehicle>;
 
 export const PoseMsg = envelope(
   "POSE",
-  z.object({ t: z.number(), head: Pose, hand_l: Pose.optional(), hand_r: Pose.optional(), emote: Emote.optional() }),
+  z.object({ t: z.number(), head: Pose, hand_l: Pose.optional(), hand_r: Pose.optional(), emote: Emote.optional(), vehicle: Vehicle.optional(), car: Pose.optional() }),
 );
 
 export const MutationOp = z.discriminatedUnion("op", [
@@ -495,6 +504,8 @@ export const AvatarPose = z.object({
   hand_l: Pose.optional(),
   hand_r: Pose.optional(),
   emote: Emote.optional(),
+  vehicle: Vehicle.optional(),
+  car: Pose.optional(),
 });
 export type AvatarPose = z.infer<typeof AvatarPose>;
 

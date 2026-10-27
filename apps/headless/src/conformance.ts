@@ -103,6 +103,42 @@ await scenario("gestos: el emote de A llega a B con su pose; uno mal formado se 
   b.close();
 });
 
+await scenario("coche: en un distrito los demás ven el coche de A (y si va dentro); en la plaza se va a pie; un vehículo desconocido no pasa", async () => {
+  const chunkId = "c_-1_-1";
+  const a = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-coche-a" });
+  const b = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-coche-b" });
+  b.pose([32, 1.6, 128]);
+  await new Promise((r) => setTimeout(r, 300));
+  const got = b.next("POSES", (m) => m.payload.poses.some((p) => p.session_id === a.welcome.session_id && p.vehicle === "car" && p.car?.p[0] === 34), 3000);
+  for (let i = 0; i < 3; i++) {
+    a.pose([34, 1.2, 126], 0.3, undefined, { p: [34, 0, 126], inside: true });
+    await new Promise((r) => setTimeout(r, 220));
+  }
+  await got;
+  // Aparcado: el coche sigue ahí, la persona va a pie.
+  const parked = b.next("POSES", (m) => m.payload.poses.some((p) => p.session_id === a.welcome.session_id && !p.vehicle && p.car?.p[2] === 126), 3000);
+  for (let i = 0; i < 3; i++) {
+    a.pose([36, 1.6, 126], 0.3, undefined, { p: [34, 0, 126], inside: false });
+    await new Promise((r) => setTimeout(r, 220));
+  }
+  await parked;
+  const bad = a.next("ERROR", (m) => m.payload.code === "bad_message", 3000);
+  a.sendRaw(JSON.stringify({ ...msg("POSE", { t: Date.now(), head: { p: [34, 1.6, 126], r: [0, 0, 0, 1] } }), payload: { t: Date.now(), head: { p: [34, 1.6, 126], r: [0, 0, 0, 1] }, vehicle: "tanque" } }));
+  await bad;
+  a.close();
+  b.close();
+  // En la plaza no hay coches: la pose llega, pero a pie y sin coche.
+  const pa = await XenxoClient.connect({ baseUrl, displayName: "conf-coche-pa" });
+  const pb = await XenxoClient.connect({ baseUrl, displayName: "conf-coche-pb" });
+  const seen = pb.next("POSES", (m) => m.payload.poses.some((p) => p.session_id === pa.welcome.session_id), 3000);
+  pa.pose([30, 1.6, 40], 0, undefined, { p: [30, 0, 42], inside: true });
+  const m = await seen;
+  const pp = m.payload.poses.find((p) => p.session_id === pa.welcome.session_id);
+  assert(!pp?.vehicle && !pp?.car, "en la plaza se va a pie");
+  pa.close();
+  pb.close();
+});
+
 await scenario("avatar de serie: un invitado puede llevarlo; un hash cualquiera se ignora", async () => {
   const preset = AVATAR_PRESETS[0]!;
   const watcher = await XenxoClient.connect({ baseUrl });
@@ -751,6 +787,12 @@ await scenario("actividades: el servidor comprueba la cercanía, el orden y el r
   await at([0, 1.6, 120]);
   const done = await u.activity("CHECKPOINT", fin);
   assert(done.type === "RACE" && done.payload.state === "finish" && (done.payload.ms ?? 0) >= 1400 && done.payload.rank === 1, `meta: tiempo y puesto (${JSON.stringify(done.payload)})`);
+  // En coche no se corre: la salida no cuenta.
+  u.pose([0, 1.2, 100], 0, undefined, { p: [0, 0, 100], inside: true });
+  await new Promise((r) => setTimeout(r, 260));
+  const inCar = await u.activity("CHECKPOINT", start);
+  assert(inCar.type === "ERROR" && inCar.payload.code === "forbidden", "en coche, la carrera no cuenta");
+  await at([0, 1.6, 100]);
   const sr = await u.activity("SCORES_GET", boardRace);
   assert(sr.type === "SCORES" && sr.payload.rows[0]?.name === name && sr.payload.rows[0]?.value === done.payload.best, "el marcador de la carrera");
   const sh = await u.activity("SCORES_GET", boardHunt);

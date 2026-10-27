@@ -93,6 +93,11 @@ class AmbientAudio {
   private ambience: Ambience = "night";
   private active = false;
 
+  /** Contexto y salida para otros sonidos del mundo (el motor del coche), si el sonido está activo. */
+  output(): { ctx: AudioContext; out: AudioNode; noise: AudioBuffer } | null {
+    return this.ctx && this.master && this.noise && enabled ? { ctx: this.ctx, out: this.master, noise: this.noise } : null;
+  }
+
   /** Crear el contexto solo tras un gesto (los navegadores lo exigen). */
   unlock() {
     if (this.ctx || typeof AudioContext === "undefined") return;
