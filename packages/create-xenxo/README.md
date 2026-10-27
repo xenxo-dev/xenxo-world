@@ -8,6 +8,7 @@ npm create xenxo@latest
 npm create xenxo@latest mi-juego -- --3d
 npm create xenxo@latest my-game -- --2d --lang en
 npm create xenxo@latest mi-juego -- --3d --multi   # con sala multijugador
+npm create xenxo@latest mi-distrito -- --district  # un distrito de la comunidad
 ```
 
 Trae:
@@ -26,4 +27,9 @@ Trae:
 - **Publicar en un comando**: `npm run deploy` (Cloudflare Pages, gratis) o cualquier alojamiento
   estático.
 
-Licencia MIT: tu juego es tuyo.
+**Distritos** (`--district`): una carpeta con la ficha `xenxo-district.json`, modelos de ejemplo, la
+portada, el emblema y un `AGENTS.md` con las medidas y las reglas. `npm run validate` la comprueba
+con [`@xenxo/district-kit`](https://www.npmjs.com/package/@xenxo/district-kit) y se sube desde
+xenxo.io → Cuenta → Tu distrito.
+
+Licencia MIT: tu juego (o tu distrito) es tuyo.

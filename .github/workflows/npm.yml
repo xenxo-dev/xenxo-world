@@ -13,6 +13,7 @@ on:
         options:
           - "@xenxo/sdk"
           - create-xenxo
+          - "@xenxo/district-kit"
 
 permissions:
   contents: read

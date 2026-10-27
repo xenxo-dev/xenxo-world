@@ -19,7 +19,8 @@
     "build": "esbuild src/cli.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/xenxo-district.mjs --banner:js=\"#!/usr/bin/env node\"",
     "validate": "tsx src/cli.ts validate",
     "sample": "tsx scripts/sample.ts",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "prepack": "npm run build"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
