@@ -45,7 +45,9 @@
   "pixel": 4,
   "agora": 6,
   "taller": 8,
-  "frontera": 10
+  "frontera": 10,
+  "cero": 11,
+  "vertical": 1
  },
  "gates": {
   "ring": 15,

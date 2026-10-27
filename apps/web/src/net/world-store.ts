@@ -74,7 +74,9 @@ class WorldStore {
   beginTravel(chunkId: string) {
     this.chunkId = chunkId;
     this.solo = false;
-    this.walk = [1, CHUNK_SIZE - 1];
+    // Sin límites hasta que el lugar diga los suyos en WELCOME: el punto de llegada (p. ej. una
+    // isla del nexo) puede estar fuera del chunk.
+    this.walk = [-Infinity, Infinity];
     this.entities = new Map();
     this.peers.clear();
     this.poseBuffers.clear();

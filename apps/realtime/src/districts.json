@@ -201,6 +201,36 @@
     "es": "Experimentos, arte y todo lo que no cabe en otro sitio.",
     "en": "Experiments, art and everything that fits nowhere else."
    }
+  },
+  {
+   "id": "cero",
+   "chunk": "c_-1_-1",
+   "category": "other",
+   "color": "#a26bff",
+   "emblem": "zero",
+   "name": {
+    "es": "Distrito Cero",
+    "en": "District Zero"
+   },
+   "desc": {
+    "es": "La ciudad de Xen, el jugador #0: ciencia ficción, IA, ciberpunk y mundos del futuro.",
+    "en": "The city of Xen, player #0: sci-fi, AI, cyberpunk and worlds of the future."
+   }
+  },
+  {
+   "id": "vertical",
+   "chunk": "c_-1_1",
+   "category": "other",
+   "color": "#ff7a45",
+   "emblem": "stack",
+   "name": {
+    "es": "Vertical",
+    "en": "Vertical"
+   },
+   "desc": {
+    "es": "Torres de caravanas apiladas: webs personales, portfolios, blogs y primeros proyectos.",
+    "en": "Towers of stacked trailers: personal sites, portfolios, blogs and first projects."
+   }
   }
  ]
 }

@@ -118,6 +118,20 @@ def emblem(d: dict, detail: int = 1):
         p.tube(ring, 0.11, body, segments=12 if detail else 8, closed=True)
     elif shape == "cone":
         p.cylinder((0, 0, 0.1), 0.45, 1.0, body, segments=4, radius_top=0.0)
+    elif shape == "zero":
+        # Un cero tachado (Ø) de pie: óvalo de tubo con su barra en diagonal, en neón.
+        n = 48 if detail else 24
+        oval = [(0.3 * math.cos(2 * math.pi * k / n), 0.0, 0.62 + 0.46 * math.sin(2 * math.pi * k / n)) for k in range(n)]
+        p.tube(oval, 0.09, body, segments=12 if detail else 8, closed=True)
+        p.tube([(-0.26, 0.0, 0.26), (0.26, 0.0, 0.98)], 0.05, neon, segments=8 if detail else 6)
+    elif shape == "stack":
+        # Tres caravanas apiladas y desplazadas, como las torres del distrito.
+        for i, (dx, rz) in enumerate([(0.0, 0.0), (0.1, 18.0), (-0.08, -12.0)]):
+            c = Part("c")
+            c.box((-0.4, -0.17, 0.0), (0.4, 0.17, 0.26), body)
+            c.box((-0.41, -0.18, 0.11), (0.41, 0.18, 0.14), neon)
+            p.merge(c, Matrix.Translation((dx, 0, 0.08 + i * 0.3)) @ Matrix.Rotation(math.radians(rz), 4, "Z"))
+            c.bm.free()
     else:
         raise ValueError(f"emblema desconocido: {shape}")
     ob = p.to_object()

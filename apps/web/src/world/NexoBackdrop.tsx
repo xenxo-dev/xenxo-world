@@ -1,11 +1,11 @@
 /**
- * Fondo del nexo: una panorámica realista de la megaciudad cyberpunk y el espacio (planeta con
+ * Fondo lejano del nexo (lo cercano es 3D: NexoCity): una panorámica realista de la megaciudad cyberpunk y el espacio (planeta con
  * anillos, luna, estación orbital) que da la vuelta entera alrededor de la plataforma, de día o de
  * noche. Son imágenes generadas con IA, guardadas en el repo y servidas desde xenxo
  * (tools/materials/generated/nexo-panorama, CREDITS.md). Decorado del cliente, no datos del mundo.
  *
- * Un cilindro abierto con una textura (un draw call, sin luces): arriba funde con el cielo y abajo
- * se pierde en la bruma. 4096 px en gafas y móvil; 8192 en escritorio.
+ * Un cilindro abierto con una textura (un draw call, sin luces): arriba funde con el cielo y por
+ * debajo del horizonte desaparece (ahí se ve la ciudad en 3D). 4096 px en gafas y móvil; 8192 en escritorio.
  */
 import { useEffect, useMemo, useState } from "react";
 import * as THREE from "three";
@@ -38,17 +38,17 @@ const material = () =>
     transparent: true,
     depthWrite: false,
     side: THREE.BackSide,
-    uniforms: { map: { value: null as THREE.Texture | null }, gain: { value: 1 } },
+    uniforms: { map: { value: null as THREE.Texture | null }, gain: { value: 1 }, cut: { value: 0.5 } },
     vertexShader: /* glsl */ `
       varying vec2 vUv;
       void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
     fragmentShader: /* glsl */ `
-      uniform sampler2D map; uniform float gain;
+      uniform sampler2D map; uniform float gain; uniform float cut;
       varying vec2 vUv;
       void main() {
         vec4 c = texture2D(map, vec2(1.0 - vUv.x, vUv.y));
-        // Arriba funde con el cielo; abajo se pierde en la bruma.
-        float a = smoothstep(0.0, 0.14, vUv.y) * smoothstep(1.0, 0.86, vUv.y);
+        // Por debajo del horizonte no hay imagen: ahí está la ciudad en 3D (NexoCity), entre la bruma.
+        float a = smoothstep(cut - 0.01, cut + 0.05, vUv.y) * smoothstep(1.0, 0.86, vUv.y);
         gl_FragColor = vec4(c.rgb * gain, a);
         #include <colorspace_fragment>
       }`,
@@ -65,6 +65,7 @@ export function NexoBackdrop({ ambience, hd }: { ambience: Ambience; hd: boolean
         if (!alive) return;
         mat.uniforms.map!.value = t;
         mat.uniforms.gain!.value = ambience === "night" ? 1.15 : 1;
+        mat.uniforms.cut!.value = 1 - HORIZON[ambience];
         const img = t.image as { width: number; height: number };
         setAspect(img.width / img.height);
       })

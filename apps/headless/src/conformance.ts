@@ -499,6 +499,20 @@ await scenario("nexo y distritos: el nexo lleva a la plaza y a los distritos, y 
   assert(toArcade?.to.chunk_id === "c_1_0", "falta el portal del nexo al distrito Arcade");
   const arcadePortal = c.snapshot.entities.find((e) => e.entity_id === "nexo_portal_arcade")?.components["portal@1"] as { color?: string; cover?: string } | undefined;
   assert(!!arcadePortal?.color && !arcadePortal.cover, "la puerta del distrito es abierta (sin portada) y del color del distrito");
+  // Todos los distritos (también los nuevos) tienen su puerta en el nexo, y la vuelta deja dentro de lo caminable.
+  const all = (await (await fetch(`${baseUrl}/districts`)).json()) as { districts: { id: string; chunk_id: string }[] };
+  const nexoWalk = c.welcome.walk ?? [0, 64];
+  for (const d of all.districts) {
+    const to = c.snapshot.entities.find((e) => e.entity_id === `nexo_portal_${d.id}`)?.components["portal@1"] as { to: { chunk_id?: string } } | undefined;
+    assert(to?.to.chunk_id === d.chunk_id, `falta la puerta del nexo al distrito ${d.id}`);
+    const dc = await XenxoClient.connect({ baseUrl, chunkId: d.chunk_id });
+    const back = dc.snapshot.entities.find((e) => (e.components["portal@1"] as { to?: { chunk_id?: string } } | undefined)?.to?.chunk_id === PLACES.nexo)?.components["portal@1"] as
+      | { to: { spawn: number[] } }
+      | undefined;
+    dc.close();
+    const [bx, , bz] = back?.to.spawn ?? [NaN, 0, NaN];
+    assert(bx! >= nexoWalk[0] && bx! <= nexoWalk[1] && bz! >= nexoWalk[0] && bz! <= nexoWalk[1], `la puerta de ${d.id} devuelve fuera de lo caminable del nexo`);
+  }
   for (const id of ["nexo_gate_arcade", "nexo_monument_arcade", "nexo_island_arcade", "nexo_spires_arcade", "nexo_island_plaza"]) {
     assert(c.snapshot.entities.some((e) => e.entity_id === id), `falta ${id} (puerta, emblema e isla del distrito)`);
   }

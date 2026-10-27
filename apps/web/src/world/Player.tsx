@@ -152,7 +152,9 @@ export function Player({ active }: { active: boolean }) {
         }
         // Sentado no hay físicas: el banco es una caja y nos subiría encima.
         // En el nexo (en solitario) se camina más allá del chunk: por las pasarelas hasta las islas.
-        if (motion.emote !== "sit") stepBody(body, wantX, wantZ, dt, world.walk[0], world.walk[1]);
+        // Mientras se viaja (aún sin WELCOME ni suelo del lugar nuevo) el cuerpo espera quieto: si
+        // diera pasos, los límites y el suelo del lugar anterior lo dejarían fuera de lo caminable.
+        if (motion.emote !== "sit" && world.status === "open") stepBody(body, wantX, wantZ, dt, world.walk[0], world.walk[1]);
         smoothSpeed(motion, Math.hypot(body.vx, body.vz), dt);
         motion.airborne = !body.grounded;
 

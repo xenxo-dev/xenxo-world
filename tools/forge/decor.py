@@ -218,6 +218,110 @@ def rock(color: str) -> Part:
     return p
 
 
+# ---------------------------------------------------------------- Distrito Cero (ciberpunk)
+
+def neon_sign(color: str) -> Part:
+    """Poste con letreros de neón en bandera, uno encima de otro (sin letras: solo barras de luz)."""
+    p = Part("neon_sign")
+    metal = mat("metal", "#1b1f2e")
+    p.box((-0.3, -0.3, 0.0), (0.3, 0.3, 0.25), metal)
+    p.cylinder((0, 0, 0.25), 0.07, 3.0, metal, segments=8)
+    for i, (h, w, c) in enumerate(((1.4, 0.55, color), (2.15, 0.7, "#36d9ff"), (2.85, 0.45, "#ff4f8b"))):
+        side = 1 if i % 2 == 0 else -1
+        x0 = 0.07 if side > 0 else -0.07 - w
+        p.box((x0, -0.06, h), (x0 + w, 0.06, h + 0.5), mat("metal", "#0d1018"))
+        p.box((x0 + 0.06, -0.08, h + 0.08), (x0 + w - 0.06, -0.06, h + 0.16), mat("neon", c))
+        p.box((x0 + 0.06, -0.08, h + 0.3), (x0 + w * 0.6, -0.06, h + 0.38), mat("neon", c))
+    return p
+
+
+def vending(color: str) -> Part:
+    """Máquina expendedora con frontal encendido."""
+    p = Part("vending")
+    body = mat("metal", "#232a3c")
+    p.box((-0.45, -0.38, 0.0), (0.45, 0.38, 1.9), body)
+    p.box((-0.38, -0.4, 0.55), (0.18, -0.38, 1.75), mat("neon", "#cfe8ff"))  # escaparate
+    for k in range(4):
+        z = 0.7 + k * 0.27
+        p.box((-0.34, -0.42, z), (0.14, -0.4, z + 0.03), mat("neon", color))
+    p.box((0.24, -0.4, 1.0), (0.38, -0.38, 1.5), mat("metal", "#0d1018"))  # panel
+    p.box((-0.38, -0.4, 0.15), (0.38, -0.38, 0.4), mat("oscuro", "#050608"))  # cajón
+    p.box((-0.46, -0.39, 1.82), (0.46, 0.39, 1.9), mat("neon", color))
+    return p
+
+
+def data_pylon(color: str) -> Part:
+    """Columna de datos: pilar oscuro con anillos de luz y cables al suelo."""
+    p = Part("data_pylon")
+    dark, cable = mat("metal", "#14161f"), mat("oscuro", "#050608")
+    p.cylinder((0, 0, 0), 0.6, 0.2, mat("metal", "#2c3348"), segments=8)
+    p.cylinder((0, 0, 0.2), 0.32, 2.6, dark, segments=8)
+    for k, c in enumerate((color, "#36d9ff", color)):
+        p.cylinder((0, 0, 0.8 + k * 0.6), 0.34, 0.07, mat("neon", c), segments=8)
+    p.sphere((0, 0, 2.95), 0.18, mat("neon", "#36d9ff"), subdiv=1)
+    for a in (0.4, 2.3, 4.2):
+        p.tube([(math.cos(a) * 0.3, math.sin(a) * 0.3, 0.5), (math.cos(a) * 0.65, math.sin(a) * 0.65, 0.05)], 0.04, cable, segments=6)
+    return p
+
+
+# ---------------------------------------------------------------- Vertical (torres de caravanas)
+
+def trailer(color: str) -> Part:
+    """Caravana pequeña de chapa, con ventanas encendidas y su toldo."""
+    p = Part("trailer")
+    shell, trim = mat("metal", "#b9b2a4"), mat("metal", "#3a4256")
+    p.box((-0.75, -0.42, 0.25), (0.75, 0.42, 1.35), shell)
+    p.box((-0.77, -0.44, 0.75), (0.77, 0.44, 0.82), mat("metal", color))  # franja
+    for x in (-0.45, 0.25):
+        p.box((x, -0.44, 0.9), (x + 0.3, -0.42, 1.15), mat("farol", "#ffd27a"))
+    p.box((-0.15, -0.44, 0.3), (0.1, -0.42, 0.95), trim)  # puerta
+    p.box((-0.5, -0.8, 1.2), (0.6, -0.42, 1.24), mat("toldo", color))
+    for x in (-0.5, 0.5):
+        p.cylinder((x, -0.46, 0.18), 0.18, 0.92, mat("oscuro", "#050608"), segments=10, axis="y")
+    p.box((-0.75, -0.4, 0.0), (0.75, 0.4, 0.06), trim)
+    return p
+
+
+def scaffold(color: str) -> Part:
+    """Torre de andamio con una tabla y una bombilla colgando."""
+    p = Part("scaffold")
+    pipe = mat("hierro", "#5b6070")
+    h = 2.8
+    for x in (-0.6, 0.6):
+        for y in (-0.6, 0.6):
+            p.cylinder((x, y, 0), 0.04, h, pipe, segments=6)
+    for z in (0.9, 1.8, 2.7):
+        for (a, b) in (((-0.6, -0.6), (0.6, -0.6)), ((-0.6, 0.6), (0.6, 0.6)), ((-0.6, -0.6), (-0.6, 0.6)), ((0.6, -0.6), (0.6, 0.6))):
+            p.tube([(a[0], a[1], z), (b[0], b[1], z)], 0.03, pipe, segments=6)
+    p.tube([(-0.6, -0.6, 0.1), (0.6, -0.6, 0.9)], 0.025, pipe, segments=6)
+    p.box((-0.62, -0.62, 1.8), (0.62, 0.62, 1.86), mat("madera", "#9b7046"))
+    p.tube([(0.0, 0.0, 2.7), (0.0, 0.0, 2.35)], 0.01, mat("oscuro", "#050608"), segments=4)
+    p.sphere((0.0, 0.0, 2.3), 0.07, mat("farol", "#ffd27a"), subdiv=1)
+    return p
+
+
+def tires(color: str) -> Part:
+    """Pila de neumáticos viejos con una lata encima."""
+    p = Part("tires")
+    rubber = mat("oscuro", "#1a1b20")
+    for k, (x, y) in enumerate(((0.0, 0.0), (0.06, -0.04), (-0.05, 0.03), (0.02, 0.05))):
+        n = 16
+        ring = [(x + 0.42 * math.cos(2 * math.pi * i / n), y + 0.42 * math.sin(2 * math.pi * i / n), 0.12 + k * 0.24) for i in range(n)]
+        p.tube(ring, 0.12, rubber, segments=8, closed=True)
+    p.cylinder((0.0, 0.0, 0.96), 0.14, 0.3, mat("metal", color), segments=10)
+    return p
+
+
+def fire_barrel(color: str) -> Part:
+    """Bidón con fuego, donde se calientan los vecinos."""
+    p = Part("fire_barrel")
+    p.cylinder((0, 0, 0), 0.32, 0.9, mat("metal", "#7a4a32"), segments=12)
+    for z in (0.25, 0.65):
+        p.cylinder((0, 0, z), 0.335, 0.05, mat("metal", "#3a2a22"), segments=12)
+    p.lathe((0, 0, 0.88), [(0.26, 0.0), (0.16, 0.25), (0.0001, 0.5)], mat("neon", "#ff8a2c"), segments=7, smooth=False)
+    return p
+
+
 # ---------------------------------------------------------------- La Plaza (mediterránea)
 
 def orange_tree(color: str) -> Part:
@@ -255,6 +359,8 @@ BUILDERS = {
     "cafe_table": cafe_table, "speakers": speakers, "string_lamp": string_lamp,
     "crates": crates, "gear": gear, "robot_arm": robot_arm,
     "crystals": crystals, "dish": dish, "rock": rock,
+    "neon_sign": neon_sign, "vending": vending, "data_pylon": data_pylon,
+    "trailer": trailer, "scaffold": scaffold, "tires": tires, "fire_barrel": fire_barrel,
     "orange_tree": orange_tree, "bench": bench, "lamp": lamp,
 }
 
@@ -266,6 +372,8 @@ THEMES = {
     "agora": ["cafe_table", "string_lamp", "speakers", "cafe_table", "string_lamp", "cafe_table", "speakers", "string_lamp"],
     "taller": ["crates", "gear", "robot_arm", "crates", "gear", "robot_arm", "crates", "gear"],
     "frontera": ["crystals", "dish", "rock", "crystals", "rock", "dish", "crystals", "rock"],
+    "cero": ["neon_sign", "vending", "data_pylon", "neon_sign", "vending", "data_pylon", "neon_sign", "vending"],
+    "vertical": ["trailer", "fire_barrel", "scaffold", "tires", "trailer", "scaffold", "fire_barrel", "tires"],
 }
 
 
