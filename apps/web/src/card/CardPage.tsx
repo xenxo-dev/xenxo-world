@@ -129,7 +129,7 @@ export function CardPage({ no }: { no: number }) {
         {state.kind === "loading" && <p className="p-10 text-center text-cal/60">{t("card.loading")}</p>}
         {(state.kind === "missing" || state.kind === "error") && (
           <div className="p-10 text-center">
-            <p className="display text-5xl font-bold text-neon-suave">#{no}</p>
+            <p className="meta text-5xl text-neon-suave">#{no}</p>
             <p className="mt-4 text-cal/70">{t(state.kind === "missing" ? "card.notFound" : "card.error")}</p>
             <a href="/" className="mt-6 inline-block rounded-xl bg-neon px-4 py-2 font-medium text-noche hover:bg-neon-suave">
               {t("card.enter")}

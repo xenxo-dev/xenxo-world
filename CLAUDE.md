@@ -51,6 +51,7 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 - Todo efecto nuevo entra en la tabla `FEATURES`, nunca con un `if` suelto. El mundo debe verse bien en `low`: lo de los niveles altos es un extra.
 - `Effects.tsx` (post-proceso) se carga aparte y nunca se monta en XR.
 - Textos 3D con la fuente empaquetada (`world/font.ts`) y siempre dentro de `<Suspense>`: si suspenden fuera, congelan toda la app.
+- Tipografía empaquetada (`@fontsource`, nunca de un CDN): Space Grotesk para logo, títulos y rótulos 3D (`.display`, `style: "sign"`), Inter para el texto, IBM Plex Mono para metadatos (`.meta`). Colores y botones (`.neon-tube` = acción principal, `.btn-play`, `.btn-ghost`) en el tema de `index.css`: nada de colores sueltos. Iconos del HUD: SVG de línea en `hud/icons.tsx`, sin emojis. El texto secundario del mundo se apaga con la distancia (`label@1.max_distance`).
 - PWA: `public/manifest.webmanifest` + `public/sw.js` (solo GET del mismo origen; nunca la API ni el tiempo real) e iconos generados con `tools/icons/make.py`. Si una ruta nueva sirve HTML propio (no la SPA), exclúyela en `sw.js` como `/legal/`.
 - El movimiento del personaje es `world/locomotion.ts` (subpasos, escalones, saltos) sobre `world/collision.ts`: sin objetos nuevos por frame. En VR manda el casco, pero las paredes también lo frenan.
 - Mide en las gafas, no en el escritorio.

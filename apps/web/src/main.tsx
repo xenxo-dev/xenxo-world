@@ -1,8 +1,12 @@
 import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { cardRoute } from "./net/card";
+// Tipografías autoalojadas (sin CDN): Space Grotesk para titulares y carteles, Inter para el texto
+// y IBM Plex Mono para los datos técnicos.
 import "@fontsource-variable/inter";
-import "@fontsource-variable/archivo/wdth.css";
+import "@fontsource/space-grotesk/600.css";
+import "@fontsource/space-grotesk/700.css";
+import "@fontsource/ibm-plex-mono/500.css";
 import "./index.css";
 
 // xenxo.io/p/<n>: el carné público, sin cargar el mundo ni el panel.

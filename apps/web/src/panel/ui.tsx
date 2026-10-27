@@ -1,7 +1,7 @@
 /** Piezas de interfaz compartidas por las secciones del panel. */
 import type { ReactNode } from "react";
 
-export const card = "rounded-2xl border border-cal/10 bg-cal/[0.04]";
+export const card = "rounded-2xl border border-cal/10 bg-noche-2/70";
 export const input =
   "w-full rounded-xl border border-cal/10 bg-cal/5 px-3 py-2 text-cal outline-none placeholder:text-cal/35 focus:border-neon";
 
@@ -21,7 +21,7 @@ export function Stat({ label, value }: { label: string; value: number | undefine
   return (
     <div className={`${card} p-4`}>
       <p className="text-2xl font-semibold text-cal">{value ?? "–"}</p>
-      <p className="text-xs text-cal/50">{label}</p>
+      <p className="meta text-xs text-muted">{label}</p>
     </div>
   );
 }
@@ -54,9 +54,9 @@ export function Segmented<T extends string>({
 type Variant = "primary" | "secondary" | "danger" | "ghost";
 const VARIANTS: Record<Variant, string> = {
   primary: "bg-neon font-medium text-noche hover:bg-neon-suave disabled:bg-neon/25 disabled:text-cal/50",
-  secondary: "border border-cal/15 text-cal/85 hover:bg-cal/5 disabled:text-cal/30",
+  secondary: "btn-ghost disabled:opacity-40",
   danger: "border border-red-400/30 text-red-200 hover:bg-red-500/10",
-  ghost: "text-cal/60 hover:text-cal",
+  ghost: "text-soft hover:text-cal",
 };
 
 export function Button({

@@ -1,11 +1,11 @@
-import { Component, memo, Suspense, useMemo, type ReactNode } from "react";
+import { Component, memo, Suspense, useMemo, useRef, type ReactNode } from "react";
 import { Billboard, Text, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
-import { HologramV1, LabelV1, labelText, LightV1, MeshV1, PrimitiveV1, TransformV1, type Entity } from "@xenxo/protocol";
+import { HologramV1, LabelV1, labelText, LightV1, MeshV1, PLACES, PrimitiveV1, TransformV1, type Entity } from "@xenxo/protocol";
 import { assetUrl } from "../config";
 import { useLang } from "../i18n";
 import { useWorldVersion, world } from "../net/world-store";
-import { FONT_URL, NEON_FONT_URL } from "./font";
+import { FONT_URL, NEON_FONT_URL, SIGN_FONT_URL } from "./font";
 import type { Ambience, Features } from "./graphics";
 import { useFrame } from "@react-three/fiber";
 import { haloMaterial, hologramMaterial, lightweight, libraryMaterial, parseLibraryName, tickHolograms } from "./materials";
@@ -50,7 +50,7 @@ function holoOf(color: string, opacity: number) {
   return h;
 }
 
-function MeshAsset({ hash, features, ambience, holo }: { hash: string; features: Features; ambience: Ambience; holo: Holo }) {
+function MeshAsset({ hash, features, ambience, holo, dim }: { hash: string; features: Features; ambience: Ambience; holo: Holo; dim: number }) {
   const gltf = useGLTF(assetUrl(hash), false, true);
   const shadows = features.shadows > 0;
   const scene = useMemo(() => {
@@ -68,7 +68,7 @@ function MeshAsset({ hash, features, ambience, holo }: { hash: string; features:
       });
       return c;
     }
-    const tierKey = `${features.textures}|${features.normalMaps}|${features.pbr}|${features.bloom}|${ambience}`;
+    const tierKey = `${features.textures}|${features.normalMaps}|${features.pbr}|${features.bloom}|${ambience}|${dim}`;
     c.traverse((o) => {
       const mesh = o as THREE.Mesh;
       if (!mesh.isMesh) return;
@@ -78,7 +78,7 @@ function MeshAsset({ hash, features, ambience, holo }: { hash: string; features:
         if (!out) {
           const ref = parseLibraryName(m.name);
           const ao = (m as THREE.MeshStandardMaterial).aoMap ?? null;
-          out = ref ? libraryMaterial(ref, features, ambience, ao) : features.pbr ? m : lightweight(m);
+          out = ref ? libraryMaterial(ref, features, ambience, ao, dim) : features.pbr ? m : lightweight(m);
           materialCache.set(key, out);
         }
         return out;
@@ -100,15 +100,21 @@ function MeshAsset({ hash, features, ambience, holo }: { hash: string; features:
       mesh.receiveShadow = shadows;
     });
     return c;
-  }, [gltf, hash, shadows, features, ambience, holo]);
+  }, [gltf, hash, shadows, features, ambience, holo, dim]);
   return <primitive object={scene} />;
 }
 
 /** Brillo de los emisivos: por encima de 1 para que el bloom los haga resplandecer, sobre todo de noche. */
-function glow(ambience: Ambience, bloom: boolean) {
+function glow(ambience: Ambience, bloom: boolean, dim = 1) {
   if (!bloom) return 1;
-  return ambience === "night" ? 4 : 1.15;
+  return Math.max(1, (ambience === "night" ? 4 : 1.15) * dim);
 }
+
+/**
+ * En el nexo hay mucho neón junto (faro, anillos, líneas, pasarelas): con bloom, un 32 % menos de
+ * brillo para que los tubos no se quemen en blanco ni tapen la panorámica del fondo.
+ */
+const NEXO_DIM = 0.68;
 
 /** Luces de la escala de protocolo (0–10) a candelas de Three.js. */
 const CANDELA_PER_UNIT = 4;
@@ -163,11 +169,13 @@ const EntityView = memo(function EntityView({
   lang,
   features,
   ambience,
+  dim,
 }: {
   entity: Entity;
   lang: string;
   features: Features;
   ambience: Ambience;
+  dim: number;
 }) {
   const t = TransformV1.safeParse(entity.components["transform@1"]);
   if (!t.success) return null;
@@ -198,7 +206,7 @@ const EntityView = memo(function EntityView({
       />
     )}
     <group position={[p[0] + ox, p[1], p[2] + oz]} quaternion={r} scale={s}>
-      {prim.success && <Primitive {...prim.data} pbr={features.pbr} glow={glow(ambience, features.bloom)} shadows={shadows} holo={holo} />}
+      {prim.success && <Primitive {...prim.data} pbr={features.pbr} glow={glow(ambience, features.bloom, dim)} shadows={shadows} holo={holo} />}
       {showLight && (
         <pointLight
           color={light.data.color}
@@ -210,24 +218,31 @@ const EntityView = memo(function EntityView({
       {lod && (
         <SkipOnError>
           <Suspense fallback={null}>
-            <MeshAsset hash={lod.hash} features={features} ambience={ambience} holo={holo} />
+            <MeshAsset hash={lod.hash} features={features} ambience={ambience} holo={holo} dim={dim} />
           </Suspense>
         </SkipOnError>
       )}
-      {label.success &&
-        (label.data.billboard ? (
-          // Si la entidad tiene geometría, el cartel flota justo encima de ella.
-          <Billboard position={[0, prim.success ? prim.data.size[1] / 2 + label.data.size : 0, 0]}>
-            <Label text={labelText(label.data, lang)} size={label.data.size} width={label.data.width} />
-          </Billboard>
-        ) : label.data.style === "neon" ? (
-          <Suspense fallback={null}>
-            <NeonLabel text={labelText(label.data, lang)} size={label.data.size} color={label.data.color ?? "#4fa3ff"} ambience={ambience} bloom={features.bloom} />
-          </Suspense>
-        ) : (
-          // Carteles fijos (los de las fachadas): de noche brillan como un rótulo luminoso.
-          <Label text={labelText(label.data, lang)} size={label.data.size} width={label.data.width} glow={ambience === "night" && features.bloom ? 2.4 : 1} />
-        ))}
+      {label.success && (
+        <FadeByDistance max={label.data.max_distance}>
+          {label.data.billboard ? (
+            // Si la entidad tiene geometría, el cartel flota justo encima de ella.
+            <Billboard position={[0, prim.success ? prim.data.size[1] / 2 + label.data.size : 0, 0]}>
+              <Label text={labelText(label.data, lang)} size={label.data.size} width={label.data.width} />
+            </Billboard>
+          ) : label.data.style === "neon" ? (
+            <Suspense fallback={null}>
+              <NeonLabel text={labelText(label.data, lang)} size={label.data.size} color={label.data.color ?? "#4fa3ff"} ambience={ambience} bloom={features.bloom} dim={dim} />
+            </Suspense>
+          ) : label.data.style === "sign" ? (
+            <Suspense fallback={null}>
+              <SignLabel text={labelText(label.data, lang)} size={label.data.size} color={label.data.color ?? "#36d9ff"} ambience={ambience} bloom={features.bloom} width={label.data.width} />
+            </Suspense>
+          ) : (
+            // Carteles fijos (los de las fachadas): de noche brillan como un rótulo luminoso.
+            <Label text={labelText(label.data, lang)} size={label.data.size} width={label.data.width} glow={ambience === "night" && features.bloom ? 2.4 : 1} />
+          )}
+        </FadeByDistance>
+      )}
     </group>
     </>
   );
@@ -328,14 +343,14 @@ const WHITE = new THREE.Color("#ffffff");
  *  - De noche con bloom (PC): núcleo casi blanco por encima de 1 y el bloom pone el resplandor.
  *  - De noche sin bloom (VR, móvil): el resplandor lo hace un contorno difuminado del mismo color.
  */
-function NeonLabel({ text, size, color, ambience, bloom }: { text: string; size: number; color: string; ambience: Ambience; bloom: boolean }) {
+function NeonLabel({ text, size, color, ambience, bloom, dim }: { text: string; size: number; color: string; ambience: Ambience; bloom: boolean; dim: number }) {
   const night = ambience === "night";
   const base = useMemo(() => new THREE.Color(color), [color]);
   const fill = useMemo(() => {
     if (!night) return base.clone().lerp(WHITE, 0.45);
     const c = base.clone().lerp(WHITE, bloom ? 0.5 : 0.35);
-    return bloom ? c.multiplyScalar(3.2) : c;
-  }, [base, night, bloom]);
+    return bloom ? c.multiplyScalar(Math.max(1.2, 3.2 * dim)) : c;
+  }, [base, night, bloom, dim]);
   const glowOutline = night && !bloom;
   return (
     <Text
@@ -362,14 +377,87 @@ function HologramClock() {
   return null;
 }
 
+/**
+ * Cartel nítido (estilo "sign"): Space Grotesk del color dado, con un filo oscuro fino para que se
+ * lea a distancia y en las gafas, y un brillo contenido (sin halos que emborronen las letras).
+ */
+function SignLabel({ text, size, color, ambience, bloom, width }: { text: string; size: number; color: string; ambience: Ambience; bloom: boolean; width?: number }) {
+  const night = ambience === "night";
+  const fill = useMemo(() => {
+    const c = new THREE.Color(color).lerp(WHITE, night ? 0.22 : 0.12);
+    return night && bloom ? c.multiplyScalar(1.15) : c;
+  }, [color, night, bloom]);
+  return (
+    <Text
+      font={SIGN_FONT_URL}
+      fontSize={size}
+      color={fill}
+      material-toneMapped={!(night && bloom)}
+      anchorX="center"
+      anchorY="middle"
+      maxWidth={width}
+      textAlign="center"
+      letterSpacing={0.01}
+      outlineWidth={size * 0.035}
+      outlineColor="#050913"
+      outlineOpacity={0.9}
+    >
+      {text}
+    </Text>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Textos que se desvanecen con la distancia (label@1.max_distance)     */
+/* ------------------------------------------------------------------ */
+
+const _fadeP = new THREE.Vector3();
+type FadeText = THREE.Object3D & { fillOpacity?: number; outlineOpacity?: number };
+const fadeBase = new WeakMap<FadeText, [number, number]>();
+
+/**
+ * Los textos secundarios (la descripción de una isla) solo se ven de cerca: así, desde lejos,
+ * no se montan sobre el nombre de la puerta. Se apagan suaves en el último 25 % de la distancia.
+ */
+function FadeByDistance({ max, children }: { max?: number; children: ReactNode }) {
+  if (!max) return <>{children}</>;
+  return <Fader max={max}>{children}</Fader>;
+}
+
+// Sin cierres por frame: la opacidad del momento va en una variable de módulo.
+let fadeNow = 1;
+function applyFade(obj: THREE.Object3D) {
+  const t = obj as FadeText;
+  if (t.fillOpacity === undefined) return;
+  let base = fadeBase.get(t);
+  if (!base) fadeBase.set(t, (base = [t.fillOpacity, t.outlineOpacity ?? 1]));
+  t.fillOpacity = base[0] * fadeNow;
+  t.outlineOpacity = base[1] * fadeNow;
+}
+
+function Fader({ max, children }: { max: number; children: ReactNode }) {
+  const ref = useRef<THREE.Group>(null);
+  useFrame(({ camera }) => {
+    const g = ref.current;
+    if (!g) return;
+    g.getWorldPosition(_fadeP);
+    const d = _fadeP.distanceTo(camera.position);
+    fadeNow = Math.min(1, Math.max(0, (max - d) / (max * 0.25)));
+    g.visible = fadeNow > 0.01;
+    if (g.visible) g.traverse(applyFade);
+  });
+  return <group ref={ref}>{children}</group>;
+}
+
 export function Entities({ features, ambience }: { features: Features; ambience: Ambience }) {
   useWorldVersion();
   const lang = useLang();
+  const dim = world.chunkId === PLACES.nexo ? NEXO_DIM : 1;
   return (
     <>
       <HologramClock />
       {[...world.entities.values()].map((e) => (
-        <EntityView key={`${e.entity_id}:${e.rev}`} entity={e} lang={lang} features={features} ambience={ambience} />
+        <EntityView key={`${e.entity_id}:${e.rev}`} entity={e} lang={lang} features={features} ambience={ambience} dim={dim} />
       ))}
     </>
   );

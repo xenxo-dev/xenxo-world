@@ -185,7 +185,7 @@ export function JamBlock() {
                     {jam.phase === "voting" && isMine && <p className="text-xs text-cal/45">{t("jam.ownEntry")}</p>}
                     <div className="mt-auto pt-3">
                       {p.game && fitsHere(p.game.devices) ? (
-                        <button onClick={() => openGame(p)} className="w-full rounded-xl bg-neon px-4 py-2.5 text-center text-sm font-medium text-noche hover:bg-neon-suave">
+                        <button onClick={() => openGame(p)} className="w-full btn-play rounded-xl px-4 py-2.5 text-center text-sm font-medium">
                           {t("portal.play")}
                         </button>
                       ) : (

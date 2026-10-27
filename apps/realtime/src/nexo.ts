@@ -207,7 +207,7 @@ export function nexoSeed(): Seeded[] {
         id: `nexo_post_label_${k}`,
         components: {
           "transform@1": { p: at(x, z, facing, 0, 1.9, 0), r: yaw(facing), s: [1, 1, 1], parent: null },
-          "label@1": { text: spec.name.en!, i18n: spec.name, billboard: false, size: 0.55, style: "neon", color: spec.color },
+          "label@1": { text: spec.name.en!, i18n: spec.name, billboard: false, size: 0.55, style: "sign", color: spec.color },
         },
       });
     }
@@ -280,7 +280,7 @@ export function nexoSeed(): Seeded[] {
       id: `nexo_label_${k}`,
       components: {
         "transform@1": { p: at(g.x, g.z, g.facing, 0, G.bottom + G.h + 1.35, 0.4), r: yaw(g.facing), s: [1, 1, 1], parent: null },
-        "label@1": { text: spec.name.en!, i18n: spec.name, billboard: false, size: 0.6, style: "neon", color: spec.color },
+        "label@1": { text: spec.name.en!, i18n: spec.name, billboard: false, size: 0.7, style: "sign", color: spec.color },
       },
     });
     // El emblema, a la izquierda de la puerta, sobre su peana.
@@ -373,14 +373,14 @@ export function nexoSeed(): Seeded[] {
       id: `nexo_sign_${k}`,
       components: {
         "transform@1": { p: at(ix, iz, facing, r3(nx), 2.3, r3(nz)), r: yaw(facing + P.turn), s: [1, 1, 1], parent: null },
-        "label@1": { text: spec.name.en!, i18n: spec.name, billboard: false, size: 0.42, style: "neon", color: spec.color },
+        "label@1": { text: spec.name.en!, i18n: spec.name, billboard: false, size: 0.42, style: "sign", color: spec.color, max_distance: 26 },
       },
     });
     out.push({
       id: `nexo_sign_desc_${k}`,
       components: {
         "transform@1": { p: at(ix, iz, facing, r3(nx), 1.45, r3(nz)), r: yaw(facing + P.turn), s: [1, 1, 1], parent: null },
-        "label@1": { text: spec.desc.en!, i18n: spec.desc, billboard: false, size: 0.2, style: "plain", width: r3(P.w - 0.5) },
+        "label@1": { text: spec.desc.en!, i18n: spec.desc, billboard: false, size: 0.2, style: "plain", width: r3(P.w - 0.5), max_distance: 16 },
       },
     });
 

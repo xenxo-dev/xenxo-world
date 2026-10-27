@@ -11,6 +11,7 @@ import { Entities } from "./Entities";
 import { graphics, useGraphics, type Ambience, type Features } from "./graphics";
 import { attachDesktopInput, input } from "./input";
 import { PhotoTaker } from "./Photo";
+import { self } from "./self";
 import { setMaxAnisotropy, tickMaterials } from "./materials";
 import { Player } from "./Player";
 import { Portals } from "./Portals";
@@ -41,11 +42,13 @@ const SUN_DIR = (() => {
 
 const LIGHTING = {
   day: {
+    fill: 0,
     hemi: ["#e8f0ff", "#9c8a6a", 1.25],
     sun: { color: "#fff1dc", intensity: 2.3, offset: SUN_DIR },
     env: 0.55,
   },
   night: {
+    fill: 0.55,
     hemi: ["#3a4a9a", "#1a1410", 0.3],
     sun: { color: "#9fb4ff", intensity: 0.3, offset: [22, 40, -12] },
     // Sin sonda, el entorno es un estudio blanco (RoomEnvironment): de noche casi nada,
@@ -54,18 +57,45 @@ const LIGHTING = {
   },
   // El nexo de día: cielo claro sobre la megaciudad, luz suave para que no se pierdan los neones.
   nexoDay: {
+    fill: 0.25,
     hemi: ["#e6eeff", "#7a7488", 1.2],
     sun: { color: "#fff4e6", intensity: 1.7, offset: SUN_DIR },
     env: 0.45,
   },
   // El nexo de noche (y los distritos, siempre): una luz fría de ambiente para que se lea el suelo.
   nexo: {
+    fill: 0.85,
     hemi: ["#7fa6e6", "#1a2333", 1.1],
     sun: { color: "#9fd8ff", intensity: 0.35, offset: [22, 40, -12] },
     env: 0.05,
   },
 } as const;
 type LightProfile = keyof typeof LIGHTING;
+
+/**
+ * Relleno de los personajes: una direccional que sale de la cámara hacia el jugador, casi
+ * horizontal. Ilumina la cara que vemos de cada avatar (los oscuros dejan de ser una silueta
+ * negra) y apenas toca el suelo, que mira hacia arriba. Sin objetos nuevos por frame.
+ */
+function AvatarFill({ intensity }: { intensity: number }) {
+  const light = useRef<THREE.DirectionalLight>(null);
+  const scene = useThree((s) => s.scene);
+  useEffect(() => {
+    const l = light.current;
+    if (!l) return;
+    scene.add(l.target);
+    return () => {
+      scene.remove(l.target);
+    };
+  }, [scene]);
+  useFrame(({ camera }) => {
+    const l = light.current;
+    if (!l) return;
+    l.position.set(camera.position.x, camera.position.y + 0.6, camera.position.z);
+    l.target.position.set(self.x, self.y + 1.1, self.z);
+  });
+  return <directionalLight ref={light} intensity={intensity} color="#d6e6ff" />;
+}
 
 function Lighting({ profile, features }: { profile: LightProfile; features: Features }) {
   const sun = useRef<THREE.DirectionalLight>(null);
@@ -104,6 +134,7 @@ function Lighting({ profile, features }: { profile: LightProfile; features: Feat
   return (
     <>
       <hemisphereLight args={[L.hemi[0], L.hemi[1], L.hemi[2]]} />
+      {features.avatarFill && L.fill > 0 && <AvatarFill intensity={L.fill} />}
       <directionalLight
         ref={sun}
         position={[CENTER.x + L.sun.offset[0], L.sun.offset[1], CENTER.z + L.sun.offset[2]]}

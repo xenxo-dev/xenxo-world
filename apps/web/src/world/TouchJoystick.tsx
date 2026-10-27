@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { CONTROL_PX, useControls } from "../controls";
 import { t } from "../i18n";
 import { input } from "./input";
+import { JumpIcon } from "../hud/icons";
 
 const bottom = "bottom-[max(1.5rem,env(safe-area-inset-bottom))]";
 
@@ -81,7 +82,9 @@ export function TouchJoystick() {
           onPointerCancel={() => setPressed(false)}
           onContextMenu={(e) => e.preventDefault()}
         >
-          <span aria-hidden>⤒</span>
+          <span aria-hidden className="grid h-[45%] w-[45%] place-items-center [&>svg]:h-full [&>svg]:w-full">
+            <JumpIcon />
+          </span>
         </button>
       )}
     </>

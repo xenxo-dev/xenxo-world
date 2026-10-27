@@ -41,13 +41,18 @@ export interface Features {
   textures: 0 | 512 | 1024;
   /** Mapas de normales y rugosidad de la biblioteca (relieve y brillo reales). */
   normalMaps: boolean;
+  /**
+   * Luz de relleno que sigue a la cámara (una direccional sin sombras): separa a los personajes
+   * oscuros del suelo oscuro de noche. Barata: en todos los niveles.
+   */
+  avatarFill: boolean;
 }
 
 export const FEATURES: Record<Tier, Features> = {
-  low: { dpr: [0.75, 1], antialias: false, pbr: false, post: false, bloom: false, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 48, lod: "light", textures: 512, normalMaps: false },
-  medium: { dpr: [1, 1.5], antialias: true, pbr: true, post: true, bloom: true, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 96, lod: "light", textures: 512, normalMaps: true },
-  high: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: false, shadows: 1024, probe: 128, pointLights: true, lightPools: false, skyline: 150, lod: "detailed", textures: 1024, normalMaps: true },
-  ultra: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: true, shadows: 2048, probe: 256, pointLights: true, lightPools: false, skyline: 220, lod: "detailed", textures: 1024, normalMaps: true },
+  low: { dpr: [0.75, 1], antialias: false, pbr: false, post: false, bloom: false, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 48, lod: "light", textures: 512, normalMaps: false, avatarFill: true },
+  medium: { dpr: [1, 1.5], antialias: true, pbr: true, post: true, bloom: true, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 96, lod: "light", textures: 512, normalMaps: true, avatarFill: true },
+  high: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: false, shadows: 1024, probe: 128, pointLights: true, lightPools: false, skyline: 150, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true },
+  ultra: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: true, shadows: 2048, probe: 256, pointLights: true, lightPools: false, skyline: 220, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true },
 };
 
 /* ------------------------------------------------------------------ */

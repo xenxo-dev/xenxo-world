@@ -8,7 +8,8 @@ La excepción son las texturas generadas con IA (abajo), que tienen su propia no
 - **Personas de serie**: generadas con [MPFB / MakeHuman](https://static.makehumancommunity.org)
   y sus paquetes de recursos CC0 (pieles, pelo, ropa).
 - **Animaciones**: [Universal Animation Library](https://quaternius.com) de Quaternius (CC0).
-- **Tipografías**: Inter, Archivo y Tilt Neon de Andy Clymer, para los rótulos de neón (SIL Open Font License), empaquetadas con la web.
+- **Kits de ciudad** (`tools/kits/kenney/`): packs de [Kenney](https://kenney.nl) (CC0), descargados el 27-10-2026. La lista está en `tools/kits/README.md`.
+- **Tipografías**: Space Grotesk (titulares y carteles), Inter (texto), IBM Plex Mono (datos técnicos) y Tilt Neon de Andy Clymer (rótulos de neón), todas con licencia SIL Open Font License y empaquetadas con la web (sin CDN).
 
 ## Generado con IA
 

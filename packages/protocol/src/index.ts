@@ -134,6 +134,11 @@ export const LabelV1 = z.object({
    * Los clientes que no lo conozcan lo dibujan en una línea.
    */
   width: z.number().min(0.5).max(40).optional(),
+  /**
+   * Distancia (m) a partir de la cual el texto se desvanece y deja de verse: para los textos
+   * secundarios, que solo hacen falta de cerca. Si falta, se ve siempre.
+   */
+  max_distance: z.number().min(1).max(500).optional(),
 });
 
 /** Texto de un label en el idioma pedido, con `text` como respaldo. */

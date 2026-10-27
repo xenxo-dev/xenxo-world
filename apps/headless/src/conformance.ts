@@ -507,6 +507,10 @@ await scenario("nexo y distritos: el nexo lleva a la plaza y a los distritos, y 
   for (const id of ["nexo_post_label_arcade", "nexo_bridge_arcade", "nexo_holo_arcade_ground", "nexo_panel_arcade", "nexo_sign_desc_arcade", "nexo_decor_arcade"]) {
     assert(c.snapshot.entities.some((e) => e.entity_id === id), `falta ${id} (poste, pasarela, holograma, panel y decorado del distrito)`);
   }
+  // El texto secundario de la isla se apaga con la distancia; el nombre es un rótulo nítido.
+  const labelOf = (id: string) => c.snapshot.entities.find((e) => e.entity_id === id)?.components["label@1"] as { style?: string; max_distance?: number } | undefined;
+  assert(labelOf("nexo_sign_arcade")?.style === "sign", "el nombre del panel es un rótulo (style: sign)");
+  assert((labelOf("nexo_sign_desc_arcade")?.max_distance ?? 0) > 0, "la descripción del panel se apaga de lejos (label@1.max_distance)");
   const pos = (id: string) => (c.snapshot.entities.find((e) => e.entity_id === id)?.components["transform@1"] as { p: number[] }).p;
   const fromCenter = (p: number[]) => Math.hypot(p[0]! - 32, p[2]! - 32);
   const portalP = pos("nexo_portal_arcade");

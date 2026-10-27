@@ -3,11 +3,10 @@ import { useControls } from "../controls";
 import { fullscreenSupported, toggleFullscreen, useFullscreen } from "../fullscreen";
 import { t } from "../i18n";
 import { input, onPhoto, subscribeView, view } from "../world/input";
+import { EyeIcon, hudIconButton, JumpIcon, PersonIcon } from "./icons";
 
 const hudBox = "rounded-xl border border-cal/10 bg-noche/70 backdrop-blur";
-const big =
-  "grid h-11 w-11 place-items-center rounded-xl border border-cal/10 bg-noche/70 text-xl backdrop-blur transition hover:border-cal/30 hover:bg-noche/85 active:scale-95";
-const small = "grid h-9 w-9 place-items-center rounded-lg text-cal/80 transition hover:bg-cal/10 hover:text-cal active:scale-95";
+const small = "grid h-9 w-9 place-items-center rounded-lg text-[#f4f7ff] transition hover:bg-cal/10 hover:text-neon active:scale-95";
 
 /**
  * Arriba a la derecha: VR (si hay gafas), foto (P) y pantalla completa (F). El destello y el aviso
@@ -79,8 +78,8 @@ export function ViewTools({ touch }: { touch: boolean }) {
   return (
     <div className="flex gap-1.5" style={touch ? { opacity: c.opacity } : undefined}>
       {jump && (
-        <button title={t("tools.jump")} aria-label={t("tools.jump")} onPointerDown={() => (input.jump = true)} className={`${big} touch-none`}>
-          <span aria-hidden>⤒</span>
+        <button title={t("tools.jump")} aria-label={t("tools.jump")} onPointerDown={() => (input.jump = true)} className={`${hudIconButton} touch-none`}>
+          <JumpIcon />
         </button>
       )}
       {c.showCamera && (
@@ -89,9 +88,9 @@ export function ViewTools({ touch }: { touch: boolean }) {
           aria-label={t(firstPerson ? "tools.thirdPerson" : "tools.firstPerson")}
           aria-pressed={firstPerson}
           onClick={() => (input.toggleView = true)}
-          className={big}
+          className={hudIconButton}
         >
-          <span aria-hidden>{firstPerson ? "🧍" : "👁️"}</span>
+          {firstPerson ? <PersonIcon /> : <EyeIcon />}
         </button>
       )}
     </div>

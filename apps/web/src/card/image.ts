@@ -6,7 +6,7 @@ import type { PlayerCard } from "../net/card";
 
 const W = 1200;
 const H = 630;
-const DISPLAY = '"Archivo Variable", "Inter Variable", system-ui, sans-serif';
+const DISPLAY = '"Space Grotesk", "Inter Variable", system-ui, sans-serif';
 const SANS = '"Inter Variable", system-ui, sans-serif';
 
 export interface CardTexts {

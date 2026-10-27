@@ -171,12 +171,14 @@ const ROUGH: Record<string, number> = { azulejo: 0.35, ventana: 0.06, agua: 0.04
  * Material de biblioteca para un nivel y un ambiente. `ao` es el mapa de oclusión horneado
  * del propio modelo (segundo canal UV); se conserva.
  */
-export function libraryMaterial(ref: LibraryRef, f: Features, ambience: Ambience, ao: THREE.Texture | null): THREE.Material {
+export function libraryMaterial(ref: LibraryRef, f: Features, ambience: Ambience, ao: THREE.Texture | null, dim = 1): THREE.Material {
   const { lib, tint } = ref;
   const night = ambience === "night";
 
   if (lib === "neon") {
-    const glow = neonGlow(ambience, f.bloom);
+    // `dim` baja el exceso de brillo donde hay mucho neón junto (el nexo): solo con bloom, para
+    // que el centro de los tubos no se queme en blanco; sin bloom (VR, móvil) no se toca.
+    const glow = f.bloom ? Math.max(1, neonGlow(ambience, f.bloom) * dim) : neonGlow(ambience, f.bloom);
     return new THREE.MeshBasicMaterial({ color: tint.clone().multiplyScalar(glow), toneMapped: glow <= 1 });
   }
   if (lib === "oscuro") return new THREE.MeshBasicMaterial({ color: tint });

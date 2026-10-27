@@ -92,10 +92,10 @@ export function Panel(props: PanelProps) {
                 className={`relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[15px] transition ${
                   section === s.id
                     ? "bg-neon/10 text-cal before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-full before:bg-neon before:shadow-[0_0_10px_var(--color-neon)]"
-                    : "text-cal/60 hover:bg-cal/5 hover:text-cal"
+                    : "text-soft/80 hover:bg-cal/5 hover:text-cal"
                 }`}
               >
-                <span aria-hidden className={`w-4 text-center ${section === s.id ? "text-neon-suave" : "text-cal/40"}`}>{s.icon}</span>
+                <span aria-hidden className={`w-4 text-center ${section === s.id ? "text-neon" : "text-muted"}`}>{s.icon}</span>
                 {t(s.label)}
               </button>
             ))}
@@ -118,7 +118,7 @@ export function Panel(props: PanelProps) {
 
           {section === "solutions" && (
             <Block title={t("nav.solutions")}>
-              <p className="-mt-2 mb-5 max-w-prose text-[15px] leading-relaxed text-cal/65">{t("solutions.intro")}</p>
+              <p className="-mt-2 mb-5 max-w-prose text-[15px] leading-relaxed text-soft">{t("solutions.intro")}</p>
               <ul className="divide-y divide-cal/[0.07] border-y border-cal/[0.07]">
                 {SOLUTIONS.map((s) => (
                   <li key={s.tag.en}>
@@ -126,7 +126,7 @@ export function Panel(props: PanelProps) {
                       <span className={`justify-self-start rounded-md border px-2 py-0.5 text-xs ${ACCENTS[s.accent]}`}>{s.tag[lang]}</span>
                       <span>
                         <span className="display block text-[17px] font-semibold text-cal transition group-hover:text-neon-suave">{s.title[lang]}</span>
-                        <span className="mt-1 block max-w-prose text-sm leading-relaxed text-cal/60">{s.summary[lang]}</span>
+                        <span className="mt-1 block max-w-prose text-sm leading-relaxed text-muted">{s.summary[lang]}</span>
                       </span>
                     </a>
                   </li>
@@ -179,7 +179,7 @@ export function Panel(props: PanelProps) {
                 key={s.id}
                 onClick={() => setSection(s.id)}
                 aria-current={section === s.id ? "page" : undefined}
-                className={`flex flex-col items-center gap-0.5 rounded-lg py-1.5 text-[11px] ${section === s.id ? "text-neon-suave [text-shadow:0_0_8px_var(--color-neon)]" : "text-cal/50"}`}
+                className={`flex flex-col items-center gap-0.5 rounded-lg py-1.5 text-[11px] ${section === s.id ? "text-neon" : "text-muted"}`}
               >
                 <span aria-hidden className="text-base">{s.icon}</span>
                 {t(s.label)}
@@ -198,7 +198,7 @@ function Brand({ live }: { live: LiveState | null }) {
       <span className="display neon-sign text-[26px] font-bold leading-none" translate="no">
         xenxo<span className="dot">.io</span>
       </span>
-      <span className="flex items-center gap-1.5 text-xs text-cal/60" title={t("online.title")}>
+      <span className="meta flex items-center gap-1.5 text-xs text-soft" title={t("online.title")}>
         <span className={`h-2 w-2 rounded-full ${live ? "bg-[#6dff8a] shadow-[0_0_8px_#6dff8a]" : "bg-cal/30"}`} />
         {live ? live.online : "–"}
       </span>
@@ -226,7 +226,7 @@ function LangSwitch() {
 
 function LegalLinks() {
   return (
-    <p className="flex gap-3 text-xs text-cal/40">
+    <p className="flex gap-3 text-xs text-muted">
       <a href={legalPath("privacy")} target="_blank" rel="noreferrer" className="hover:text-cal/70">
         {t("legal.privacy")}
       </a>

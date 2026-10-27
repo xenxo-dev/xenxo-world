@@ -43,7 +43,7 @@ export function CardSettings() {
   return (
     <div className={`${card} p-4`}>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <span className="display text-3xl font-bold text-neon-suave">#{state.player_no}</span>
+        <span className="meta text-3xl text-neon-suave">#{state.player_no}</span>
         <span className={`rounded-md px-2 py-0.5 text-xs ${state.public ? "bg-huerta/20 text-lime-100" : "bg-cal/10 text-cal/60"}`}>
           {state.public ? t("card.isPublic") : t("card.isPrivate")}
         </span>

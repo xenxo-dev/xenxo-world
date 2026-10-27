@@ -37,8 +37,8 @@ export function NexoSection({ onEnter }: { onEnter: () => void }) {
     <>
       <JamBlock />
       <Block title={t("nav.nexo")}>
-        <p className="-mt-2 mb-5 max-w-prose text-[15px] leading-relaxed text-cal/65">{t("nexo.intro")}</p>
-        <h3 className="mb-3 text-sm font-medium uppercase tracking-wide text-cal/50">{t("nexo.districts")}</h3>
+        <p className="-mt-2 mb-5 max-w-prose text-[15px] leading-relaxed text-soft">{t("nexo.intro")}</p>
+        <h3 className="meta mb-3 text-xs uppercase tracking-[0.14em] text-muted">{t("nexo.districts")}</h3>
         <ul className="grid gap-3 sm:grid-cols-2">
           <DistrictCard
             cover="/covers/plaza.webp"
@@ -102,10 +102,10 @@ export function NexoSection({ onEnter }: { onEnter: () => void }) {
                     </span>
                   )}
                   <p className="display text-[17px] font-semibold text-cal">{gameName(p, lang)}</p>
-                  <p className="text-xs text-cal/50">{t("projects.by", { name: p.author })}</p>
-                  {p.summary && <p className="line-clamp-3 text-sm leading-relaxed text-cal/65">{p.summary}</p>}
+                  <p className="text-xs text-muted">{t("projects.by", { name: p.author })}</p>
+                  {p.summary && <p className="line-clamp-3 text-sm leading-relaxed text-soft">{p.summary}</p>}
                   {p.game && (
-                    <p className="text-xs text-cal/45">{t("gate.devices", { list: p.game.devices.map((d) => t(`gate.device.${d}` as Key)).join(" · ") })}</p>
+                    <p className="meta text-xs text-muted">{t("gate.devices", { list: p.game.devices.map((d) => t(`gate.device.${d}` as Key)).join(" · ") })}</p>
                   )}
                   {p.game && avatarMode(p.game) === "character" && (
                     <span className="w-fit rounded-md border border-neon/40 px-2 py-0.5 text-xs text-sky-100">{t("gate.avatar.character")}</span>
@@ -115,7 +115,7 @@ export function NexoSection({ onEnter }: { onEnter: () => void }) {
                       (fitsHere(p.game.devices) ? (
                         <button
                           onClick={() => openGame(p)}
-                          className="flex-1 rounded-xl bg-neon px-4 py-3 text-center text-base font-medium text-noche hover:bg-neon-suave"
+                          className="flex-1 btn-play rounded-xl px-4 py-3 text-center text-base font-medium"
                         >
                           {t("portal.play")}
                         </button>
@@ -129,7 +129,7 @@ export function NexoSection({ onEnter }: { onEnter: () => void }) {
                         href={p.url}
                         target="_blank"
                         rel="noreferrer noopener nofollow ugc"
-                        className="flex-1 rounded-xl bg-neon px-4 py-3 text-center text-base font-medium text-noche hover:bg-neon-suave"
+                        className="flex-1 btn-play rounded-xl px-4 py-3 text-center text-base font-medium"
                       >
                         {t("portal.open")} ↗
                       </a>
@@ -139,7 +139,7 @@ export function NexoSection({ onEnter }: { onEnter: () => void }) {
                         onClick={() => {
                           if (goToParcel(p.district, p.parcel)) onEnter();
                         }}
-                        className="flex-1 rounded-xl border border-cal/15 px-4 py-3 text-base text-cal/85 hover:bg-cal/5"
+                        className="btn-ghost flex-1 rounded-xl px-4 py-3 text-base"
                       >
                         {t("nexo.seePortal")}
                       </button>
@@ -168,10 +168,10 @@ function DistrictCard({ cover, color, title, desc, free, onGo }: { cover: string
         <p className="display text-lg font-semibold" style={{ color }}>
           {title}
         </p>
-        <p className="text-sm leading-relaxed text-cal/65">{desc}</p>
-        {free !== undefined && <p className="text-xs text-cal/45">{t("nexo.freeParcels", { n: free })}</p>}
+        <p className="text-sm leading-relaxed text-soft">{desc}</p>
+        {free !== undefined && <p className="meta text-xs text-muted">{t("nexo.freeParcels", { n: free })}</p>}
         <div className="mt-auto pt-2">
-          <button onClick={onGo} className="rounded-xl bg-neon px-5 py-3 text-base font-medium text-noche hover:bg-neon-suave">
+          <button onClick={onGo} className="btn-ghost rounded-xl px-5 py-2.5 text-base font-medium">
             {t("nexo.go")} →
           </button>
         </div>

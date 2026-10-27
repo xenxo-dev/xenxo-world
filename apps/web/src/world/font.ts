@@ -7,3 +7,8 @@ export const FONT_URL: string = inter;
 import tiltNeon from "@fontsource/tilt-neon/files/tilt-neon-latin-400-normal.woff?url";
 
 export const NEON_FONT_URL: string = tiltNeon;
+
+// Carteles nítidos (estilo "sign") y nombres de distritos: Space Grotesk (SIL Open Font License).
+import spaceGrotesk from "@fontsource/space-grotesk/files/space-grotesk-latin-700-normal.woff?url";
+
+export const SIGN_FONT_URL: string = spaceGrotesk;

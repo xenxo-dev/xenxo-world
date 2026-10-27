@@ -83,7 +83,7 @@ export function People({ selfName, selfNo }: { selfName: string; selfNo: number 
           <ul className="max-h-[50dvh] overflow-y-auto">
             <li className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm">
               <span className="truncate text-cal">{selfName}</span>
-              {selfNo != null && <span className="text-xs text-neon-suave">#{selfNo}</span>}
+              {selfNo != null && <span className="meta text-xs text-neon-suave">#{selfNo}</span>}
               <span className="ml-auto text-xs text-cal/45">{t("people.you")}</span>
             </li>
             {peers.map((p) => (
