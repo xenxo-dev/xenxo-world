@@ -18,6 +18,7 @@ import random
 
 from mathutils import Matrix
 
+import cero
 import decor
 from kit import CHUNK, Part, finish, mat
 from townhouse import hip_roof
@@ -75,8 +76,10 @@ def plan(lay: dict, d: dict) -> dict:
         q = 2 if j == 2 else 0  # la puerta mira a la calle de la plaza (norte → su cara sur)
         midx = (x0 + x1) / 2
         lots = [[x0, z0, midx - ALLEY / 2, z1], [midx + ALLEY / 2, z0, x1, z1]]
-        if theme in ("arcade", "cero"):
-            hmin, hmax = (28, 48) if theme == "arcade" else (38, 64)
+        if theme == "cero":  # diseño propio: pasajes en los ejes y torres ancla (cero.py)
+            out["buildings"] += cero.lots(i, j, x0, z0, x1, z1, rnd)
+        elif theme == "arcade":
+            hmin, hmax = 28, 48
             for lot in lots:
                 out["buildings"].append({"style": "tower", "rect": lot, "h": round(rnd.uniform(hmin, hmax), 2), "q": q})
         elif theme == "pixel":
@@ -99,11 +102,17 @@ def plan(lay: dict, d: dict) -> dict:
             for lot in lots:
                 out["buildings"].append({"style": "stack", "rect": [lot[0] + 0.5, lot[1] + 0.5, lot[2] - 0.5, lot[3] - 0.5], "h": round(3.1 * rnd.randint(7, 12), 2), "q": q})
         # Atrezo del tema en las aceras que dan a las calles de dentro de la ciudad.
+        spots = []
         if i != 1:
-            out["props"].append({"x": round(bx1 - 0.8 if i == 0 else bx0 + 0.8, 2), "z": round((bz0 + bz1) / 2, 2), "rot": 90 if i == 0 else -90})
+            spots.append((bx1 - 0.8 if i == 0 else bx0 + 0.8, (bz0 + bz1) / 2, 90 if i == 0 else -90))
         if j != 1:
-            out["props"].append({"x": round((bx0 + bx1) / 2, 2), "z": round(bz1 - 0.8 if j == 0 else bz0 + 0.8, 2), "rot": 0 if j == 0 else 180})
-    out["landmark"] = {"x": C, "z": C}
+            spots.append(((bx0 + bx1) / 2, bz1 - 0.8 if j == 0 else bz0 + 0.8, 0 if j == 0 else 180))
+        for (px, pz, rot) in spots:
+            if theme == "cero":
+                px, pz = cero.prop_shift(px, pz)
+            out["props"].append({"x": round(px, 2), "z": round(pz, 2), "rot": rot})
+    # Cero no lleva monumento en la plaza: allí está la Torre Cero (cero.py).
+    out["landmark"] = None if theme == "cero" else {"x": C, "z": C}
     return out
 
 
@@ -117,7 +126,10 @@ def colliders(lay: dict, d: dict) -> list[list[float]]:
     for pr in pl["props"]:
         boxes.append([pr["x"], 1.0, pr["z"], 0.7, 1.0, 0.7])
     lm = pl["landmark"]
-    boxes.append([lm["x"], 2.5, lm["z"], 3.2, 2.5, 3.2])
+    if lm:
+        boxes.append([lm["x"], 2.5, lm["z"], 3.2, 2.5, 3.2])
+    if d["id"] == "cero":
+        boxes += cero.colliders()
     return boxes
 
 
@@ -320,7 +332,6 @@ LANDMARK = {
     "agora": ("cafe_table", 2.2),
     "taller": ("gear", 2.2),
     "frontera": ("crystals", 2.6),
-    "cero": ("data_pylon", 2.4),
     "vertical": ("trailer", 2.0),
 }
 
@@ -344,10 +355,17 @@ def build(lay: dict, d: dict, detail: int = 1):
     names = PROPS.get(d["id"], ["crates", "rock"])
     for i, pr in enumerate(pl["props"]):
         _put(p, decor.BUILDERS[names[i % len(names)]](color), pr["x"], pr["z"], pr["rot"])
+    if d["id"] == "cero":
+        cero.build(p, _blocks(lay), detail)
     name, scale = LANDMARK.get(d["id"], ("crystals", 2.0))
     lm = pl["landmark"]
     # Peana de la plaza con su anillo de luz, y el monumento encima.
     seg = 32 if detail else 16
+    if not lm:
+        ob = p.to_object()
+        ob.name = f"district_city_{d['id']}"
+        finish(ob)
+        return ob
     p.cylinder((0, 0, 0), 3.6, 0.6, mat("metal", "#1b1f2e"), segments=seg)
     p.lathe((0, 0, 0), [(3.65, 0.35), (3.65, 0.5)], mat("neon", color), segments=seg, smooth=False)
     item = decor.BUILDERS[name](color)

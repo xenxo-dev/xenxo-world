@@ -224,9 +224,16 @@ export const ActivityId = z.string().regex(/^[a-z0-9_-]{1,32}$/);
  * servidor comprueba que la pose de esa sesión esté cerca de verdad. Cada cuenta lleva su cuenta;
  * lo recogido deja de dibujarse para quien ya lo tiene. Lo que se ve es su `mesh@1` o `primitive@1`.
  */
+/** Texto corto de una actividad en varios idiomas (dato del mundo, nunca instrucciones). */
+export const ActivityNote = z
+  .record(z.string().regex(/^[a-z]{2}$/), z.string().min(1).max(240))
+  .refine((o) => Object.keys(o).length <= 12, "máximo 12 idiomas");
+
 export const CollectibleV1 = z.object({
   set: ActivityId,
   radius: z.number().min(0.5).max(5).default(1.5),
+  /** Lo que cuenta al recogerlo (un trozo de historia). Opcional; viaja en COLLECTED. */
+  note: ActivityNote.optional(),
 });
 
 /**
@@ -557,7 +564,15 @@ export const ProgressMsg = envelope(
 /** Un objeto recogido: cuántos lleva de su búsqueda y si la ha completado. */
 export const CollectedMsg = envelope(
   "COLLECTED",
-  z.object({ entity_id: EntityId, set: ActivityId, count: z.number().int(), total: z.number().int(), complete: z.boolean() }),
+  z.object({
+    entity_id: EntityId,
+    set: ActivityId,
+    count: z.number().int(),
+    total: z.number().int(),
+    complete: z.boolean(),
+    /** El texto del objeto (`collectible@1.note`), si lo tiene. */
+    note: ActivityNote.optional(),
+  }),
 );
 /**
  * Estado de la carrera de esta sesión: `start` (el servidor empieza a contar), `cp` (`next` = el

@@ -6,6 +6,13 @@ import { SEED_ASSETS } from "./seed-assets";
 import legacyV1 from "./districts-v1-parcels.json";
 import legacyV2 from "./districts-v2-parcels.json";
 import cities from "./district-cities.json";
+import activities from "./district-activities.json";
+
+/** Actividades del sistema de un distrito (district-activities.json). */
+interface DistrictActivities {
+  hunts?: { id: string; piece: string; radius: number; items: { p: V3; note?: Record<string, string> }[] }[];
+  boards?: { kind: "race" | "hunt"; id: string; p: V3; yaw: number; size: [number, number]; title?: { es: string; en: string } }[];
+}
 
 /**
  * Distritos: chunks temáticos alrededor de la plaza, cada uno con 16 parcelas de 10×10 m.
@@ -160,6 +167,34 @@ export function districtSeed(d: District, toNexo: { p: V3; yaw: number }): Seede
   }
   const boxes = (cities.cities as Record<string, number[][]>)[d.id] ?? [];
   boxes.forEach(([x, y, z, hx, hy, hz], n) => solid(`${d.id}_city_${n}`, [x!, y!, z!], [hx!, hy!, hz!]));
+
+  /* --- Actividades del sistema (district-activities.json): búsquedas y sus marcadores --- */
+  const acts = (activities as unknown as Record<string, DistrictActivities | undefined>)[d.id];
+  for (const h of acts?.hunts ?? []) {
+    const piece = SEED_ASSETS[h.piece];
+    if (!piece) throw new Error(`falta el modelo de la forja: ${h.piece}`);
+    const plods = piece.lods.map((l) => ({ hash: l.hash, media: "model/gltf-binary" as const, tris: l.tris }));
+    h.items.forEach((it, n) =>
+      out.push({
+        id: `${d.id}_${h.id}_${n + 1}`,
+        components: {
+          "transform@1": { p: it.p, r: [0, 0, 0, 1], s: [1, 1, 1], parent: null },
+          "mesh@1": { lods: plods },
+          "collectible@1": { set: h.id, radius: h.radius, ...(it.note ? { note: it.note } : {}) },
+        } as Components,
+      }),
+    );
+  }
+  for (const b of acts?.boards ?? []) {
+    out.push({
+      id: `${d.id}_board_${b.id}`,
+      components: {
+        "transform@1": { p: b.p, r: yaw(b.yaw), s: [1, 1, 1], parent: null },
+        "scoreboard@1": { kind: b.kind, id: b.id, size: b.size },
+      } as Components,
+    });
+    if (b.title) label(`${d.id}_board_${b.id}_title`, [b.p[0], r3(b.p[1] + b.size[1] / 2 + 0.7), b.p[2]], yaw(b.yaw), b.title.en, b.title, 0.55);
+  }
 
   /* --- Nombre del distrito en luz, en el suelo de la avenida del sur, al llegar --- */
   label(`${d.id}_floor_name`, [32, 0.03, 140], FLAT, d.name.en.toLowerCase(), { es: d.name.es.toLowerCase(), en: d.name.en.toLowerCase() }, 1.5);

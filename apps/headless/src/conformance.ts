@@ -756,6 +756,37 @@ await scenario("actividades: el servidor comprueba la cercanía, el orden y el r
   assert(exp.ok && exp.data.activities.some((x) => x.chunk === chunkId && x.collected.length === 2), "la exportación incluye las actividades");
 });
 
+await scenario("Rastro de datos (Distrito Cero): 12 fragmentos del sistema con su historia; los de la pasarela solo desde arriba", async () => {
+  const chunkId = "c_-1_-1";
+  const api = new Api(baseUrl);
+  await api.register(`conf rastro ${randomUUID().slice(0, 6)}`);
+  const u = await XenxoClient.connect({ baseUrl, chunkId, token: api.token });
+  const frags = u.snapshot.entities.filter((e) => (e.components["collectible@1"] as { set?: string } | undefined)?.set === "rastro");
+  assert(frags.length === 12 && frags.every((e) => e.owner === "system"), `12 fragmentos del sistema (${frags.length})`);
+  const note = (e: (typeof frags)[number]) => (e.components["collectible@1"] as { note?: Record<string, string> }).note;
+  assert(frags.every((e) => note(e)?.es && note(e)?.en), "cada fragmento cuenta algo en ES y EN");
+  assert(u.snapshot.entities.some((e) => (e.components["scoreboard@1"] as { kind?: string; id?: string } | undefined)?.id === "rastro"), "con su marcador en la plaza");
+  const pos = (e: (typeof frags)[number]) => (e.components["transform@1"] as { p: [number, number, number] }).p;
+  const at = async (p: [number, number, number]) => {
+    u.pose(p);
+    await new Promise((r) => setTimeout(r, 260));
+  };
+  const first = frags.find((e) => pos(e)[1] < 2)!;
+  const fp = pos(first);
+  await at([fp[0], 1.6, fp[2]]);
+  const c = await u.activity("COLLECT", first.entity_id);
+  assert(c.type === "COLLECTED" && c.payload.total === 12 && c.payload.count === 1 && !!c.payload.note?.es, `recogido, 1 de 12, con su historia (${JSON.stringify(c.payload)})`);
+  const high = frags.find((e) => pos(e)[1] > 8)!;
+  const hp = pos(high);
+  await at([hp[0], 1.6, hp[2]]);
+  const below = await u.activity("COLLECT", high.entity_id);
+  assert(below.type === "ERROR" && below.payload.code === "forbidden", "desde la calle, el de la pasarela no se recoge");
+  await at([hp[0], 9.6, hp[2]]);
+  const above = await u.activity("COLLECT", high.entity_id);
+  assert(above.type === "COLLECTED" && above.payload.count === 2, "desde la pasarela, sí");
+  u.close();
+});
+
 await scenario("distrito grande: WELCOME.walk de 256 m y cada uno recibe solo las poses de quien tiene cerca", async () => {
   const chunkId = "c_0_-1";
   const a = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-lejos-a" });

@@ -11,6 +11,7 @@ import { CHUNK_SIZE } from "@xenxo/protocol";
 import districts from "../../../realtime/src/districts.json";
 import { usePlaceTheme } from "../net/world-store";
 import { CarsMesh, CityBoxes, CityClock, CityGround, NEON, rng, type Box, type Car } from "./NexoCity";
+import type { Ambience } from "./graphics";
 
 const C = CHUNK_SIZE / 2;
 /** Margen alrededor del chunk caminable: ahí no se pone nada. */
@@ -198,7 +199,7 @@ function skylineCars(id: string, color: string, density: number): Car[] {
 
 const BY_CHUNK = new Map((districts.districts as { id: string; chunk: string; color: string }[]).map((d) => [d.chunk, d]));
 
-export function DistrictSkyline({ chunk, density }: { chunk: string; density: number }) {
+export function DistrictSkyline({ chunk, density, ambience }: { chunk: string; density: number; ambience: Ambience }) {
   // Los del sistema, por su chunk; los de la comunidad, por la pista de WELCOME (su tema y su color).
   const hint = usePlaceTheme();
   const d = BY_CHUNK.get(chunk) ?? (hint && THEMES[hint.id] ? { id: hint.id, chunk, color: hint.color } : undefined);
@@ -208,7 +209,7 @@ export function DistrictSkyline({ chunk, density }: { chunk: string; density: nu
   if (!d || density <= 0) return null;
   return (
     <>
-      <CityClock ambience="night" />
+      <CityClock ambience={ambience} />
       {/* Un poco por debajo del suelo del distrito: dentro no se ve; fuera, las calles de la ciudad. */}
       <CityGround y={-0.12} size={REACH * 2.4} />
       {boxes.length > 0 && <CityBoxes boxes={boxes} />}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { Ambience } from "./graphics";
@@ -68,12 +68,16 @@ export function Sky({ ambience }: { ambience: Ambience }) {
     material.uniforms.night!.value = ambience === "night" ? 1 : 0;
   }, [ambience, material]);
 
-  useFrame((_, dt) => {
+  // La esfera va con la cámara: si se quedara en el origen, en los distritos (256 m) parte de ella
+  // quedaría más lejos que el plano lejano (400 m) y se vería recortada como una cúpula.
+  const mesh = useRef<THREE.Mesh>(null!);
+  useFrame(({ camera }, dt) => {
     material.uniforms.time!.value += dt;
+    mesh.current?.position.copy(camera.position);
   });
 
   return (
-    <mesh material={material} renderOrder={-1} frustumCulled={false}>
+    <mesh ref={mesh} material={material} renderOrder={-1} frustumCulled={false}>
       <sphereGeometry args={[300, 32, 16]} />
     </mesh>
   );

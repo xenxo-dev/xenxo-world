@@ -1,5 +1,5 @@
 import { isNear, useNearby } from "./nearby";
-import { Component, memo, Suspense, useMemo, useRef, type ReactNode } from "react";
+import { Component, memo, Suspense, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { Billboard, Text, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import { HologramV1, LabelV1, labelText, LightV1, MeshV1, PLACES, PrimitiveV1, TransformV1, type Entity } from "@xenxo/protocol";
@@ -218,11 +218,13 @@ const EntityView = memo(function EntityView({
         />
       )}
       {lod && (
-        <SkipOnError>
-          <Suspense fallback={null}>
-            <MeshAsset hash={lod.hash} features={features} ambience={ambience} holo={holo} dim={dim} />
-          </Suspense>
-        </SkipOnError>
+        <Spin on={entity.components["collectible@1"] !== undefined}>
+          <SkipOnError>
+            <Suspense fallback={null}>
+              <MeshAsset hash={lod.hash} features={features} ambience={ambience} holo={holo} dim={dim} />
+            </Suspense>
+          </SkipOnError>
+        </Spin>
       )}
       {label.success && (
         <FadeByDistance max={label.data.max_distance}>
@@ -373,9 +375,34 @@ function NeonLabel({ text, size, color, ambience, bloom, dim }: { text: string; 
   );
 }
 
-/** Avanza el reloj de los hologramas (uno para todos). */
+/**
+ * Lo que se recoge (collectible@1) gira despacio y flota: se reconoce de lejos como algo que coger.
+ * Un solo reloj mueve todos (sin objetos nuevos por frame).
+ */
+const SPINNING = new Set<THREE.Object3D>();
+function Spin({ on, children }: { on: boolean; children: ReactNode }) {
+  const g = useRef<THREE.Group>(null!);
+  useEffect(() => {
+    if (!on) return;
+    const obj = g.current;
+    SPINNING.add(obj);
+    return () => {
+      SPINNING.delete(obj);
+    };
+  }, [on]);
+  return <group ref={g}>{children}</group>;
+}
+
+/** Avanza el reloj de los hologramas y de lo que gira (uno para todos). */
 function HologramClock() {
-  useFrame((state) => tickHolograms(state.clock.elapsedTime));
+  useFrame((state) => {
+    const t = state.clock.elapsedTime;
+    tickHolograms(t);
+    for (const o of SPINNING) {
+      o.rotation.y = t * 1.1;
+      o.position.y = Math.sin(t * 1.8) * 0.12;
+    }
+  });
   return null;
 }
 

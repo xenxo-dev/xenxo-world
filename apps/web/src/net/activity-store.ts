@@ -11,7 +11,7 @@ import { net } from "./session";
 export type ScoreRow = MessageOf<ServerMessage, "SCORES">["payload"]["rows"][number];
 
 export type ActivityToast =
-  | { kind: "collected"; count: number; total: number; complete: boolean; at: number }
+  | { kind: "collected"; count: number; total: number; complete: boolean; note?: Record<string, string>; at: number }
   | { kind: "race"; state: "start" | "cp" | "finish" | "reset"; next?: number; total?: number; ms?: number; best?: number; rank?: number; at: number }
   | { kind: "guest"; at: number }
   | { kind: "far"; at: number };
@@ -64,7 +64,7 @@ class ActivityStore {
       case "COLLECTED":
         // Un conjunto nuevo: quien lo mira (Entities) se entera de que ha cambiado.
         this.collected = new Set(this.collected).add(m.payload.entity_id);
-        this.toast = { kind: "collected", count: m.payload.count, total: m.payload.total, complete: m.payload.complete, at: now };
+        this.toast = { kind: "collected", count: m.payload.count, total: m.payload.total, complete: m.payload.complete, note: m.payload.note, at: now };
         this.bump();
         return;
       case "RACE": {

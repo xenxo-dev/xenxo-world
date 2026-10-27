@@ -294,10 +294,10 @@ function Scene({ active }: { active: boolean }) {
   const place = usePlace();
   const inPlaza = place === PLACES.plaza;
   const inNexo = place === PLACES.nexo;
-  // La plaza y el nexo siguen el ambiente elegido (día, noche o la hora); los distritos están
-  // fuera del tiempo, siempre de noche, para que manden sus líneas de luz.
-  const ambience: Ambience = inPlaza || inNexo ? g.ambience : "night";
-  const profile: LightProfile = inPlaza ? ambience : inNexo && ambience === "day" ? "nexoDay" : "nexo";
+  // Todos los lugares siguen el ambiente elegido (día, noche o la hora): cada distrito tiene su
+  // versión de día y de noche. Los distritos usan la luz abierta del nexo.
+  const ambience: Ambience = g.ambience;
+  const profile: LightProfile = inPlaza ? ambience : ambience === "day" ? "nexoDay" : "nexo";
   const sky = SKY[ambience];
   // El cielo de nubes (HDRI) es de la plaza; el nexo lleva su panorámica.
   const realSky = ambience === "day" && f.pbr && !inNexo;
@@ -314,7 +314,7 @@ function Scene({ active }: { active: boolean }) {
       {inPlaza && <Skyline count={f.skyline} ambience={ambience} pbr={f.pbr} />}
       {inNexo && <NexoBackdrop ambience={ambience} hd={f.textures >= 1024} />}
       {inNexo && <NexoCity ambience={ambience} density={f.nexoCity} />}
-      {!inNexo && !inPlaza && <DistrictSkyline chunk={place} density={f.nexoCity} />}
+      {!inNexo && !inPlaza && <DistrictSkyline chunk={place} density={f.nexoCity} ambience={ambience} />}
       <Lighting profile={profile} features={f} />
       <Environment ambience={ambience} profile={profile} probe={f.probe} sky={dayEnv} />
       {/* Los textos cargan su fuente de forma asíncrona: que nunca bloqueen la escena ni el panel. */}

@@ -1058,7 +1058,7 @@ export class ChunkRoom extends DurableObject<Env> {
 
   /** Entidades de actividad del lugar, ya leídas (componente y posición). */
   private activityEntities() {
-    const out: { id: string; owner: string; p: number[]; col?: { set: string; radius: number }; cp?: { race: string; role: "start" | "cp" | "finish"; order: number; radius: number } }[] = [];
+    const out: { id: string; owner: string; p: number[]; col?: { set: string; radius: number; note?: Record<string, string> }; cp?: { race: string; role: "start" | "cp" | "finish"; order: number; radius: number } }[] = [];
     for (const r of this.sql.exec<{ entity_id: string; owner: string; data: string }>("SELECT entity_id, owner, data FROM entities").toArray()) {
       if (!r.data.includes("collectible@1") && !r.data.includes("checkpoint@1")) continue;
       const e = JSON.parse(r.data) as Entity;
@@ -1120,7 +1120,7 @@ export class ChunkRoom extends DurableObject<Env> {
         key, sub, att.principal.name ?? att.display_name, att.principal.no ?? null, Date.now(),
       );
     }
-    this.send(ws, msg("COLLECTED", { entity_id: entityId, set: it.col.set, count, total: ids.length, complete }));
+    this.send(ws, msg("COLLECTED", { entity_id: entityId, set: it.col.set, count, total: ids.length, complete, ...(it.col.note ? { note: it.col.note } : {}) }));
   }
 
   private handleCheckpoint(ws: WebSocket, att: Attachment, ref: string | undefined, entityId: string) {

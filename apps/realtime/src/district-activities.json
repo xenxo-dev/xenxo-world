@@ -1,0 +1,108 @@
+{
+  "$comment": "Actividades del sistema en cada distrito (coordenadas del chunk: X este, Z sur, metros). Las siembra districts.ts como entidades con dueño `system` (collectible@1, checkpoint@1, scoreboard@1). Las posiciones salen del diseño de cada ciudad (tools/forge/cero.py…): si mueves la ciudad, revisa esto. Los textos van como datos (`note`, `title`) en ES y EN.",
+  "cero": {
+    "hunts": [
+      {
+        "id": "rastro",
+        "piece": "cero_fragment",
+        "radius": 1.6,
+        "items": [
+          {
+            "p": [32, 1.2, 128],
+            "note": {
+              "es": "Registro 001. Aquí no había nada: ni suelo, ni cielo. Escribí una línea y apareció un cuadrado gris. Lo llamé cero. Dejé once registros más por la ciudad. Síguelos.",
+              "en": "Log 001. There was nothing here: no ground, no sky. I wrote one line and a grey square appeared. I called it zero. I left eleven more logs around the city. Follow them."
+            }
+          },
+          {
+            "p": [32, 1.2, 70],
+            "note": {
+              "es": "Registro 002. Abrí estos pasajes para que, entres por donde entres, la torre te diga dónde está el centro. Perderse está bien. No saber volver, no.",
+              "en": "Log 002. I cut these passages so that, whichever way you come in, the tower tells you where the centre is. Getting lost is fine. Not finding your way back isn't."
+            }
+          },
+          {
+            "p": [32, 1.2, 39.5],
+            "note": {
+              "es": "Registro 003. La torre no guarda nada. Es una antena: apunta a todos los que todavía no han llegado.",
+              "en": "Log 003. The tower keeps nothing inside. It's an antenna, pointed at everyone who hasn't arrived yet."
+            }
+          },
+          {
+            "p": [13.5, 9.2, 50.5],
+            "note": {
+              "es": "Registro 004. Desde arriba la ciudad se entiende mejor. Levanté esta pasarela una noche que no podía dormir.",
+              "en": "Log 004. The city makes more sense from up here. I built this walkway on a night I couldn't sleep."
+            }
+          },
+          {
+            "p": [32, 9.2, 13.5],
+            "note": {
+              "es": "Registro 005. Fui el jugador número cero. No por ser el mejor: alguien tenía que encender la luz.",
+              "en": "Log 005. I was player number zero. Not because I was the best: someone had to switch the lights on."
+            }
+          },
+          {
+            "p": [50.5, 9.2, 32],
+            "note": {
+              "es": "Registro 006. Las luces cian marcan mi camino. Las magenta, lo que todavía falta por encontrar.",
+              "en": "Log 006. The cyan lights mark my path. The magenta ones, what is still waiting to be found."
+            }
+          },
+          {
+            "p": [13.5, 9.2, 13.5],
+            "note": {
+              "es": "Registro 007. Cada parcela de ahí fuera es de alguien. Yo solo dibujé las calles: las ciudades las hacéis vosotros.",
+              "en": "Log 007. Every parcel out there belongs to someone. I only drew the streets: you are the ones who build the cities."
+            }
+          },
+          {
+            "p": [50.5, 1.2, 50.5],
+            "note": {
+              "es": "Registro 008. Bajo los puentes se piensa mejor. Aquí decidí que todo lo que cambie en el mundo pasará por una sola puerta, y que nadie tendrá una llave aparte.",
+              "en": "Log 008. You think better under bridges. Here I decided that every change to the world would go through a single door, and that nobody would get a key of their own."
+            }
+          },
+          {
+            "p": [-5, 1.2, 32],
+            "note": {
+              "es": "Registro 009. Los distritos tienen puertas porque un mundo sin puertas es solo un mapa.",
+              "en": "Log 009. Districts have gates because a world without gates is just a map."
+            }
+          },
+          {
+            "p": [32, 1.2, -5],
+            "note": {
+              "es": "Registro 010. Dejé el código abierto. Si quieres saber cómo funciona este sitio, no tienes que fiarte de mí: puedes leerlo.",
+              "en": "Log 010. I left the code open. If you want to know how this place works, you don't have to trust me: you can read it."
+            }
+          },
+          {
+            "p": [87, 1.2, 32],
+            "note": {
+              "es": "Registro 011. Aquí empiezan las parcelas. Algún día habrá más ciudades que calles. Ese día dejaré de contar.",
+              "en": "Log 011. The parcels start here. One day there will be more cities than streets. That day I'll stop counting."
+            }
+          },
+          {
+            "p": [-49, 1.2, -49],
+            "note": {
+              "es": "Registro 012. Si has llegado hasta aquí, has visto todo lo que hice. Lo que falta lo traes tú. Bienvenido a xenxo.",
+              "en": "Log 012. If you made it this far, you've seen everything I made. What's missing is whatever you bring. Welcome to xenxo."
+            }
+          }
+        ]
+      }
+    ],
+    "boards": [
+      {
+        "kind": "hunt",
+        "id": "rastro",
+        "p": [24, 2.4, 43],
+        "yaw": 0,
+        "size": [4, 3],
+        "title": { "es": "RASTRO DE DATOS", "en": "DATA TRAIL" }
+      }
+    ]
+  }
+}
