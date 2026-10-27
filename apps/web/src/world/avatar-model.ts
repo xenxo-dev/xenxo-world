@@ -56,8 +56,10 @@ function normalize(root: THREE.Object3D, keepRealScale = false) {
 }
 
 /**
- * Los personajes proyectan sombra (solo se ve en equipos con sombras activadas)
- * y las mallas con huesos no se recortan por error al moverse.
+ * Los personajes proyectan sombra (solo se ve en equipos con sombras activadas). Las mallas con
+ * huesos se recortan con una esfera holgada (su caja en reposo más medio metro: cabe cualquier
+ * gesto, sentado o bailando): sin recorte, cada personaje se dibujaba aunque estuviera detrás de la
+ * cámara, y en una ciudad con gente era casi todo el trabajo de la tarjeta gráfica.
  */
 function tune(root: THREE.Object3D) {
   root.traverse((o) => {
@@ -65,8 +67,24 @@ function tune(root: THREE.Object3D) {
     if (m.isMesh) {
       m.castShadow = true;
       m.receiveShadow = false;
-      if ((m as THREE.SkinnedMesh).isSkinnedMesh) m.frustumCulled = false;
+      if ((m as THREE.SkinnedMesh).isSkinnedMesh) {
+        const g = m.geometry;
+        g.computeBoundingBox();
+        const box = g.boundingBox!.clone().expandByScalar(0.5);
+        const sphere = box.getBoundingSphere(new THREE.Sphere());
+        // La esfera de la malla (la que usa el recorte) y la de la geometría, por si se recalcula.
+        (m as THREE.SkinnedMesh).boundingSphere = sphere;
+        g.boundingSphere = sphere.clone();
+        m.frustumCulled = true;
+      }
     }
+  });
+}
+
+/** Personajes de decorado (peatones y residentes): sin sombra, que no se note su ausencia y cuesta otra pasada. */
+export function withoutShadows(root: THREE.Object3D) {
+  root.traverse((o) => {
+    if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).castShadow = false;
   });
 }
 

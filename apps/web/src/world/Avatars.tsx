@@ -112,13 +112,15 @@ export function DefaultAvatar({ color, motion }: { color: THREE.ColorRepresentat
  * Mientras carga se ve el muñeco articulado de respaldo.
  */
 /** `avatar`: el suyo; sin él, uno de serie según `seed`; `null`: aún no se sabe (solo el muñeco). */
-export function AvatarBody({ avatar, seed, motion }: { avatar?: AvatarRef | null; seed: string; motion: Motion }) {
+/** `extra`: gente de decorado (peatones, residentes): sin sombra. */
+export function AvatarBody({ avatar, seed, motion, extra = false }: { avatar?: AvatarRef | null; seed: string; motion: Motion; extra?: boolean }) {
   useFrame((_, dt) => advance(motion, Math.min(dt, 0.1)));
   const fallback = <DefaultAvatar color={colorFor(seed)} motion={motion} />;
   if (avatar === null) return fallback;
   const preset = avatar ? null : presetFor(seed);
-  const url = avatar ? assetUrl(avatar.hash) : preset ? assetUrl(preset.hash) : null;
-  return <CustomAvatar url={url} fallback={fallback} motion={motion} />;
+  // La gente de decorado lleva la versión ligera del avatar de serie (un tercio de los triángulos).
+  const url = avatar ? assetUrl(avatar.hash) : preset ? assetUrl(extra && preset.lite ? preset.lite : preset.hash) : null;
+  return <CustomAvatar url={url} fallback={fallback} motion={motion} extra={extra} />;
 }
 
 /** Bocadillo con el último mensaje del chat de esa sesión, durante unos segundos. */

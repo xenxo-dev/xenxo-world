@@ -143,9 +143,10 @@ def main() -> None:
     # Borra los avatares de la tanda anterior (la carpeta la comparten con los modelos de la plaza).
     if os.path.exists(CATALOG):
         for old in json.load(open(CATALOG, encoding="utf-8")):
-            path = os.path.join(DEST, f"{old['hash'][7:]}.glb")
-            if os.path.exists(path):
-                os.remove(path)
+            for key in ("hash", "lite"):
+                path = os.path.join(DEST, f"{old.get(key, 'sha256:-')[7:]}.glb")
+                if old.get(key) and os.path.exists(path):
+                    os.remove(path)
     meta = json.load(open(os.path.join(SRC, "avatars.json"), encoding="utf-8"))
     catalog = []
     for aid, info in meta.items():
@@ -184,6 +185,9 @@ def main() -> None:
         "",
     ]
     open(INDEX_TS, "w", encoding="utf-8").write("\n".join(lines))
+    # Versiones ligeras para la gente de decorado (peatones y residentes).
+    import subprocess
+    subprocess.run(["node", os.path.join(ROOT, "tools", "avatars", "lite_avatars.mjs")], check=True)
 
 
 if __name__ == "__main__":

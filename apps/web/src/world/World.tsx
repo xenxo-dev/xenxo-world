@@ -295,6 +295,30 @@ function XRWatcher() {
 /* Escena                                                               */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Solo en desarrollo: cuánto dibuja cada frame (llamadas de dibujo y triángulos, sumando las pasadas
+ * del post-proceso), para medir el rendimiento desde las pruebas (`globalThis.__xenxoStats`).
+ */
+function DevStats() {
+  const gl = useThree((s) => s.gl);
+  const scene = useThree((s) => s.scene);
+  useEffect(() => {
+    gl.info.autoReset = false;
+    const stats = { calls: 0, triangles: 0, scene };
+    (globalThis as { __xenxoStats?: typeof stats }).__xenxoStats = stats;
+    return () => void (gl.info.autoReset = true);
+  }, [gl, scene]);
+  useFrame(() => {
+    const s = (globalThis as { __xenxoStats?: { calls: number; triangles: number } }).__xenxoStats;
+    if (s) {
+      s.calls = gl.info.render.calls;
+      s.triangles = gl.info.render.triangles;
+    }
+    gl.info.reset();
+  }, -1000);
+  return null;
+}
+
 function Scene({ active }: { active: boolean }) {
   const g = useGraphics();
   const f = g.features;
@@ -321,6 +345,7 @@ function Scene({ active }: { active: boolean }) {
   return (
     <>
       <XRWatcher />
+      {import.meta.env.DEV && <DevStats />}
       <PerformanceMonitor bounds={(hz) => (hz > 90 ? [60, 100] : [45, 58])} flipflops={3} onDecline={() => graphics.decline()} />
       {daySky ? <primitive key="sky" attach="background" object={daySky.tex} /> : <color key="color" attach="background" args={[sky.fog]} />}
       <fog attach="fog" args={[sky.fog, ambience === "night" ? 45 : 70, ambience === "night" ? 230 : 260]} />

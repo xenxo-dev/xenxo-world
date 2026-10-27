@@ -5,7 +5,9 @@
   "hash": "sha256:927ec08956aae9186f4b0585645d2124d3586ab9f05ed0bf63848e439a0e2cf4",
   "format": "vrm",
   "tris": 27241,
-  "bytes": 1269400
+  "bytes": 1269400,
+  "lite": "sha256:62e3f71e104129af692731fc63d4917b2658d87cc9e30a8370082aa231292553",
+  "lite_tris": 7677
  },
  {
   "id": "dani",
@@ -13,7 +15,9 @@
   "hash": "sha256:e4be79037d9833ae758f0f05a706dabe0b138c02644da63e6d08838894968d9c",
   "format": "vrm",
   "tris": 27446,
-  "bytes": 1273744
+  "bytes": 1273744,
+  "lite": "sha256:5725813109666a381c7dfd7ff2247fd1e4736988b6d7caaeb52ca599e8f1ab78",
+  "lite_tris": 9342
  },
  {
   "id": "nora",
@@ -21,7 +25,9 @@
   "hash": "sha256:157dcdf2818576b9d0f5a167e00e8844cd96eeedc2b6e179f2d9c4a2ea9b9b0b",
   "format": "vrm",
   "tris": 27427,
-  "bytes": 1293496
+  "bytes": 1293496,
+  "lite": "sha256:4af68223164da8b77f4d9fba06ca595b23106bd407654aff7e96d29cab2f76c2",
+  "lite_tris": 8587
  },
  {
   "id": "kai",
@@ -29,7 +35,9 @@
   "hash": "sha256:0fa4a0fd85a943827ae7517bc57823ca96a7ef807ecc0b475aefe2424c01c70a",
   "format": "vrm",
   "tris": 27476,
-  "bytes": 1238464
+  "bytes": 1238464,
+  "lite": "sha256:a4ad906ec6beef7d7f00510c973e63d87f598e3a501fa65ad16795e6ec04fe7b",
+  "lite_tris": 9534
  },
  {
   "id": "leo",
@@ -37,7 +45,9 @@
   "hash": "sha256:78a97678731c7f26048985b159b47bcf8d80dc78a57ad8ae3d26daa4e03f4422",
   "format": "vrm",
   "tris": 26632,
-  "bytes": 1154340
+  "bytes": 1154340,
+  "lite": "sha256:c322e3a1e9ce74c762e6327318df3608b86e8250b91d6f158f9b9ab486df15fd",
+  "lite_tris": 9036
  },
  {
   "id": "mar",
@@ -45,7 +55,9 @@
   "hash": "sha256:d9359584ac26161402d66a05bb55b72116ce1dab2cd4d258c3a7912e919f4001",
   "format": "vrm",
   "tris": 28961,
-  "bytes": 1290036
+  "bytes": 1290036,
+  "lite": "sha256:8e6cabe2c9fea722dd164dc5b20603fe407108d93535c5f51fe387c3d1dcfd71",
+  "lite_tris": 10161
  },
  {
   "id": "sam",
@@ -53,7 +65,9 @@
   "hash": "sha256:94f5f59dec2b9c90b087eff24abc8d45e5d7be413914bb253e56e6e3b1b55a5d",
   "format": "vrm",
   "tris": 27098,
-  "bytes": 1320284
+  "bytes": 1320284,
+  "lite": "sha256:ba6760aa5b6063fef60192d211eb8f8f0b7f6108d330b35feab8b58b12ee219e",
+  "lite_tris": 9162
  },
  {
   "id": "iris",
@@ -61,6 +75,8 @@
   "hash": "sha256:94513f7be5a10044fd435b322ce89b6b8853fffb08618b6f9c1b5d9d61ec3b34",
   "format": "vrm",
   "tris": 27471,
-  "bytes": 1246684
+  "bytes": 1246684,
+  "lite": "sha256:0cac4d68fffbbc15056405e0a658924f61a4e928e5322de20122dc70c0cdd553",
+  "lite_tris": 8549
  }
 ]

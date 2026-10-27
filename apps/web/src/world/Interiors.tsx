@@ -142,7 +142,7 @@ interface Slot {
 const Body = memo(function Body({ slot, seed }: { slot: Slot; seed: string }) {
   return (
     <group ref={(g) => void (slot.group = g)} visible={false}>
-      <AvatarBody seed={seed} motion={slot.motion} />
+      <AvatarBody seed={seed} motion={slot.motion} extra />
     </group>
   );
 });

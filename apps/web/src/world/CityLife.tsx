@@ -40,8 +40,8 @@ interface Walker {
 const POPULATION = 44;
 /** Distrito Cero es la ciudad más viva: más gente y también por los pasajes. */
 const POPULATION_CERO = 84;
-/** Más allá, nadie: la niebla de noche empieza a 45 m. */
-const RANGE = 55;
+/** Más allá, nadie: la niebla de noche empieza a 45 m (y cada persona cuesta como un edificio). */
+const RANGE = 42;
 const REASSIGN_MS = 600;
 /** Cada peatón va 0,45 m a la derecha de su recorrido (los que se cruzan no se pisan). */
 const LANE = 0.45;
@@ -114,7 +114,7 @@ interface Slot {
 const Pedestrian = memo(function Pedestrian({ slot, seed }: { slot: Slot; seed: string }) {
   return (
     <group ref={(g) => void (slot.group = g)} visible={false}>
-      <AvatarBody seed={seed} motion={slot.motion} />
+      <AvatarBody seed={seed} motion={slot.motion} extra />
     </group>
   );
 });

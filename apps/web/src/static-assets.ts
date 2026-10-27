@@ -9,10 +9,13 @@
 import { AVATAR_PRESETS } from "../../realtime/src/avatar-presets";
 import { SEED_ASSETS } from "../../realtime/src/seed-assets";
 import { SEED_COVERS } from "../../realtime/src/seed-covers";
+import PRESETS from "./world/avatar-presets.json";
 
 const EXT = new Map<string, string>();
 for (const a of Object.values(SEED_ASSETS)) for (const l of a.lods) EXT.set(l.hash.slice(7), "glb");
 for (const a of AVATAR_PRESETS) EXT.set(a.hash.slice(7), "glb");
+// Las versiones ligeras de los avatares de serie (gente de decorado: tools/avatars/lite_avatars.mjs).
+for (const a of PRESETS as { lite?: string }[]) if (a.lite) EXT.set(a.lite.slice(7), "glb");
 for (const h of Object.values(SEED_COVERS)) EXT.set(h.slice(7), "webp");
 
 /** Ruta estática de un asset del sistema, o null si es de la gente. */
