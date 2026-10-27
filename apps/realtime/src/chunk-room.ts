@@ -3,7 +3,7 @@
  *
  * - Es la ÚNICA puerta de escritura del mundo: humanos y agentes pasan por aquí.
  * - Estado vivo en su SQLite (entidades, log de eventos, claves de idempotencia).
- * - Poses efímeras en memoria, repartidas en lotes a TICK_HZ.
+ * - Poses efímeras en memoria, repartidas en lotes a TICK_HZ como mucho (casi sin temporizadores: el objeto hiberna).
  * - WebSocket Hibernation: cuando no hay mensajes, el objeto duerme y no factura duración.
  */
 import { DurableObject } from "cloudflare:workers";
@@ -124,6 +124,8 @@ export class ChunkRoom extends DurableObject<Env> {
   private lastPoseAt = new Map<string, number>();
   private mutationLog = new Map<string, number[]>();
   private chatLog = new Map<string, number[]>();
+  /** Último reparto de poses (ms) y el temporizador corto que se deja solo si hace falta (ver `scheduleTick`). */
+  private lastTick = 0;
   private tickTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -335,15 +337,31 @@ export class ChunkRoom extends DurableObject<Env> {
   /* Tick de poses                                                      */
   /* ---------------------------------------------------------------- */
 
+  /**
+   * Reparte las poses pendientes a TICK_HZ como mucho. Si ha pasado el intervalo, al momento (sin
+   * temporizador); si no, deja uno corto para lo que falte. Un temporizador pendiente impide que el
+   * objeto hiberne, y ese tiempo cuenta como duración (plan gratuito: 13.000 GB-s al día): así solo
+   * lo hay cuando varias poses llegan dentro del mismo intervalo, no mientras haya alguien en el chunk.
+   */
   private scheduleTick() {
-    if (this.tickTimer) return;
-    this.tickTimer = setTimeout(() => {
-      this.tickTimer = null;
-      if (this.dirty.size === 0) return;
-      const poses = [...this.dirty].map((id) => this.poses.get(id)).filter((p): p is AvatarPose => !!p);
-      this.dirty.clear();
-      this.broadcast(msg("POSES", { t: Date.now(), poses }));
-    }, 1000 / TICK_HZ);
+    if (this.dirty.size === 0) return;
+    const wait = this.lastTick + 1000 / TICK_HZ - 20 - Date.now();
+    if (wait <= 0) return this.flushPoses();
+    if (!this.tickTimer) {
+      this.tickTimer = setTimeout(() => {
+        this.tickTimer = null;
+        this.flushPoses();
+      }, wait);
+    }
+  }
+
+  private flushPoses() {
+    if (this.dirty.size === 0) return;
+    const now = Date.now();
+    this.lastTick = now;
+    const poses = [...this.dirty].map((id) => this.poses.get(id)).filter((p): p is AvatarPose => !!p);
+    this.dirty.clear();
+    this.broadcast(msg("POSES", { t: now, poses }));
   }
 
   /* ---------------------------------------------------------------- */

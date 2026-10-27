@@ -32,7 +32,8 @@ import { AVATAR_PRESETS, presetByHash, setChosenPreset, useChosenPreset } from "
 import type { PreviewPose } from "./AvatarPreview";
 import { CardSettings } from "./CardSettings";
 import { JamAdmin } from "./JamAdmin";
-import { Moderation, useModerator } from "./Moderation";
+import { ModeratorsAdmin } from "./ModeratorsAdmin";
+import { Moderation, useRoles } from "./Moderation";
 import { ConnectedGames } from "./Games";
 import { ModelPicker } from "./ModelPicker";
 import { Block, Button, card, input, Label, Notice, Segmented } from "./ui";
@@ -50,7 +51,7 @@ const AvatarPreview = lazy(() => import("./AvatarPreview"));
 /** Cuenta: quién eres (cuenta o invitado), tu personaje con su vista previa y tu armario. */
 export function AccountSection(props: CustomizeProps) {
   const user = useAccount();
-  const moderator = useModerator(user?.id);
+  const { moderator, founder } = useRoles(user?.id);
   return (
     <>
       <Block title={t("account.title")}>
@@ -70,6 +71,11 @@ export function AccountSection(props: CustomizeProps) {
       {moderator && (
         <Block title={t("jamAdmin.title")}>
           <JamAdmin />
+        </Block>
+      )}
+      {moderator && (
+        <Block title={t("modTeam.title")}>
+          <ModeratorsAdmin founder={founder} />
         </Block>
       )}
 

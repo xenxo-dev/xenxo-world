@@ -35,7 +35,10 @@ jurisdiction = "eu"
 [assets]
 directory = "./seed-assets"
 binding = "STATIC"
-run_worker_first = true
+# El Worker va primero en todo menos en /s/* (modelos y portadas del sistema): esos los sirve
+# Cloudflare como estáticos, gratis y sin contar para las 100.000 peticiones al día del plan
+# gratuito. Si alguno no está (p. ej. un despliegue a medias), lo atiende el Worker igual.
+run_worker_first = ["/*", "!/s/*"]
 
 [vars]
 # Los datos de cada chunk se guardan y procesan solo en la UE (RGPD).

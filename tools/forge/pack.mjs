@@ -3,7 +3,7 @@
  *   - añade a cada material su mapa de oclusión horneado (segundo canal UV),
  *   - cuantiza y comprime con meshopt,
  *   - comprueba el presupuesto con el mismo inspector que usa el servidor,
- *   - escribe los GLB en apps/realtime/src/seed-assets/ con un índice (hash, triángulos, límites).
+ *   - escribe los GLB en apps/realtime/seed-assets/s/ con un índice (hash, triángulos, límites).
  *
  *   node tools/forge/pack.mjs [carpeta-de-la-forja] [--keep]
  *
@@ -25,7 +25,7 @@ const root = resolve(here, "..", "..");
 const args = process.argv.slice(2);
 const keep = args.includes("--keep");
 const src = resolve(args.find((a) => !a.startsWith("--")) ?? join(here, "out"));
-const dest = join(root, "apps", "realtime", "seed-assets");
+const dest = join(root, "apps", "realtime", "seed-assets", "s");
 const indexFile = join(root, "apps", "realtime", "src", "seed-assets.ts");
 
 /** Materiales que no llevan oclusión: emiten luz o son superficies que el cliente anima. */
@@ -89,7 +89,7 @@ for (const name of Object.keys(forge).sort()) {
 if (keep) console.log(`(conservadas sin tocar: ${Object.keys(index).filter((n) => !(n in forge)).join(", ") || "ninguna"})`);
 
 // Índice tipado: el servidor siembra entidades con estos hashes y sirve los archivos
-// desde sus recursos estáticos (apps/realtime/seed-assets, nombrados por hash).
+// desde sus recursos estáticos (apps/realtime/seed-assets/s, nombrados por hash).
 const names = Object.keys(index).sort();
 const lines = [
   "// Generado por tools/forge/pack.mjs. No lo edites a mano: vuelve a forjar (npm run forge).",

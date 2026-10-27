@@ -2,7 +2,7 @@
 Empaqueta los avatares de la forja para la web:
   - texturas PNG → WebP (con transparencia solo donde hace falta),
   - comprueba el presupuesto de avatar (triángulos, tamaño, texturas),
-  - los guarda por hash en apps/realtime/seed-assets/ (el servidor los sirve tal cual),
+  - los guarda por hash en apps/realtime/seed-assets/s/ (el servidor los sirve tal cual),
   - y escribe el catálogo en apps/web/src/world/avatar-presets.json.
 
 Reescribe el GLB a mano para no perder las extensiones VRM (VRMC_*).
@@ -22,7 +22,7 @@ from PIL import Image
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 SRC = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.join(ROOT, "tools", "avatars", "out")
-DEST = os.path.join(ROOT, "apps", "realtime", "seed-assets")
+DEST = os.path.join(ROOT, "apps", "realtime", "seed-assets", "s")
 CATALOG = os.path.join(ROOT, "apps", "web", "src", "world", "avatar-presets.json")
 INDEX_TS = os.path.join(ROOT, "apps", "realtime", "src", "avatar-presets.ts")
 

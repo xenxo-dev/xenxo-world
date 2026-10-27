@@ -55,7 +55,10 @@ function useLiveState() {
         });
       });
     load();
-    const id = setInterval(load, 10_000);
+    // Cada 30 s y solo con la pestaña a la vista: cada consulta es una petición del plan gratuito.
+    const id = setInterval(() => {
+      if (!document.hidden) void load();
+    }, 30_000);
     return () => {
       alive = false;
       clearInterval(id);

@@ -1114,6 +1114,22 @@ await scenario("juegos de fuera: ficha xenxo.json leída por el servidor, enlace
     assert(p?.status === "hidden" && p.review_note === "Prueba de ocultar: contenido no permitido", "su autor ve que está oculto y por qué");
     const log = await mod.call<{ log: { action: string; target_id: string }[] }>("GET", "/mod/log");
     assert(log.ok && ["review_approved", "hide"].every((a) => log.data.log.some((l) => l.action === a && l.target_id === id)), "cada decisión queda registrada");
+
+    // Equipo de moderación: lo nombra el fundador (o la clave de administración), por número de jugador.
+    const card = await dev.call<{ player_no: number | null }>("GET", "/me/card");
+    const no = card.ok ? card.data.player_no : null;
+    assert(no !== null, "la persona de prueba tiene número de jugador");
+    assert(statusOf(await dev.call("PUT", `/mod/moderators/${no}`)) === 403, "nadie se nombra a sí mismo");
+    assert((await mod.call("PUT", `/mod/moderators/${no}`)).ok, "nombrar moderación por número");
+    const now = await dev.call<{ moderator: boolean; founder: boolean }>("GET", "/me/roles");
+    assert(now.ok && now.data.moderator && !now.data.founder, "ya modera (y no es el fundador)");
+    assert(statusOf(await dev.call("DELETE", `/mod/moderators/${no}`)) === 403, "moderar no da permiso para nombrar ni retirar");
+    const team = await dev.call<{ moderators: { player_no: number | null }[] }>("GET", "/mod/moderators");
+    assert(team.ok && team.data.moderators.some((m) => m.player_no === no), "sale en el equipo");
+    assert((await mod.call("DELETE", `/mod/moderators/${no}`)).ok, "retirar de moderación");
+    assert(statusOf(await dev.call("GET", "/mod/queue")) === 403, "retirada, ya no modera");
+    const log2 = await mod.call<{ log: { action: string; target_id: string }[] }>("GET", "/mod/log");
+    assert(log2.ok && ["moderator_add", "moderator_remove"].every((a) => log2.data.log.some((l) => l.action === a && l.target_id === `#${no}`)), "nombrar y retirar quedan en el registro");
   } finally {
     server.close();
   }

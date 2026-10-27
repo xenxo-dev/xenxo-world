@@ -824,6 +824,7 @@ export class Directory extends DurableObject<Env> {
       jam_votes: this.sql.exec("SELECT j.slug AS jam, v.project_id, v.stars, v.created_at FROM jam_votes v JOIN jams j ON j.id = v.jam_id WHERE v.user_id = ?", id).toArray(),
       // Si moderas: tus decisiones (el registro que pide la DSA).
       moderation_decisions: this.sql.exec("SELECT ts, action, target_type, target_id, note FROM moderation_log WHERE moderator = ?", `usr_${id}`).toArray(),
+      moderator_since: this.sql.exec<{ added_at: number }>("SELECT added_at FROM moderators WHERE user_id = ?", id).toArray()[0]?.added_at ?? null,
     });
   }
 
@@ -1162,6 +1163,38 @@ export class Directory extends DurableObject<Env> {
     const founder = (this.env.FOUNDER_USER_ID ?? "").replace(/^usr_/, "").trim();
     if (founder && userId === founder) return true;
     return this.sql.exec("SELECT 1 FROM moderators WHERE user_id = ?", userId).toArray().length > 0;
+  }
+
+  /** ¿Es el fundador? Solo él (o la clave de administración) nombra y retira moderación. */
+  isFounder(userId: string | null): boolean {
+    const founder = (this.env.FOUNDER_USER_ID ?? "").replace(/^usr_/, "").trim();
+    return !!userId && !!founder && userId === founder;
+  }
+
+  /** Quién modera (por su número y nombre públicos; el fundador, siempre). */
+  listModerators(): { player_no: number | null; display_name: string; added_at: number | null; founder: boolean }[] {
+    const founder = (this.env.FOUNDER_USER_ID ?? "").replace(/^usr_/, "").trim();
+    const rows = this.sql
+      .exec<{ id: string; player_no: number | null; display_name: string; added_at: number | null }>(
+        `SELECT u.id, u.player_no, u.display_name, m.added_at FROM users u LEFT JOIN moderators m ON m.user_id = u.id
+         WHERE m.user_id IS NOT NULL OR u.id = ? ORDER BY u.player_no`,
+        founder,
+      )
+      .toArray();
+    return rows.map((r) => ({ player_no: r.player_no, display_name: r.display_name, added_at: r.added_at, founder: r.id === founder }));
+  }
+
+  /** Nombra o retira a alguien de moderación por su número de jugador. Queda en el registro. */
+  setModerator(actor: string, rawNo: unknown, on: boolean): Result<{ player_no: number; moderator: boolean }> {
+    const no = Number(rawNo);
+    if (!Number.isInteger(no) || no < 0) return fail(400, "bad_player", "di el número de jugador");
+    const u = this.sql.exec<{ id: string }>("SELECT id FROM users WHERE player_no = ?", no).toArray()[0];
+    if (!u) return fail(404, "not_found", "no hay nadie con ese número");
+    if (this.isFounder(u.id)) return fail(400, "founder", "el fundador modera siempre");
+    if (on) this.sql.exec("INSERT OR IGNORE INTO moderators (user_id, added_at) VALUES (?, ?)", u.id, Date.now());
+    else this.sql.exec("DELETE FROM moderators WHERE user_id = ?", u.id);
+    this.logDecision(actor, on ? "moderator_add" : "moderator_remove", "user", `#${no}`, null);
+    return ok({ player_no: no, moderator: on });
   }
 
   private logDecision(moderator: string, action: string, targetType: string, targetId: string, note: string | null) {

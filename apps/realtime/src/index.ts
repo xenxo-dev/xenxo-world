@@ -534,7 +534,9 @@ export default {
       }
 
       /* --- Assets --- */
-      const asset = path.match(/^\/assets\/([0-9a-f]{64})$/);
+      // /s/<hash>.<ext> lo sirve Cloudflare como estático sin pasar por aquí; si llega, es que no
+      // estaba (p. ej. la web es más nueva que este Worker): se atiende como cualquier asset.
+      const asset = path.match(/^\/assets\/([0-9a-f]{64})$/) ?? path.match(/^\/s\/([0-9a-f]{64})\.(?:glb|webp)$/);
       if (asset && (req.method === "GET" || req.method === "HEAD")) return handleGet(asset[1]!, env.ASSETS, req, ctx, env.STATIC);
       if (path === "/assets" && req.method === "POST") {
         const p = await bearer(req, env);
@@ -716,7 +718,7 @@ export default {
           return r.ok ? json(r.data, 200, h) : failure(r, h);
         }
         if (path === "/me/roles" && req.method === "GET") {
-          return json({ moderator: await dir.isModerator(uid) }, 200, h);
+          return json({ moderator: await dir.isModerator(uid), founder: await dir.isFounder(uid) }, 200, h);
         }
         if (path === "/me/card" && req.method === "GET") {
           const r = await dir.card(uid);
@@ -857,6 +859,14 @@ export default {
         if (!modId) return json({ error: "forbidden", message: "solo moderación" }, 403, h);
         if (path === "/mod/queue" && req.method === "GET") return json(await dir.moderationQueue(), 200, { ...h, "Cache-Control": "no-store" });
         if (path === "/mod/log" && req.method === "GET") return json({ log: await dir.moderationLog() }, 200, { ...h, "Cache-Control": "no-store" });
+        // Quién modera: lo ve moderación; nombrar y retirar, solo el fundador (o la clave de administración).
+        if (path === "/mod/moderators" && req.method === "GET") return json({ moderators: await dir.listModerators() }, 200, { ...h, "Cache-Control": "no-store" });
+        const modr = path.match(/^\/mod\/moderators\/(\d{1,9})$/);
+        if (modr && (req.method === "PUT" || req.method === "DELETE")) {
+          if (!isAdmin && !(await dir.isFounder(uid))) return json({ error: "forbidden", message: "solo el fundador nombra moderación" }, 403, h);
+          const r = await dir.setModerator(modId, modr[1], req.method === "PUT");
+          return r.ok ? json(r.data, 200, h) : failure(r, h);
+        }
         const rev = path.match(/^\/mod\/projects\/([a-zA-Z0-9_-]{4,40})\/review$/);
         if (rev && req.method === "POST") {
           const b = await readJson(req);
@@ -945,9 +955,17 @@ export default {
         const headers = new Headers({ "X-Chunk-Id": chunkId });
 
         if (m[2] === "state") {
-          // Lectura pública y ligera para el panel 2D (no abre WebSocket).
+          // Lectura pública y ligera para el panel 2D (no abre WebSocket). Se guarda 15 s en la caché
+          // del centro de datos: el chunk se despierta como mucho una vez cada 15 s, mire quien mire.
+          const cache = (globalThis as unknown as { caches?: { default?: Cache } }).caches?.default;
+          const key = new Request(`https://xenxo-cache.local/state/${chunkId}`);
+          const hit = await cache?.match(key);
+          const out = { ...h, "Content-Type": "application/json", "Cache-Control": "public, max-age=15" };
+          if (hit) return new Response(hit.body, { status: 200, headers: out });
           const r = await stub.fetch(new Request("https://do/state", { headers }));
-          return new Response(r.body, { status: r.status, headers: { ...h, "Content-Type": "application/json", "Cache-Control": "public, max-age=5" } });
+          const body = await r.text();
+          if (r.ok && cache) ctx.waitUntil(cache.put(key, new Response(body, { headers: { "Cache-Control": "public, max-age=15" } })));
+          return new Response(body, { status: r.status, headers: out });
         }
 
         if (req.headers.get("Upgrade") !== "websocket") return json({ error: "se esperaba WebSocket" }, 426, h);

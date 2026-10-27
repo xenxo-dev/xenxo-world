@@ -12,7 +12,7 @@ npm run forge                                    # forja + empaquetado
 
 - `plaza-layout.json` (en `apps/realtime/src/`) es la única fuente de la disposición: la usan la forja y `seed.ts`.
 - `pack.mjs` añade la oclusión, cuantiza, comprime con meshopt, comprueba el presupuesto con el
-  mismo inspector que el servidor y deja los GLB **por hash** en `apps/realtime/seed-assets/`
+  mismo inspector que el servidor y deja los GLB **por hash** en `apps/realtime/seed-assets/s/`
   (recursos estáticos del Worker) y el índice en `apps/realtime/src/seed-assets.ts`.
 - Al cambiar los modelos cambian sus hashes y, con ellos, la huella de la semilla: el servidor
   vuelve a sembrar la plaza solo.

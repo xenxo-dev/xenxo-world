@@ -1,6 +1,6 @@
 """
 Instala una foto como portada del sistema (la de la plaza en el nexo):
-  - WebP 1280×720 en apps/realtime/seed-assets/<sha256>.webp (la sirve el Worker como recurso estático),
+  - WebP 1280×720 en apps/realtime/seed-assets/s/<sha256>.webp (la sirve el Worker como recurso estático),
   - copia en apps/web/public/covers/plaza.webp (tarjeta del nexo 2D),
   - índice en apps/realtime/src/seed-covers.ts.
 
@@ -29,7 +29,7 @@ for q in (82, 74, 66, 58):
         break
 digest = hashlib.sha256(data).hexdigest()
 
-seed_dir = os.path.join(ROOT, "apps", "realtime", "seed-assets")
+seed_dir = os.path.join(ROOT, "apps", "realtime", "seed-assets", "s")
 index = os.path.join(ROOT, "apps", "realtime", "src", "seed-covers.ts")
 covers = {}
 if os.path.exists(index):
@@ -53,7 +53,7 @@ with open(os.path.join(web, f"{name}.webp"), "wb") as f:
     f.write(data)
 lines = [
     "// Generado por tools/covers/install.py. No lo edites a mano.",
-    "// Portadas del sistema (WebP en apps/realtime/seed-assets/<hash>.webp).",
+    "// Portadas del sistema (WebP en apps/realtime/seed-assets/s/<hash>.webp).",
     "",
     "export const SEED_COVERS: Record<string, string> = {",
     *[f'  "{k}": "{v}",' for k, v in sorted(covers.items())],

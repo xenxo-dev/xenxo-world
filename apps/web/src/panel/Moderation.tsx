@@ -7,19 +7,23 @@ import { gameName, openGame } from "../games/state";
 import { Button, card, input, Notice } from "./ui";
 
 /** ¿Modera esta persona? (el fundador siempre). */
-export function useModerator(userId: string | undefined): boolean {
-  const [mod, setMod] = useState(false);
+export function useRoles(userId: string | undefined): { moderator: boolean; founder: boolean } {
+  const [roles, setRoles] = useState({ moderator: false, founder: false });
   useEffect(() => {
     let alive = true;
-    if (!userId) return setMod(false);
+    if (!userId) return setRoles({ moderator: false, founder: false });
     myRoles()
-      .then((r) => alive && setMod(r.moderator))
-      .catch(() => alive && setMod(false));
+      .then((r) => alive && setRoles({ moderator: r.moderator, founder: !!r.founder }))
+      .catch(() => alive && setRoles({ moderator: false, founder: false }));
     return () => {
       alive = false;
     };
   }, [userId]);
-  return mod;
+  return roles;
+}
+
+export function useModerator(userId: string | undefined): boolean {
+  return useRoles(userId).moderator;
 }
 
 /**

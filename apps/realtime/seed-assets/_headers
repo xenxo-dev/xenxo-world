@@ -1,0 +1,6 @@
+# Modelos y portadas del sistema (la forja, los avatares de serie y las portadas), por hash:
+# recursos estáticos servidos sin pasar por el Worker (no gastan peticiones del plan gratuito).
+/s/*
+  Access-Control-Allow-Origin: *
+  Cache-Control: public, max-age=31536000, immutable
+  X-Content-Type-Options: nosniff

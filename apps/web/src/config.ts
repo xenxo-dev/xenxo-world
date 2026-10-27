@@ -1,10 +1,11 @@
 import { assetPath } from "@xenxo/protocol";
+import { staticAssetPath } from "./static-assets";
 
 export const REALTIME_URL: string = import.meta.env.VITE_REALTIME_URL ?? "http://localhost:8787";
 
 /** URL pública e inmutable de un asset ("sha256:…"). */
 export function assetUrl(hash: string): string {
-  return new URL(assetPath(hash), REALTIME_URL).toString();
+  return new URL(staticAssetPath(hash) ?? assetPath(hash), REALTIME_URL).toString();
 }
 
 /** Preferencias del visitante. localStorage puede fallar (modo privado): siempre con try/catch. */

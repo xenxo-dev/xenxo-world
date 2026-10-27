@@ -82,6 +82,7 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 
 - Se diseña para el plan gratuito: en Workers Free los límites cortan, no cobran. R2 sí factura si pasa de su capa gratis, por eso hay topes en `directory.ts` (`STORAGE_CAP_BYTES`, `USER_QUOTA_BYTES`, subidas al día) y los GET de assets van por la caché.
 - Nada nuevo que lea o escriba en R2 por visitante o por frame sin caché delante. Ningún servicio de pago (AI, Queues, Images…) sin acordarlo antes.
+- Cuánto aguanta cada plan y por qué: `docs/LIMITES-CLOUDFLARE.md`. Los modelos del sistema van como estáticos en `/s/<hash>.<ext>` (gratis, sin ejecutar el Worker); en los Durable Objects, nada de temporizadores largos o permanentes (con uno pendiente no hiberna y gasta duración); cada petición nueva por visitante cuenta contra las 100.000 al día.
 
 ## Licencias
 

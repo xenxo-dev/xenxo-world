@@ -234,7 +234,9 @@ lleva `slug`, `review` (`pending`, `approved`, `rejected`) y `game` (la ficha gu
 (pendientes y denuncias abiertas) · `POST /mod/projects/<id>/review { decision, note }` (rechazar exige
 motivo) · `POST /mod/projects/<id>/hide { note }` · `POST /mod/reports/<id> { status, note }` ·
 `GET /mod/log`. Cada decisión queda en `moderation_log`; el motivo lo ve su autor (`review_note` en
-`GET /me`). `GET /me/roles` → `{ moderator }`.
+`GET /me`). `GET /me/roles` → `{ moderator, founder }`. Equipo: `GET /mod/moderators` (quién modera:
+número, nombre, desde cuándo) · `PUT|DELETE /mod/moderators/<número de jugador>` (solo el fundador o la
+clave de administración; queda en el registro como `moderator_add` / `moderator_remove`).
 
 **Abrir un juego.** La web enseña un aviso previo (autor, dominio, edad, anuncios o compras, si está
 revisado, que el navegador hablará con esa web). Sin cuenta solo se abren juegos `all` y aprobados.

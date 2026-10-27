@@ -85,9 +85,25 @@ export interface LogEntry {
   note: string | null;
 }
 
-export async function myRoles(): Promise<{ moderator: boolean }> {
+export async function myRoles(): Promise<{ moderator: boolean; founder?: boolean }> {
   if (!accountToken()) return { moderator: false };
   return call("GET", "/me/roles");
+}
+
+export interface ModeratorRow {
+  player_no: number | null;
+  display_name: string;
+  added_at: number | null;
+  founder: boolean;
+}
+
+export function modModerators() {
+  return call<{ moderators: ModeratorRow[] }>("GET", "/mod/moderators");
+}
+
+/** Solo el fundador: nombrar o retirar a alguien de moderación por su número de jugador. */
+export function modSetModerator(playerNo: number, on: boolean) {
+  return call<{ player_no: number; moderator: boolean }>(on ? "PUT" : "DELETE", `/mod/moderators/${playerNo}`);
 }
 
 export function modQueue() {

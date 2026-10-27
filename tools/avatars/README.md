@@ -24,7 +24,7 @@ python3 tools/avatars/forge_avatars.py out --preview          # personas → out
 python3 tools/avatars/pack_avatars.py out                     # texturas WebP, presupuesto, hash
 ```
 
-- Los VRM quedan por hash en `apps/realtime/seed-assets/` (el servidor los sirve como cualquier asset),
+- Los VRM quedan por hash en `apps/realtime/seed-assets/s/` (se sirven como estáticos en `/s/<hash>.glb`),
   el catálogo en `apps/realtime/src/avatar-presets.ts` y `apps/web/src/world/avatar-presets.json`,
   y los retratos en `apps/web/public/avatars/`.
 - Las animaciones VRMA valen para **cualquier** VRM, también los que sube la gente.

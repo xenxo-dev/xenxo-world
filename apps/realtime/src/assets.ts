@@ -176,7 +176,7 @@ export async function handleGet(hex: string, bucket: R2Bucket, req: Request, ctx
   // Modelos del sistema (la plaza y los avatares de serie): vienen con el propio Worker, no de R2.
   if (statik && isSystemAsset(hex)) {
     const cover = SYSTEM_COVERS.has(hex);
-    const r = await statik.fetch(new Request(`https://static.local/${hex}.${cover ? "webp" : "glb"}`));
+    const r = await statik.fetch(new Request(`https://static.local/s/${hex}.${cover ? "webp" : "glb"}`));
     if (r.ok) return new Response(r.body, { headers: { ...common, "Content-Type": cover ? "image/webp" : GLB_MEDIA } });
   }
   // Los de la gente, de R2 a través de la caché de Cloudflare: un mismo modelo se lee de R2
