@@ -151,7 +151,7 @@ for (const folder of existsSync(generatedDir) ? readdirSync(generatedDir).sort()
     await doc.transform(
       // Nivel detallado: tal cual (o reducido con `lod0_ratio` si el original es muy denso); ligero: `lod1_ratio`.
       ...(lod === 1 || meta.lod0_ratio
-        ? [simplify({ simplifier: MeshoptSimplifier, ratio: lod === 1 ? (meta.lod1_ratio ?? 0.5) : meta.lod0_ratio, error: lod === 1 ? 0.004 : 0.002 })]
+        ? [simplify({ simplifier: MeshoptSimplifier, ratio: lod === 1 ? (meta.lod1_ratio ?? 0.5) : meta.lod0_ratio, error: lod === 1 ? (meta.lod1_error ?? 0.004) : 0.002 })]
         : []),
       textureCompress({ encoder: sharp, targetFormat: "webp", resize: [meta.tex?.[lod] ?? (lod === 0 ? 1024 : 512), meta.tex?.[lod] ?? (lod === 0 ? 1024 : 512)], quality: 82 }),
       dedup(),

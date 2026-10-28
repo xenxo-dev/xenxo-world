@@ -8,7 +8,8 @@
  * - Quita los logotipos de Khronos (la licencia no cubre las marcas): la textura con el logo sale de
  *   todos los materiales y la matrícula queda lisa.
  * - Quita lo que no se ve desde fuera ni desde el asiento (motor, bajos del capó, pedales, ejes,
- *   pinzas de freno) y simplifica el resto para que quepa en las gafas.
+ *   pinzas de freno, limpiaparabrisas). Simplifica el interior y las llantas; la carrocería, solo
+ *   donde es plana (medio milímetro de error: con más, la pintura se veía abollada).
  * - Cristal sin transmisión (cuesta una pasada de pantalla): transparente normal, oscuro.
  * - Lo separa en piezas, cada una con su pivote en el origen: carrocería (con el interior), las dos
  *   puertas (bisagra) y las ruedas izquierda y derecha (eje). Imprime dónde va cada pivote: esos
@@ -19,7 +20,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NodeIO } from "@gltf-transform/core";
 import { ALL_EXTENSIONS } from "@gltf-transform/extensions";
-import { getBounds, prune, simplify, textureCompress, weld } from "@gltf-transform/functions";
+import { getBounds, prune, simplifyPrimitive, textureCompress, weldPrimitive } from "@gltf-transform/functions";
 import { MeshoptSimplifier } from "meshoptimizer";
 import sharp from "sharp";
 
@@ -30,9 +31,23 @@ await MeshoptSimplifier.ready;
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
 
 /** Piezas que no se ven (o casi) y pesan. */
-const DROP = /^(Engine|BodyHoodInterior0[12]|BodyHoodUnder|Axles|InteriorPedal.*|Wheel.*BrakePad|InteriorRearHatch|InteriorFloormats|InteriorSteeringEmblem)$/;
+const DROP = /^(Engine|BodyHoodInterior0[12]|BodyHoodUnder|Axles|InteriorPedal.*|Wheel.*BrakePad|InteriorRearHatch|InteriorFloormats|InteriorSteeringEmblem|BodyWindshieldWipers)$/;
+/**
+ * Qué se simplifica (y cuánto): solo lo que no luce. La carrocería (paneles, capó, techo, pilares,
+ * puertas por fuera) va entera: la pintura brilla y cualquier simplificación se ve como abolladuras.
+ */
+const SIMPLIFY = [
+  // Los paneles pintados, con un error de medio milímetro: se quitan triángulos solo donde es plano.
+  [/^Body(PanelsColor2|Hood|RearPanelsColor1|Pillars|RoofPanel)$/, 0.5, 0.0004],
+  [/^Body(Windshield|Rearwindow|WindowsRearSides|HoodTopgrill|TaillightsPanels)$/, 0.5, 0.001],
+  [/^Interior/, 0.35, 0.004], // el habitáculo: se ve poco y a través del cristal
+  [/Rim$/, 0.3, 0.003], // las llantas (12.000 triángulos cada una)
+  [/BrakeDisc$/, 0.4, 0.004],
+];
 const DOORS = { door_l: "BodyDoorLColor1", door_r: "BodyDoorRColor1" };
-const WHEELS = { wheel_l: "WheelFrontL", wheel_r: "WheelFrontR" };
+// Las traseras: en el modelo, las delanteras vienen giradas unos 22° (la dirección torcida) y, usadas
+// en las cuatro, asomaban por fuera de la carrocería.
+const WHEELS = { wheel_l: "WheelRearL", wheel_r: "WheelRearR" };
 const ALL_WHEELS = ["WheelFrontL", "WheelFrontR", "WheelRearL", "WheelRearR"];
 
 async function load() {
@@ -81,12 +96,21 @@ function isolate(doc, keep) {
 }
 
 const r3 = (v) => Math.round(v * 1000) / 1000;
+const weldPrim = (prim) => weldPrimitive(prim, {});
 const tris = (doc) => doc.getRoot().listMeshes().reduce((a, m) => a + m.listPrimitives().reduce((b, p) => b + (p.getIndices()?.getCount() ?? 0) / 3, 0), 0);
 
-async function write(name, doc, ratio, error) {
+async function write(name, doc) {
+  // Simplificar pieza a pieza (por el nombre del nodo), nunca la carrocería.
+  for (const node of doc.getRoot().listNodes()) {
+    const rule = SIMPLIFY.find(([re]) => re.test(node.getName()));
+    const mesh = node.getMesh();
+    if (!rule || !mesh) continue;
+    for (const prim of mesh.listPrimitives()) {
+      weldPrim(prim);
+      simplifyPrimitive(prim, { simplifier: MeshoptSimplifier, ratio: rule[1], error: rule[2] });
+    }
+  }
   await doc.transform(
-    weld(),
-    simplify({ simplifier: MeshoptSimplifier, ratio, error }),
     prune(),
     // Texturas a 1024 px en WebP ya aquí (pack.mjs las vuelve a preparar): el repo no guarda megas de PNG.
     textureCompress({ encoder: sharp, targetFormat: "webp", resize: [1024, 1024], quality: 88 }),
@@ -103,17 +127,17 @@ const out = { pieces: {}, doors: {}, wheels: {} };
 {
   const doc = await load();
   for (const n of doc.getRoot().listNodes()) if (Object.values(DOORS).includes(n.getName()) || ALL_WHEELS.includes(n.getName())) n.dispose();
-  out.pieces.vehicle_car = await write("vehicle_car", doc, 0.16, 0.0025);
+  out.pieces.vehicle_car = await write("vehicle_car", doc);
 }
 for (const [k, name] of Object.entries(DOORS)) {
   const doc = await load();
   out.doors[k] = isolate(doc, name).map(r3);
-  out.pieces[`vehicle_car_${k}`] = await write(`vehicle_car_${k}`, doc, 0.25, 0.003);
+  out.pieces[`vehicle_car_${k}`] = await write(`vehicle_car_${k}`, doc);
 }
 for (const [k, name] of Object.entries(WHEELS)) {
   const doc = await load();
   isolate(doc, name);
-  out.pieces[`vehicle_car_${k}`] = await write(`vehicle_car_${k}`, doc, 0.09, 0.008);
+  out.pieces[`vehicle_car_${k}`] = await write(`vehicle_car_${k}`, doc);
 }
 // Dónde va cada rueda (su eje).
 {
