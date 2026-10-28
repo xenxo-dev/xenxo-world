@@ -25,11 +25,15 @@ export const CAR = {
   hingeR: { x: -1.087, y: 0.643, z: 0.998 },
   doorOpen: 1.05,
   /**
-   * Quien conduce va en el centro (es un concept con el puesto de mando central): dónde se apoya el
-   * personaje sentado (sus pies, mirando a +Z), sus ojos (primera persona) y dónde se pone de pie
-   * fuera, entre la puerta abierta y la carrocería.
+   * Quien conduce va en el centro (es un concept con el puesto de mando central) y recostado, como en
+   * un deportivo de verdad (sentado como en una silla, la cabeza atravesaba el techo): dónde queda su
+   * cadera, cuánto se echa hacia atrás (rad), sus ojos (primera persona) y dónde se pone de pie fuera,
+   * entre la puerta abierta y la carrocería. En la animación de sentarse (sit_idle) la cadera queda
+   * 54 cm por encima de los pies y 33 cm por detrás.
    */
-  seat: { x: 0, y: -0.15, z: 0.45 },
+  driverHips: { x: 0, y: 0.28, z: 0.12 },
+  lean: 0.42,
+  sitHips: { up: 0.54, back: 0.33 },
   eye: { x: 0, y: 0.93, z: 0.3 },
   entry: { x: 1.62, z: -0.3 },
   /** Pinturas de serie (la de cada coche sale de quien lo conduce). */
@@ -73,6 +77,19 @@ export interface Drive {
   throttle: number;
   steer: number;
   handbrake: boolean;
+}
+
+/**
+ * Dónde van los pies de quien conduce (en ejes del coche) para que, echado `lean` hacia atrás, su
+ * cadera caiga en `driverHips`. El giro del personaje es: el del coche · inclinación (−lean en X) ·
+ * media vuelta en Y (los personajes miran a −Z).
+ */
+export function driverRoot(lean: number = CAR.lean): { x: number; y: number; z: number } {
+  const t = -lean;
+  const y0 = CAR.sitHips.up, z0 = -CAR.sitHips.back; // la cadera respecto a los pies, ya girada media vuelta
+  const y = y0 * Math.cos(t) - z0 * Math.sin(t);
+  const z = y0 * Math.sin(t) + z0 * Math.cos(t);
+  return { x: CAR.driverHips.x, y: CAR.driverHips.y - y, z: CAR.driverHips.z - z };
 }
 
 /** Pintura del coche de alguien (siempre la misma para la misma sesión). */

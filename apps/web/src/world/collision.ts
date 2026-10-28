@@ -99,7 +99,16 @@ export const NPC_RADIUS = 0.3;
 /** Huecos de los peatones: [0, NPC_CITY). Los residentes van detrás: [NPC_CITY, NPC_CITY + extra). */
 export const NPC_CITY = 32;
 const MAX_NPC = 64;
-export const npcs = { count: 0, extra: 0, pos: new Float32Array(MAX_NPC * 3) };
+export const npcs = {
+  count: 0,
+  extra: 0,
+  pos: new Float32Array(MAX_NPC * 3),
+  /**
+   * Atropellos (vehicle/physics.ts): por hueco, cuándo (performance.now, ms), hacia dónde (x, z) y a
+   * qué velocidad. Lo leen CityLife e Interiors para tirar a la persona y que se levante (knock.ts).
+   */
+  knock: new Float32Array(MAX_NPC * 4),
+};
 /** Índice del hueco k de la lista de gente (peatones primero, luego residentes). */
 const npcAt = (k: number) => (k < npcs.count ? k : NPC_CITY + k - npcs.count);
 /** La gente de ahora, en orden (para la física del coche). */
@@ -112,6 +121,13 @@ export const crowd = {
     out.x = npcs.pos[i * 3]!;
     out.y = npcs.pos[i * 3 + 1]!;
     out.z = npcs.pos[i * 3 + 2]!;
+  },
+  hit(k: number, nx: number, nz: number, speed: number) {
+    const i = npcAt(k);
+    npcs.knock[i * 4] = performance.now();
+    npcs.knock[i * 4 + 1] = nx;
+    npcs.knock[i * 4 + 2] = nz;
+    npcs.knock[i * 4 + 3] = speed;
   },
 };
 

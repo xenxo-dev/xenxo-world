@@ -22,6 +22,7 @@ import { createMotion, type Motion } from "./motion";
 import { rng } from "./NexoCity";
 import { playerBulk, playerPos } from "./Player";
 import { floorAt, NPC_CITY, npcs } from "./collision";
+import { knockApply, knockPaused } from "./knock";
 
 interface Loop {
   /** Esquinas en orden (x, z), a la altura `y`. */
@@ -199,7 +200,8 @@ export function Pedestrians({ chunk, count }: { chunk: string; count: number }) 
         if (j === i || !ahead(i, _px[j]!, _py[j]!, _pz[j]!)) continue;
         if (!ahead(j, _px[i]!, _py[i]!, _pz[i]!) || i > j) b = true;
       }
-      _blocked[i] = b ? 1 : 0;
+      // Atropellado (knock.ts): en el suelo no avanza.
+      _blocked[i] = b || knockPaused(i) ? 1 : 0;
     }
     // 3) Colocarlos: el que espera descuenta su avance (sigue en su sitio).
     let n = 0;
@@ -222,13 +224,15 @@ export function Pedestrians({ chunk, count }: { chunk: string; count: number }) 
       // Sobre las capas del suelo (unos centímetros sobre su altura nominal): los pies no se hunden.
       const py = floorAt(px, pz, l.y + 0.3);
       g.position.set(px, py, pz);
-      g.rotation.y = s.yaw;
+      g.rotation.set(0, s.yaw, 0);
       s.motion.speed = blocked ? 0 : w.speed;
-      // Para las colisiones del jugador (collision.ts): no se atraviesan.
+      // Para las colisiones del jugador (collision.ts): no se atraviesan. Si le ha dado un coche,
+      // sale despedido (knock.ts) y cuenta donde está ahora.
       if (n < NPC_CITY) {
-        npcs.pos[n * 3] = px;
+        knockApply(n, g, px, py, pz, s.yaw, s.motion);
+        npcs.pos[n * 3] = g.position.x;
         npcs.pos[n * 3 + 1] = py;
-        npcs.pos[n * 3 + 2] = pz;
+        npcs.pos[n * 3 + 2] = g.position.z;
         n++;
       }
     }

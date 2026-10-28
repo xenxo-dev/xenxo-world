@@ -14,7 +14,7 @@ import { ceilingHeight, crowd, forEachSolidBox, forEachSolidMesh, groundHeight, 
 import { placeBody, stepBody, type Body } from "../locomotion";
 import { smoothSpeed, type Motion } from "../motion";
 import { input } from "../input";
-import { CAR } from "./car";
+import { CAR, driverRoot } from "./car";
 import { createCarPose } from "./CarModel";
 import { carSound, carSoundStop } from "./audio";
 import { DISTRICT_CHUNKS, drive, driveNotice, emitDrive, SEATED, setPhase, type Phase } from "./drive-state";
@@ -184,9 +184,15 @@ export function dropCar() {
 /** Dónde dibujar al personaje mientras sube, va dentro o baja (raíz y giro completos). */
 export const seated = { pos: new THREE.Vector3(), q: new THREE.Quaternion() };
 
-function placeSeated(lx: number, ly: number, lz: number, localYaw: number) {
+const _x = new THREE.Vector3(1, 0, 0);
+const _ql = new THREE.Quaternion();
+/** Pies del personaje sentado al volante (recostado), en ejes del coche. */
+const SEAT = driverRoot(CAR.lean);
+
+/** Raíz del personaje en ejes del coche, su giro (en Y) y cuánto va echado atrás. */
+function placeSeated(lx: number, ly: number, lz: number, localYaw: number, lean = 0) {
   toWorld(lx, ly, lz, seated.pos);
-  seated.q.copy(carPose.q).multiply(_q.setFromAxisAngle(_y, localYaw));
+  seated.q.copy(carPose.q).multiply(_ql.setFromAxisAngle(_x, -lean)).multiply(_q.setFromAxisAngle(_y, localYaw));
 }
 
 export interface SeqCtx {
@@ -253,7 +259,7 @@ export function carFrame(dt: number, ctx: SeqCtx): "free" | "walking" | "seated"
       const ey = Math.min(1, k * 1.6);
       const back = faceCar + Math.PI;
       const yaw = k < 0.3 ? faceCar + Math.PI * (k / 0.3) : back + (Math.PI - back) * ((k - 0.3) / 0.7);
-      placeSeated(ex + (CAR.seat.x - ex) * e, CAR.seat.y * ey, ez + (CAR.seat.z - ez) * e, yaw);
+      placeSeated(ex + (SEAT.x - ex) * e, SEAT.y * ey, ez + (SEAT.z - ez) * e, yaw, CAR.lean * e);
       motion.speed = 0;
       motion.emote = "car_in";
       follow(body);
@@ -262,7 +268,7 @@ export function carFrame(dt: number, ctx: SeqCtx): "free" | "walking" | "seated"
     }
     case "close": {
       door(1 - k);
-      placeSeated(CAR.seat.x, CAR.seat.y, CAR.seat.z, Math.PI);
+      placeSeated(SEAT.x, SEAT.y, SEAT.z, Math.PI, CAR.lean);
       motion.emote = "sit";
       follow(body);
       if (k >= 1) {
@@ -283,7 +289,7 @@ export function carFrame(dt: number, ctx: SeqCtx): "free" | "walking" | "seated"
       readSim();
       const st = sim.state;
       carSound(st.speed, stopping ? 0 : input.move.y, st.slip, st.impact);
-      placeSeated(CAR.seat.x, CAR.seat.y, CAR.seat.z, Math.PI);
+      placeSeated(SEAT.x, SEAT.y, SEAT.z, Math.PI, CAR.lean);
       motion.speed = 0;
       motion.emote = "sit";
       follow(body);
@@ -299,7 +305,7 @@ export function carFrame(dt: number, ctx: SeqCtx): "free" | "walking" | "seated"
     }
     case "open_out": {
       door(k);
-      placeSeated(CAR.seat.x, CAR.seat.y, CAR.seat.z, Math.PI);
+      placeSeated(SEAT.x, SEAT.y, SEAT.z, Math.PI, CAR.lean);
       motion.emote = "sit";
       follow(body);
       if (k >= 1) setPhase("out");
@@ -310,7 +316,7 @@ export function carFrame(dt: number, ctx: SeqCtx): "free" | "walking" | "seated"
       const e = k * k * (3 - 2 * k);
       const ey = Math.max(0, (k - 0.35) / 0.65);
       const away = faceCar + Math.PI; // de espaldas al coche
-      placeSeated(CAR.seat.x + (ex - CAR.seat.x) * e, CAR.seat.y * (1 - ey), CAR.seat.z + (ez - CAR.seat.z) * e, Math.PI + (away - Math.PI) * e);
+      placeSeated(SEAT.x + (ex - SEAT.x) * e, SEAT.y * (1 - ey), SEAT.z + (ez - SEAT.z) * e, Math.PI + (away - Math.PI) * e, CAR.lean * (1 - e));
       motion.speed = 0;
       motion.emote = "car_out";
       follow(body);

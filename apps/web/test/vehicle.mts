@@ -103,6 +103,36 @@ const upY = 1 - 2 * (s.qx * s.qx + s.qz * s.qz);
 console.log(`volcado: arriba=${upY.toFixed(2)} ruedas=${s.contacts}`);
 check(upY > 0.9 && s.contacts >= 3, "se endereza solo");
 
+// 8) Atropello: la persona sale despedida hacia delante y el coche pierde algo de velocidad, sin
+//    clavarse (antes la gente era un poste y el coche se paraba en seco).
+const hits: { nx: number; nz: number; speed: number }[] = [];
+const crowd = {
+  count: 1,
+  at(_i: number, o: { x: number; y: number; z: number }) {
+    o.x = 0.3;
+    o.y = 0;
+    o.z = -40;
+  },
+  hit(_i: number, nx: number, nz: number, speed: number) {
+    hits.push({ nx, nz, speed });
+  },
+};
+const sim2 = new CarSim(R, source, crowd);
+sim2.spawn(0, 0, -80, 0);
+const s2 = sim2.state;
+let before = 0;
+for (let t = 0; t < 8 && !hits.length; t += 1 / 60) {
+  before = s2.speed;
+  sim2.update(1 / 60, { throttle: 1, steer: 0, handbrake: false });
+}
+const after = s2.speed;
+for (let t = 0; t < 1; t += 1 / 60) sim2.update(1 / 60, { throttle: 1, steer: 0, handbrake: false });
+console.log(`atropello: ${hits.length} golpe(s) a ${r1((hits[0]?.speed ?? 0) * 3.6)} km/h hacia (${r1(hits[0]?.nx ?? 0)}, ${r1(hits[0]?.nz ?? 0)}); coche ${r1(before * 3.6)} → ${r1(after * 3.6)} km/h, sigue a ${r1(s2.speed * 3.6)} km/h`);
+check(hits.length === 1, "le da una vez (no la vuelve a golpear enseguida)");
+check((hits[0]?.nz ?? 0) > 0.6, "sale despedida hacia donde va el coche");
+check(after > before * 0.85 && s2.speed > 10, "el coche pierde algo de velocidad pero no se clava");
+sim2.dispose();
+
 version++;
 sim.dispose();
 console.log(fails ? `\n${fails} fallos` : "\nTodo bien.");

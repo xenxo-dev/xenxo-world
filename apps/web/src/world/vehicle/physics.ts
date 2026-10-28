@@ -33,11 +33,22 @@ export interface StaticSource {
   bounds(): [number, number];
 }
 
-/** Gente que se mueve (peatones y residentes): posiciones x, y (pies), z. */
+/**
+ * Gente que se mueve (peatones y residentes): posiciones x, y (pies), z. Si el coche le da a
+ * alguien, `hit` le dice hacia dónde sale despedido (horizontal, unitario) y a qué velocidad iba el
+ * coche contra él (m/s).
+ */
 export interface MovingPeople {
   count: number;
   at(i: number, out: { x: number; y: number; z: number }): void;
+  hit?(i: number, nx: number, nz: number, speed: number): void;
 }
+
+/** Masa de una persona (kg): lo que el coche pierde al llevársela por delante. */
+const PERSON_MASS = 80;
+/** Medio ancho de una persona (m) y cuánto tarda en poder volver a recibir un golpe (s). */
+const PERSON_R = 0.3;
+const HIT_COOLDOWN = 2;
 
 export interface CarState {
   x: number;
@@ -82,7 +93,9 @@ export class CarSim {
   private statics: InstanceType<R["Collider"]>[] = [];
   private meshes = new Map<string, { col: InstanceType<R["Collider"]>; n: number }>();
   private walls: InstanceType<R["Collider"]>[] = [];
-  private people: InstanceType<R["RigidBody"]>[] = [];
+  /** Cuándo le dio el coche por última vez a cada hueco de la gente (s de simulación). */
+  private lastHit = new Float64Array(PEOPLE).fill(-1e9);
+  private simTime = 0;
   private seen = -1;
   private acc = 0;
   private steerNow = 0;
@@ -96,12 +109,6 @@ export class CarSim {
   constructor(private R: R, private source: StaticSource, private crowd?: MovingPeople) {
     this.world = new R.World({ x: 0, y: -9.81, z: 0 });
     this.world.timestep = STEP;
-    // Gente: cilindros cinemáticos (se mueven solos; el coche choca con ellos y no los empuja).
-    for (let i = 0; i < PEOPLE; i++) {
-      const b = this.world.createRigidBody(R.RigidBodyDesc.kinematicPositionBased().setTranslation(0, -1000 - i * 3, 0));
-      this.world.createCollider(R.ColliderDesc.cylinder(0.85, 0.3).setTranslation(0, 0.85, 0), b);
-      this.people.push(b);
-    }
   }
 
   /** Lo sólido del lugar: se rehace solo si ha cambiado (las mallas, solo las nuevas o quitadas). */
@@ -224,7 +231,8 @@ export class CarSim {
     let impact = 0;
     while (this.acc >= STEP) {
       this.acc -= STEP;
-      this.movePeople();
+      this.simTime += STEP;
+      impact = Math.max(impact, this.hitPeople(body));
       this.controls(drive, body, v);
       v.updateVehicle(STEP);
       this.world.step();
@@ -291,16 +299,47 @@ export class CarSim {
     }
   }
 
-  private movePeople() {
+  /**
+   * Atropellos: la gente no es un poste (el coche se clavaba en seco contra ella), sino una masa de
+   * 80 kg. Quien esté dentro de la planta del coche (más su medio ancho) y a la altura de la
+   * carrocería sale despedido hacia fuera del coche y el coche pierde el impulso que le da.
+   * Devuelve el golpe (m/s) para el sonido.
+   */
+  private hitPeople(body: InstanceType<R["RigidBody"]>): number {
     const c = this.crowd;
-    const n = c ? Math.min(c.count, PEOPLE) : 0;
-    for (let i = 0; i < PEOPLE; i++) {
-      const b = this.people[i]!;
-      if (i < n) {
-        c!.at(i, _p);
-        b.setNextKinematicTranslation(_p);
-      } else if (b.translation().y > -500) b.setNextKinematicTranslation({ x: 0, y: -1000 - i * 3, z: 0 });
+    if (!c || !c.hit) return 0;
+    const t = body.translation(), q = body.rotation(), lv = body.linvel();
+    // Ejes del coche en el mundo (adelante = +Z, izquierda = +X).
+    const fx = 2 * (q.x * q.z + q.w * q.y), fz = 1 - 2 * (q.x * q.x + q.y * q.y);
+    const lx = 1 - 2 * (q.y * q.y + q.z * q.z), lz = 2 * (q.x * q.z - q.w * q.y);
+    const hw = CAR.width / 2 + PERSON_R, hl = CAR.length / 2 + PERSON_R;
+    const n = Math.min(c.count, PEOPLE);
+    let bang = 0;
+    for (let i = 0; i < n; i++) {
+      c.at(i, _p);
+      if (_p.y > t.y + CAR.height || _p.y + 1.7 < t.y) continue;
+      const dx = _p.x - t.x, dz = _p.z - t.z;
+      const along = dx * fx + dz * fz - CAR.centerZ, side = dx * lx + dz * lz;
+      if (Math.abs(along) > hl || Math.abs(side) > hw) continue;
+      if (this.simTime - this.lastHit[i]! < HIT_COOLDOWN) continue;
+      // Hacia dónde sale: lejos del centro del coche, y sobre todo hacia donde va el coche.
+      let nx = dx, nz = dz;
+      const d = Math.hypot(nx, nz) || 1;
+      nx /= d;
+      nz /= d;
+      const speed = lv.x * nx + lv.z * nz;
+      if (speed < 0.6) continue; // rozándola parado o alejándose: nada
+      const sp = Math.hypot(lv.x, lv.z) || 1;
+      const ox = nx * 0.4 + (lv.x / sp) * 0.6, oz = nz * 0.4 + (lv.z / sp) * 0.6;
+      const od = Math.hypot(ox, oz) || 1;
+      this.lastHit[i] = this.simTime;
+      c.hit(i, ox / od, oz / od, speed);
+      // Choque casi plástico: el coche le da su velocidad a la persona y pierde ese impulso.
+      const j = (PERSON_MASS * CAR.mass) / (PERSON_MASS + CAR.mass) * speed;
+      body.applyImpulse({ x: -nx * j, y: 0, z: -nz * j }, true);
+      bang = Math.max(bang, speed * 0.6);
     }
+    return bang;
   }
 
   private read() {

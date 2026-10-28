@@ -20,6 +20,7 @@ import { AvatarBody } from "./Avatars";
 import { createMotion, type Motion } from "./motion";
 import { playerPos } from "./Player";
 import { floorAt, NPC_CITY, npcs } from "./collision";
+import { knockApply } from "./knock";
 
 interface Door {
   x: number;
@@ -137,6 +138,12 @@ interface Slot {
   who: number;
   motion: Motion;
   group: THREE.Group | null;
+  /** Su sitio y su giro (para volver a él si le da un coche: knock.ts). */
+  bx: number;
+  by: number;
+  bz: number;
+  yaw: number;
+  knocked: boolean;
 }
 
 const Body = memo(function Body({ slot, seed }: { slot: Slot; seed: string }) {
@@ -159,7 +166,7 @@ export function Residents({ chunk, count }: { chunk: string; count: number }) {
   const life = d ? LIFE[d.id] : undefined;
   const people = life?.npcs ?? [];
   const n = Math.min(count, NPC_CITY);
-  const slots = useMemo<Slot[]>(() => Array.from({ length: n }, () => ({ who: -1, motion: createMotion(), group: null })), [n]);
+  const slots = useMemo<Slot[]>(() => Array.from({ length: n }, () => ({ who: -1, motion: createMotion(), group: null, bx: 0, by: 0, bz: 0, yaw: 0, knocked: false })), [n]);
   const dist = useMemo(() => new Float32Array(people.length), [people]);
   const order = useMemo(() => Array.from({ length: people.length }, (_, k) => k), [people]);
   const inView = useMemo(() => new Uint8Array(life?.rooms.length ?? 0), [life]);
@@ -206,9 +213,15 @@ export function Residents({ chunk, count }: { chunk: string; count: number }) {
       for (const s of slots) {
         if (s.who < 0 || !s.group) continue;
         const p = people[s.who]!;
-        s.group.position.set(p.x, floorAt(p.x, p.z, p.y + 0.4), p.z);
+        s.bx = p.x;
+        s.by = floorAt(p.x, p.z, p.y + 0.4);
+        s.bz = p.z;
         // El frente de los personajes es su −Z: media vuelta respecto a hacia dónde mira.
-        s.group.rotation.y = (p.yaw * Math.PI) / 180 + Math.PI;
+        s.yaw = (p.yaw * Math.PI) / 180 + Math.PI;
+        if (!s.knocked) {
+          s.group.position.set(s.bx, s.by, s.bz);
+          s.group.rotation.set(0, s.yaw, 0);
+        }
       }
     }
     // Dibujados y sólidos (collision.ts: detrás de los peatones).
@@ -218,6 +231,15 @@ export function Residents({ chunk, count }: { chunk: string; count: number }) {
       if (!g) continue;
       g.visible = s.who >= 0;
       if (s.who < 0) continue;
+      // Si le ha dado un coche, sale despedido y se levanta (knock.ts); después, a su sitio y a lo suyo.
+      const k = knockApply(NPC_CITY + e, g, s.bx, s.by, s.bz, s.yaw, s.motion) || npcs.knock[(NPC_CITY + e) * 4] !== 0;
+      if (!k && s.knocked) {
+        g.position.set(s.bx, s.by, s.bz);
+        g.rotation.set(0, s.yaw, 0);
+        const pose = people[s.who]!.pose;
+        s.motion.emote = pose === "idle" ? null : pose;
+      }
+      s.knocked = k;
       npcs.pos[(NPC_CITY + e) * 3] = g.position.x;
       npcs.pos[(NPC_CITY + e) * 3 + 1] = g.position.y;
       npcs.pos[(NPC_CITY + e) * 3 + 2] = g.position.z;

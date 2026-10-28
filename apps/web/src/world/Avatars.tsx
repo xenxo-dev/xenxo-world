@@ -13,13 +13,17 @@ import { FONT_URL } from "./font";
 import { advance, createMotion, smoothSpeed, type Motion } from "./motion";
 import { presetFor } from "./presets";
 import { applyCarPose, CarModel, createCarHandle, createCarPose } from "./vehicle/CarModel";
-import { CAR, paintFor } from "./vehicle/car";
+import { CAR, driverRoot, paintFor } from "./vehicle/car";
 
 /** Gestos con la puerta del coche abierta (subir y bajar). */
 const DOOR_OPEN = new Set(["car_open", "car_in", "car_out"]);
 const _cp = new THREE.Vector3();
 const _cq = new THREE.Quaternion();
-const _seatQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
+/** Quien conduce: recostado y mirando adelante (vehicle/car.ts). */
+const SEAT = driverRoot(CAR.lean);
+const _seatQ = new THREE.Quaternion()
+  .setFromAxisAngle(new THREE.Vector3(1, 0, 0), -CAR.lean)
+  .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI));
 
 /** Se dibuja a los demás con este retraso para tener siempre dos poses entre las que interpolar (a 5 Hz llegan cada 200 ms). */
 const INTERP_DELAY_MS = 320;
@@ -214,7 +218,7 @@ function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; n
     motion.emote = s1.emote ?? null;
     if (driving) {
       // Sentado en el asiento, pegado al coche (sin el desfase entre las dos poses).
-      body.current.position.set(CAR.seat.x, CAR.seat.y, CAR.seat.z).applyQuaternion(car.q).add(car.p);
+      body.current.position.set(SEAT.x, SEAT.y, SEAT.z).applyQuaternion(car.q).add(car.p);
       body.current.quaternion.copy(car.q).multiply(_seatQ);
     } else {
       body.current.position.set(_a.x, feet, _a.z);
