@@ -44,10 +44,9 @@ run_worker_first = ["/*", "!/s/*"]
 # Los datos de cada chunk se guardan y procesan solo en la UE (RGPD).
 # Cambiarlo después de desplegar crea objetos nuevos y vacíos: decídelo antes del primer despliegue.
 DO_JURISDICTION = "eu"
-# Distritos en una máquina propia (tools/district-host/README.md): su URL y qué chunks viven allí.
-# Vacío = todo en Cloudflare. La clave privada va aparte: wrangler secret put DISTRICT_SIGNING_KEY.
-DISTRICT_HOST = ""
-REMOTE_CHUNKS = ""
+# Distritos en nodos de la comunidad (src/nodes.ts, docs/guia/es/servidor.md): qué nodo lleva cada
+# distrito está en el registro (/mod/nodes). Solo hace falta el secreto DISTRICT_SIGNING_KEY
+# (wrangler secret put); sin él, todo vive en Cloudflare y el cron no hace nada.
 # Orígenes permitidos para /auth y /chunk/*/state (separados por comas).
 ALLOWED_ORIGINS = "http://localhost:5173,https://xenxo.io,https://www.xenxo.io"
 # Dominio de las passkeys. Debe coincidir con el dominio de la web (o ser su dominio padre).
@@ -94,3 +93,8 @@ namespace_id = "1005"
   [ratelimits.simple]
   limit = 30
   period = 60
+
+# La ronda de los nodos (src/nodes.ts): salud, copias de los distritos que cambian y relevo a
+# Cloudflare si uno cae. Sin DISTRICT_SIGNING_KEY sale enseguida sin hacer nada.
+[triggers]
+crons = ["*/2 * * * *"]

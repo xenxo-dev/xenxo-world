@@ -1259,6 +1259,24 @@ export class ChunkRoom extends DurableObject<Env> {
     };
   }
 
+  /**
+   * Huella barata de lo que se lleva dumpState (sin el chat, que es efímero): el Worker solo guarda
+   * una copia nueva de un distrito de otro nodo cuando cambia (nodes.ts).
+   */
+  async stateRev(): Promise<string> {
+    this.ensureChunk(null);
+    const one = (q: string) => JSON.stringify(this.sql.exec(q).toArray()[0] ?? null);
+    return [
+      one("SELECT COUNT(*) AS n, COALESCE(SUM(rev), 0) AS r, COALESCE(SUM(LENGTH(data)), 0) AS b FROM entities WHERE owner != 'system'"),
+      one("SELECT COUNT(*) AS n, COALESCE(SUM(slot), 0) AS s FROM stands"),
+      one("SELECT COUNT(*) AS n, COALESCE(MAX(ts), 0) AS t FROM act_collected"),
+      one("SELECT COUNT(*) AS n, COALESCE(MAX(ts), 0) AS t FROM act_race_best"),
+      one("SELECT COUNT(*) AS n, COALESCE(MAX(ts), 0) AS t FROM act_hunt_done"),
+      one("SELECT COUNT(*) AS n, COALESCE(SUM(points), 0) AS p FROM act_points"),
+      one("SELECT v FROM meta WHERE k = 'community'"),
+    ].join("|");
+  }
+
   /** Sustituye lo de la gente por lo de otro servidor (ver dumpState). Echa a quien esté dentro. */
   async loadState(d: ChunkDump): Promise<{ entities: number; stands: number; chat: number }> {
     this.ensureChunk(null);

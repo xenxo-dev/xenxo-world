@@ -14,7 +14,8 @@ export type ModEvent =
   | { event: "project.pending"; id: string; title: string; district: string | null }
   | { event: "game.pending"; id: string; title: string }
   | { event: "report.open"; id: number; target_type: string; reason: string }
-  | { event: "district.pending"; id: string; slug: string };
+  | { event: "district.pending"; id: string; slug: string }
+  | { event: "node.down"; id: string; chunks: number };
 
 export interface NotifyEnv {
   N8N_WEBHOOK_URL?: string;

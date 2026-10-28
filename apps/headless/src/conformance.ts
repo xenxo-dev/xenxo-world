@@ -1167,6 +1167,58 @@ await scenario("pase: /chunk/<id>/ticket dice dónde conectar (aquí con el mism
   }
 });
 
+await scenario("nodos: el registro lo gestiona solo el fundador; un nodo que no responde no recibe distritos (y con XENXO_NODE_URL, un traslado de ida y vuelta)", async () => {
+  const key = await fetch(new URL("/nodes/key", baseUrl));
+  assert(key.status === 200 || key.status === 404, "/nodes/key: la clave pública o 404 si no hay nodos");
+  if (key.status === 404) return console.log("    (sin DISTRICT_SIGNING_KEY en el servidor: se omite)");
+  const pub = (await key.json()) as { kty: string; x: string; d?: string };
+  assert(pub.kty === "OKP" && !!pub.x && pub.d === undefined, "la clave que se reparte es solo la pública");
+  const someone = new Api(baseUrl);
+  await someone.register(`conf ${randomUUID().slice(0, 6)}`);
+  const nope = await someone.call("POST", "/mod/nodes", { id: "intruso", name: "Intruso", url: "https://example.com" });
+  assert(!nope.ok && nope.status === 403, "una cuenta cualquiera no da de alta nodos");
+  if (!adminKey) return console.log("    (sin XENXO_ADMIN_KEY: se omite el resto)");
+  const admin = new Api(baseUrl);
+  await admin.agentToken(adminKey);
+  const bad = await admin.call("POST", "/mod/nodes", { id: "mal-url", name: "Mal", url: "ftp://example.com" });
+  assert(!bad.ok && bad.status === 400, "una dirección que no es https se rechaza");
+  const ghostId = `fantasma-${randomUUID().slice(0, 6)}`;
+  const ghost = await admin.call<{ alive: boolean }>("POST", "/mod/nodes", { id: ghostId, name: "Fantasma", url: "http://127.0.0.1:9" });
+  assert(ghost.ok && ghost.data.alive === false, "se puede dar de alta, pero consta que no responde");
+  const mv = await admin.call("POST", "/mod/chunks/c_-1_0/move", { to: ghostId });
+  assert(!mv.ok && mv.status === 502, "a un nodo que no responde no se lleva ningún distrito");
+  const plaza = await admin.call("POST", "/mod/chunks/c_0_0/move", { to: ghostId });
+  assert(!plaza.ok && plaza.status === 400, "la plaza no va a ningún nodo");
+  assert((await admin.call("DELETE", `/mod/nodes/${ghostId}`)).ok, "un nodo sin distritos se quita");
+
+  const nodeUrl = process.env.XENXO_NODE_URL;
+  const nodeId = process.env.XENXO_NODE_ID;
+  if (!nodeUrl || !nodeId) return console.log("    (sin XENXO_NODE_URL y XENXO_NODE_ID: se omite el traslado)");
+  await admin.call("DELETE", `/mod/nodes/${nodeId}`);
+  const add = await admin.call<{ alive: boolean }>("POST", "/mod/nodes", { id: nodeId, name: "Nodo de prueba", url: nodeUrl });
+  assert(add.ok && add.data.alive, "el nodo de prueba responde con su id");
+  const go = await admin.call("POST", "/mod/chunks/c_-1_0/move", { to: nodeId });
+  assert(go.ok, `traslado al nodo: ${!go.ok ? go.message : ""}`);
+  const ds = ((await (await fetch(new URL("/districts", baseUrl))).json()) as { districts: { chunk_id: string; remote?: boolean; host?: string }[] }).districts;
+  const v = ds.find((d) => d.chunk_id === "c_-1_0");
+  assert(v?.remote && v.host === "Nodo de prueba", "/districts dice que vive en el nodo y quién lo aloja");
+  const guest = ((await (await fetch(new URL("/auth/guest", baseUrl), { method: "POST" })).json()) as { token: string }).token;
+  const t = (await (await fetch(new URL("/chunk/c_-1_0/ticket", baseUrl), { method: "POST", headers: { Authorization: `Bearer ${guest}` } })).json()) as { url: string; remote: boolean };
+  assert(t.remote && t.url.startsWith(nodeUrl.replace(/^http/, "ws")) && !t.url.includes(guest), "el pase lleva al nodo y nunca el token de sesión");
+  const c = await XenxoClient.connect({ baseUrl, chunkId: "c_-1_0", token: guest });
+  assert(c.welcome.chunk_id === "c_-1_0", "se entra en el distrito del nodo");
+  c.close();
+  const check = await admin.call<{ checked: number }>("POST", "/mod/nodes/check", {});
+  assert(check.ok && check.data.checked >= 1, "la ronda de comprobación ve el nodo");
+  const list = await admin.call<{ hosts: { chunk_id: string; snapshot_at: number | null }[] }>("GET", "/mod/nodes");
+  assert(list.ok && list.data.hosts.find((x) => x.chunk_id === "c_-1_0")?.snapshot_at, "hay copia del distrito en Cloudflare");
+  const busy = await admin.call("DELETE", `/mod/nodes/${nodeId}`);
+  assert(!busy.ok && busy.status === 409, "un nodo con distritos no se puede quitar");
+  const back = await admin.call("POST", "/mod/chunks/c_-1_0/move", { to: "cloudflare" });
+  assert(back.ok, "vuelta a Cloudflare");
+  assert((await admin.call("DELETE", `/mod/nodes/${nodeId}`)).ok, "y ya se puede quitar");
+}, 40_000);
+
 await scenario("nexo en solitario: nadie ve a nadie, no hay poses ni chat; en la plaza, sí", async () => {
   const api = new Api(baseUrl);
   await api.register(`conf ${randomUUID().slice(0, 6)}`);

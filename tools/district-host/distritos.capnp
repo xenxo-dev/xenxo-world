@@ -1,7 +1,7 @@
 # Servidor de distritos con workerd (docs/ALOJAMIENTO-DISTRITOS.md, tools/district-host/README.md).
 # Va en la misma carpeta que district-host.js (npm run build:district-host). Arranque:
 #   workerd serve distritos.capnp --experimental
-# Las variables (DISTRICT_PUBLIC_KEY, HOSTED_CHUNKS, ASSETS_URL) vienen del entorno (el servicio de
+# Las variables (NODE_ID, DISTRICT_PUBLIC_KEY, HOSTED_CHUNKS, ASSETS_URL) vienen del entorno (el servicio de
 # systemd las lee de /etc/xenxo-distritos.env). Los datos de cada distrito (SQLite) van en DATOS.
 using Workerd = import "/workerd/workerd.capnp";
 
@@ -27,5 +27,6 @@ const distritos :Workerd.Worker = (
     (name = "DISTRICT_PUBLIC_KEY", fromEnvironment = "DISTRICT_PUBLIC_KEY"),
     (name = "HOSTED_CHUNKS", fromEnvironment = "HOSTED_CHUNKS"),
     (name = "ASSETS_URL", fromEnvironment = "ASSETS_URL"),
+    (name = "NODE_ID", fromEnvironment = "NODE_ID"),
   ],
 );

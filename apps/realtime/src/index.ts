@@ -5,14 +5,15 @@ import { SEED_ASSETS } from "./seed-assets";
 import { assetMeta, assetKey, forgetAssets, handleGet, handleUpload } from "./assets";
 import { isAvatarPreset } from "./avatar-presets-check";
 import { randomId, resolveAgent, signToken, verifyToken, type Principal } from "./auth";
-import { CALL_TTL_MS, chunkList, REMOTE_METHODS, sha256B64, signRemote, TICKET_TTL_MS } from "./remote";
+import { CALL_TTL_MS, REMOTE_METHODS, sha256B64, signRemote, TICKET_TTL_MS } from "./remote";
+import { currentRoutes, forgetRoutes, loadRoutes, nodeAccepts, nodeAlive, nodeUrl, publicJwk, snapshotKey } from "./nodes";
 import type { ChunkRoom, ShowcaseItem } from "./chunk-room";
 import { BADGES, earnedIn, type ActivityOf } from "./badges";
 import { notify, notifyConfigured } from "./notify";
 import { billboardSlots, cabinetSlots, DISTRICTS, districtById, parcelIndex, parcelSpawn } from "./districts";
 import { communityGates, SHOWCASE_SLOTS, type CommunityGate } from "./nexo";
 import { fetchDevManifest, fetchManifest } from "./games";
-import { defaultAvatarFor, MAX_AGENT_KEYS_PER_PROJECT, MAX_SKINS, type Directory, type UserRow } from "./directory";
+import { defaultAvatarFor, MAX_AGENT_KEYS_PER_PROJECT, MAX_SKINS, type ChunkHostRow, type Directory, type UserRow } from "./directory";
 import { allowed, type LimitKind, type RateLimiter } from "./ratelimit";
 
 export { ChunkRoom } from "./chunk-room";
@@ -41,12 +42,10 @@ export interface Env {
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
   /**
-   * Distritos en otro servidor (docs/ALOJAMIENTO-DISTRITOS.md): su URL (https://…), qué chunks
-   * viven allí (separados por comas) y la clave privada Ed25519 (JWK, un secreto) con la que se
-   * firman los pases y las llamadas. Sin DISTRICT_HOST, todo vive en Cloudflare como siempre.
+   * Nodos (nodes.ts): la clave privada Ed25519 (JWK, un secreto) con la que se firman los pases y
+   * las llamadas a los servidores de distritos. Sin ella no se usa ningún nodo: todo vive en Cloudflare.
+   * Qué nodo lleva cada distrito está en el registro (/mod/nodes), no aquí.
    */
-  DISTRICT_HOST?: string;
-  REMOTE_CHUNKS?: string;
   DISTRICT_SIGNING_KEY?: string;
   /**
    * Avisos de moderación a una automatización propia (n8n; tools/n8n/README.md): el webhook y el
@@ -431,23 +430,39 @@ async function clearParcel(env: Env, district: string | null | undefined, projec
   if (agents.length) await room.kick(agents);
 }
 
-/** ¿Vive este chunk en el servidor de distritos? */
+/** El nodo que atiende ahora este chunk (null = Cloudflare). Lee las rutas ya cargadas (loadRoutes). */
+function nodeFor(env: Env, id: string): { id: string; name: string; url: string } | null {
+  if (!env.DISTRICT_SIGNING_KEY) return null;
+  const r = currentRoutes();
+  const nid = r.chunks[id];
+  const n = nid ? r.nodes[nid] : undefined;
+  return nid && n ? { id: nid, ...n } : null;
+}
+
+/** ¿Vive este chunk en un nodo? */
 function isRemote(env: Env, id: string): boolean {
-  return !!env.DISTRICT_HOST && !!env.DISTRICT_SIGNING_KEY && chunkList(env.REMOTE_CHUNKS).has(id);
+  return !!nodeFor(env, id);
+}
+
+/** Carga las rutas de los nodos (si hay clave de nodos): antes de cualquier chunk(env, id). */
+async function routes(env: Env, force = false) {
+  if (!env.DISTRICT_SIGNING_KEY) return;
+  await loadRoutes(() => directory(env).nodeRoutes(), force);
 }
 
 /**
- * Un chunk del servidor de distritos, con la misma forma que el de aquí: cada método es una
- * llamada HTTPS firmada (solo los de REMOTE_METHODS) y fetch lleva el estado público.
+ * Un chunk de un nodo, con la misma forma que el de aquí: cada método es una llamada HTTPS firmada
+ * (solo los de REMOTE_METHODS, con `aud` = el nodo) y fetch lleva el estado público.
  */
-function remoteChunk(env: Env, id: string) {
-  const host = env.DISTRICT_HOST!.replace(/\/+$/, "");
+function remoteChunk(env: Env, id: string, node: { id: string; url: string } | null = nodeFor(env, id)) {
+  if (!node || !env.DISTRICT_SIGNING_KEY) throw new Error("ese chunk no vive en ningún nodo");
+  const host = node.url.replace(/\/+$/, "");
   const call = async (method: string, args: unknown[]) => {
     if (!REMOTE_METHODS.has(method)) throw new Error(`método remoto no permitido: ${method}`);
     const body = JSON.stringify(args);
-    const token = await signRemote(env.DISTRICT_SIGNING_KEY!, { typ: "rpc", chunk: id, method, body: await sha256B64(body), exp: Date.now() + CALL_TTL_MS });
+    const token = await signRemote(env.DISTRICT_SIGNING_KEY!, { typ: "rpc", aud: node.id, chunk: id, method, body: await sha256B64(body), exp: Date.now() + CALL_TTL_MS });
     const r = await fetch(`${host}/rpc/${encodeURIComponent(id)}/${method}`, { method: "POST", headers: { "Content-Type": "application/json", "X-Xenxo-Call": token }, body });
-    if (!r.ok) throw new Error(`servidor de distritos: ${method} → ${r.status}`);
+    if (!r.ok) throw new Error(`nodo ${node.id}: ${method} → ${r.status}`);
     return (await r.json()) as unknown;
   };
   return new Proxy({} as Api<ChunkRoom> & { fetch(r: Request): Promise<Response> }, {
@@ -473,6 +488,8 @@ async function closedFor(env: Env, chunkId: string, p: Principal): Promise<boole
   return !(uid && (await directory(env).isModerator(uid)));
 }
 const SOON = { error: "soon", message: "este distrito abrirá pronto" };
+/** El nodo que lleva este distrito no responde (nodes.ts). */
+const UNAVAILABLE = { error: "district_unavailable", message: "este distrito no está disponible ahora; vuelve a intentarlo en un rato" };
 
 /**
  * ¿Sigue viva la sesión de esta persona? Una sesión recién firmada (menos de 10 minutos: la web la
@@ -554,9 +571,10 @@ async function checkSubmission(env: Env, req: Request): Promise<{ ok: true; sub:
 }
 
 async function socketFor(env: Env, req: Request, chunkId: string, p: Principal, token: string): Promise<string> {
-  if (isRemote(env, chunkId)) {
-    const ticket = await signRemote(env.DISTRICT_SIGNING_KEY!, { typ: "ticket", chunk: chunkId, principal: p, exp: Date.now() + TICKET_TTL_MS });
-    const u = new URL(`/chunk/${encodeURIComponent(chunkId)}/ws`, env.DISTRICT_HOST!);
+  const node = nodeFor(env, chunkId);
+  if (node) {
+    const ticket = await signRemote(env.DISTRICT_SIGNING_KEY!, { typ: "ticket", aud: node.id, chunk: chunkId, principal: p, exp: Date.now() + TICKET_TTL_MS });
+    const u = new URL(`${node.url.replace(/\/+$/, "")}/chunk/${encodeURIComponent(chunkId)}/ws`);
     u.protocol = u.protocol === "http:" ? "ws:" : "wss:";
     u.searchParams.set("ticket", ticket);
     return u.toString();
@@ -565,6 +583,93 @@ async function socketFor(env: Env, req: Request, chunkId: string, p: Principal, 
   u.protocol = u.protocol === "http:" ? "ws:" : "wss:";
   u.searchParams.set("token", token);
   return u.toString();
+}
+
+/* --- Nodos: traslados, relevo y comprobaciones (nodes.ts) ------------------------------------ */
+
+type ChunkDumpOf = Awaited<ReturnType<ChunkRoom["dumpState"]>>;
+
+/**
+ * Lleva un distrito a Cloudflare o a un nodo: copia lo de la gente de donde está ahora y después
+ * cambia la ruta. Al ir a un nodo, guarda ya su primera copia en R2 (por si el nodo cae pronto).
+ */
+async function moveChunk(env: Env, id: string, to: unknown, moderator: string): Promise<{ ok: true; data: unknown } | { ok: false; status: number; error: string; message: string }> {
+  const dir = directory(env);
+  const host = await dir.chunkHost(id);
+  const fromNode = host && host.state === "node" ? await dir.nodeOf(host.node_id) : null;
+  const source = fromNode ? remoteChunk(env, id, fromNode) : localChunk(env, id);
+  if (to === "cloudflare") {
+    if (!host) return { ok: true, data: { chunk: id, to: "cloudflare", unchanged: true } };
+    const dump = fromNode ? ((await source.dumpState()) as ChunkDumpOf) : null;
+    const r = dump ? await localChunk(env, id).loadState(dump) : null;
+    await dir.setChunkHost(moderator, id, null, "node");
+    await forgetRoutes();
+    return { ok: true, data: { chunk: id, to: "cloudflare", ...(r ?? {}) } };
+  }
+  if (typeof to !== "string") return { ok: false, status: 400, error: "bad_request", message: "to: cloudflare o el id de un nodo" };
+  const node = await dir.nodeOf(to);
+  if (!node || node.disabled) return { ok: false, status: 404, error: "not_found", message: "ese nodo no existe o está apagado" };
+  if (fromNode?.id === node.id) return { ok: true, data: { chunk: id, to: node.id, unchanged: true } };
+  const alive = await nodeAlive(node.id, node.url, true);
+  if (!alive.ok) return { ok: false, status: 502, error: "node_unreachable", message: "el nodo no responde o no es quien dice ser (GET /node)" };
+  if (!nodeAccepts(alive.chunks, id)) return { ok: false, status: 409, error: "node_refuses", message: "ese nodo no acepta este distrito (su HOSTED_CHUNKS)" };
+  const target = remoteChunk(env, id, node);
+  const dump = (await source.dumpState()) as ChunkDumpOf;
+  const r = await target.loadState(dump);
+  await env.ASSETS.put(snapshotKey(id), JSON.stringify(dump), { httpMetadata: { contentType: "application/json" } });
+  await dir.setChunkHost(moderator, id, node.id, "node");
+  await dir.snapshotSaved(id, (await target.stateRev()) as string);
+  await forgetRoutes();
+  return { ok: true, data: { chunk: id, to: node.id, ...(r as object) } };
+}
+
+/** Un distrito vuelve a Cloudflare con la última copia que hay en R2 (su nodo cayó o se apagó). */
+async function fallbackChunk(env: Env, host: ChunkHostRow, moderator: string | null, reason: string): Promise<void> {
+  const obj = await env.ASSETS.get(snapshotKey(host.chunk_id));
+  if (obj) await localChunk(env, host.chunk_id).loadState(JSON.parse(await obj.text()) as ChunkDumpOf);
+  await directory(env).setChunkHost(moderator, host.chunk_id, host.node_id, "fallback", obj ? reason : `${reason} (sin copia)`);
+}
+
+/**
+ * Una ronda (cron cada 2 minutos, o /mod/nodes/check): salud de cada nodo, copia en R2 de los
+ * distritos que cambiaron y relevo a Cloudflare de los nodos que llevan NODE_FAILS_TO_FALLBACK fallos seguidos.
+ */
+async function runNodeChecks(env: Env): Promise<{ checked: number; down: string[]; snapshots: string[]; fallback: string[] }> {
+  const out = { checked: 0, down: [] as string[], snapshots: [] as string[], fallback: [] as string[] };
+  if (!env.DISTRICT_SIGNING_KEY) return out;
+  const dir = directory(env);
+  const { nodes, hosts } = await dir.listNodes();
+  const active = nodes.filter((n) => !n.disabled);
+  if (!active.length) return out;
+  const results = await Promise.all(active.map(async (n) => ({ id: n.id, ok: (await nodeAlive(n.id, n.url, true)).ok })));
+  out.checked = results.length;
+  const healthy = new Set(results.filter((r) => r.ok).map((r) => r.id));
+  out.down = await dir.nodeHealth(results);
+  for (const hst of hosts) {
+    if (hst.state !== "node" || !healthy.has(hst.node_id)) continue;
+    const node = active.find((n) => n.id === hst.node_id)!;
+    try {
+      const room = remoteChunk(env, hst.chunk_id, node);
+      const rev = (await room.stateRev()) as string;
+      if (rev === hst.snapshot_rev) continue;
+      const dump = await room.dumpState();
+      await env.ASSETS.put(snapshotKey(hst.chunk_id), JSON.stringify(dump), { httpMetadata: { contentType: "application/json" } });
+      await dir.snapshotSaved(hst.chunk_id, rev);
+      out.snapshots.push(hst.chunk_id);
+    } catch (e) {
+      console.warn("copia del distrito", hst.chunk_id, (e as Error).message);
+    }
+  }
+  for (const id of out.down) {
+    for (const hst of hosts) {
+      if (hst.node_id !== id || hst.state !== "node") continue;
+      await fallbackChunk(env, hst, null, "el nodo no responde");
+      out.fallback.push(hst.chunk_id);
+    }
+    await notify(env, { event: "node.down", id, chunks: out.fallback.length });
+  }
+  if (out.fallback.length) await forgetRoutes();
+  return out;
 }
 
 function directory(env: Env) {
@@ -723,6 +828,13 @@ export default {
     }
 
     try {
+      // Dónde vive cada distrito (nodos): en memoria 30 s, luego la caché del centro de datos.
+      if (env.DISTRICT_SIGNING_KEY && path !== "/health" && !path.startsWith("/assets/") && !path.startsWith("/s/")) await routes(env);
+      // La clave pública con la que los nodos comprueban lo que firma este Worker (no es secreta).
+      if (path === "/nodes/key" && req.method === "GET") {
+        const k = env.DISTRICT_SIGNING_KEY ? publicJwk(env.DISTRICT_SIGNING_KEY) : null;
+        return k ? new Response(JSON.stringify(k), { headers: { ...h, "Content-Type": "application/json", "Cache-Control": "public, max-age=300" } }) : json({ error: "not_found" }, 404, h);
+      }
       if (path === "/health") return json({ ok: true, protocol: 0 }, 200, h);
 
       if (path === "/github/repos" && req.method === "GET") {
@@ -903,7 +1015,10 @@ export default {
           parcels: [],
           community: true,
         }));
-        const list = [...(await dir.districts()), ...community].map((d) => (isRemote(env, d.chunk_id) ? { ...d, remote: true } : d));
+        const list = [...(await dir.districts()), ...community].map((d) => {
+          const node = nodeFor(env, d.chunk_id);
+          return node ? { ...d, remote: true, host: node.name } : d;
+        });
         return json({ districts: list }, 200, { ...h, "Cache-Control": "public, max-age=10" });
       }
 
@@ -1343,20 +1458,63 @@ export default {
           await syncCommunityGates(env, dir);
           return json({ district: r.data }, 200, h);
         }
-        // Mover un chunk de servidor: copia lo de la gente de Cloudflare al servidor de distritos (o al
-        // revés). Solo con la clave de administración. Primero se copia; después se cambia REMOTE_CHUNKS.
-        const mv = path.match(/^\/mod\/chunks\/([^/]+)\/move$/);
-        if (mv && req.method === "POST") {
-          if (!isAdmin) return json({ error: "forbidden", message: "solo con la clave de administración" }, 403, h);
-          const id = mv[1]!;
-          if (!ChunkId.safeParse(id).success || !env.DISTRICT_HOST || !env.DISTRICT_SIGNING_KEY) return json({ error: "bad_request", message: "falta DISTRICT_HOST o el chunk no es válido" }, 400, h);
-          const to = (await readJson(req)).to;
-          if (to !== "remote" && to !== "local") return json({ error: "bad_request", message: "to: remote | local" }, 400, h);
-          const here = localChunk(env, id);
-          const there = remoteChunk(env, id);
-          const dump = to === "remote" ? await here.dumpState() : ((await there.dumpState()) as Awaited<ReturnType<typeof here.dumpState>>);
-          const r = to === "remote" ? await there.loadState(dump) : await here.loadState(dump);
-          return json({ moved: id, to, ...(r as object) }, 200, { ...h, "Cache-Control": "no-store" });
+        // Nodos (nodes.ts): verlos, darlos de alta, apagarlos y llevar distritos de un sitio a otro.
+        // Solo el fundador o la clave de administración: un nodo ve el chat y las poses de sus distritos.
+        if (path === "/mod/nodes" || path.startsWith("/mod/nodes/") || /^\/mod\/chunks\/[^/]+\/move$/.test(path)) {
+          if (!isAdmin && !(await dir.isFounder(uid))) return json({ error: "forbidden", message: "los nodos los gestiona el fundador" }, 403, h);
+          if (!env.DISTRICT_SIGNING_KEY) return json({ error: "nodes_off", message: "falta DISTRICT_SIGNING_KEY: sin ella no se usa ningún nodo" }, 400, h);
+          const noStore = { ...h, "Cache-Control": "no-store" };
+          if (path === "/mod/nodes" && req.method === "GET") {
+            const { nodes, hosts } = await dir.listNodes();
+            const places = [...DISTRICTS.map((d) => ({ chunk_id: d.chunk, id: d.id, name: d.name })), ...(await dir.communityDistricts()).map((d) => ({ chunk_id: d.chunk_id, id: d.slug, name: d.manifest.name }))];
+            return json({ nodes, hosts, districts: places }, 200, noStore);
+          }
+          if (path === "/mod/nodes" && req.method === "POST") {
+            const b = await readJson(req);
+            const nurl = nodeUrl(b.url, env.RP_ID === "localhost");
+            if (!nurl) return json({ error: "bad_url", message: "la dirección del nodo tiene que ser https://… (sin usuario, consulta ni #)" }, 400, h);
+            const r = await dir.addNode(modId, b.id, b.name, nurl);
+            if (!r.ok) return failure(r, h);
+            const alive = await nodeAlive(r.data.id, r.data.url, true);
+            return json({ node: r.data, alive: alive.ok, chunks: alive.chunks }, 201, noStore);
+          }
+          if (path === "/mod/nodes/check" && req.method === "POST") return json(await runNodeChecks(env), 200, noStore);
+          const nd = path.match(/^\/mod\/nodes\/([a-z0-9-]{3,32})(?:\/(disable|enable))?$/);
+          if (nd && nd[2] && req.method === "POST") {
+            const b = await readJson(req);
+            const r = await dir.setNodeDisabled(modId, nd[1]!, nd[2] === "disable", b.note);
+            if (!r.ok) return failure(r, h);
+            // Apagar un nodo saca al momento sus distritos a Cloudflare, con su última copia.
+            const moved: string[] = [];
+            if (nd[2] === "disable") {
+              for (const hst of (await dir.listNodes()).hosts) {
+                if (hst.node_id === nd[1] && hst.state === "node") {
+                  await fallbackChunk(env, hst, modId, "nodo apagado por moderación");
+                  moved.push(hst.chunk_id);
+                }
+              }
+            }
+            await forgetRoutes();
+            return json({ ...r.data, fallback: moved }, 200, noStore);
+          }
+          if (nd && !nd[2] && req.method === "DELETE") {
+            const r = await dir.removeNode(modId, nd[1]!);
+            await forgetRoutes();
+            return r.ok ? json(r.data, 200, noStore) : failure(r, h);
+          }
+          // Llevar un distrito: { to: "cloudflare" | <id de nodo> }. Se copia lo de la gente (portales,
+          // lo construido, actividades y chat) de donde está ahora a donde va, y después cambia la ruta.
+          const mv = path.match(/^\/mod\/chunks\/([^/]+)\/move$/);
+          if (mv && req.method === "POST") {
+            const id = mv[1]!;
+            if (!ChunkId.safeParse(id).success || !(await knownChunk(env, id)) || id === PLACES.nexo || id === PLACES.plaza) {
+              return json({ error: "bad_request", message: "solo los distritos pueden ir a un nodo" }, 400, h);
+            }
+            const to = (await readJson(req)).to;
+            const r = await moveChunk(env, id, to === "local" ? "cloudflare" : to, modId);
+            return r.ok ? json(r.data, 200, noStore) : json({ error: r.error, message: r.message }, r.status, h);
+          }
+          return json({ error: "not_found" }, 404, h);
         }
         if (path === "/mod/queue" && req.method === "GET") return json(await dir.moderationQueue(), 200, { ...h, "Cache-Control": "no-store" });
         if (path === "/mod/log" && req.method === "GET") return json({ log: await dir.moderationLog() }, 200, { ...h, "Cache-Control": "no-store" });
@@ -1469,7 +1627,10 @@ export default {
         }
         if (!(await sessionAlive(env, p))) return json({ error: "session_expired", message: "tu sesión ha caducado; vuelve a entrar" }, 401, h);
         if (await closedFor(env, chunkId, p)) return json(SOON, 403, h);
-        return json({ url: await socketFor(env, req, chunkId, p, raw), remote: isRemote(env, chunkId) }, 200, { ...h, "Cache-Control": "no-store" });
+        // En un nodo que no responde no se da pase: el visitante ve «no disponible» en vez de esperar.
+        const node = nodeFor(env, chunkId);
+        if (node && !(await nodeAlive(node.id, node.url)).ok) return json(UNAVAILABLE, 503, { ...h, "Cache-Control": "no-store", "Retry-After": "30" });
+        return json({ url: await socketFor(env, req, chunkId, p, raw), remote: !!node, ...(node ? { host: node.name } : {}) }, 200, { ...h, "Cache-Control": "no-store" });
       }
 
       const m = path.match(/^\/chunk\/([^/]+)\/(ws|state)$/);
@@ -1488,7 +1649,8 @@ export default {
           const hit = await cache?.match(key);
           const out = { ...h, "Content-Type": "application/json", "Cache-Control": "public, max-age=15" };
           if (hit) return new Response(hit.body, { status: 200, headers: out });
-          const r = await stub.fetch(new Request("https://do/state", { headers }));
+          const r = await stub.fetch(new Request("https://do/state", { headers })).catch(() => null);
+          if (!r || r.status >= 500) return json(UNAVAILABLE, 503, { ...h, "Cache-Control": "no-store" });
           const body = await r.text();
           if (r.ok && cache) ctx.waitUntil(cache.put(key, new Response(body, { headers: { "Cache-Control": "public, max-age=15" } })));
           return new Response(body, { status: r.status, headers: out });
@@ -1521,5 +1683,10 @@ export default {
       console.error(e);
       return json({ error: "internal", message: "error interno" }, 500, h);
     }
+  },
+  /** Cron (wrangler.toml → triggers): la ronda de los nodos. Sin nodos no hace nada. */
+  async scheduled(_c: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    if (!env.DISTRICT_SIGNING_KEY) return;
+    ctx.waitUntil(runNodeChecks(env).then(() => undefined).catch((e) => console.warn("nodos:", (e as Error).message)));
   },
 } satisfies ExportedHandler<Env>;

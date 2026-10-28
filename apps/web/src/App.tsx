@@ -10,6 +10,7 @@ import { CarButton, CarNotice, CarSpeed } from "./hud/CarTools";
 import { useDrive } from "./world/vehicle/drive-state";
 import { People } from "./hud/People";
 import { PortalCard, TravelToast } from "./hud/PortalCard";
+import { Unavailable } from "./hud/Unavailable";
 import { ActivityHud } from "./hud/ActivityHud";
 import { SandboxTools } from "./hud/SandboxTools";
 import { errorText, placeName, t, useLang } from "./i18n";
@@ -216,6 +217,7 @@ export function App() {
           )}
           <PortalCard />
           <TravelToast />
+          <Unavailable />
           <ActivityHud />
           <SandboxTools />
           {/* Primera persona y gestos en una fila; en táctil, por encima del botón de saltar (o del

@@ -34,6 +34,7 @@ import type { PreviewPose } from "./AvatarPreview";
 import { CardSettings } from "./CardSettings";
 import { JamAdmin } from "./JamAdmin";
 import { ModeratorsAdmin } from "./ModeratorsAdmin";
+import { NodesAdmin } from "./NodesAdmin";
 import { Moderation, useRoles } from "./Moderation";
 import { ModDistricts, MyDistrict } from "./District";
 import { ConnectedGames } from "./Games";
@@ -85,6 +86,11 @@ export function AccountSection(props: CustomizeProps) {
       {moderator && (
         <Block title={t("modTeam.title")}>
           <ModeratorsAdmin founder={founder} />
+        </Block>
+      )}
+      {founder && (
+        <Block title={t("nodes.title")}>
+          <NodesAdmin />
         </Block>
       )}
 

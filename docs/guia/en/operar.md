@@ -57,7 +57,7 @@ How this was measured: [`docs/LIMITES-CLOUDFLARE.md`](../../../docs/LIMITES-CLOU
 | What | Where it is | How to back it up |
 |---|---|---|
 | The code | Your repository | Any clone will do; `git bundle create backup.bundle --all` puts it in a single file |
-| Districts on your server | `/var/lib/xenxo-distritos/datos` | It's done automatically every 15 minutes ([guide](servidor.md#6-day-to-day)) |
+| Districts on your server | `/var/lib/xenxo-distritos/datos` | It's done automatically every 15 minutes ([guide](servidor.md#7-day-to-day)) |
 | Accounts, projects and places on Cloudflare | Durable Objects | Each person can download their data from *Account*; xenxo has no full copy of its own today |
 | Uploaded models and covers | R2 | Addressed by hash: they can be uploaded again |
 

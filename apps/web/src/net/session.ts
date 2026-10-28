@@ -1,4 +1,3 @@
-import { refreshDistricts } from "./districts";
 import { msg, PLACES, type ClientMessage } from "@xenxo/protocol";
 import { REALTIME_URL } from "../config";
 import { accountToken } from "./account";
@@ -31,25 +30,40 @@ async function tokenForSession(): Promise<string> {
   return ((await r.json()) as { token: string }).token;
 }
 
+/** El distrito vive en un nodo que ahora no responde (503 district_unavailable). */
+class Unavailable extends Error {}
+
 /**
- * Los distritos pueden vivir en el servidor de distritos (docs/ALOJAMIENTO-DISTRITOS.md): entonces
- * se pide un pase al Worker y se conecta donde diga. La plaza y el nexo siempre están aquí.
+ * Los distritos pueden vivir en un nodo de la comunidad (servidores de distritos, docs/guia): se pide
+ * un pase al Worker y se conecta donde diga. Se pide siempre, porque el sitio de un distrito cambia
+ * (traslados y relevos). La plaza y el nexo siempre están aquí.
  */
 async function remoteSocket(chunkId: string, token: string): Promise<string | undefined> {
   if (chunkId === PLACES.nexo || chunkId === PLACES.plaza) return undefined;
-  const list = await refreshDistricts().catch(() => []);
-  if (!list.some((d) => d.chunk_id === chunkId && d.remote)) return undefined;
   const r = await fetch(new URL(`/chunk/${chunkId}/ticket`, REALTIME_URL), { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+  if (r.status === 503) throw new Unavailable();
   if (!r.ok) throw new Error(`ticket ${r.status}`);
-  return ((await r.json()) as { url: string }).url;
+  const t = (await r.json()) as { url: string; remote?: boolean };
+  remoteNow = !!t.remote;
+  return t.remote ? t.url : undefined;
 }
+
+/** ¿La conexión actual va a un nodo? Y cuántas veces seguidas ha fallado sin llegar a abrirse. */
+let remoteNow = false;
+let remoteFails = 0;
+let opened = false;
+/** Tras estos fallos seguidos con un nodo, se avisa de que el distrito no está disponible. */
+const REMOTE_FAILS_TO_WARN = 2;
 
 async function connect() {
   try {
     const token = await tokenForSession();
+    remoteNow = false;
+    opened = false;
     net.connect(chunk, token, await remoteSocket(chunk, token));
   } catch (e) {
-    console.warn("[xenxo] sin conexión con el servidor de tiempo real", e);
+    if (e instanceof Unavailable) world.setUnavailable(true);
+    else console.warn("[xenxo] sin conexión con el servidor de tiempo real", e);
     world.setStatus("closed");
     scheduleRetry();
   }
@@ -58,10 +72,12 @@ async function connect() {
 function scheduleRetry() {
   if (retryTimer) return;
   retry = Math.min(retry + 1, 6);
+  // Con el distrito «no disponible», cada 15 s como mucho: si pasa a Cloudflare, se entra enseguida.
+  const wait = 1000 * 2 ** retry;
   retryTimer = setTimeout(() => {
     retryTimer = null;
     void connect();
-  }, 1000 * 2 ** retry);
+  }, world.unavailable ? Math.min(wait, 15_000) : wait);
 }
 
 export async function startSession(displayName: string | undefined, chunkId: string = PLACES.nexo) {
@@ -73,6 +89,9 @@ export async function startSession(displayName: string | undefined, chunkId: str
   net.onStatus((s) => {
     if (s === "open") {
       retry = 0;
+      remoteFails = 0;
+      opened = true;
+      world.setUnavailable(false);
       net.send(
         msg("HELLO", {
           client_type: detectClientType(),
@@ -83,7 +102,12 @@ export async function startSession(displayName: string | undefined, chunkId: str
         }) as ClientMessage,
       );
     }
-    if (s === "closed" && started && !reconnecting) scheduleRetry();
+    if (s === "closed" && started && !reconnecting) {
+      // Un nodo que no acepta la conexión: tras dos intentos se avisa (y se sigue probando: si el
+      // distrito vuelve a Cloudflare, el pase siguiente ya lleva aquí).
+      if (remoteNow && !opened && ++remoteFails >= REMOTE_FAILS_TO_WARN) world.setUnavailable(true);
+      scheduleRetry();
+    }
   });
 
   await connect();
@@ -128,6 +152,7 @@ export function travel(chunkId: string, p?: [number, number, number], yawDeg = 0
   if (p) teleport(p, yawDeg);
   if (chunkId === chunk) return;
   chunk = chunkId;
+  remoteFails = 0;
   world.beginTravel(chunkId);
   if (started) reconnect();
 }

@@ -392,9 +392,41 @@ plantilla (`npm create xenxo@latest mi-distrito -- --district`). Mide lo mismo q
 - **Quién entra:** aprobado, cualquiera (sale en `GET /districts` con `community: true`, su portada,
   su tema y su autor, sin el contacto). Si no, solo su autor y moderación (`403 soon` al pedir pase).
 - **WELCOME** lleva `walk` (256 m) y `theme` (`{id, color}`): la ciudad de fondo que dibuja el cliente.
-- **Servidor de distritos:** `REMOTE_CHUNKS` admite prefijos (`c_1000_*`) para llevarlos todos a la
-  máquina propia; `installDistrict` está en `REMOTE_METHODS`.
+- **En un nodo:** un distrito de la comunidad puede vivir en un nodo como cualquier otro (§9 septies);
+  `installDistrict` está en `REMOTE_METHODS` y el `HOSTED_CHUNKS` del nodo admite prefijos (`c_1000_*`).
 - **En el nexo:** cada distrito aprobado tiene su puerta (marco con su portada, peana con su emblema y su nombre) en uno de los 8 huecos entre pasarelas del círculo central, por orden de aprobación (`COMMUNITY_GATE_SLOTS`, owner `community_gates`). El Worker las vuelve a poner al aprobar, ocultar, cambiar o borrar un distrito (`setCommunityGates`). Cuando haya más de 8, harán falta islas propias (anillo exterior).
+
+## 9 septies. Nodos (servidores de distritos de la comunidad)
+
+Un **nodo** es una máquina de la comunidad que corre el mismo `ChunkRoom` con workerd
+(`apps/realtime/src/district-host.ts`, guía en `docs/guia/es/servidor.md`). Lleva los distritos que
+le asigna el fundador. Nunca salen de Cloudflare las cuentas, «Entrar con xenxo», la moderación, los
+archivos, la web, el nexo ni la plaza.
+
+| Ruta | Quién | Qué hace |
+|---|---|---|
+| `GET /nodes/key` | público | La clave **pública** Ed25519 (JWK `{kty, crv, x}`) con la que los nodos comprueban lo que firma el Worker. 404 si no hay `DISTRICT_SIGNING_KEY` |
+| `GET /mod/nodes` | fundador o clave `admin` | `{nodes, hosts, districts}`: cada nodo con su salud (`fails`, `last_ok`, `last_fail`, `disabled`) y dónde vive cada distrito (`hosts`: `chunk_id`, `node_id`, `state`, `snapshot_at`) |
+| `POST /mod/nodes {id, name, url}` | fundador | Alta. `id`: 3–32 `[a-z0-9-]`; `url`: `https://…` (en local, `http://localhost`). Responde `{node, alive, chunks}` tras preguntarle quién es. Como mucho 32 nodos |
+| `POST /mod/nodes/<id>/disable {note?}` · `/enable` | fundador | Apagar saca al momento sus distritos a Cloudflare con su última copia. Encender no los devuelve |
+| `DELETE /mod/nodes/<id>` | fundador | Solo si no lleva distritos (`409 node_busy`) |
+| `POST /mod/chunks/<id>/move {to: "cloudflare" \| <id de nodo>}` | fundador | Copia lo de la gente (portales, lo construido, actividades y chat) de donde está a donde va y cambia la ruta. A un nodo: tiene que responder con su id (`502 node_unreachable`) y aceptar el chunk en su `HOSTED_CHUNKS` (`409 node_refuses`). El nexo y la plaza, nunca (`400`) |
+| `POST /mod/nodes/check` | fundador | La ronda de comprobación ya (la hace también el cron cada 2 minutos) |
+
+- **Pases y llamadas:** todo lo que firma el Worker para un nodo lleva `aud` = el id del nodo, y cada
+  nodo (`NODE_ID`) solo acepta lo suyo: un nodo no puede reenviar a otro lo que recibe. Las llamadas
+  llevan además `jti` (de un solo uso) y el hash del cuerpo.
+- **Quién es:** el nodo responde `GET /node` → `{id, chunks, protocol}`. El Worker no le da pases ni
+  le lleva distritos si `id` no coincide con el registro.
+- **Entrar:** `POST /chunk/<id>/ticket` da `{url, remote: true, host}` (el nombre del nodo) o, si el
+  nodo no responde, `503 district_unavailable` (con `Retry-After`). `GET /districts` marca los
+  distritos de un nodo con `remote: true` y `host`. Los clientes piden pase para todo lo que no es el
+  nexo ni la plaza: el sitio de un distrito cambia.
+- **Copias y relevo:** cada ronda pregunta a cada nodo su huella (`stateRev`) y, si cambió, guarda su
+  volcado (`dumpState`) en R2 (`nodes/snapshots/<chunk>.json`, uno por distrito). Tras **3** rondas
+  seguidas sin respuesta, sus distritos pasan a Cloudflare con esa copia (`state: fallback`) y sale
+  el aviso `node.down` (n8n). La vuelta al nodo es a mano (`move`): nunca hay dos sitios escribiendo
+  el mismo distrito.
 
 ## 10. Códigos de error
 

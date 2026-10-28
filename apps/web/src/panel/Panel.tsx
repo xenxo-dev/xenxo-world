@@ -230,7 +230,7 @@ function LangSwitch() {
 function LegalLinks() {
   const lang = useLang();
   return (
-    <p className="flex gap-3 text-xs text-muted">
+    <p className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
       <a href={legalPath("privacy")} target="_blank" rel="noreferrer" className="hover:text-cal/70">
         {t("legal.privacy")}
       </a>

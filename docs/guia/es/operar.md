@@ -57,7 +57,7 @@ Cómo se ha medido, en [`docs/LIMITES-CLOUDFLARE.md`](../../../docs/LIMITES-CLOU
 | Qué | Dónde está | Cómo copiarlo |
 |---|---|---|
 | El código | Tu repositorio | Cualquier clon sirve; `git bundle create copia.bundle --all` lo deja en un solo archivo |
-| Los distritos en tu servidor | `/var/lib/xenxo-distritos/datos` | Lo hace solo cada 15 minutos ([guía](servidor.md#6-el-dia-a-dia)) |
+| Los distritos en tu servidor | `/var/lib/xenxo-distritos/datos` | Lo hace solo cada 15 minutos ([guía](servidor.md#7-el-dia-a-dia)) |
 | Cuentas, proyectos y lugares en Cloudflare | Durable Objects | Cada persona puede descargar sus datos desde *Cuenta*; xenxo no tiene hoy una copia completa propia |
 | Modelos y portadas subidos | R2 | Direccionados por hash: se pueden volver a subir |
 

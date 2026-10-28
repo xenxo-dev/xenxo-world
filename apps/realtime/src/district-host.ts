@@ -5,6 +5,7 @@
  * Worker de Cloudflare (pases para entrar y llamadas; ver remote.ts).
  *
  *   GET  /health                       → "ok"
+ *   GET  /node                         → { id, chunks }: quién es este nodo (lo comprueba el Worker)
  *   GET  /chunk/<id>/state             → estado público del chunk
  *   GET  /chunk/<id>/ws?ticket=<pase>  → WebSocket del chunk (el pase dice quién entra)
  *   POST /rpc/<id>/<método>            → llamada firmada del Worker (cabecera X-Xenxo-Call)
@@ -25,6 +26,8 @@ export interface HostEnv {
   HOSTED_CHUNKS: string;
   /** Worker de Cloudflare, para las medidas de los modelos (https://api.xenxo.io). */
   ASSETS_URL: string;
+  /** Id de este nodo en el registro del Worker (/mod/nodes): solo acepta pases y llamadas para él. */
+  NODE_ID: string;
 }
 
 const MAX_RPC_BYTES = 64 * 1024;
@@ -50,6 +53,11 @@ export default {
     if (path === "/health") return new Response("ok");
 
     const hosted = chunkList(env.HOSTED_CHUNKS);
+    const nodeId = (env.NODE_ID ?? "").trim();
+    // El Worker pregunta quién es antes de mandar a nadie aquí: si el id no coincide, no lo usa.
+    if (path === "/node") return json({ id: nodeId || null, chunks: (env.HOSTED_CHUNKS ?? "").split(",").map((x) => x.trim()).filter(Boolean), protocol: 0 });
+    // Sin NODE_ID no se acepta nada firmado: así un nodo mal configurado no sirve lo de otro.
+    if (!nodeId) return json({ error: "no_node_id", message: "falta NODE_ID en la configuración del nodo" }, 503);
 
     const c = path.match(/^\/chunk\/([^/]+)\/(ws|state)$/);
     if (c) {
@@ -62,7 +70,7 @@ export default {
       }
       if (req.headers.get("Upgrade") !== "websocket") return json({ error: "se esperaba WebSocket" }, 426);
       const t = await verifyRemote<Ticket>(env.DISTRICT_PUBLIC_KEY, url.searchParams.get("ticket") ?? "");
-      if (!t || t.typ !== "ticket" || t.chunk !== id || !t.principal) return json({ error: "unauthorized", message: "pase no válido o caducado" }, 401);
+      if (!t || t.typ !== "ticket" || t.chunk !== id || t.aud !== nodeId || !t.principal) return json({ error: "unauthorized", message: "pase no válido o caducado" }, 401);
       headers.set("X-Principal", JSON.stringify(t.principal));
       headers.set("Upgrade", "websocket");
       return stubOf(env, id).fetch(new Request("https://do/ws", { headers }));
@@ -77,7 +85,7 @@ export default {
       if (body.length > (method === "loadState" || method === "installDistrict" ? MAX_LOAD_BYTES : MAX_RPC_BYTES)) return json({ error: "too_large" }, 413);
       const token = req.headers.get("X-Xenxo-Call") ?? "";
       const call = await verifyRemote<RemoteCall>(env.DISTRICT_PUBLIC_KEY, token);
-      if (!call || call.typ !== "rpc" || call.chunk !== id || call.method !== method || call.body !== (await sha256B64(body))) {
+      if (!call || call.typ !== "rpc" || call.aud !== nodeId || call.chunk !== id || call.method !== method || call.body !== (await sha256B64(body))) {
         return json({ error: "unauthorized" }, 401);
       }
       if (!seenCalls.claim(call.jti ?? token, call.exp)) return json({ error: "replayed", message: "esa llamada ya se atendió" }, 409);

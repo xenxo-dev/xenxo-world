@@ -40,9 +40,10 @@ El instalador crea el usuario `xenxo`, las carpetas, el servicio `xenxo-distrito
 `127.0.0.1:8788`), la copia al NAS cada 15 minutos, la vigilancia del relevo y hace que cerrar la
 tapa no suspenda.
 
-## 3. Las claves (una vez)
+## 3. Las claves y el id del nodo
 
-En tu ordenador, con el repo y la sesión de Wrangler de xenxo:
+Una sola vez (la clave es del Worker, no de cada nodo), en tu ordenador con el repo y la sesión de
+Wrangler de xenxo:
 
 ```bash
 node tools/district-host/keys.mjs            # crea distrito-privada.jwk y enseña la pública
@@ -50,8 +51,15 @@ npx wrangler secret put DISTRICT_SIGNING_KEY --config apps/realtime/wrangler.tom
 rm distrito-privada.jwk                      # la privada solo vive en Cloudflare
 ```
 
-Copia la **pública** (la línea JSON) en `/etc/xenxo-distritos.env` del portátil (`DISTRICT_PUBLIC_KEY=…`)
-y reinicia: `sudo systemctl restart xenxo-distritos`. Comprueba: `curl http://127.0.0.1:8788/health` → `ok`.
+En el portátil, `/etc/xenxo-distritos.env`:
+
+- `NODE_ID=portatil` (el id con el que lo darás de alta),
+- `DISTRICT_PUBLIC_KEY=` la línea de `curl https://api.xenxo.io/nodes/key`,
+- `HOSTED_CHUNKS=*` (o la lista de distritos que aceptas),
+- `ASSETS_URL=https://api.xenxo.io`.
+
+Reinicia (`sudo systemctl restart xenxo-distritos`) y comprueba: `curl http://127.0.0.1:8788/node` →
+`{"id":"portatil",…}`.
 
 ## 4. El túnel de Cloudflare
 
@@ -60,37 +68,26 @@ En el panel de Cloudflare: **Zero Trust → Networks → Tunnels → Create a tu
 1. Nombre: `xenxo-distritos`. Copia la orden de instalación para Debian/Ubuntu (lleva un token: es un
    secreto, ejecútala tal cual en el portátil, no la pegues en ningún chat).
 2. **Public hostname:** `distritos.xenxo.io` → servicio `HTTP` → `localhost:8788`.
-3. Comprueba desde fuera: `curl https://distritos.xenxo.io/health` → `ok`.
+3. Comprueba desde fuera: `curl https://distritos.xenxo.io/node` → su id.
 4. Avisos: **Notifications → Tunnel health** para que te llegue un correo si se cae.
 
-## 5. Encender los distritos remotos
+## 5. Darlo de alta y llevarle distritos
 
-En `apps/realtime/wrangler.toml`, sección `[vars]`:
+En xenxo.io con la cuenta de fundador: **Cuenta → Nodos**. Alta con id `portatil`, un nombre y
+`https://distritos.xenxo.io`; si responde, sale «En línea». Después, en «Dónde vive cada distrito»,
+elige el nodo y pulsa **Llevar**: se copia lo de la gente (portales, lo construido, actividades y chat)
+y el distrito pasa a vivir en el portátil. Empieza por uno y ve añadiendo. Chunks: Arcade `c_1_0`,
+Píxel `c_-1_0`, Ágora `c_0_1`, Taller `c_0_-1`, Frontera `c_1_-1`, Distrito Cero `c_-1_-1`,
+Vertical `c_-1_1`.
 
-```toml
-DISTRICT_HOST = "https://distritos.xenxo.io"
-REMOTE_CHUNKS = "c_-1_1"          # empieza por un distrito (Vertical) y ve añadiendo
-```
+**Si el portátil cae**, el Worker lo nota (cada 2 minutos) y, tras 3 rondas sin respuesta, devuelve sus
+distritos a Cloudflare con la última copia guardada en R2. Volver al portátil es a mano: **Llevar** otra
+vez. **Apagar** el nodo en el panel hace lo mismo al momento.
 
-Despliega (push a `main`). Desde ese momento ese distrito vive en el portátil, recién sembrado. Copia
-lo que tenía en Cloudflare (portales de proyectos, lo construido y el chat) con la clave de
-administración:
-
-```bash
-T=$(curl -s -X POST https://api.xenxo.io/auth/agent -H "Authorization: Bearer $XENXO_ADMIN_KEY" | jq -r .token)
-curl -s -X POST https://api.xenxo.io/mod/chunks/c_-1_1/move -H "Authorization: Bearer $T" \
-  -H 'Content-Type: application/json' -d '{"to":"remote"}'
-```
-
-Entra en el distrito y comprueba que todo está. Luego el siguiente. Los chunks de los distritos:
-Arcade `c_1_0`, Píxel `c_-1_0`, Ágora `c_0_1`, Taller `c_0_-1`, Frontera `c_1_-1`,
-Distrito Cero `c_-1_-1`, Vertical `c_-1_1`.
-
-**Volver a Cloudflare** (si el portátil va a estar parado): primero
-`{"to":"local"}` en `/mod/chunks/<id>/move`, después quita el chunk de `REMOTE_CHUNKS` y despliega.
-
-**Antes de encender el primero:** añade a la política de privacidad (ES y EN, `apps/web/public/legal/`)
+**Antes de llevar el primero:** añade a la política de privacidad (ES y EN, `apps/web/public/legal/`)
 que los distritos se procesan en un servidor propio en España, sin guardar IP.
+
+Guía completa (también para nodos de otras personas): `docs/guia/es/servidor.md` (xenxo.io/docs/servidor).
 
 ## 6. Mantenimiento
 

@@ -1,8 +1,8 @@
 /**
  * Distritos en otro servidor (docs/ALOJAMIENTO-DISTRITOS.md).
  *
- * Algunos chunks (los de `REMOTE_CHUNKS`) viven fuera de Cloudflare, en un servidor de distritos
- * (`DISTRICT_HOST`) que corre este mismo código con workerd (src/district-host.ts). Ese servidor no
+ * Algunos distritos viven fuera de Cloudflare, en nodos (servidores de distritos registrados en
+ * /mod/nodes, ver nodes.ts) que corren este mismo código con workerd (src/district-host.ts). Un nodo no
  * guarda ningún secreto de xenxo: solo la clave PÚBLICA Ed25519 con la que comprueba lo que firma
  * el Worker de Cloudflare con su clave privada (`DISTRICT_SIGNING_KEY`, un secreto de Wrangler):
  *
@@ -11,6 +11,9 @@
  *     una denuncia…), atadas al chunk, al método y al hash del cuerpo, válidas 30 s.
  *
  * Formato: base64url(JSON) "." base64url(firma Ed25519 de la primera parte). Sin dependencias.
+ *
+ * Puede haber varios servidores (nodos, ver nodes.ts): todo lo firmado lleva `aud`, el id del nodo al
+ * que va, y cada nodo solo acepta lo suyo. Así un nodo no puede reenviar a otro lo que recibe.
  */
 import type { Principal } from "./auth";
 
@@ -72,6 +75,8 @@ export interface Ticket {
   chunk: string;
   principal: Principal;
   exp: number;
+  /** Nodo al que va (su id en el registro): otro nodo no lo acepta. */
+  aud?: string;
 }
 
 /** Llamada firmada del Worker a un chunk de otro servidor. */
@@ -83,6 +88,8 @@ export interface RemoteCall {
   exp: number;
   /** Id de un solo uso (lo pone signRemote): una llamada repetida se rechaza. */
   jti?: string;
+  /** Nodo al que va: una llamada copiada de un nodo no vale en otro. */
+  aud?: string;
 }
 
 /**
@@ -108,9 +115,10 @@ export class SeenCalls {
 export const TICKET_TTL_MS = 60_000;
 export const CALL_TTL_MS = 30_000;
 
-/** Lista de chunks de una variable ("c_1_0,c_-1_0"); vacía = ninguno. */
+/** Lista de chunks de una variable ("c_1_0,c_-1_0"); vacía = ninguno; «*» = todos. */
 export function chunkList(v: string | undefined): { has(id: string): boolean } {
   const items = (v ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (items.includes("*")) return { has: () => true };
   const exact = new Set(items.filter((s) => !s.endsWith("*")));
   // «c_1000_*»: todos los que empiezan así (los distritos de la comunidad, por ejemplo).
   const prefixes = items.filter((s) => s.endsWith("*")).map((s) => s.slice(0, -1));
@@ -118,4 +126,4 @@ export function chunkList(v: string | undefined): { has(id: string): boolean } {
 }
 
 /** Métodos del chunk que el Worker puede llamar en otro servidor (y nada más). */
-export const REMOTE_METHODS = new Set(["placeStand", "removeStand", "purgeOwner", "kick", "chatMessage", "chatOf", "hideChat", "dumpState", "loadState", "installDistrict", "activityOf", "syncCabinets", "syncBillboards", "clearSandbox", "boardsOf"]);
+export const REMOTE_METHODS = new Set(["stateRev", "placeStand", "removeStand", "purgeOwner", "kick", "chatMessage", "chatOf", "hideChat", "dumpState", "loadState", "installDistrict", "activityOf", "syncCabinets", "syncBillboards", "clearSandbox", "boardsOf"]);

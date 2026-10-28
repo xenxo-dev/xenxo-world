@@ -13,7 +13,7 @@ xenxo, con su motivo y su registro (DSA). n8n solo avisa: nunca modera.
 ## Qué sale de xenxo
 
 Solo lo justo para avisar, en JSON: `event` (`project.pending`, `game.pending`, `report.open`,
-`district.pending`), el id, un título público (el del proyecto o el slug del distrito), el tipo y el
+`district.pending`, o `node.down` cuando un nodo deja de responder y sus distritos vuelven a Cloudflare), el id, un título público (el del proyecto o el slug del distrito), el tipo y el
 motivo de una denuncia, y la hora. **Nunca** quién denuncia, ni ids de cuentas, ni el texto de una
 denuncia. El resumen son cuentas y fechas.
 

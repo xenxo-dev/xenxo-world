@@ -42,6 +42,8 @@ class WorldStore {
   theme: { id: string; color: string } | null = null;
   status: ConnectionStatus = "idle";
   lastError: string | null = null;
+  /** El nodo que lleva este distrito no responde: se avisa y se sigue intentando (nodes.ts del servidor). */
+  unavailable = false;
   /** serverTime ≈ Date.now() + clockOffset */
   clockOffset = 0;
 
@@ -68,6 +70,12 @@ class WorldStore {
     this.bump();
   }
 
+  setUnavailable(v: boolean) {
+    if (this.unavailable === v) return;
+    this.unavailable = v;
+    this.bump();
+  }
+
   serverNow() {
     return Date.now() + this.clockOffset;
   }
@@ -85,6 +93,7 @@ class WorldStore {
     this.solo = false;
     this.big = false;
     this.theme = null;
+    this.unavailable = false;
     // Sin límites hasta que el lugar diga los suyos en WELCOME: el punto de llegada (p. ej. una
     // isla del nexo) puede estar fuera del chunk.
     this.walk = [-Infinity, Infinity];
@@ -255,6 +264,10 @@ export function usePlaceTheme(): { id: string; color: string } | null {
 }
 
 /** Re-renderiza solo ante cambios estructurales. */
+export function useUnavailable() {
+  return useSyncExternalStore(world.subscribe, () => world.unavailable);
+}
+
 export function useWorldVersion() {
   return useSyncExternalStore(world.subscribe, world.getVersion);
 }

@@ -83,6 +83,13 @@ const MAX_GUEST_REPORTS_PER_DAY = 300;
 const MAX_MANIFEST_READS_PER_DAY = 30;
 const RESERVED_NAMES = new Set(["system", "admin", "xenxo", "moderador", "moderator", "anthropic", "claude"]);
 
+/** Nodos de la comunidad (nodes.ts): cuántos como mucho y tras cuántas comprobaciones fallidas seguidas pasan sus distritos a Cloudflare. */
+const MAX_NODES = 32;
+export const NODE_FAILS_TO_FALLBACK = 3;
+export type NodeRow = { id: string; name: string; url: string; created_at: number; disabled: number; fails: number; last_ok: number | null; last_fail: number | null };
+export type ChunkHostRow = { chunk_id: string; node_id: string; state: "node" | "fallback"; since: number; snapshot_rev: string | null; snapshot_at: number | null };
+export type NodeRoutes = { nodes: Record<string, { name: string; url: string }>; chunks: Record<string, string> };
+
 export type Fail = { ok: false; status: number; error: string; message: string; detail?: unknown };
 export type Ok<T> = { ok: true; data: T };
 export type Result<T> = Ok<T> | Fail;
@@ -246,6 +253,15 @@ export class Directory extends DurableObject<Env> {
       CREATE TABLE IF NOT EXISTS skins (
         user_id TEXT NOT NULL, hash TEXT NOT NULL, format TEXT NOT NULL, label TEXT, created_at INTEGER NOT NULL,
         PRIMARY KEY (user_id, hash));
+      -- Nodos: servidores de distritos de la comunidad (nodes.ts). Qué distrito lleva cada uno y en
+      -- qué estado: 'node' (lo atiende el nodo) o 'fallback' (el nodo cayó y lo atiende Cloudflare
+      -- con su última copia hasta que moderación lo devuelva).
+      CREATE TABLE IF NOT EXISTS nodes (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, url TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL,
+        disabled INTEGER NOT NULL DEFAULT 0, fails INTEGER NOT NULL DEFAULT 0, last_ok INTEGER, last_fail INTEGER);
+      CREATE TABLE IF NOT EXISTS chunk_hosts (
+        chunk_id TEXT PRIMARY KEY, node_id TEXT NOT NULL, state TEXT NOT NULL, since INTEGER NOT NULL,
+        snapshot_rev TEXT, snapshot_at INTEGER);
     `);
     // Jams: convocatorias, juegos apuntados y votos (ver jam.ts).
     this.sql.exec(JAM_SCHEMA);
@@ -1394,6 +1410,99 @@ export class Directory extends DurableObject<Env> {
   }
 
   /** Registro (DSA) de una decisión tomada fuera del Directory (vaciar la zona de pruebas). */
+  /* --- Nodos (nodes.ts) ------------------------------------------------------------------- */
+
+  /** Lo que el Worker necesita para encaminar: nodos activos y qué distritos atienden ahora. */
+  nodeRoutes(): NodeRoutes {
+    const nodes: NodeRoutes["nodes"] = {};
+    for (const n of this.sql.exec<{ id: string; name: string; url: string }>("SELECT id, name, url FROM nodes WHERE disabled = 0").toArray()) {
+      nodes[n.id] = { name: n.name, url: n.url };
+    }
+    const chunks: NodeRoutes["chunks"] = {};
+    for (const h of this.sql.exec<{ chunk_id: string; node_id: string }>("SELECT chunk_id, node_id FROM chunk_hosts WHERE state = 'node'").toArray()) {
+      if (nodes[h.node_id]) chunks[h.chunk_id] = h.node_id;
+    }
+    return { nodes, chunks };
+  }
+
+  /** Para el panel: los nodos con su salud y lo que lleva cada uno. */
+  listNodes(): { nodes: NodeRow[]; hosts: ChunkHostRow[] } {
+    return {
+      nodes: this.sql.exec<NodeRow>("SELECT id, name, url, created_at, disabled, fails, last_ok, last_fail FROM nodes ORDER BY created_at").toArray(),
+      hosts: this.sql.exec<ChunkHostRow>("SELECT chunk_id, node_id, state, since, snapshot_rev, snapshot_at FROM chunk_hosts ORDER BY chunk_id").toArray(),
+    };
+  }
+
+  /** Alta de un nodo. `url` ya viene comprobada por el Worker (https, o http en local). */
+  addNode(moderator: string, id: unknown, name: unknown, url: unknown): Result<NodeRow> {
+    if (typeof id !== "string" || !/^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$/.test(id)) return fail(400, "bad_node_id", "el id del nodo: 3–32 letras minúsculas, números y guiones");
+    if (typeof name !== "string" || name.trim().length < 2 || name.trim().length > 60) return fail(400, "bad_name", "el nombre: de 2 a 60 caracteres");
+    if (typeof url !== "string") return fail(400, "bad_url", "falta la dirección del nodo");
+    if (this.sql.exec("SELECT 1 FROM nodes WHERE id = ? OR url = ?", id, url).toArray().length) return fail(409, "node_exists", "ya hay un nodo con ese id o esa dirección");
+    if (this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM nodes").one().n >= MAX_NODES) return fail(429, "too_many_nodes", `como mucho ${MAX_NODES} nodos`);
+    this.sql.exec("INSERT INTO nodes (id, name, url, created_at) VALUES (?, ?, ?, ?)", id, name.trim(), url, Date.now());
+    this.logDecision(moderator, "node_add", "node", id, `${name.trim()} · ${url}`);
+    return ok(this.sql.exec<NodeRow>("SELECT id, name, url, created_at, disabled, fails, last_ok, last_fail FROM nodes WHERE id = ?", id).one());
+  }
+
+  setNodeDisabled(moderator: string, id: string, disabled: boolean, note: unknown): Result<{ id: string; disabled: boolean }> {
+    const n = this.sql.exec("UPDATE nodes SET disabled = ?, fails = 0 WHERE id = ?", disabled ? 1 : 0, id).rowsWritten;
+    if (!n) return fail(404, "not_found", "ese nodo no existe");
+    this.logDecision(moderator, disabled ? "node_disable" : "node_enable", "node", id, typeof note === "string" ? note.slice(0, 500) : null);
+    return ok({ id, disabled });
+  }
+
+  removeNode(moderator: string, id: string): Result<{ removed: string }> {
+    if (this.sql.exec("SELECT 1 FROM chunk_hosts WHERE node_id = ?", id).toArray().length) {
+      return fail(409, "node_busy", "ese nodo aún lleva distritos: devuélvelos a Cloudflare antes de quitarlo");
+    }
+    const n = this.sql.exec("DELETE FROM nodes WHERE id = ?", id).rowsWritten;
+    if (!n) return fail(404, "not_found", "ese nodo no existe");
+    this.logDecision(moderator, "node_remove", "node", id, null);
+    return ok({ removed: id });
+  }
+
+  nodeOf(id: string): NodeRow | null {
+    return this.sql.exec<NodeRow>("SELECT id, name, url, created_at, disabled, fails, last_ok, last_fail FROM nodes WHERE id = ?", id).toArray()[0] ?? null;
+  }
+
+  chunkHost(chunkId: string): ChunkHostRow | null {
+    return this.sql.exec<ChunkHostRow>("SELECT chunk_id, node_id, state, since, snapshot_rev, snapshot_at FROM chunk_hosts WHERE chunk_id = ?", chunkId).toArray()[0] ?? null;
+  }
+
+  /** Dónde vive un distrito: en un nodo (`node`), de vuelta en Cloudflare tras caerse su nodo (`fallback`) o solo en Cloudflare (null). */
+  setChunkHost(moderator: string | null, chunkId: string, nodeId: string | null, state: "node" | "fallback", note: string | null = null): void {
+    if (!nodeId) this.sql.exec("DELETE FROM chunk_hosts WHERE chunk_id = ?", chunkId);
+    else {
+      this.sql.exec(
+        `INSERT INTO chunk_hosts (chunk_id, node_id, state, since) VALUES (?, ?, ?, ?)
+         ON CONFLICT(chunk_id) DO UPDATE SET node_id = excluded.node_id, state = excluded.state, since = excluded.since`,
+        chunkId, nodeId, state, Date.now(),
+      );
+      if (state === "node") this.sql.exec("UPDATE nodes SET fails = 0 WHERE id = ?", nodeId);
+    }
+    this.logDecision(moderator ?? "system", nodeId ? (state === "node" ? "chunk_to_node" : "chunk_fallback") : "chunk_to_cloudflare", "chunk", chunkId, nodeId ? `${nodeId}${note ? ` · ${note}` : ""}` : note);
+  }
+
+  /** Resultado de una ronda de comprobaciones. Devuelve los nodos que acaban de pasar el umbral de caída. */
+  nodeHealth(results: { id: string; ok: boolean }[]): string[] {
+    const now = Date.now();
+    const down: string[] = [];
+    for (const r of results) {
+      if (r.ok) {
+        this.sql.exec("UPDATE nodes SET fails = 0, last_ok = ? WHERE id = ?", now, r.id);
+        continue;
+      }
+      const row = this.sql.exec<{ fails: number }>("UPDATE nodes SET fails = fails + 1, last_fail = ? WHERE id = ? RETURNING fails", now, r.id).toArray()[0];
+      if (row && row.fails === NODE_FAILS_TO_FALLBACK) down.push(r.id);
+    }
+    return down;
+  }
+
+  snapshotSaved(chunkId: string, rev: string): void {
+    this.sql.exec("UPDATE chunk_hosts SET snapshot_rev = ?, snapshot_at = ? WHERE chunk_id = ?", rev, Date.now(), chunkId);
+  }
+
   logModeration(moderator: string, action: string, targetId: string, note: string | null) {
     this.logDecision(moderator, action, "district", targetId, note);
   }
