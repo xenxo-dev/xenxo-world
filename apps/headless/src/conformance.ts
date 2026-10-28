@@ -842,7 +842,14 @@ await scenario("Rastro de datos (Distrito Cero): 12 fragmentos del sistema con s
   for (const f of frags.filter((e) => e !== first && e !== high)) {
     const p = pos(f);
     await at([p[0], Math.max(1.6, p[1]), p[2]]);
-    const r = await u.activity("COLLECT", f.entity_id);
+    let r = await u.activity("COLLECT", f.entity_id);
+    // La cercanía se mide con la última pose que le llegó al servidor: en una máquina lenta (CI)
+    // puede no haber llegado aún. Se vuelve a dar una vez, con más margen.
+    if (r.type !== "COLLECTED") {
+      u.pose([p[0], Math.max(1.6, p[1]), p[2]]);
+      await new Promise((ok) => setTimeout(ok, 800));
+      r = await u.activity("COLLECT", f.entity_id);
+    }
     last = r.type === "COLLECTED" ? r.payload : r;
   }
   assert((last as { complete?: boolean }).complete === true, `los 12 recogidos (${JSON.stringify(last)})`);
