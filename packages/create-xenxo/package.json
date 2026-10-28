@@ -7,6 +7,9 @@
   "bin": {
     "create-xenxo": "index.mjs"
   },
+  "scripts": {
+    "test": "tsx test/ficha.test.ts"
+  },
   "files": [
     "index.mjs",
     "templates",
@@ -14,7 +17,7 @@
     "LICENSE"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12"
   },
   "repository": {
     "type": "git",

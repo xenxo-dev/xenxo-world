@@ -19,6 +19,18 @@ const lang: Lang = flagValue("--lang") === "es" || (!flagValue("--lang") && /^es
 const positional = args.filter((a, i) => !a.startsWith("--") && args[i - 1] !== "--lang");
 const cmd = positional[0] ?? "help";
 
+/**
+ * Lo que sale de la ficha (rutas, claves, mensajes) es dato de quien hizo el distrito: puede llevar
+ * secuencias de escape que cambian la terminal (enlaces falsos, borrar la pantalla…). Se quitan los
+ * controles C0 y C1 (y DEL) de todo lo que se imprime.
+ */
+const CONTROLES = /[\u0000-\u001f\u007f-\u009f]/g;
+const limpio = (v: unknown) => String(v).replace(CONTROLES, "");
+/** Imprime línea a línea, cada una sin controles (los saltos de línea propios se respetan). */
+const say = (text: string) => console.log(text.split("\n").map(limpio).join("\n"));
+/** JSON.stringify ya escapa C0, pero no C1 ni DEL: se escapan también. */
+const json = (v: unknown) => JSON.stringify(v, null, 2).replace(/[\u007f-\u009f]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
+
 const T = {
   es: {
     help:
@@ -61,10 +73,10 @@ async function validate(dir: string) {
   };
   const r = await checkDistrictFolder(read, lang);
   if (args.includes("--json")) {
-    console.log(JSON.stringify({ ok: r.ok, problems: r.problems, warnings: r.warnings, summary: r.summary }, null, 2));
+    console.log(json({ ok: r.ok, problems: r.problems, warnings: r.warnings, summary: r.summary }));
     process.exit(r.ok ? 0 : 1);
   }
-  if (r.manifest) console.log(T.title(r.manifest.slug));
+  if (r.manifest) say(T.title(limpio(r.manifest.slug)));
   if (r.summary) {
     const s = r.summary, L = T.labels;
     const mb = (b: number) => `${(b / 1048576).toFixed(1)} MB`;
@@ -78,17 +90,17 @@ async function validate(dir: string) {
       [L.lights, `${s.lights} / ${B.maxLights}`],
       [L.labels, `${s.labels} / ${B.maxLabels}`],
       [L.portals, `${s.portals} / ${B.maxPortals}`],
-    ] as const) console.log(T.row(k, v));
-    console.log("");
+    ] as const) say(T.row(k, v));
+    say("");
   }
-  for (const p of r.problems) console.log(`  ✗ ${p.at}: ${p.message}`);
+  for (const p of r.problems) say(`  ✗ ${limpio(p.at)}: ${limpio(p.message)}`);
   if (r.warnings.length) {
-    console.log(T.warn);
-    for (const w of r.warnings) console.log(`    ${w.at}: ${w.message}`);
+    say(T.warn);
+    for (const w of r.warnings) say(`    ${limpio(w.at)}: ${limpio(w.message)}`);
   }
-  console.log(r.ok ? T.ok : T.bad(r.problems.length));
+  say(r.ok ? T.ok : T.bad(r.problems.length));
   process.exit(r.ok ? 0 : 1);
 }
 
 if (cmd === "validate" || cmd === "check" || cmd === "comprobar") await validate(positional[1] ?? ".");
-else console.log(T.help);
+else say(T.help);

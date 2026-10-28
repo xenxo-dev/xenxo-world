@@ -38,11 +38,11 @@ async function freeSpot(order = ["arcade", "pixel", "cero", "taller"]): Promise<
 }
 
 let failed = 0;
-async function scenario(name: string, fn: () => Promise<void>) {
+async function scenario(name: string, fn: () => Promise<void>, timeoutMs = 15_000) {
   try {
     await Promise.race([
       fn(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("timeout de 15 s")), 15_000)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error(`timeout de ${timeoutMs / 1000} s`)), timeoutMs)),
     ]);
     console.log(`  ✓ ${name}`);
   } catch (e) {
@@ -52,6 +52,22 @@ async function scenario(name: string, fn: () => Promise<void>) {
 }
 function assert(cond: unknown, why: string): asserts cond {
   if (!cond) throw new Error(why);
+}
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Ir andando (o corriendo) de `from` a `to` mandando poses cada `stepMs`: el servidor no admite
+ * saltos para las actividades (más de unos 15 m de golpe o más de 40 m/s seguidos), así que las
+ * pruebas se mueven como un cliente de verdad. `speed` en m/s (a pie, en una carrera: 16 como mucho).
+ */
+async function walk(c: XenxoClient, from: [number, number, number], to: [number, number, number], speed = 30, stepMs = 200) {
+  const d = Math.hypot(to[0] - from[0], to[2] - from[2]);
+  const n = Math.max(1, Math.ceil(d / ((speed * stepMs) / 1000)));
+  for (let i = 1; i <= n; i++) {
+    const k = i / n;
+    c.pose([from[0] + (to[0] - from[0]) * k, from[1] + (to[1] - from[1]) * k, from[2] + (to[2] - from[2]) * k]);
+    await sleep(stepMs);
+  }
 }
 
 console.log(`Conformidad xenxo protocolo v0 contra ${baseUrl}\n`);
@@ -723,6 +739,34 @@ await scenario("distrito de la comunidad: la ficha se comprueba, queda en borrad
   }
 });
 
+await scenario("distrito de la comunidad: un portal admite el enlace entero del juego (xenxo.io/j/<nombre>) y se queda con el nombre", async () => {
+  const api = new Api(baseUrl);
+  await api.register(`conf ${randomUUID().slice(0, 6)}`);
+  const model = await api.upload(await makeBoxGlb({ segments: 1, color: [0.2, Math.random(), 0.8, 1] }), "model");
+  const emblem = await api.upload(await makeBoxGlb({ segments: 1, color: [Math.random(), 0.7, 0.2, 1] }), "monument");
+  const cover = await api.upload(makeCoverPng(320, 180, [40, Math.floor(Math.random() * 255), 120]), "cover");
+  assert(model.ok && emblem.ok && cover.ok, "subidas del distrito");
+  const base = {
+    schema: "xenxo.district/0",
+    slug: `conf-${randomUUID().slice(0, 8)}`,
+    name: { es: "Portales", en: "Portals" },
+    description: { es: "Enlaces de juegos", en: "Game links" },
+    color: "#33ddff",
+    cover: cover.data.hash,
+    emblem: emblem.data.hash,
+    models: { caja: { file: model.data.hash } },
+    author: "Banco de conformidad",
+    contact: "contact@xenxo.io",
+  };
+  // Con el enlace entero, el servidor lo entiende como el nombre del juego (y lo busca: no es suyo → bad_portal).
+  const full = await api.call("PUT", "/me/district", { ...base, portals: [{ p: [10, 1.2, 10], game: "https://xenxo.io/j/no-existe-nunca" }] });
+  assert(!full.ok && full.error === "bad_portal", `enlace entero → se comprueba el juego: bad_portal (${!full.ok && full.error})`);
+  assert(!full.ok && /no-existe-nunca/.test(full.message ?? "") && !/https:/.test(full.message ?? ""), `se queda con el nombre (${!full.ok && full.message})`);
+  // Un enlace de otra web no es un juego de xenxo: la ficha no vale.
+  const other = await api.call("PUT", "/me/district", { ...base, portals: [{ p: [10, 1.2, 10], game: "https://example.org/j/no-existe-nunca" }] });
+  assert(!other.ok && other.status === 400 && other.error !== "bad_portal", `enlace de otra web → ficha no válida (${!other.ok && other.error})`);
+});
+
 await scenario("actividades: el servidor comprueba la cercanía, el orden y el reloj; guarda lo recogido, los tiempos y los marcadores", async () => {
   if (!adminKey) return console.log("    (sin XENXO_ADMIN_KEY: se omite: las actividades de prueba las pone la administración)");
   const chunkId = "c_-1_-1";
@@ -756,9 +800,15 @@ await scenario("actividades: el servidor comprueba la cercanía, el orden y el r
   const name = `conf ${randomUUID().slice(0, 6)}`;
   await api.register(name);
   const u = await XenxoClient.connect({ baseUrl, chunkId, token: api.token });
-  const at = async (p: [number, number, number]) => {
-    u.pose(p);
-    await new Promise((r) => setTimeout(r, 260));
+  // La primera pose es la llegada; después se va andando (a `speed` m/s), como un cliente de verdad.
+  let here: [number, number, number] | null = null;
+  const at = async (p: [number, number, number], speed = 30) => {
+    if (here) await walk(u, here, p, speed);
+    else {
+      u.pose(p);
+      await sleep(260);
+    }
+    here = p;
   };
   await at([10, 1.6, 10]);
   const c1 = await u.activity("COLLECT", a);
@@ -769,25 +819,31 @@ await scenario("actividades: el servidor comprueba la cercanía, el orden y el r
   const c2 = await u.activity("COLLECT", b);
   assert(c2.type === "COLLECTED" && c2.payload.count === 2 && c2.payload.complete, "el segundo completa la búsqueda");
 
-  // Carrera: demasiado rápida → se anula; a un ritmo posible → tiempo, mejor marca y puesto.
+  // Carrera: más rápida que a pie (lo ve el servidor en las poses) → se anula; a un ritmo posible →
+  // tiempo, mejor marca y puesto.
   await at([0, 1.6, 100]);
   const s1 = await u.activity("CHECKPOINT", start);
   assert(s1.type === "RACE" && s1.payload.state === "start" && s1.payload.total === 1, "la salida empieza la carrera");
-  await at([0, 1.6, 110]);
+  await at([0, 1.6, 110], 12);
   const k1 = await u.activity("CHECKPOINT", cp);
   assert(k1.type === "RACE" && k1.payload.state === "cp" && k1.payload.next === 2, "el punto que toca avanza");
-  await at([0, 1.6, 120]);
-  const fast = await u.activity("CHECKPOINT", fin);
-  assert(fast.type === "RACE" && fast.payload.state === "reset", "llegar antes de lo posible anula la carrera");
+  const reset = u.next("RACE", (m) => m.payload.state === "reset", 3000);
+  u.pose([0, 1.6, 120]); // 10 m de golpe: no es un salto, pero nadie corre tanto a pie
+  here = [0, 1.6, 120];
+  await reset;
+  // Sin carrera en marcha, la meta no responde (o responde sin tiempo).
+  const after = await u.activity("CHECKPOINT", fin, 1000).catch(() => null);
+  assert(!after || after.type !== "RACE" || after.payload.state !== "finish", "la carrera anulada no llega a la meta");
   await at([0, 1.6, 100]);
   await u.activity("CHECKPOINT", start);
-  await at([0, 1.6, 110]);
+  await at([0, 1.6, 110], 12);
   await u.activity("CHECKPOINT", cp);
-  await new Promise((r) => setTimeout(r, 1400));
-  await at([0, 1.6, 120]);
+  await sleep(1400);
+  await at([0, 1.6, 120], 12);
   const done = await u.activity("CHECKPOINT", fin);
   assert(done.type === "RACE" && done.payload.state === "finish" && (done.payload.ms ?? 0) >= 1400 && done.payload.rank === 1, `meta: tiempo y puesto (${JSON.stringify(done.payload)})`);
   // En coche no se corre: la salida no cuenta.
+  await at([0, 1.6, 100]);
   u.pose([0, 1.2, 100], 0, undefined, { p: [0, 0, 100], inside: true });
   await new Promise((r) => setTimeout(r, 260));
   const inCar = await u.activity("CHECKPOINT", start);
@@ -805,7 +861,7 @@ await scenario("actividades: el servidor comprueba la cercanía, el orden y el r
   again.close();
   const exp = await api.call<{ activities: { chunk: string; collected: unknown[] }[] }>("GET", "/me/export");
   assert(exp.ok && exp.data.activities.some((x) => x.chunk === chunkId && x.collected.length === 2), "la exportación incluye las actividades");
-});
+}, 40_000);
 
 await scenario("Rastro de datos (Distrito Cero): 12 fragmentos del sistema con su historia; los de la pasarela solo desde arriba", async () => {
   const chunkId = "c_-1_-1";
@@ -818,9 +874,15 @@ await scenario("Rastro de datos (Distrito Cero): 12 fragmentos del sistema con s
   assert(frags.every((e) => note(e)?.es && note(e)?.en), "cada fragmento cuenta algo en ES y EN");
   assert(u.snapshot.entities.some((e) => (e.components["scoreboard@1"] as { kind?: string; id?: string } | undefined)?.id === "rastro"), "con su marcador en la plaza");
   const pos = (e: (typeof frags)[number]) => (e.components["transform@1"] as { p: [number, number, number] }).p;
+  // La primera pose es la llegada; después, andando (sin saltos: con un salto no se recoge nada).
+  let here: [number, number, number] | null = null;
   const at = async (p: [number, number, number]) => {
-    u.pose(p);
-    await new Promise((r) => setTimeout(r, 260));
+    if (here) await walk(u, here, p, 35);
+    else {
+      u.pose(p);
+      await sleep(260);
+    }
+    here = p;
   };
   const first = frags.find((e) => pos(e)[1] < 2)!;
   const fp = pos(first);
@@ -869,7 +931,7 @@ await scenario("Rastro de datos (Distrito Cero): 12 fragmentos del sistema con s
   const no = cardMine.data.player_no;
   const card = (await (await fetch(new URL(`/players/${no}`, baseUrl))).json()) as { badges?: { id: string }[] };
   assert((card.badges ?? []).some((b) => b.id === "cero_rastro"), "y se ve en el carné");
-});
+}, 60_000);
 
 await scenario("marcadores en el panel: /scores reúne los de los distritos (del día, de la semana y lo que construyen los agentes)", async () => {
   const r = await fetch(new URL("/scores", baseUrl));
@@ -913,9 +975,14 @@ await scenario("Plaza tablero (Píxel): el servidor enciende una figura, cuenta 
   const round = await show;
   assert(round.payload.lit.length > 0 && round.payload.done.length <= round.payload.lit.length, `ronda con su figura (${round.payload.lit.length} baldosas)`);
   const won = u.next("TILES", (m) => m.payload.state === "won", 60_000);
-  for (const i of round.payload.lit) {
-    u.pose(center(i));
-    await new Promise((r) => setTimeout(r, 230));
+  // De baldosa en baldosa, por la más cercana y andando (una pose que llega de un salto no pisa).
+  let here: [number, number, number] = [bx + 0.1, 1.6, bz + 0.1];
+  const left = [...round.payload.lit];
+  while (left.length) {
+    left.sort((a, b) => Math.hypot(center(a)[0] - here[0], center(a)[2] - here[2]) - Math.hypot(center(b)[0] - here[0], center(b)[2] - here[2]));
+    const next = center(left.shift()!);
+    await walk(u, here, next, 30, 150);
+    here = next;
   }
   await won;
   const sb = u.snapshot.entities.find((e) => (e.components["scoreboard@1"] as { kind?: string } | undefined)?.kind === "points");
@@ -925,7 +992,7 @@ await scenario("Plaza tablero (Píxel): el servidor enciende una figura, cuenta 
   u.close();
   const exp = await api.call<{ activities: { daily_points?: unknown[] }[] }>("GET", "/me/export");
   assert(exp.ok && exp.data.activities.some((x) => (x.daily_points ?? []).length > 0), "la exportación incluye los puntos");
-});
+}, 30_000);
 
 await scenario("zona de pruebas (Taller): cualquier cuenta construye piezas básicas dentro, con tope; fuera o con modelos, no", async () => {
   const chunkId = "c_0_-1";
@@ -950,6 +1017,111 @@ await scenario("zona de pruebas (Taller): cualquier cuenta construye piezas bás
   assert(del.type === "ACK", "lo suyo sí lo borra");
   u.close();
 });
+
+await scenario("zona de pruebas: lo que se sale (escala negativa o enorme, colisionador más grande que la pieza, cartel larguísimo) se rechaza", async () => {
+  const chunkId = "c_0_-1";
+  const api = new Api(baseUrl);
+  await api.register(`conf sandbox ${randomUUID().slice(0, 6)}`);
+  const u = await XenxoClient.connect({ baseUrl, chunkId, token: api.token });
+  const box = { shape: "box", size: [1, 1, 1], color: "#ff4fd8" };
+  const tries: [string, Record<string, unknown>][] = [
+    ["escala negativa", { "transform@1": { p: [32, 0.5, 69], s: [-2000, 1, -2000] }, "primitive@1": box }],
+    ["escala enorme", { "transform@1": { p: [32, 0.5, 69], s: [50, 1, 1] }, "primitive@1": box }],
+    ["colisionador gigante", { "transform@1": { p: [32, 0.5, 69] }, "primitive@1": box, "collider@1": { shape: "box", half_extents: [500, 50, 500] } }],
+    ["cartel que se sale", { "transform@1": { p: [32, 2, 69] }, "label@1": { text: "x".repeat(120), size: 4 } }],
+    ["giro que escala", { "transform@1": { p: [32, 0.5, 69], r: [0, 0, 0, 0] }, "primitive@1": box }],
+  ];
+  for (const [why, components] of tries) {
+    const r = await u.mutate({ op: "SPAWN", components });
+    assert(r.type === "ERROR", `${why}: debería rechazarse (${JSON.stringify(r.payload)})`);
+  }
+  // Lo normal sigue entrando (y un giro sin normalizar se guarda normalizado).
+  const ok = await u.mutate({ op: "SPAWN", components: { "transform@1": { p: [32, 0.5, 69], r: [0, 2, 0, 2] }, "primitive@1": box } });
+  assert(ok.type === "ACK", `una caja normal dentro (${JSON.stringify(ok.payload)})`);
+  await u.mutate({ op: "DESPAWN", entity_id: ok.payload.entity_id, base_rev: 1 });
+  u.close();
+});
+
+await scenario("ids reservados: un cliente no puede elegir los del sistema (máquinas, portales, semilla del lugar)", async () => {
+  const api = new Api(baseUrl);
+  await api.register(`conf ids ${randomUUID().slice(0, 6)}`);
+  const u = await XenxoClient.connect({ baseUrl, chunkId: "c_0_-1", token: api.token });
+  const piece = { "transform@1": { p: [30, 0.5, 68] }, "primitive@1": { shape: "box", size: [1, 1, 1], color: "#ff4fd8" } };
+  for (const id of ["cabinet_4", "billboard_9", "standm_abcdef", "Stand_abcdef", "taller_mio_1", "nexo_puerta"]) {
+    const r = await u.mutate({ op: "SPAWN", entity_id: id, components: piece });
+    assert(r.type === "ERROR" && r.payload.code === "forbidden", `«${id}» está reservado (${JSON.stringify(r.payload)})`);
+  }
+  const mine = await u.mutate({ op: "SPAWN", entity_id: `mio_${randomUUID().slice(0, 8)}`, components: piece });
+  assert(mine.type === "ACK", "un id cualquiera sí");
+  await u.mutate({ op: "DESPAWN", entity_id: mine.payload.entity_id, base_rev: 1 });
+  u.close();
+});
+
+await scenario("HELLO una sola vez: el segundo da bad_message y no vuelve a mandar el SNAPSHOT", async () => {
+  const c = await XenxoClient.connect({ baseUrl, displayName: "conf-hello" });
+  const err = c.next("ERROR", (m) => m.payload.code === "bad_message", 3000);
+  c.sendRaw(msg("HELLO", { client_type: "headless", capabilities: { xr: false, hand_tracking: false, haptics: false, lod: "low" } }));
+  await err;
+  await sleep(400);
+  assert(!c.received.some((m) => m.type === "SNAPSHOT" || m.type === "WELCOME"), "un segundo HELLO no repite WELCOME ni SNAPSHOT");
+  c.close();
+});
+
+await scenario("inundación: quien manda mensajes sin parar se queda sin conexión (4008)", async () => {
+  const c = await XenxoClient.connect({ baseUrl, displayName: "conf-flood" });
+  for (let i = 0; i < 400; i++) c.sendRaw(msg("PING", { t: i }));
+  for (let i = 0; i < 20 && !c.closed; i++) await sleep(100);
+  assert(c.closed, "la conexión debería cerrarse");
+  // Otra conexión normal sigue entrando.
+  const ok = await XenxoClient.connect({ baseUrl });
+  ok.close();
+});
+
+await scenario("saltos: quien aparece de golpe junto a un objeto no lo recoge; andando, sí", async () => {
+  const chunkId = "c_-1_-1";
+  const api = new Api(baseUrl);
+  await api.register(`conf salto ${randomUUID().slice(0, 6)}`);
+  const u = await XenxoClient.connect({ baseUrl, chunkId, token: api.token });
+  const frag = u.snapshot.entities.find((e) => (e.components["collectible@1"] as { set?: string } | undefined)?.set === "rastro" && (e.components["transform@1"] as { p: number[] }).p[1]! < 2)!;
+  const fp = (frag.components["transform@1"] as { p: [number, number, number] }).p;
+  const start: [number, number, number] = [fp[0], 1.6, fp[2] - 60];
+  u.pose(start); // la llegada
+  await sleep(260);
+  u.pose([fp[0], 1.6, fp[2]]); // 60 m de golpe
+  await sleep(260);
+  const r = await u.activity("COLLECT", frag.entity_id);
+  assert(r.type === "ERROR" && r.payload.code === "forbidden" && (r.payload.detail as { reason?: string } | undefined)?.reason === "jump", `tras un salto no se recoge (${JSON.stringify(r.payload)})`);
+  u.close();
+  // Otra conexión (otra llegada) que se acerca andando, sí.
+  const v = await XenxoClient.connect({ baseUrl, chunkId, token: api.token });
+  v.pose(start);
+  await sleep(260);
+  await walk(v, start, [fp[0], 1.6, fp[2]], 25);
+  const ok = await v.activity("COLLECT", frag.entity_id);
+  assert(ok.type === "COLLECTED", `andando, sí (${JSON.stringify(ok.payload)})`);
+  v.close();
+});
+
+if (process.env.XENXO_SLOW && agentKey) {
+  await scenario("hibernación: tras un rato sin mensajes el chunk sigue sabiendo quién es (SNAPSHOT válido, nexo en solitario)", async () => {
+    const api = new Api(baseUrl);
+    await api.register(`conf hib ${randomUUID().slice(0, 6)}`);
+    const agent = await XenxoClient.connect({ baseUrl, agentKey });
+    const solo = await XenxoClient.connect({ baseUrl, chunkId: PLACES.nexo, token: api.token });
+    await sleep(75_000); // en local, workerd saca de memoria el objeto que no recibe nada
+    const r = await agent.mutate({ op: "SPAWN", components: { "transform@1": { p: [12, 0.5, 12] }, "primitive@1": { shape: "box", size: [1, 1, 1], color: "#ffffff" } } });
+    assert(r.type === "ACK", `SPAWN tras hibernar (${JSON.stringify(r.payload)})`);
+    const said = await solo.chat("hola tras hibernar");
+    assert(said.type === "ERROR" && said.payload.code === "forbidden", "el nexo sigue en solitario tras hibernar");
+    // Si la entidad nueva saliera sin chunk_id, el SNAPSHOT no pasaría el esquema y connect() fallaría.
+    const g = await XenxoClient.connect({ baseUrl });
+    assert(g.snapshot.entities.some((e) => e.entity_id === r.payload.entity_id && e.chunk_id === "c_0_0"), "la entidad nueva va con su chunk_id");
+    g.close();
+    await agent.mutate({ op: "DESPAWN", entity_id: r.payload.entity_id, base_rev: 1 });
+    agent.close();
+    solo.close();
+  }, 120_000);
+}
 
 await scenario("distrito grande: WELCOME.walk de 256 m y cada uno recibe solo las poses de quien tiene cerca", async () => {
   const chunkId = "c_0_-1";
@@ -1152,6 +1324,40 @@ await scenario("DSA: cualquiera puede denunciar un contenido", async () => {
     const list = await admin.call<{ reports: { id: number }[] }>("GET", "/admin/reports");
     assert(list.ok && list.data.reports.some((x) => x.id === r.data.id), "moderación debería ver la denuncia");
   }
+});
+
+await scenario("sesiones: «cerrar sesión en todos los dispositivos» impide renovar los tokens anteriores", async () => {
+  const api = new Api(baseUrl);
+  const { passkey } = await api.register(`conf ${randomUUID().slice(0, 6)}`);
+  const renewed = await api.call<{ token: string }>("POST", "/me/session");
+  assert(renewed.ok && !!renewed.data.token, "una sesión vigente se renueva");
+  const out = await api.call("POST", "/me/logout-all");
+  assert(out.ok, "cerrar todas las sesiones debería responder bien");
+  const stale = await api.call("POST", "/me/session");
+  assert(!stale.ok && stale.status === 401 && stale.error === "session_expired", "un token de antes ya no se renueva");
+  const old = new Api(baseUrl, renewed.data.token);
+  const stale2 = await old.call("PATCH", "/me", { display_name: "otro nombre" });
+  assert(!stale2.ok && stale2.status === 401, "ni sirve para pedir un token nuevo con otro nombre");
+  const again = new Api(baseUrl);
+  await again.login(passkey);
+  assert((await again.call("POST", "/me/session")).ok, "al volver a entrar, la sesión nueva vale");
+});
+
+await scenario("puertas cerradas: un chunk inventado da 404; una denuncia con un id raro o un cuerpo enorme se rechaza", async () => {
+  for (const id of ["c_9_9", "c_1000_987654", "x"]) {
+    const r = await fetch(new URL(`/chunk/${id}/state`, baseUrl));
+    assert(r.status === 404 || r.status === 400, `/chunk/${id}/state debería dar 404 (dio ${r.status})`);
+  }
+  assert((await fetch(new URL(`/chunk/${PLACES.plaza}/state`, baseUrl))).ok, "la plaza sí existe");
+  const guest = new Api(baseUrl, ((await (await fetch(new URL("/auth/guest", baseUrl), { method: "POST" })).json()) as { token: string }).token);
+  const weird = await guest.call("POST", "/reports", { target_type: "project", target_id: "p_<script>", reason: "spam" });
+  assert(!weird.ok && weird.status === 400, "un target_id con caracteres raros se rechaza");
+  const big = await fetch(new URL("/reports", baseUrl), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${guest.token}` },
+    body: JSON.stringify({ target_type: "project", target_id: "p_prueba", reason: "spam", details: "x".repeat(200_000) }),
+  });
+  assert(big.status === 413, `un cuerpo de 200 KB se corta (dio ${big.status})`);
 });
 
 await scenario("avisos de moderación: /mod/summary solo para moderación; con webhook, la denuncia llega firmada", async () => {

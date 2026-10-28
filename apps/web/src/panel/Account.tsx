@@ -15,6 +15,7 @@ import {
   myLogins,
   type Logins,
   logout,
+  logoutEverywhere,
   mySkins,
   passkeysSupported,
   register,
@@ -459,7 +460,7 @@ export function SignedOut() {
           {google && (
             <Button
               disabled={busy || !age || !terms || name.trim().length < 2}
-              onClick={() => googleStart("register", { name: name.trim(), age, terms })}
+              onClick={() => void googleStart("register", { name: name.trim(), age, terms })}
             >
               {t("account.createGoogle")}
             </Button>
@@ -475,7 +476,7 @@ export function SignedOut() {
             </Button>
           )}
           {google && (
-            <Button disabled={busy} onClick={() => googleStart("login")}>
+            <Button disabled={busy} onClick={() => void googleStart("login")}>
               {t("account.loginGoogle")}
             </Button>
           )}
@@ -530,6 +531,9 @@ function SignedIn() {
         <Button onClick={() => void act(exportData)}>{t("account.export")}</Button>
         <Button variant="ghost" onClick={logout}>
           {t("account.logout")}
+        </Button>
+        <Button variant="ghost" onClick={() => void act(logoutEverywhere)}>
+          {t("account.logoutAll")}
         </Button>
         {!confirming ? (
           <Button variant="danger" onClick={() => setConfirming(true)}>

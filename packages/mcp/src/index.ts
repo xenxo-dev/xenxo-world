@@ -6,11 +6,11 @@
  *
  *   XENXO_KEY=xk_…  [XENXO_URL=https://api.xenxo.io]  xenxo-mcp
  */
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { open, realpath } from "node:fs/promises";
+import { resolve, sep } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { checkBudget, inspectGlb } from "@xenxo/assets";
+import { ASSET_BUDGETS, checkBudget, inspectGlb } from "@xenxo/assets";
 import { optimizeGlb } from "@xenxo/assets/optimize";
 import type { Components } from "@xenxo/protocol";
 import { z } from "zod";
@@ -21,6 +21,51 @@ const baseUrl = process.env.XENXO_URL ?? "https://api.xenxo.io";
 if (!key.startsWith("xk_")) {
   console.error("Falta XENXO_KEY (la clave de tu parcela, empieza por xk_). Créala en xenxo.io → Proyectos → Construir con tu agente.");
   process.exit(1);
+}
+// La clave viaja en cada petición: solo por https (en tu equipo, http a localhost vale para desarrollar).
+if (!secureUrl(baseUrl)) {
+  console.error("XENXO_URL tiene que ser https:// (solo localhost o 127.0.0.1 pueden ir por http://).");
+  process.exit(1);
+}
+
+function secureUrl(raw: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (u.username || u.password) return false;
+  if (u.protocol === "https:") return true;
+  return u.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(u.hostname);
+}
+
+/**
+ * Lee un .glb para subirlo, solo de dentro de la carpeta en la que corre el servidor (la del
+ * proyecto). Se resuelven los enlaces simbólicos antes de comprobarlo, solo valen archivos normales
+ * y se mira el tamaño antes de leer (nada de /dev/zero ni de archivos enormes).
+ */
+async function readModelFile(path: string): Promise<Uint8Array> {
+  const max = ASSET_BUDGETS.model.maxBytes;
+  const root = await realpath(process.cwd());
+  let full: string;
+  try {
+    full = await realpath(resolve(root, path));
+  } catch {
+    throw new Error(`file not found: ${path}`);
+  }
+  if (full !== root && !full.startsWith(root + sep)) {
+    throw new Error(`only files inside the project folder (${root}) can be uploaded`);
+  }
+  const fh = await open(full, "r");
+  try {
+    const st = await fh.stat(); // del archivo ya abierto: no puede cambiar entre mirar y leer
+    if (!st.isFile()) throw new Error(`${path} is not a regular file`);
+    if (st.size > max) throw new Error(`${path} is ${(st.size / 1048576).toFixed(1)} MB; the maximum is ${max / 1048576} MB`);
+    return new Uint8Array(await fh.readFile());
+  } finally {
+    await fh.close();
+  }
 }
 
 const parcel = new Parcel(baseUrl, key);
@@ -176,12 +221,13 @@ server.registerTool(
     title: "Subir un modelo 3D",
     description:
       "Uploads a .glb file from this computer (made in Blender, generated, or a CC0 pack). It is optimised here first; " +
-      "max 50,000 triangles and 6 MB, textures are reduced to 2048 px, nothing external (no URLs, no Draco). Returns its hash for place_model.",
-    inputSchema: { path: z.string().describe("path to the .glb file") },
+      "max 50,000 triangles and 6 MB, textures are reduced to 2048 px, nothing external (no URLs, no Draco). Returns its hash for place_model. " +
+      "Only files inside the project folder (where this server runs) can be uploaded.",
+    inputSchema: { path: z.string().describe("path to the .glb file, inside the project folder (relative paths are from there)") },
   },
   async (a) =>
     guard(async () => {
-      const input = new Uint8Array(await readFile(resolve(a.path)));
+      const input = await readModelFile(a.path);
       const before = inspectGlb(input);
       const { lods, notes } = await optimizeGlb(input, { kind: "model", makeLod: true });
       const problems = checkBudget(lods[0]!.report, "model");

@@ -13,7 +13,7 @@
  * sistema van dentro del código, como en Cloudflare.
  */
 import type { ChunkRoom } from "./chunk-room";
-import { chunkList, REMOTE_METHODS, sha256B64, verifyRemote, type RemoteCall, type Ticket } from "./remote";
+import { chunkList, REMOTE_METHODS, SeenCalls, sha256B64, verifyRemote, type RemoteCall, type Ticket } from "./remote";
 
 export { ChunkRoom } from "./chunk-room";
 
@@ -30,6 +30,8 @@ export interface HostEnv {
 const MAX_RPC_BYTES = 64 * 1024;
 /** Mover un distrito entero (loadState) o montar uno de la comunidad (installDistrict) puede pesar más. */
 const MAX_LOAD_BYTES = 16 * 1024 * 1024;
+/** Llamadas firmadas ya atendidas: cada una vale una sola vez. */
+const seenCalls = new SeenCalls();
 
 function json(data: unknown, status = 200, extra: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...extra } });
@@ -73,10 +75,12 @@ export default {
       if (!hosted.has(id) || !REMOTE_METHODS.has(method)) return json({ error: "not_found" }, 404);
       const body = await req.text();
       if (body.length > (method === "loadState" || method === "installDistrict" ? MAX_LOAD_BYTES : MAX_RPC_BYTES)) return json({ error: "too_large" }, 413);
-      const call = await verifyRemote<RemoteCall>(env.DISTRICT_PUBLIC_KEY, req.headers.get("X-Xenxo-Call") ?? "");
+      const token = req.headers.get("X-Xenxo-Call") ?? "";
+      const call = await verifyRemote<RemoteCall>(env.DISTRICT_PUBLIC_KEY, token);
       if (!call || call.typ !== "rpc" || call.chunk !== id || call.method !== method || call.body !== (await sha256B64(body))) {
         return json({ error: "unauthorized" }, 401);
       }
+      if (!seenCalls.claim(call.jti ?? token, call.exp)) return json({ error: "replayed", message: "esa llamada ya se atendió" }, 409);
       const args = JSON.parse(body) as unknown[];
       if (!Array.isArray(args)) return json({ error: "bad_request" }, 400);
       const stub = stubOf(env, id);

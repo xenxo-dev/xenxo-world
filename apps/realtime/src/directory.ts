@@ -65,6 +65,8 @@ export async function defaultAvatarFor(userId: string): Promise<{ hash: string; 
 export const ORPHAN_GRACE_MS = 7 * 86_400_000;
 const CLEANUP_EVERY_MS = 86_400_000;
 const MAX_UPLOADS_PER_DAY = 80;
+/** Las de una cuenta de menos de un día. */
+const NEW_ACCOUNT_UPLOADS_PER_DAY = 15;
 /**
  * Topes de almacenamiento para no salir nunca del plan gratuito de R2 (10 GB-mes).
  * Al llegar al tope global se rechazan subidas nuevas; nada se cobra.
@@ -76,6 +78,8 @@ const UPLOAD_HEADROOM = 6 * 1024 ** 2;
 /** Subidas al día entre todo el mundo: unas 30.000 escrituras al mes como mucho (R2 regala 1 millón). */
 export const MAX_UPLOADS_PER_DAY_GLOBAL = 1000;
 const MAX_REPORTS_PER_DAY = 20;
+/** Denuncias de invitados entre todos, al día. */
+const MAX_GUEST_REPORTS_PER_DAY = 300;
 const MAX_MANIFEST_READS_PER_DAY = 30;
 const RESERVED_NAMES = new Set(["system", "admin", "xenxo", "moderador", "moderator", "anthropic", "claude"]);
 
@@ -113,6 +117,8 @@ export type UserRow = {
   created_at: number;
   /** Número de jugador: por orden de alta desde el 1; el 0 es el fundador. */
   player_no: number | null;
+  /** Versión de las sesiones (auth.ts → Principal.sv). */
+  session_epoch?: number;
 };
 
 export type PublicProject = {
@@ -223,6 +229,10 @@ export class Directory extends DurableObject<Env> {
         id TEXT PRIMARY KEY, kind TEXT NOT NULL, data TEXT NOT NULL, expires INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS oidc_pending_expires ON oidc_pending(expires);
       CREATE INDEX IF NOT EXISTS flows_ts ON flows(ts);
+      -- Para que los topes por persona y por día lean pocas filas (no toda la tabla).
+      CREATE INDEX IF NOT EXISTS reports_reporter_ts ON reports(reporter, ts);
+      CREATE INDEX IF NOT EXISTS uploads_ts ON uploads(ts);
+      CREATE INDEX IF NOT EXISTS uploads_uploader_ts ON uploads(uploader, ts);
       -- Claves de agente de una parcela: solo se guarda la huella (sha256) de la clave.
       CREATE TABLE IF NOT EXISTS agent_keys (
         id TEXT PRIMARY KEY, user_id TEXT NOT NULL, project_id TEXT NOT NULL, hash TEXT NOT NULL UNIQUE,
@@ -287,6 +297,9 @@ export class Directory extends DurableObject<Env> {
     // Migración: retrato del personaje (lo hace la web en el navegador) y de qué personaje es.
     if (!ucols.includes("portrait_hash")) this.sql.exec("ALTER TABLE users ADD COLUMN portrait_hash TEXT");
     if (!ucols.includes("portrait_of")) this.sql.exec("ALTER TABLE users ADD COLUMN portrait_of TEXT");
+    // Migración: versión de las sesiones. Subirla («cerrar sesión en todos los dispositivos») deja
+    // sin valor todas las sesiones anteriores de la cuenta.
+    if (!ucols.includes("session_epoch")) this.sql.exec("ALTER TABLE users ADD COLUMN session_epoch INTEGER NOT NULL DEFAULT 0");
     // Contador de números de jugador: nunca baja, así un número no se reutiliza aunque se borre la cuenta.
     this.sql.exec("INSERT OR IGNORE INTO counters (k, v) VALUES ('next_player', (SELECT COALESCE(MAX(player_no), 0) + 1 FROM users))");
     // Migración: el personaje propio que ya llevaba cada cuenta entra en su armario (una sola vez).
@@ -340,14 +353,31 @@ export class Directory extends DurableObject<Env> {
    * hay un tope de vivos para que nadie llene el Directory (y la cuota del día) a base de peticiones.
    */
   private flowsBusy(): Fail | null {
-    this.sql.exec("DELETE FROM flows WHERE ts < ?", Date.now() - FLOW_TTL_MS);
-    const n = this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM flows").one().n;
-    return n >= MAX_LIVE_FLOWS ? fail(503, "busy", "hay demasiadas entradas en curso; prueba en un minuto") : null;
+    this.expireFlows();
+    // Cuántos hay vivos se lleva en memoria (contarlos con COUNT(*) en cada petición lee miles de
+    // filas y agota la cuota diaria de lecturas a base de peticiones anónimas). Se cuenta una vez
+    // al despertar el objeto.
+    this.liveFlows ??= this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM flows").one().n;
+    return this.liveFlows >= MAX_LIVE_FLOWS ? fail(503, "busy", "hay demasiadas entradas en curso; prueba en un minuto") : null;
   }
 
-  private takeFlow(id: unknown, kind: "register" | "login" | "addkey" | "google" | "gcode") {
-    this.sql.exec("DELETE FROM flows WHERE ts < ?", Date.now() - FLOW_TTL_MS);
-    if (typeof id !== "string") return null;
+  private liveFlows: number | null = null;
+
+  /** Borra los flujos caducados (por índice: solo lee los que borra) y los descuenta. */
+  private expireFlows() {
+    const gone = this.sql.exec("DELETE FROM flows WHERE ts < ? RETURNING id", Date.now() - FLOW_TTL_MS).toArray().length;
+    if (this.liveFlows !== null) this.liveFlows = Math.max(0, this.liveFlows - gone);
+  }
+
+  /** Guarda un flujo nuevo (y lo cuenta). */
+  private insertFlow(id: string, kind: string, challenge: string, userId: string | null, displayName: string | null) {
+    this.sql.exec("INSERT INTO flows (id, kind, challenge, user_id, display_name, ts) VALUES (?, ?, ?, ?, ?, ?)", id, kind, challenge, userId, displayName, Date.now());
+    if (this.liveFlows !== null) this.liveFlows++;
+  }
+
+  private takeFlow(id: unknown, kind: "register" | "login" | "addkey" | "google" | "gcode" | "glink") {
+    this.expireFlows();
+    if (typeof id !== "string" || id.length > 100) return null;
     const row = this.sql
       .exec<{ challenge: string; user_id: string | null; display_name: string | null; ts: number }>(
         "SELECT challenge, user_id, display_name, ts FROM flows WHERE id = ? AND kind = ?",
@@ -355,7 +385,10 @@ export class Directory extends DurableObject<Env> {
         kind,
       )
       .toArray()[0];
-    this.sql.exec("DELETE FROM flows WHERE id = ?", id); // un solo uso
+    if (row) {
+      this.sql.exec("DELETE FROM flows WHERE id = ?", id); // un solo uso
+      if (this.liveFlows !== null) this.liveFlows = Math.max(0, this.liveFlows - 1);
+    }
     return row ?? null;
   }
 
@@ -382,14 +415,7 @@ export class Directory extends DurableObject<Env> {
       authenticatorSelection: { residentKey: "required", userVerification: "preferred" },
     });
     const flow = randomId("f_");
-    this.sql.exec(
-      "INSERT INTO flows (id, kind, challenge, user_id, display_name, ts) VALUES (?, 'register', ?, ?, ?, ?)",
-      flow,
-      options.challenge,
-      userId,
-      name,
-      Date.now(),
-    );
+    this.insertFlow(flow, "register", options.challenge, userId, name);
     return ok({ flow_id: flow, options });
   }
 
@@ -431,7 +457,7 @@ export class Directory extends DurableObject<Env> {
     if (busy) return busy;
     const options = await generateAuthenticationOptions({ rpID: this.rpID, userVerification: "preferred" });
     const flow = randomId("f_");
-    this.sql.exec("INSERT INTO flows (id, kind, challenge, ts) VALUES (?, 'login', ?, ?)", flow, options.challenge, Date.now());
+    this.insertFlow(flow, "login", options.challenge, null, null);
     return ok({ flow_id: flow, options });
   }
 
@@ -482,6 +508,8 @@ export class Directory extends DurableObject<Env> {
   async addPasskeyOptions(userId: string) {
     const u = this.user(userId);
     if (!u) return fail(404, "not_found", "la cuenta no existe");
+    const busy = this.flowsBusy();
+    if (busy) return busy;
     const existing = this.sql.exec<{ id: string }>("SELECT id FROM credentials WHERE user_id = ?", userId).toArray();
     const options = await generateRegistrationOptions({
       rpName: "xenxo.io",
@@ -494,7 +522,7 @@ export class Directory extends DurableObject<Env> {
       authenticatorSelection: { residentKey: "required", userVerification: "preferred" },
     });
     const flow = randomId("f_");
-    this.sql.exec("INSERT INTO flows (id, kind, challenge, user_id, ts) VALUES (?, 'addkey', ?, ?, ?)", flow, options.challenge, userId, Date.now());
+    this.insertFlow(flow, "addkey", options.challenge, userId, null);
     return ok({ flow_id: flow, options });
   }
 
@@ -546,9 +574,18 @@ export class Directory extends DurableObject<Env> {
     age_confirmed?: unknown;
     accept_terms?: unknown;
     origin: string;
+    /**
+     * Huella (sha256, base64url) de un secreto que la web guarda en este navegador. Al volver,
+     * solo ese navegador puede canjear el resultado: nadie puede meter a otra persona en su cuenta
+     * con un enlace (ni vincular su Google a la cuenta de otro).
+     */
+    bind_hash?: unknown;
   }): Promise<Result<{ state: string; nonce: string; code_challenge: string }>> {
     const mode = input.mode;
     if (mode !== "login" && mode !== "register" && mode !== "link") return fail(400, "bad_message", "mode: login, register o link");
+    if (typeof input.bind_hash !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(input.bind_hash)) {
+      return fail(400, "bad_message", "falta el enlace con este navegador (recarga la página)");
+    }
     const busy = this.flowsBusy();
     if (busy) return busy;
     let name: string | null = null;
@@ -564,24 +601,22 @@ export class Directory extends DurableObject<Env> {
     const verifier = randomId("", 48);
     const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)));
     const code_challenge = isoBase64URL.fromBuffer(digest);
-    this.sql.exec(
-      "INSERT INTO flows (id, kind, challenge, user_id, display_name, ts) VALUES (?, 'google', ?, ?, ?, ?)",
+    this.insertFlow(
       state,
-      JSON.stringify({ verifier, nonce, mode, origin: input.origin }),
+      "google",
+      JSON.stringify({ verifier, nonce, mode, origin: input.origin, bind: input.bind_hash }),
       mode === "link" ? input.userId! : null,
       name,
-      Date.now(),
     );
     return ok({ state, nonce, code_challenge });
   }
 
-  /** Recupera (y consume) el viaje a Google por su estado. */
   /**
    * Para vincular Google desde la web (que pide el enlace con fetch): sin gastar el flujo, los datos
    * para mandar a Google desde una navegación normal, que es la que deja la cookie que lo ata.
    */
   async googleLinkPeek(state: unknown): Promise<{ state: string; nonce: string; code_challenge: string } | null> {
-    if (typeof state !== "string") return null;
+    if (typeof state !== "string" || state.length > 100) return null;
     const f = this.sql
       .exec<{ challenge: string; ts: number }>("SELECT challenge, ts FROM flows WHERE id = ? AND kind = 'google'", state)
       .toArray()[0];
@@ -592,30 +627,35 @@ export class Directory extends DurableObject<Env> {
     return { state, nonce: data.nonce, code_challenge: isoBase64URL.fromBuffer(digest) };
   }
 
+  /** Recupera (y consume) el viaje a Google por su estado. */
   googleFlow(state: unknown) {
     const f = this.takeFlow(state, "google");
     if (!f) return null;
-    const data = JSON.parse(f.challenge) as { verifier: string; nonce: string; mode: "login" | "register" | "link"; origin: string };
+    const data = JSON.parse(f.challenge) as { verifier: string; nonce: string; mode: "login" | "register" | "link"; origin: string; bind?: string };
     return { ...data, user_id: f.user_id, display_name: f.display_name };
   }
 
   /**
    * Termina el viaje con el identificador de Google ya comprobado por el Worker. Devuelve un código
-   * de un solo uso (60 s) que la web cambia por la sesión: así el token nunca viaja en una URL.
+   * de un solo uso (60 s) que la web cambia por la sesión (o, al vincular, por el vínculo, con la
+   * sesión de esa cuenta): así el token nunca viaja en una URL y el código solo vale en el navegador
+   * que empezó el viaje.
    */
   async googleComplete(
-    flow: { mode: "login" | "register" | "link"; user_id: string | null; display_name: string | null },
+    flow: { mode: "login" | "register" | "link"; user_id: string | null; display_name: string | null; bind?: string },
     googleSub: string,
-  ): Promise<Result<{ code: string | null; linked: boolean }>> {
+  ): Promise<Result<{ code: string; link: boolean }>> {
     const subject = await sha256Hex(`xenxo-google:${googleSub}`);
     const owner = this.sql.exec<{ user_id: string }>("SELECT user_id FROM logins WHERE provider = 'google' AND subject = ?", subject).toArray()[0]?.user_id;
     const now = Date.now();
-    let userId: string;
+    const code = randomId("c_", 24);
     if (flow.mode === "link") {
       if (owner && owner !== flow.user_id) return fail(409, "google_taken", "esa cuenta de Google ya entra en otro jugador");
-      if (!owner) this.sql.exec("INSERT INTO logins (provider, subject, user_id, created_at) VALUES ('google', ?, ?, ?)", subject, flow.user_id, now);
-      return ok({ code: null, linked: true });
+      // No se vincula aquí: lo termina la web con la sesión de la cuenta y el secreto del navegador.
+      this.insertFlow(code, "glink", JSON.stringify({ subject, bind: flow.bind ?? "" }), flow.user_id, null);
+      return ok({ code, link: true });
     }
+    let userId: string;
     if (owner) {
       userId = owner;
     } else if (flow.mode === "register" && flow.display_name) {
@@ -628,17 +668,40 @@ export class Directory extends DurableObject<Env> {
       return fail(404, "google_unknown", "no hay ninguna cuenta con ese Google; crea una o entra con tu passkey y vincúlalo");
     }
     this.sql.exec("UPDATE logins SET last_used = ? WHERE provider = 'google' AND subject = ?", now, subject);
-    const code = randomId("c_", 24);
-    this.sql.exec("INSERT INTO flows (id, kind, challenge, user_id, ts) VALUES (?, 'gcode', '-', ?, ?)", code, userId, now);
-    return ok({ code, linked: false });
+    this.insertFlow(code, "gcode", JSON.stringify({ bind: flow.bind ?? "" }), userId, null);
+    return ok({ code, link: false });
+  }
+
+  /** ¿Es este el secreto del navegador que empezó el viaje? */
+  private async boundTo(challenge: string, bind: unknown): Promise<boolean> {
+    let want = "";
+    try {
+      want = (JSON.parse(challenge) as { bind?: string }).bind ?? "";
+    } catch {
+      return false;
+    }
+    if (!want || typeof bind !== "string" || bind.length < 32 || bind.length > 128) return false;
+    const got = isoBase64URL.fromBuffer(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(bind))));
+    return got === want;
   }
 
   /** Cambia el código de un solo uso por la cuenta (la sesión la firma el Worker). */
-  googleRedeem(code: unknown): Result<UserRow> {
+  async googleRedeem(code: unknown, bind: unknown): Promise<Result<UserRow>> {
     const f = this.takeFlow(code, "gcode");
-    if (!f || !f.user_id || Date.now() - f.ts > 60_000) return fail(400, "flow_expired", "caducó; vuelve a entrar");
+    if (!f || !f.user_id || Date.now() - f.ts > 60_000 || !(await this.boundTo(f.challenge, bind))) return fail(400, "flow_expired", "caducó; vuelve a entrar");
     const u = this.user(f.user_id);
     return u ? ok(u) : fail(401, "unknown_user", "la cuenta ya no existe");
+  }
+
+  /** Termina de vincular Google: con la sesión de la cuenta que lo pidió y en el mismo navegador. */
+  async googleLinkFinish(userId: string, code: unknown, bind: unknown): Promise<Result<{ linked: true }>> {
+    const f = this.takeFlow(code, "glink");
+    if (!f || f.user_id !== userId || Date.now() - f.ts > 60_000 || !(await this.boundTo(f.challenge, bind))) return fail(400, "flow_expired", "caducó; vuelve a vincular Google");
+    const { subject } = JSON.parse(f.challenge) as { subject: string };
+    const owner = this.sql.exec<{ user_id: string }>("SELECT user_id FROM logins WHERE provider = 'google' AND subject = ?", subject).toArray()[0]?.user_id;
+    if (owner && owner !== userId) return fail(409, "google_taken", "esa cuenta de Google ya entra en otro jugador");
+    if (!owner) this.sql.exec("INSERT INTO logins (provider, subject, user_id, created_at) VALUES ('google', ?, ?, ?)", subject, userId, Date.now());
+    return ok({ linked: true });
   }
 
   /** Formas de entrar de una cuenta (para sus ajustes). */
@@ -667,9 +730,21 @@ export class Directory extends DurableObject<Env> {
   user(id: string): UserRow | null {
     return (
       this.sql
-        .exec<UserRow>("SELECT id, display_name, avatar_hash, avatar_format, created_at, player_no FROM users WHERE id = ?", id)
+        .exec<UserRow>("SELECT id, display_name, avatar_hash, avatar_format, created_at, player_no, session_epoch FROM users WHERE id = ?", id)
         .toArray()[0] ?? null
     );
+  }
+
+  /** Cierra todas las sesiones de la cuenta (sube su versión: las anteriores ya no se renuevan). */
+  endSessions(id: string): Result<{ ok: true }> {
+    const n = this.sql.exec("UPDATE users SET session_epoch = session_epoch + 1 WHERE id = ?", id).rowsWritten;
+    return n ? ok({ ok: true }) : fail(404, "not_found", "la cuenta no existe");
+  }
+
+  /** ¿Sigue valiendo una sesión (la cuenta existe y la versión es la actual)? */
+  sessionOk(id: string, sv: number): boolean {
+    const r = this.sql.exec<{ v: number }>("SELECT session_epoch AS v FROM users WHERE id = ?", id).toArray()[0];
+    return !!r && r.v === sv;
   }
 
   async me(id: string): Promise<Result<UserRow & { projects: PublicProject[]; avatar_effective: { hash: string; format: string }; portrait: { hash: string; current: boolean } | null }>> {
@@ -1015,37 +1090,79 @@ export class Directory extends DurableObject<Env> {
   /* Subidas                                                            */
   /* ---------------------------------------------------------------- */
 
+  /**
+   * Reserva una subida: comprueba los topes contando también las que están en curso (si no, diez
+   * subidas a la vez pasarían todas la comprobación antes de que se apuntara ninguna). La reserva se
+   * cierra con recordUpload o, si falla, con releaseUpload.
+   */
   canUpload(uploader: string): Result<true> {
+    const pending = this.uploadsInFlight.get(uploader) ?? 0;
+    if (pending >= 3) return fail(429, "rate_limited", "espera a que terminen tus subidas en curso");
     const n = this.sql
       .exec<{ n: number }>("SELECT COUNT(*) AS n FROM uploads WHERE uploader = ? AND ts > ?", uploader, Date.now() - 86_400_000)
       .one().n;
-    if (n >= MAX_UPLOADS_PER_DAY) return fail(429, "rate_limited", "has llegado al máximo de subidas por hoy");
+    if (n + pending >= this.dailyUploads(uploader)) return fail(429, "rate_limited", "has llegado al máximo de subidas por hoy");
     const all = this.sql
       .exec<{ n: number }>("SELECT COUNT(*) AS n FROM uploads WHERE ts > ?", Date.now() - 86_400_000)
       .one().n;
-    if (all >= MAX_UPLOADS_PER_DAY_GLOBAL) return fail(429, "storage_busy", "hoy ya se han subido muchos modelos a xenxo; prueba mañana");
+    if (all + this.inFlightTotal() >= MAX_UPLOADS_PER_DAY_GLOBAL) return fail(429, "storage_busy", "hoy ya se han subido muchos modelos a xenxo; prueba mañana");
     const mine = this.sql
       .exec<{ b: number | null }>("SELECT SUM(bytes) AS b FROM uploads WHERE uploader = ?", uploader)
       .one().b ?? 0;
-    if (mine + UPLOAD_HEADROOM > USER_QUOTA_BYTES) {
+    if (mine + (pending + 1) * UPLOAD_HEADROOM > USER_QUOTA_BYTES) {
       return fail(413, "quota_exceeded", `has llegado a tu espacio (${USER_QUOTA_BYTES / 1024 ** 2} MB): borra algún modelo para subir otro`);
     }
-    if (this.storedBytes() + UPLOAD_HEADROOM > STORAGE_CAP_BYTES) {
+    if (this.storedBytes() + (this.inFlightTotal() + 1) * UPLOAD_HEADROOM > STORAGE_CAP_BYTES) {
       return fail(507, "storage_full", "el almacén de xenxo está lleno por ahora; vuelve a intentarlo más adelante");
     }
+    this.uploadsInFlight.set(uploader, pending + 1);
     return ok(true);
+  }
+
+  /** Subidas en curso por quien sube (en memoria: si el objeto se reinicia, se olvidan, y no pasa nada). */
+  private uploadsInFlight = new Map<string, number>();
+  private inFlightTotal() {
+    let t = 0;
+    for (const v of this.uploadsInFlight.values()) t += v;
+    return t;
+  }
+
+  /** Cierra una reserva de subida que no llegó a guardarse. */
+  releaseUpload(uploader: string) {
+    const v = (this.uploadsInFlight.get(uploader) ?? 1) - 1;
+    if (v > 0) this.uploadsInFlight.set(uploader, v);
+    else this.uploadsInFlight.delete(uploader);
+  }
+
+  /**
+   * Subidas al día de cada cuenta: las cuentas nuevas (menos de un día) tienen pocas, para que nadie
+   * agote el tope de todo xenxo con un puñado de cuentas recién hechas. Los agentes de parcela
+   * (`prj_…`), las de su proyecto.
+   */
+  private dailyUploads(uploader: string): number {
+    const uid = uploader.startsWith("usr_") ? uploader.slice(4) : null;
+    if (!uid) return MAX_UPLOADS_PER_DAY;
+    const u = this.sql.exec<{ created_at: number }>("SELECT created_at FROM users WHERE id = ?", uid).toArray()[0];
+    return u && Date.now() - u.created_at < 86_400_000 ? NEW_ACCOUNT_UPLOADS_PER_DAY : MAX_UPLOADS_PER_DAY;
   }
 
   /** Bytes guardados en R2 por subidas de la gente (cada hash cuenta una vez). */
   storedBytes(): number {
-    return (
+    // Recorre todas las subidas: se recuerda unos minutos (cada subida nueva lo vuelve a calcular).
+    const now = Date.now();
+    if (this.storedCache && now - this.storedCache.at < 10 * 60_000) return this.storedCache.bytes;
+    const bytes =
       this.sql
         .exec<{ b: number | null }>("SELECT SUM(b) AS b FROM (SELECT MAX(bytes) AS b FROM uploads GROUP BY hash)")
-        .one().b ?? 0
-    );
+        .one().b ?? 0;
+    this.storedCache = { bytes, at: now };
+    return bytes;
   }
+  private storedCache: { bytes: number; at: number } | null = null;
 
   recordUpload(uploader: string, hash: string, kind: string, bytes: number) {
+    this.releaseUpload(uploader);
+    this.storedCache = null;
     this.sql.exec(
       "INSERT OR REPLACE INTO uploads (hash, uploader, kind, ts, bytes) VALUES (?, ?, ?, ?, ?)",
       hash, uploader, kind, Date.now(), bytes,
@@ -1463,6 +1580,11 @@ export class Directory extends DurableObject<Env> {
     return !!userId && (r.user_id === userId || this.isModerator(userId));
   }
 
+  /** Los chunks de todos los distritos de la comunidad que existen (para el chat, la exportación y la baja). */
+  communityChunkIds(): string[] {
+    return this.sql.exec<{ chunk_id: string }>("SELECT chunk_id FROM community_districts").toArray().map((r) => r.chunk_id);
+  }
+
   /** Los aprobados (para /districts y, en la fase 3, el anillo exterior del nexo). */
   communityDistricts(): CommunityDistrict[] {
     return this.districtRows("status = 'approved' ORDER BY reviewed_at ASC").map((r) => this.districtView(r));
@@ -1783,6 +1905,29 @@ export class Directory extends DurableObject<Env> {
     this.sql.exec("DELETE FROM oidc_pending WHERE expires < ?", now);
   }
 
+  /**
+   * Peticiones de permiso vivas (en total y por juego), contadas en memoria. Se recuentan desde la
+   * tabla como mucho cada 10 minutos (y al despertar): entre medias, cada petición nueva suma y las
+   * caducadas siguen contando hasta el recuento, que es lo prudente.
+   */
+  private pendingCount: { total: number; byClient: Map<string, number>; at: number } | null = null;
+  private pendingRequests() {
+    const now = Date.now();
+    if (!this.pendingCount || now - this.pendingCount.at > 10 * 60_000) {
+      const byClient = new Map<string, number>();
+      let total = 0;
+      for (const r of this.sql.exec<{ c: string; n: number }>(
+        "SELECT json_extract(data, '$.client_id') AS c, COUNT(*) AS n FROM oidc_pending WHERE kind = 'request' AND expires > ? GROUP BY c",
+        now,
+      )) {
+        byClient.set(r.c, r.n);
+        total += r.n;
+      }
+      this.pendingCount = { total, byClient, at: now };
+    }
+    return this.pendingCount;
+  }
+
   /* --- Juegos (clientes) --- */
 
   async registerClient(userId: string, body: { name?: unknown; redirect_uris?: unknown; project_id?: unknown }): Promise<Result<OidcClientRow>> {
@@ -1858,17 +2003,18 @@ export class Directory extends DurableObject<Env> {
       return { ok: false, error: "invalid_redirect_uri", message: "esa dirección de vuelta no está registrada para este juego", redirect: null };
     }
     if (!validState(q.state)) return { ok: false, error: "invalid_request", message: "state no válido", redirect: null };
-    // Tope de peticiones vivas: nadie llena el Directory a base de abrir pantallas de permiso.
-    const live = this.sql.exec<{ n: number; mine: number | null }>(
-      "SELECT COUNT(*) AS n, SUM(CASE WHEN json_extract(data, '$.client_id') = ? THEN 1 ELSE 0 END) AS mine FROM oidc_pending WHERE kind = 'request' AND expires > ?",
-      c.client_id, Date.now(),
-    ).one();
-    if (live.n >= MAX_PENDING_TOTAL || (live.mine ?? 0) >= MAX_PENDING_PER_CLIENT) {
+    // Tope de peticiones vivas: nadie llena el Directory a base de abrir pantallas de permiso. Se
+    // cuentan en memoria (contarlas en la tabla en cada petición lee miles de filas).
+    const live = this.pendingRequests();
+    if (live.total >= MAX_PENDING_TOTAL || (live.byClient.get(c.client_id) ?? 0) >= MAX_PENDING_PER_CLIENT) {
       return { ok: false, error: "temporarily_unavailable", message: "hay demasiadas peticiones en curso; prueba en un minuto", redirect: null };
     }
     const id = randomId("ar_", 18);
-    const save = (data: Record<string, unknown>) =>
+    const save = (data: Record<string, unknown>) => {
       this.sql.exec("INSERT INTO oidc_pending (id, kind, data, expires) VALUES (?, 'request', ?, ?)", id, JSON.stringify({ client_id: c.client_id, redirect_uri: redirect, state: q.state || null, ...data }), Date.now() + REQUEST_TTL_MS);
+      live.total++;
+      live.byClient.set(c.client_id, (live.byClient.get(c.client_id) ?? 0) + 1);
+    };
     // Un error del juego tampoco redirige solo: la persona lo ve en xenxo y vuelve con un clic.
     // Así nadie usa xenxo como trampolín hacia su web (RFC 9700 §4.11).
     const problem = (error: string, message: string) => {
@@ -2205,6 +2351,16 @@ export class Directory extends DurableObject<Env> {
       .exec<{ n: number }>("SELECT COUNT(*) AS n FROM reports WHERE reporter = ? AND ts > ?", reporter, Date.now() - 86_400_000)
       .one().n;
     if (n >= MAX_REPORTS_PER_DAY) return fail(429, "rate_limited", "has enviado muchas denuncias hoy");
+    // Los invitados son gratis (uno nuevo por petición): entre todos, un tope al día. Con cuenta,
+    // el de cada persona. Así nadie entierra las denuncias de verdad bajo miles de falsas.
+    if (reporter.startsWith("g_")) {
+      const key = `guest_reports:${new Date().toISOString().slice(0, 10)}`;
+      const used = this.sql.exec<{ v: number }>("SELECT v FROM counters WHERE k = ?", key).toArray()[0]?.v ?? 0;
+      if (used >= MAX_GUEST_REPORTS_PER_DAY) return fail(429, "rate_limited", "hoy ya hay muchas denuncias sin cuenta; crea una cuenta para denunciar");
+      this.sql.exec("INSERT INTO counters (k, v) VALUES (?, 1) ON CONFLICT(k) DO UPDATE SET v = v + 1", key);
+      // Los contadores de días pasados no sirven: fuera.
+      this.sql.exec("DELETE FROM counters WHERE k LIKE 'guest_reports:%' AND k < ?", key);
+    }
     this.sql.exec(
       "INSERT INTO reports (ts, reporter, target_type, target_id, reason, details) VALUES (?, ?, ?, ?, ?, ?)",
       Date.now(),

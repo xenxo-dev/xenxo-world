@@ -19,7 +19,9 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const SDK_VERSION = "^0.3.0";
 const KIT_VERSION = "^0.1.0";
-const WRANGLER_VERSION = "^4.150.0";
+const WRANGLER_VERSION = "^4.154.0";
+/** Vite 8 pide Node 20.19+ o 22.12+ y wrangler 4 (para publicar), Node 22: se pide 22.12. */
+const NODE_MIN = [22, 12];
 
 const args = process.argv.slice(2);
 const flag = (f) => args.includes(f);
@@ -32,7 +34,10 @@ const positional = args.filter((a, i) => !a.startsWith("--") && !args[i - 1]?.ma
 const T = {
   es: {
     hello: "\n  xenxo · crea tu juego\n",
+    helloDistrict: "\n  xenxo · crea tu distrito\n",
+    oldNode: (v) => `  Aviso: tienes Node ${v}. El juego necesita Node 22.12 o más nuevo (Vite y wrangler): https://nodejs.org\n`,
     folder: "  Carpeta del juego",
+    districtFolder: "  Carpeta del distrito",
     kind: "  ¿2D o 3D? (2d/3d)",
     multi: "  ¿Multijugador, con sala propia en tu Cloudflare gratuito? (s/n)",
     yes: /^(s|si|sí|y|yes)$/i,
@@ -48,11 +53,14 @@ const T = {
       `  Siguientes pasos:\n\n    cd ${d}\n    npm install\n    npm run dev\n\n` +
       "  Se abre con un jugador de prueba (el simulador de xenxo, abajo a la izquierda).\n" +
       "  Pídele cambios a tu IA: lee AGENTS.md y sabe integrarse con xenxo.\n" +
-      "  Para publicarlo y que la gente entre con su cuenta de xenxo: README.md.\n",
+      "  npm run check comprueba la ficha (public/xenxo.json). Para publicarlo: README.md.\n",
   },
   en: {
     hello: "\n  xenxo · create your game\n",
+    helloDistrict: "\n  xenxo · create your district\n",
+    oldNode: (v) => `  Warning: you have Node ${v}. The game needs Node 22.12 or newer (Vite and wrangler): https://nodejs.org\n`,
     folder: "  Game folder",
+    districtFolder: "  District folder",
     kind: "  2D or 3D? (2d/3d)",
     multi: "  Multiplayer, with its own room on your free Cloudflare? (y/n)",
     yes: /^(y|yes|s|si|sí)$/i,
@@ -68,7 +76,7 @@ const T = {
       `  Next steps:\n\n    cd ${d}\n    npm install\n    npm run dev\n\n` +
       "  It opens with a test player (the xenxo simulator, bottom left).\n" +
       "  Ask your AI for changes: it reads AGENTS.md and knows how to work with xenxo.\n" +
-      "  To publish it so people sign in with their xenxo account: README.md.\n",
+      "  npm run check validates the game card (public/xenxo.json). To publish it: README.md.\n",
   },
 };
 
@@ -81,12 +89,25 @@ async function ask(rl, question, fallback) {
   return a || fallback;
 }
 
+/** Deja README.md y AGENTS.md en el idioma elegido (las plantillas traen `*.en.md` para el inglés). */
+function pickLanguage(target) {
+  for (const doc of ["README", "AGENTS"]) {
+    const en = join(target, `${doc}.en.md`);
+    if (!existsSync(en)) continue;
+    if (lang === "en") renameSync(en, join(target, `${doc}.md`));
+    else rmSync(en);
+  }
+}
+
 async function main() {
-  console.log(t.hello);
+  const isDistrict = flag("--district") || flag("--distrito");
+  console.log(isDistrict ? t.helloDistrict : t.hello);
+  const [major, minor] = process.versions.node.split(".").map(Number);
+  if (!isDistrict && (major < NODE_MIN[0] || (major === NODE_MIN[0] && minor < NODE_MIN[1]))) console.log(t.oldNode(process.versions.node));
   const interactive = process.stdin.isTTY && !flag("--yes") && !flag("--sí");
   const rl = interactive ? createInterface({ input: process.stdin, output: process.stdout }) : null;
   try {
-    if (flag("--district") || flag("--distrito")) return await district(rl);
+    if (isDistrict) return await district(rl);
     let dir = positional[0] ?? (await ask(rl, t.folder, lang === "en" ? "my-xenxo-game" : "mi-juego-xenxo"));
     let kind = flag("--2d") ? "2d" : flag("--3d") ? "3d" : value("--plantilla") ?? value("--template");
     if (kind !== "2d" && kind !== "3d") kind = (await ask(rl, t.kind, "3d")).toLowerCase() === "2d" ? "2d" : "3d";
@@ -106,17 +127,21 @@ async function main() {
     mkdirSync(target, { recursive: true });
     cpSync(join(here, "templates", "common"), target, { recursive: true });
     cpSync(join(here, "templates", kind), target, { recursive: true });
+    pickLanguage(target);
     if (multi) {
-      // La sala: servidor en sala/, cliente real en src/multijugador.js y su parte de README y AGENTS.
+      // La sala: servidor en sala/, cliente real en src/multijugador.js y su parte de README y AGENTS
+      // (en inglés, `*.append.en.md` si la plantilla lo trae; si no, la española).
       cpSync(join(here, "templates", "sala"), target, { recursive: true });
       for (const doc of ["README", "AGENTS"]) {
-        const extra = join(target, `${doc}.append.md`);
+        const es = join(target, `${doc}.append.md`);
+        const en = join(target, `${doc}.append.en.md`);
+        const extra = lang === "en" && existsSync(en) ? en : es;
         const base = readFileSync(join(target, `${doc}.md`), "utf8");
         const add = readFileSync(extra, "utf8");
         // Antes de la licencia, si la hay; si no, al final.
-        const at = base.lastIndexOf("\n## Licencia");
+        const at = Math.max(base.lastIndexOf("\n## Licencia"), base.lastIndexOf("\n## License"));
         writeFileSync(join(target, `${doc}.md`), at >= 0 ? `${base.slice(0, at)}${add}${base.slice(at)}` : base + add);
-        rmSync(extra);
+        for (const f of [es, en]) if (existsSync(f)) rmSync(f);
       }
       const pkgPath = join(target, "package.json");
       const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
@@ -140,6 +165,24 @@ async function main() {
       "{{avatar}}": kind === "2d" ? "badge" : "character",
       "{{sdkVersion}}": SDK_VERSION,
       "{{year}}": String(new Date().getFullYear()),
+      "{{lang}}": lang,
+      "{{htmlDescription}}": lang === "en" ? `A ${kind.toUpperCase()} game for xenxo.io` : `Un juego ${kind.toUpperCase()} para xenxo.io`,
+      // Lo que la persona tiene que cambiar (npm run check avisa si se queda así).
+      "{{author}}": lang === "en" ? "Your name" : "Tu nombre",
+      "{{contact}}": lang === "en" ? "https://github.com/your-user" : "https://github.com/tu-usuario",
+      // public/privacidad.html: con sala, lo que ve y guarda la sala.
+      "{{privacyMulti}}": multi
+        ? "\n      <li><strong>Multijugador:</strong> para jugar con más gente, tu navegador se conecta a la sala del juego\n" +
+          "        (un servidor en Cloudflare), que reenvía tu nombre, tu número, tu personaje y lo que haces en la partida a\n" +
+          "        quien esté en la misma sala. Mientras estás conectado conoce tu dirección IP (para frenar abusos); no guarda\n" +
+          "        nada cuando sales.</li>"
+        : "",
+      "{{privacyMultiEn}}": multi
+        ? "\n        <li><strong>Multiplayer:</strong> to play with others, your browser connects to the game's room (a server on\n" +
+          "          Cloudflare), which relays your name, your number, your character and what you do in the game to whoever is\n" +
+          "          in the same room. While you are connected it knows your IP address (to stop abuse); it keeps nothing once\n" +
+          "          you leave.</li>"
+        : "",
     };
     const walk = (d) => {
       for (const f of readdirSync(d)) {
@@ -165,7 +208,7 @@ async function main() {
 
 /** Un distrito de la comunidad: la ficha, modelos de ejemplo, AGENTS.md y el kit para comprobarlo. */
 async function district(rl) {
-  const dir = positional[0] ?? (await ask(rl, t.folder, lang === "en" ? "my-district" : "mi-distrito"));
+  const dir = positional[0] ?? (await ask(rl, t.districtFolder, lang === "en" ? "my-district" : "mi-distrito"));
   const target = resolve(process.cwd(), dir);
   const name = basename(target).toLowerCase();
   if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(name)) {
@@ -178,6 +221,7 @@ async function district(rl) {
   }
   mkdirSync(target, { recursive: true });
   cpSync(join(here, "templates", "district"), target, { recursive: true });
+  pickLanguage(target);
   if (existsSync(join(target, "_gitignore"))) renameSync(join(target, "_gitignore"), join(target, ".gitignore"));
   // El nombre corto del distrito: 3–24 caracteres, empieza por letra y sin «xenxo».
   let slug = name.replace(/xenxo/g, "").replace(/^[^a-z]+/, "").replace(/-+/g, "-").slice(0, 24).replace(/-$/, "");

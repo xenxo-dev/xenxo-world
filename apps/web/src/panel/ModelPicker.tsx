@@ -7,8 +7,8 @@ import { Notice } from "./ui";
 export function problemText(p: BudgetProblem): string {
   const kb = (n: number) => Math.round(n / 1024);
   return t(`budget.${p.what}` as Key, {
-    value: p.what === "bytes" ? kb(p.value) : p.value,
-    max: p.what === "bytes" ? kb(p.max) : p.max,
+    value: p.what === "bytes" ? kb(p.value) : p.what === "texturePixels" ? (p.value / 1048576).toFixed(1) : p.value,
+    max: p.what === "bytes" ? kb(p.max) : p.what === "texturePixels" ? Math.round(p.max / 1048576) : p.max,
   });
 }
 

@@ -113,7 +113,7 @@ export function Chat({ touch, onSignup }: { touch: boolean; onSignup: () => void
       </ul>
       {reporting && (
         <div className="px-2 pb-2">
-          <ReportForm compact targetType="chat" targetId={reporting} onClose={() => setReporting(null)} />
+          <ReportForm compact targetType="chat" targetId={reporting} chunkId={world.chunkId} onClose={() => setReporting(null)} />
         </div>
       )}
       {notice && <p className="px-3 pb-1 text-xs text-ocre">{t(`chat.notice.${notice}` as Key)}</p>}

@@ -130,7 +130,7 @@ export function AgentKeys({ projectId }: { projectId: string }) {
           </li>
           <li>
             {t("agentKeys.step2claude")}
-            <CopyBlock text={`claude mcp add xenxo -e XENXO_KEY=${key}${env} -- node ~/xenxo-mcp.mjs`} />
+            <CopyBlock text={`claude mcp add --scope user xenxo -e XENXO_KEY=${key}${env} -- node ~/xenxo-mcp.mjs`} />
             <span className="mt-2 block">{t("agentKeys.step2cursor")}</span>
             <CopyBlock
               text={`{\n  "mcpServers": {\n    "xenxo": { "command": "node", "args": ["/ruta/a/xenxo-mcp.mjs"], "env": { "XENXO_KEY": "${key}"${cursorEnv} } }\n  }\n}`}

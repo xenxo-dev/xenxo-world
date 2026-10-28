@@ -21,9 +21,13 @@ permissions:
 
 jobs:
   publish:
+    # Solo desde main: nunca se publica el código de otra rama.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22

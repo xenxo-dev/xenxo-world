@@ -110,6 +110,9 @@ Crea un juego **2D o 3D** listo para xenxo: «Entrar con xenxo», el personaje V
 en tu cuenta gratuita de Cloudflare (o cualquier alojamiento estático). Detalles en
 [`packages/create-xenxo/README.md`](packages/create-xenxo/README.md).
 
+> **¿npm da 404?** Si los paquetes aún no están publicados, créalo desde el repositorio: pasos en
+> [«Mientras no esté en npm»](packages/create-xenxo/README.md#mientras-no-esté-en-npm).
+
 ## Crea tu distrito
 
 ```bash
@@ -121,6 +124,9 @@ Un distrito entero de 256 × 256 m (tu ciudad, tus actividades y portales a tus 
 `xenxo-district.json`, con sus modelos `.glb`. El kit (`@xenxo/district-kit`, MIT) comprueba en tu
 equipo lo mismo que comprobará xenxo; luego lo subes en *Cuenta → Tu distrito*, queda en borrador
 para que lo pruebes y moderación lo revisa. Las reglas están en el `AGENTS.md` de la plantilla.
+
+> **¿npm da 404?** Si los paquetes aún no están publicados, créalo desde el repositorio: pasos en
+> [«Mientras no esté en npm»](packages/create-xenxo/README.md#mientras-no-esté-en-npm).
 
 ## «Entrar con xenxo» en tu juego
 

@@ -21,16 +21,28 @@ concurrency:
 
 jobs:
   deploy:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    # Solo despliega lo que está en main de ESTE repositorio y llegó por push (nunca el código de un
+    # pull request, aunque su rama se llame main en un fork: workflow_run filtra por el nombre de la
+    # rama, no por el repositorio). A mano, solo desde main.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
+    # Los secretos NO van a nivel de trabajo: solo los pasos que despliegan los ven (así ningún
+    # script de instalación o de compilación de una dependencia puede leerlos).
     env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WEB_DOMAIN: ${{ vars.WEB_DOMAIN || 'xenxo.io' }}
     steps:
       - name: ¿Está configurado?
+        env:
+          HAS_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+          HAS_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
+          HAS_SECRET: ${{ secrets.TOKEN_SECRET != '' }}
         run: |
-          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ] || [ -z "${{ secrets.TOKEN_SECRET }}" ]; then
+          if [ "$HAS_TOKEN" != "true" ] || [ "$HAS_ACCOUNT" != "true" ] || [ "$HAS_SECRET" != "true" ]; then
             echo "::notice::Faltan CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID o TOKEN_SECRET: no se despliega."
             echo "SKIP=1" >> "$GITHUB_ENV"
           fi
@@ -38,6 +50,7 @@ jobs:
         if: env.SKIP != '1'
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-node@v4
         if: env.SKIP != '1'
         with:
@@ -48,6 +61,9 @@ jobs:
 
       - name: Subdominio workers.dev de la cuenta (lo exige Cloudflare; no publicamos nada en él)
         if: env.SKIP != '1'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain"
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
@@ -64,12 +80,17 @@ jobs:
       - name: Bucket de modelos en la UE (solo la primera vez)
         if: env.SKIP != '1'
         working-directory: apps/realtime
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler r2 bucket create xenxo-assets --jurisdiction eu || echo "ya existe"
 
       - name: Servidor de tiempo real → api.${{ env.WEB_DOMAIN }}
         if: env.SKIP != '1'
         working-directory: apps/realtime
         env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           TOKEN_SECRET: ${{ secrets.TOKEN_SECRET }}
           AGENT_KEYS: ${{ secrets.AGENT_KEYS }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
@@ -94,22 +115,38 @@ jobs:
             --secrets-file "$RUNNER_TEMP/secrets.env"
           rm -f "$RUNNER_TEMP/secrets.env"
 
-      - name: Web → ${{ env.WEB_DOMAIN }}
+      # Compilar, sin secretos a la vista.
+      - name: Compilar la web, el MCP y los juegos de ejemplo
         if: env.SKIP != '1'
         run: |
           VITE_REALTIME_URL="https://api.$WEB_DOMAIN" npm run build -w @xenxo/web
+          # La CSP de _headers nombra xenxo.io: en otro dominio, el suyo.
+          [ "$WEB_DOMAIN" = "xenxo.io" ] || sed -i "s/\*\.xenxo\.io/*.$WEB_DOMAIN/g" apps/web/dist/_headers
           # El servidor MCP (un solo archivo) se sirve desde la web: xenxo.io/mcp/xenxo-mcp.mjs
           npm run build -w @xenxo/mcp
           mkdir -p apps/web/dist/mcp && cp packages/mcp/dist/xenxo-mcp.mjs apps/web/dist/mcp/
-          cd apps/web && npx wrangler deploy --domain "$WEB_DOMAIN" --domain "www.$WEB_DOMAIN"
+          for g in games/*/; do
+            [ -f "$g/wrangler.toml" ] || continue
+            cp packages/sdk/dist/index.js "$g/xenxo/xenxo-sdk.mjs"
+          done
+
+      - name: Web → ${{ env.WEB_DOMAIN }}
+        if: env.SKIP != '1'
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler deploy --domain "$WEB_DOMAIN" --domain "www.$WEB_DOMAIN"
 
       # Juegos de ejemplo, cada uno en su propio dominio (no en xenxo.io: así se pueden incrustar).
       - name: Juegos de ejemplo → xenxo-<juego>.<subdominio>.workers.dev
         if: env.SKIP != '1'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           for g in games/*/; do
             [ -f "$g/wrangler.toml" ] || continue
-            cp packages/sdk/dist/index.js "$g/xenxo/xenxo-sdk.mjs"
             (cd "$g" && npx wrangler deploy)
           done
 

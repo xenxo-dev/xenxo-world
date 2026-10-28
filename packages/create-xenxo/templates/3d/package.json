@@ -7,7 +7,8 @@
     "dev": "vite --open",
     "build": "vite build",
     "preview": "vite preview",
-    "deploy": "vite build && npx wrangler pages deploy dist --project-name {{name}}"
+    "deploy": "node scripts/comprobar.mjs --lang {{lang}} && vite build && npx wrangler pages deploy dist --project-name {{name}}",
+    "check": "node scripts/comprobar.mjs --lang {{lang}}"
   },
   "dependencies": {
     "@pixiv/three-vrm": "^3.5.5",
@@ -16,5 +17,8 @@
   },
   "devDependencies": {
     "vite": "^8.3.0"
+  },
+  "engines": {
+    "node": ">=22.12"
   }
 }

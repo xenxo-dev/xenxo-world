@@ -13,6 +13,7 @@ import { billboardSlots, cabinetSlots, DISTRICTS, districtById, parcelIndex, par
 import { communityGates, SHOWCASE_SLOTS, type CommunityGate } from "./nexo";
 import { fetchDevManifest, fetchManifest } from "./games";
 import { defaultAvatarFor, MAX_AGENT_KEYS_PER_PROJECT, MAX_SKINS, type Directory, type UserRow } from "./directory";
+import { allowed, type LimitKind, type RateLimiter } from "./ratelimit";
 
 export { ChunkRoom } from "./chunk-room";
 export { Directory } from "./directory";
@@ -26,6 +27,8 @@ export interface Env {
   TOKEN_SECRET: string;
   AGENT_KEYS?: string;
   ALLOWED_ORIGINS?: string;
+  /** "1" = aplicar los límites por IP también en local (RP_ID=localhost), para probarlos. */
+  RATE_LIMIT_LOCAL?: string;
   /** Dominio de las passkeys (p. ej. "xenxo.io"; "localhost" en desarrollo). */
   RP_ID?: string;
   /** "eu" para que los datos se guarden y procesen solo en la UE. Vacío = sin restricción. */
@@ -51,7 +54,32 @@ export interface Env {
    */
   N8N_WEBHOOK_URL?: string;
   N8N_WEBHOOK_SECRET?: string;
+  /** Limitadores por dirección de red (ratelimit.ts). Opcionales: sin ellos, un respaldo en memoria. */
+  RL_AUTH?: RateLimiter;
+  RL_GUEST?: RateLimiter;
+  RL_REPORT?: RateLimiter;
+  RL_OIDC?: RateLimiter;
+  RL_UPLOAD?: RateLimiter;
 }
+
+function limit(env: Env, kind: LimitKind, req: Request) {
+  // En local (RP_ID=localhost) el banco de conformidad lanza cientos de altas desde la misma IP.
+  if (env.RP_ID === "localhost" && env.RATE_LIMIT_LOCAL !== "1") return Promise.resolve(true);
+  return allowed({ auth: env.RL_AUTH, guest: env.RL_GUEST, report: env.RL_REPORT, oidc: env.RL_OIDC, upload: env.RL_UPLOAD }, kind, req);
+}
+/** Valores de ejemplo de .dev.vars.example: públicos, así que fuera de local no valen. */
+const EXAMPLE_TOKEN_SECRET = "cambia-esto-por-algo-largo-y-aleatorio";
+const EXAMPLE_KEY_HASHES = [
+  "43ededc683aa722f872465f15374bdad75c553f7ae9cb0adbc6139d9ba3c51b1", // dev-agent-key-change-me
+  "29b401073038b82dd8106b36b0e4105cb0fcf084a083efccb6f525c8973bd2d2", // dev-admin-key-change-me
+];
+function withoutExampleKeys(keys: string | undefined): string | undefined {
+  return keys
+    ?.split(",")
+    .filter((e) => !EXAMPLE_KEY_HASHES.some((h) => e.toLowerCase().includes(h)))
+    .join(",");
+}
+const SLOW_DOWN = { error: "rate_limited", message: "demasiadas peticiones seguidas; espera un minuto" };
 
 /* ------------------------------------------------------------------ */
 /* Entrar con Google (OpenID Connect, flujo de código + PKCE)           */
@@ -158,8 +186,36 @@ async function githubRepos(env: Env, ctx: ExecutionContext): Promise<Response> {
 const GUEST_TTL_MS = 60 * 60 * 1000;
 const AGENT_TTL_MS = 15 * 60 * 1000;
 const USER_TTL_MS = 12 * 60 * 60 * 1000;
-/** Lugares del mundo (para denuncias de chat, exportación y baja de una cuenta). */
+/** Lugares fijos del mundo (para denuncias de chat, exportación y baja de una cuenta). */
 const CHAT_CHUNKS = [PLACES.nexo, PLACES.plaza, ...DISTRICTS.map((d) => d.chunk)];
+const FIXED_CHUNKS = new Set(CHAT_CHUNKS);
+
+/** Los chunks de la comunidad que existen, recordados un minuto en esta instancia. */
+let communityCache: { ids: Set<string>; at: number } | null = null;
+async function communityChunks(env: Env): Promise<Set<string>> {
+  if (!communityCache || Date.now() - communityCache.at > 60_000) {
+    communityCache = { ids: new Set(await directory(env).communityChunkIds()), at: Date.now() };
+  }
+  return communityCache.ids;
+}
+
+/**
+ * ¿Existe este lugar? Solo se despierta (y se crea) el objeto de un chunk que es del mundo: el
+ * nexo, la plaza, los distritos y los de la comunidad. Un id inventado no crea nada.
+ */
+async function knownChunk(env: Env, id: string): Promise<boolean> {
+  if (FIXED_CHUNKS.has(id)) return true;
+  if (!isCommunityChunk(id)) return false;
+  if ((await communityChunks(env)).has(id)) return true;
+  // Uno recién creado: se vuelve a mirar, como mucho cada 5 s (un id inventado no cuesta más).
+  if (communityCache && Date.now() - communityCache.at > 5_000) communityCache = null;
+  return (await communityChunks(env)).has(id);
+}
+
+/** Todos los lugares con chat (los fijos y los de la comunidad): exportar, borrar y moderar. */
+async function allChatChunks(env: Env): Promise<string[]> {
+  return [...CHAT_CHUNKS, ...(await communityChunks(env))];
+}
 
 /** Chunk del distrito donde vive el portal de un proyecto (null si es antiguo, sin parcela). */
 function districtChunk(districtId: string | null | undefined): string | null {
@@ -419,6 +475,18 @@ async function closedFor(env: Env, chunkId: string, p: Principal): Promise<boole
 const SOON = { error: "soon", message: "este distrito abrirá pronto" };
 
 /**
+ * ¿Sigue viva la sesión de esta persona? Una sesión recién firmada (menos de 10 minutos: la web la
+ * renueva al abrirse) se da por buena sin preguntar; una más vieja se comprueba con la cuenta (que
+ * exista y que no se hayan cerrado sus sesiones). Invitados y agentes: su token ya es corto.
+ */
+async function sessionAlive(env: Env, p: Principal): Promise<boolean> {
+  if (p.kind !== "user") return true;
+  if (p.exp - USER_TTL_MS > Date.now() - 10 * 60_000) return true;
+  const uid = userIdOf(p);
+  return !!uid && (await directory(env).sessionOk(uid, p.sv ?? 0));
+}
+
+/**
  * Vuelve a poner en el nexo las puertas de los distritos de la comunidad aprobados (fase 3). Se
  * llama al aprobar, ocultar, cambiar o borrar uno: pocas veces, así que se mira R2 sin caché.
  */
@@ -518,8 +586,14 @@ function cors(req: Request, env: Env): Record<string, string> {
     : {};
 }
 
+/** Cabeceras de seguridad de todas las respuestas de la API: solo HTTPS y sin adivinar tipos. */
+const SECURITY_HEADERS = {
+  "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+  "X-Content-Type-Options": "nosniff",
+};
+
 function json(data: unknown, status: number, headers: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json", ...headers } });
+  return new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json", ...SECURITY_HEADERS, ...headers } });
 }
 
 /** Carné público (xenxo.io/p/<n>): un minuto en la caché del borde, también los «no existe». */
@@ -547,9 +621,38 @@ function failure(r: { status: number; error: string; message: string; detail?: u
   return json({ error: r.error, message: r.message, detail: r.detail }, r.status, h);
 }
 
+/**
+ * El cuerpo de una petición, leído con tope: se corta en cuanto pasa de `max` bytes (no se lee
+ * entero en memoria para medirlo después).
+ */
+export async function readCapped(req: Request, max: number): Promise<string> {
+  const declared = Number(req.headers.get("Content-Length") ?? "0");
+  if (declared > max) throw new Error("too_large");
+  if (!req.body) return "";
+  const reader = req.body.getReader();
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel().catch(() => {});
+      throw new Error("too_large");
+    }
+    parts.push(value);
+  }
+  const all = new Uint8Array(size);
+  let o = 0;
+  for (const p of parts) {
+    all.set(p, o);
+    o += p.byteLength;
+  }
+  return new TextDecoder().decode(all);
+}
+
 async function readJson(req: Request): Promise<Record<string, unknown>> {
-  const text = await req.text();
-  if (text.length > 64 * 1024) throw new Error("too_large");
+  const text = await readCapped(req, 64 * 1024);
   try {
     const v = JSON.parse(text || "{}");
     return v && typeof v === "object" ? (v as Record<string, unknown>) : {};
@@ -563,18 +666,37 @@ async function bearer(req: Request, env: Env): Promise<Principal | null> {
   return token ? verifyToken(token, env.TOKEN_SECRET) : null;
 }
 
-async function userToken(u: UserRow, env: Env) {
+/** Una sesión se puede renovar como mucho este tiempo desde que se entró (después, a entrar otra vez). */
+const SESSION_MAX_MS = 30 * 86_400_000;
+
+/**
+ * Sesión de una persona. `auth` es cuándo entró de verdad (con passkey o Google): las renovaciones
+ * lo conservan. `sv` es la versión de sesiones de la cuenta: «cerrar sesión en todos los
+ * dispositivos» la sube y las sesiones anteriores dejan de renovarse y de entrar en el mundo.
+ */
+async function userToken(u: UserRow, env: Env, authAt = Date.now()) {
   const p: Principal = {
     sub: `usr_${u.id}`,
     kind: "user",
     scopes: ["upload"],
     exp: Date.now() + USER_TTL_MS,
+    sv: u.session_epoch ?? 0,
+    auth: authAt,
     name: u.display_name,
     // Sin personaje propio, el de serie de la cuenta: los demás la ven siempre igual (no según la sesión).
     avatar: u.avatar_hash ? { hash: u.avatar_hash, format: u.avatar_format ?? "glb" } : await defaultAvatarFor(u.id),
     ...(u.player_no != null ? { no: u.player_no } : {}),
   };
   return { token: await signToken(p, env.TOKEN_SECRET), principal: p, user: u };
+}
+
+/**
+ * Sesión nueva con datos nuevos (nombre, personaje…) a partir de la que hay: conserva cuándo se
+ * entró y no vale si la sesión ya no es de la versión actual de la cuenta.
+ */
+async function reissue(from: Principal, u: UserRow, env: Env) {
+  if ((from.sv ?? 0) !== (u.session_epoch ?? 0)) throw new Error("session_expired");
+  return userToken(u, env, from.auth ?? Date.now());
 }
 
 const userIdOf = (p: Principal) => (p.kind === "user" ? p.sub.replace(/^usr_/, "") : null);
@@ -595,6 +717,10 @@ export default {
 
     if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: publicOidc ? open : h });
     if (!env.TOKEN_SECRET) return json({ error: "TOKEN_SECRET no configurado" }, 500, h);
+    // Fuera de local, nunca los valores de ejemplo de .dev.vars.example (son públicos).
+    if (env.RP_ID !== "localhost" && env.TOKEN_SECRET === EXAMPLE_TOKEN_SECRET) {
+      return json({ error: "TOKEN_SECRET de ejemplo: pon uno largo y aleatorio con wrangler secret" }, 500, h);
+    }
 
     try {
       if (path === "/health") return json({ ok: true, protocol: 0 }, 200, h);
@@ -611,6 +737,19 @@ export default {
       }
 
       /* --- Invitados y agentes --- */
+      // Lo que se puede pedir sin cuenta, con límite por dirección de red.
+      const anon: LimitKind | null =
+        path === "/auth/guest" ? "guest"
+        : path.startsWith("/auth/") && req.method !== "GET" ? "auth"
+        : path === "/auth/google/start" ? "auth"
+        : path === "/reports" ? "report"
+        : path === "/oidc/authorize" || path === "/oidc/token" ? "oidc"
+        : path === "/assets" && req.method === "POST" ? "upload"
+        : null;
+      if (anon && !(await limit(env, anon, req))) {
+        return path === "/auth/google/start" ? back(webOrigin(env, null), { auth_error: "rate_limited" }) : json(SLOW_DOWN, 429, { ...h, "Retry-After": "60" });
+      }
+
       if (path === "/auth/guest" && req.method === "POST") {
         const p: Principal = { sub: randomId("g_"), kind: "guest", scopes: [], exp: Date.now() + GUEST_TTL_MS };
         return json({ token: await signToken(p, env.TOKEN_SECRET), principal: p }, 200, h);
@@ -631,7 +770,8 @@ export default {
           };
           return json({ token: await signToken(p, env.TOKEN_SECRET), principal: p, budgets: PARCEL_BUDGETS }, 200, h);
         }
-        const agent = await resolveAgent(key, env.AGENT_KEYS);
+        // Las claves de ejemplo (públicas en el repo) solo valen en local.
+        const agent = await resolveAgent(key, env.RP_ID === "localhost" ? env.AGENT_KEYS : withoutExampleKeys(env.AGENT_KEYS));
         if (!agent) return json({ error: "unauthorized" }, 401, h);
         const p: Principal = { sub: `agt_${agent.id}`, kind: "agent", scopes: agent.scopes, exp: Date.now() + AGENT_TTL_MS };
         return json({ token: await signToken(p, env.TOKEN_SECRET), principal: p }, 200, h);
@@ -670,6 +810,7 @@ export default {
           age_confirmed: q.get("age") === "1",
           accept_terms: q.get("terms"),
           origin,
+          bind_hash: q.get("b"),
         });
         if (!r.ok) return back(origin, { auth_error: r.error });
         // El state queda atado a este navegador: un enlace de vuelta de Google que no empezó aquí no vale.
@@ -694,10 +835,11 @@ export default {
         if (!subject) return back(flow.origin, { auth_error: "google_failed" });
         const r = await dir.googleComplete(flow, subject);
         if (!r.ok) return back(flow.origin, { auth_error: r.error });
-        return back(flow.origin, r.data.linked ? { google_linked: "1" } : { google: r.data.code! });
+        return back(flow.origin, r.data.link ? { google_link: r.data.code } : { google: r.data.code });
       }
       if (path === "/auth/google/finish" && req.method === "POST") {
-        const r = await dir.googleRedeem((await readJson(req)).code);
+        const b = await readJson(req);
+        const r = await dir.googleRedeem(b.code, b.bind);
         return r.ok ? json(await userToken(r.data, env), 200, h) : failure(r, h);
       }
 
@@ -726,10 +868,19 @@ export default {
         // Lo que sube el agente de una parcela cuenta para su proyecto (cuota propia, y no lo toca la limpieza).
         if (p.zone && !(await dir.agentKeyAlive(p.sub.replace(/^agt_/, "")))) return json({ error: "unauthorized", message: "tu clave de agente ya no vale" }, 401, h);
         const uploader = p.zone?.owner ?? p.sub;
-        const allowed = await dir.canUpload(uploader);
-        if (!allowed.ok) return failure(allowed, h);
-        const r = await handleUpload(req, p, env.ASSETS);
-        if (!r.ok) return failure(r, h);
+        const reserved = await dir.canUpload(uploader);
+        if (!reserved.ok) return failure(reserved, h);
+        let r: Awaited<ReturnType<typeof handleUpload>>;
+        try {
+          r = await handleUpload(req, p, env.ASSETS);
+        } catch (e) {
+          await dir.releaseUpload(uploader);
+          throw e;
+        }
+        if (!r.ok) {
+          await dir.releaseUpload(uploader);
+          return failure(r, h);
+        }
         await dir.recordUpload(uploader, r.data.hash, r.data.kind, r.data.bytes);
         return json(r.data, 201, h);
       }
@@ -814,9 +965,14 @@ export default {
         const p = await bearer(req, env);
         if (!p) return json({ error: "unauthorized" }, 401, h);
         const body = await readJson(req);
+        if (typeof body.target_id !== "string" || !/^[A-Za-z0-9_:.#-]{1,80}$/.test(body.target_id)) {
+          return json({ error: "bad_message", message: "identificador no válido" }, 400, h);
+        }
         let evidence: unknown;
-        if (body.target_type === "chat" && typeof body.target_id === "string") {
-          for (const c of CHAT_CHUNKS) evidence ??= await chunk(env, c).chatMessage(body.target_id);
+        if (body.target_type === "chat") {
+          // El mensaje se busca donde se dijo (la web manda el lugar); sin lugar, en los fijos.
+          const where = typeof body.chunk_id === "string" && (await knownChunk(env, body.chunk_id)) ? [body.chunk_id] : CHAT_CHUNKS;
+          for (const c of where) evidence ??= await chunk(env, c).chatMessage(body.target_id);
           if (!evidence) return json({ error: "not_found", message: "ese mensaje ya no existe" }, 404, h);
         }
         const r = await dir.report(p.sub, body, evidence);
@@ -840,11 +996,23 @@ export default {
           const r = await dir.me(uid);
           if (!r.ok) return failure(r, h);
           const { projects: _p, ...u } = r.data;
-          return json(await userToken(u, env), 200, h);
+          // Solo se renueva una sesión vigente: de la versión actual de la cuenta y de un acceso de
+          // hace menos de 30 días (las de antes de existir `auth` empiezan a contar ahora).
+          const authAt = principal!.auth ?? Date.now();
+          if ((principal!.sv ?? 0) !== (u.session_epoch ?? 0) || Date.now() - authAt > SESSION_MAX_MS) {
+            return json({ error: "session_expired", message: "tu sesión ha caducado; vuelve a entrar" }, 401, h);
+          }
+          return json(await userToken(u, env, authAt), 200, h);
+        }
+        // Cerrar sesión en todos los dispositivos (también este).
+        if (path === "/me/logout-all" && req.method === "POST") {
+          const r = await dir.endSessions(uid);
+          return r.ok ? json(r.data, 200, h) : failure(r, h);
         }
         if (path === "/me" && req.method === "PATCH") {
+          if (!(await dir.sessionOk(uid, principal!.sv ?? 0))) throw new Error("session_expired");
           const r = await dir.rename(uid, (await readJson(req)).display_name);
-          return r.ok ? json(await userToken(r.data, env), 200, h) : failure(r, h);
+          return r.ok ? json(await reissue(principal!, r.data, env), 200, h) : failure(r, h);
         }
         if (path === "/me/avatar" && req.method === "POST") {
           const { hash, label } = await readJson(req);
@@ -856,8 +1024,9 @@ export default {
             if (!meta || meta.kind !== "avatar" || meta.format === "image") return json({ error: "not_found", message: "ese avatar no existe" }, 404, h);
             format = meta.format;
           }
+          if (!(await dir.sessionOk(uid, principal!.sv ?? 0))) throw new Error("session_expired");
           const r = await dir.setAvatar(uid, hash, format, label);
-          return r.ok ? json(await userToken(r.data, env), 200, h) : failure(r, h);
+          return r.ok ? json(await reissue(principal!, r.data, env), 200, h) : failure(r, h);
         }
         // El retrato del personaje (lo hace la web en el navegador; lo reciben los juegos como «picture»).
         if (path === "/me/portrait" && req.method === "PUT") {
@@ -906,10 +1075,11 @@ export default {
         const skin = path.match(/^\/me\/skins\/(?:sha256:)?([0-9a-f]{64})$/);
         if (skin && req.method === "DELETE") {
           const hash = `sha256:${skin[1]}`;
+          if (!(await dir.sessionOk(uid, principal!.sv ?? 0))) throw new Error("session_expired");
           const r = await dir.removeSkin(uid, hash);
           if (!r.ok) return failure(r, h);
           if (r.data.orphan) await forgetAssets(env.ASSETS, req.url, [hash]);
-          return json({ ...(await userToken(r.data.user, env)), skins: r.data.skins, max: MAX_SKINS }, 200, h);
+          return json({ ...(await reissue(principal!, r.data.user, env)), skins: r.data.skins, max: MAX_SKINS }, 200, h);
         }
         /* Formas de entrar: más passkeys, Google */
         if (path === "/me/logins" && req.method === "GET") {
@@ -917,9 +1087,15 @@ export default {
         }
         if (path === "/me/logins/google" && req.method === "POST") {
           if (!googleEnabled(env)) return json({ error: "google_disabled", message: "Entrar con Google no está activado" }, 503, h);
-          const r = await dir.googleStart({ mode: "link", userId: uid, origin: webOrigin(env, req.headers.get("Origin")) });
+          const r = await dir.googleStart({ mode: "link", userId: uid, origin: webOrigin(env, req.headers.get("Origin")), bind_hash: (await readJson(req)).bind_hash });
           // Se pasa por /auth/google/go (navegación normal) para dejar la cookie que ata el state.
           return r.ok ? json({ url: new URL(`/auth/google/go?state=${encodeURIComponent(r.data.state)}`, req.url).toString() }, 200, h) : failure(r, h);
+        }
+        // Al volver de Google, la web termina el vínculo con su sesión y el secreto de este navegador.
+        if (path === "/me/logins/google/finish" && req.method === "POST") {
+          const b = await readJson(req);
+          const r = await dir.googleLinkFinish(uid, b.code, b.bind);
+          return r.ok ? json(r.data, 200, h) : failure(r, h);
         }
         if (path === "/me/logins/google" && req.method === "DELETE") {
           const r = await dir.unlinkGoogle(uid);
@@ -968,10 +1144,11 @@ export default {
           const r = await dir.exportData(uid);
           if (!r.ok) return failure(r, h);
           const chat = [];
-          for (const c of CHAT_CHUNKS) chat.push(...(await chunk(env, c).chatOf(`usr_${uid}`)));
+          const places = await allChatChunks(env);
+          for (const c of places) chat.push(...(await chunk(env, c).chatOf(`usr_${uid}`)));
           // Actividades (búsquedas, tiempos y puntos del día), de la plaza y los distritos.
           const activities = [];
-          for (const c of CHAT_CHUNKS.filter((c) => c !== PLACES.nexo)) {
+          for (const c of places.filter((c) => c !== PLACES.nexo)) {
             const a = await chunk(env, c).activityOf(`usr_${uid}`);
             if (a.collected.length || a.hunts_completed.length || a.best_times.length || a.daily_points.length || a.sandbox_pieces.length) activities.push(a);
           }
@@ -988,6 +1165,7 @@ export default {
           const r = await dir.saveDistrict(uid, c.sub);
           if (!r.ok) return failure(r, h);
           const d = r.data;
+          communityCache = null;
           await chunk(env, d.chunk_id).installDistrict({
             meta: { id: d.id, name: { es: c.sub.name.es, en: c.sub.name.en }, color: c.sub.color, theme: c.sub.theme, system: communitySystem(d.id, c.sub) },
             content: communityContent(d.id, c.sub, c.models, d.portals),
@@ -1010,6 +1188,9 @@ export default {
         }
         if (path === "/me" && req.method === "DELETE") {
           const before = await dir.card(uid);
+          // Todos los lugares con algo suyo, antes de borrar su distrito (si tenía).
+          communityCache = null;
+          const places = await allChatChunks(env);
           const r = await dir.deleteAccount(uid);
           if (!r.ok) return failure(r, h);
           for (const p of r.data.projects) await clearParcel(env, p.district, p.id, r.data.agents);
@@ -1017,7 +1198,7 @@ export default {
             await chunk(env, r.data.community.chunk_id).installDistrict(null);
             ctx.waitUntil(syncCommunityGates(env, dir));
           }
-          for (const c of CHAT_CHUNKS) await chunk(env, c).purgeOwner(`usr_${uid}`);
+          for (const c of places) await chunk(env, c).purgeOwner(`usr_${uid}`);
           await syncShowcase(env, dir);
           await forgetAssets(env.ASSETS, req.url, r.data.orphanHashes);
           if (before.ok) await purgeCard(req.url, before.data.player_no);
@@ -1243,26 +1424,32 @@ export default {
         if (path === "/admin/reports" && req.method === "GET") {
           return json({ reports: await dir.listReports(url.searchParams.get("status") ?? "open") }, 200, h);
         }
+        // Las decisiones de la clave de administración también quedan en el registro (DSA).
+        const adminId = `adm_${principal!.sub.replace(/^agt_/, "")}`;
         const rep = path.match(/^\/admin\/reports\/(\d+)$/);
         if (rep && req.method === "POST") {
-          const { status } = await readJson(req);
-          if (status !== "actioned" && status !== "dismissed") return json({ error: "bad_message" }, 400, h);
-          await dir.resolveReport(Number(rep[1]), status);
-          return json({ ok: true }, 200, h);
+          const b = await readJson(req);
+          const r = await dir.moderateReport(adminId, Number(rep[1]), b.status, b.note);
+          return r.ok ? json({ ok: true }, 200, h) : failure(r, h);
         }
         const hideChat = path.match(/^\/admin\/chat\/([a-zA-Z0-9_-]{4,40})\/hide$/);
         if (hideChat && req.method === "POST") {
+          const b: Record<string, unknown> = await readJson(req).catch(() => ({}));
           let hidden = false;
-          for (const c of CHAT_CHUNKS) hidden = (await chunk(env, c).hideChat(hideChat[1]!)) || hidden;
+          for (const c of await allChatChunks(env)) hidden = (await chunk(env, c).hideChat(hideChat[1]!)) || hidden;
+          if (hidden) await dir.logModeration(adminId, "hide_chat", hideChat[1]!, typeof b.note === "string" ? b.note.slice(0, 500) : null);
           return json({ hidden }, 200, h);
         }
         const hide = path.match(/^\/admin\/projects\/([a-zA-Z0-9_-]{4,40})\/hide$/);
         if (hide && req.method === "POST") {
+          const b = await readJson(req);
+          if (typeof b.note !== "string" || b.note.trim().length < 3) return json({ error: "note_required", message: "explica el motivo: lo verá su autor" }, 400, h);
           const place = await dir.projectPlace(hide[1]!);
+          const r = await dir.moderateHide(adminId, hide[1]!, b.note);
+          if (!r.ok) return failure(r, h);
           await clearParcel(env, place?.district, hide[1]!, await dir.projectAgents(hide[1]!));
-          const hidden = await dir.hideProject(hide[1]!);
           ctx.waitUntil(syncShowcase(env, dir));
-          return json({ hidden }, 200, h);
+          return json(r.data, 200, h);
         }
       }
 
@@ -1273,12 +1460,14 @@ export default {
       if (tk && req.method === "POST") {
         const chunkId = tk[1]!;
         if (!ChunkId.safeParse(chunkId).success) return json({ error: "chunk inválido" }, 400, h);
+        if (!(await knownChunk(env, chunkId))) return json({ error: "not_found", message: "ese lugar no existe" }, 404, h);
         const raw = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
         const p = await verifyToken(raw, env.TOKEN_SECRET);
         if (!p) return json({ error: "unauthorized" }, 401, h);
         if (p.zone && !(await directory(env).agentKeyAlive(p.sub.replace(/^agt_/, "")))) {
           return json({ error: "unauthorized", message: "tu clave de agente ya no vale" }, 401, h);
         }
+        if (!(await sessionAlive(env, p))) return json({ error: "session_expired", message: "tu sesión ha caducado; vuelve a entrar" }, 401, h);
         if (await closedFor(env, chunkId, p)) return json(SOON, 403, h);
         return json({ url: await socketFor(env, req, chunkId, p, raw), remote: isRemote(env, chunkId) }, 200, { ...h, "Cache-Control": "no-store" });
       }
@@ -1287,6 +1476,7 @@ export default {
       if (m) {
         const chunkId = m[1]!;
         if (!ChunkId.safeParse(chunkId).success) return json({ error: "chunk inválido" }, 400, h);
+        if (!(await knownChunk(env, chunkId))) return json({ error: "not_found", message: "ese lugar no existe" }, 404, h);
         const stub = chunk(env, chunkId);
         const headers = new Headers({ "X-Chunk-Id": chunkId });
 
@@ -1317,6 +1507,7 @@ export default {
         if (p.zone && !(await directory(env).agentKeyAlive(p.sub.replace(/^agt_/, "")))) {
           return json({ error: "unauthorized", message: "tu clave de agente ya no vale" }, 401, h);
         }
+        if (!(await sessionAlive(env, p))) return json({ error: "session_expired", message: "tu sesión ha caducado; vuelve a entrar" }, 401, h);
         if (await closedFor(env, chunkId, p)) return json(SOON, 403, h);
         headers.set("X-Principal", JSON.stringify(p));
         headers.set("Upgrade", "websocket");
@@ -1326,6 +1517,7 @@ export default {
       return json({ error: "not_found" }, 404, h);
     } catch (e) {
       if ((e as Error).message === "too_large") return json({ error: "too_large" }, 413, h);
+      if ((e as Error).message === "session_expired") return json({ error: "session_expired", message: "tu sesión ha caducado; vuelve a entrar" }, 401, h);
       console.error(e);
       return json({ error: "internal", message: "error interno" }, 500, h);
     }

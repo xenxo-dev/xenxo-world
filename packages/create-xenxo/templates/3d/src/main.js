@@ -12,7 +12,7 @@
 import * as THREE from "three";
 import { cargarAvatar } from "./avatar.js";
 import { iniciarMultijugador } from "./multijugador.js";
-import { conectar, idioma, marcador } from "./xenxo-hud.js";
+import { conectar, idioma, marcador, textos } from "./xenxo-hud.js";
 import "./estilo.css";
 
 const jugador = await conectar();
@@ -51,6 +51,12 @@ const sala = iniciarMultijugador({ jugador });
 const demas = new Map(); // id → { avatar, etiqueta, colocado }
 const miEstado = { x: 0, z: 0, r: 0, v: 0 }; // se reutiliza: nada de objetos nuevos en el bucle
 
+/**
+ * Lo que se lee encima de otro jugador. El número, solo si xenxo lo comprobó (`verificado`); un
+ * invitado va siempre marcado como tal (la sala ya le quita los «#»): nadie se hace pasar por otro.
+ */
+const etiquetaDe = (j) => (j.verificado ? (j.numero !== null && j.numero !== undefined ? `${j.nombre} #${j.numero}` : j.nombre) : `${j.nombre} · ${textos.invitado}`);
+
 /** Cartel con el nombre (y el número de xenxo si viene comprobado) encima de la cabeza. */
 function cartel(j) {
   const c = document.createElement("canvas");
@@ -63,7 +69,7 @@ function cartel(j) {
   g.shadowColor = "#000";
   g.shadowBlur = 8;
   g.fillStyle = j.verificado ? "#f6f1e7" : "#c9c4d6";
-  g.fillText(j.numero !== null && j.numero !== undefined ? `${j.nombre} #${j.numero}` : j.nombre, 256, 48);
+  g.fillText(etiquetaDe(j), 256, 48, 500);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthWrite: false }));

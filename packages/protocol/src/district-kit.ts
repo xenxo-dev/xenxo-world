@@ -73,6 +73,28 @@ const Text = (max: number) =>
     .refine((o) => Object.keys(o).length <= 12 && Object.keys(o).every((k) => /^[a-z]{2}$/.test(k)), "idiomas: códigos de 2 letras (es, en, ca…), hasta 12");
 const ModelName = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,31}$/, "nombre de modelo: minúsculas, números, - y _");
 
+/**
+ * El juego de un portal: el nombre de su enlace xenxo.io/j/<nombre>. Vale también el enlace entero
+ * (`https://xenxo.io/j/<nombre>`, `xenxo.io/j/<nombre>`, `/j/<nombre>`): se le quita lo de delante y
+ * se guarda solo el nombre. Cualquier otra web no vale.
+ */
+export function portalGameName(v: string): string {
+  return v
+    .trim()
+    .replace(/^(?:https?:\/\/)?(?:www\.)?xenxo\.io(?=\/j\/)/i, "")
+    .replace(/^\/?j\//, "")
+    .replace(/\/$/, "");
+}
+const PortalGame = z.preprocess(
+  (v) => (typeof v === "string" ? portalGameName(v) : v),
+  z
+    .string()
+    .regex(
+      /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/,
+      "un juego tuyo de xenxo: su enlace xenxo.io/j/<nombre> o solo <nombre> (minúsculas, números y guiones)",
+    ),
+);
+
 /** En la carpeta del creador: ruta relativa a un archivo. */
 export const DistrictFile = z
   .string()
@@ -163,6 +185,7 @@ function districtManifest<R extends z.ZodTypeAny>(ref: R) {
       /**
        * Portales a juegos de xenxo de quien crea el distrito (su enlace xenxo.io/j/<game>). Cada juego
        * se publica y se revisa como cualquier otro, con su xenxo.json y «Entrar con xenxo».
+       * `game` admite el enlace entero o solo el nombre; se guarda el nombre (`portalGameName`).
        */
       portals: z
         .array(
@@ -171,7 +194,7 @@ function districtManifest<R extends z.ZodTypeAny>(ref: R) {
               p: P,
               yaw: Yaw,
               size: z.tuple([z.number().min(1).max(8), z.number().min(1).max(6)]).default([4, 2.25]),
-              game: z.string().regex(/^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/, "el enlace de un juego de xenxo (xenxo.io/j/<nombre>)"),
+              game: PortalGame,
             })
             .strict(),
         )

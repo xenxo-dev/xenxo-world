@@ -12,12 +12,12 @@
   },
   "dependencies": {
     "@simplewebauthn/server": "^14.0.3",
+    "@xenxo/assets": "*",
     "@xenxo/protocol": "*",
-    "zod": "^4.1.0",
-    "@xenxo/assets": "*"
+    "zod": "^4.1.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261024.1",
-    "wrangler": "^4.152.0"
+    "wrangler": "^4.154.0"
   }
 }

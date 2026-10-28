@@ -10,11 +10,14 @@ export type AssetKind = "avatar" | "model" | "monument";
  * Presupuestos de subida. Están pensados para la Quest 3: un avatar se dibuja
  * por cada persona cercana; un modelo, una vez por stand.
  */
-export const ASSET_BUDGETS: Record<AssetKind, { maxBytes: number; maxTriangles: number; maxTexture: number }> = {
-  avatar: { maxBytes: 4 * 1024 * 1024, maxTriangles: 30_000, maxTexture: 1024 },
-  model: { maxBytes: 6 * 1024 * 1024, maxTriangles: 50_000, maxTexture: 2048 },
+export const ASSET_BUDGETS: Record<
+  AssetKind,
+  { maxBytes: number; maxTriangles: number; maxTexture: number; maxVertices: number; maxImages: number; maxTexturePixels: number }
+> = {
+  avatar: { maxBytes: 4 * 1024 * 1024, maxTriangles: 30_000, maxTexture: 1024, maxVertices: 90_000, maxImages: 24, maxTexturePixels: 24 * 1024 * 1024 },
+  model: { maxBytes: 6 * 1024 * 1024, maxTriangles: 50_000, maxTexture: 2048, maxVertices: 150_000, maxImages: 32, maxTexturePixels: 8 * 2048 * 2048 },
   /** Monumento de un proyecto en el nexo: hay hasta 23 a la vez a la vista. */
-  monument: { maxBytes: 2 * 1024 * 1024, maxTriangles: 10_000, maxTexture: 1024 },
+  monument: { maxBytes: 2 * 1024 * 1024, maxTriangles: 10_000, maxTexture: 1024, maxVertices: 30_000, maxImages: 8, maxTexturePixels: 6 * 1024 * 1024 },
 };
 
 /**
@@ -38,17 +41,25 @@ export function sniffImage(d: Uint8Array): "image/webp" | "image/jpeg" | "image/
 }
 
 export interface BudgetProblem {
-  what: "bytes" | "triangles" | "texture";
+  what: "bytes" | "triangles" | "texture" | "vertices" | "images" | "texturePixels";
   value: number;
   max: number;
 }
 
-export function checkBudget(r: { bytes: number; triangles: number; maxTextureSize: number }, kind: AssetKind): BudgetProblem[] {
+export function checkBudget(
+  r: { bytes: number; triangles: number; maxTextureSize: number; vertices?: number; images?: number; texturePixels?: number },
+  kind: AssetKind,
+): BudgetProblem[] {
   const b = ASSET_BUDGETS[kind];
   const out: BudgetProblem[] = [];
   if (r.bytes > b.maxBytes) out.push({ what: "bytes", value: r.bytes, max: b.maxBytes });
   if (r.triangles > b.maxTriangles) out.push({ what: "triangles", value: r.triangles, max: b.maxTriangles });
   if (r.maxTextureSize > b.maxTexture) out.push({ what: "texture", value: r.maxTextureSize, max: b.maxTexture });
+  // Vértices (los puntos y las líneas no tienen triángulos, pero también pesan), número de
+  // texturas y píxeles de todas juntas: lo que cuesta de verdad en la memoria de las gafas.
+  if ((r.vertices ?? 0) > b.maxVertices) out.push({ what: "vertices", value: r.vertices!, max: b.maxVertices });
+  if ((r.images ?? 0) > b.maxImages) out.push({ what: "images", value: r.images!, max: b.maxImages });
+  if ((r.texturePixels ?? 0) > b.maxTexturePixels) out.push({ what: "texturePixels", value: r.texturePixels!, max: b.maxTexturePixels });
   return out;
 }
 

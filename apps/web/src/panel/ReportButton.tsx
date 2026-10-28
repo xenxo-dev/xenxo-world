@@ -11,11 +11,14 @@ export function ReportForm({
   targetId,
   onClose,
   compact,
+  chunkId,
 }: {
   targetType: Target;
   targetId: string;
   onClose: () => void;
   compact?: boolean;
+  /** Chat: el lugar del mensaje. */
+  chunkId?: string;
 }) {
   const [reason, setReason] = useState<(typeof REPORT_REASONS)[number]>(targetType === "chat" ? "harassment" : "spam");
   const [details, setDetails] = useState("");
@@ -68,7 +71,7 @@ export function ReportForm({
           onClick={async () => {
             setState("sending");
             try {
-              await report(targetType, targetId, reason, details);
+              await report(targetType, targetId, reason, details, chunkId);
               setState("sent");
             } catch (e) {
               setError(errorText(e));

@@ -13,11 +13,18 @@
  *   → { t: "evento", d }  ← { t: "evento", id, d }   algo que pasa una vez (un disparo, un emoji)
  *
  * Un jugador es { id, nombre, numero, avatar, verificado }. Solo con un id_token firmado por xenxo
- * (y para tu client_id) es `verificado`: entonces nombre, número y avatar son de verdad suyos.
+ * (y para tu client_id) es `verificado`: entonces nombre, número y avatar son de verdad suyos. Un
+ * invitado nunca lleva número y su nombre no puede llevar «#» (no se hace pasar por «nombre #número»).
+ *
+ * Cierres: 4001 sala llena · 4002 conectado en otro sitio · 4003 no saludó a tiempo ·
+ * 4004 demasiadas conexiones desde la misma red.
  */
 import { DurableObject } from "cloudflare:workers";
 
-const MAX_JUGADORES = 16;
+const MAX_JUGADORES = 16; // solo cuentan los que ya saludaron (los que esperan no ocupan sitio)
+const MAX_CONEXIONES = 48; // en total, contando las que aún no han saludado
+const MAX_POR_IP = 8; // conexiones a la vez desde la misma red (CF-Connecting-IP)
+const ESPERA_HOLA_MS = 10_000; // quien no saluda en este tiempo se cierra (al llegar otra conexión)
 const MAX_BYTES = 1500; // por mensaje
 const MAX_POR_SEGUNDO = 30; // los que pasen de aquí se descartan
 
@@ -52,18 +59,42 @@ export class Sala extends DurableObject {
   /** Último estado de cada jugador (en memoria: si la sala hiberna, llega el siguiente enseguida). */
   estados = new Map();
 
-  async fetch() {
+  async fetch(req) {
+    const ahora = Date.now();
+    const ip = req.headers.get("CF-Connecting-IP") ?? "";
+    // Sin temporizadores (la sala hiberna): cada conexión nueva barre las que no saludaron a tiempo.
+    let total = 0;
+    let deEstaIp = 0;
+    for (const otro of this.vivas()) {
+      const a = otro.deserializeAttachment();
+      // (Quien está saludando tiene más margen: se está comprobando su token.)
+      if (!a.jugador && ahora - (a.desde ?? 0) > ESPERA_HOLA_MS * (a.saludando ? 3 : 1)) {
+        cerrar(otro, 4003, "no saludó a tiempo");
+        continue;
+      }
+      total++;
+      if (ip && a.ip === ip) deEstaIp++;
+    }
     const [cliente, servidor] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(servidor);
-    if (this.ctx.getWebSockets().length > MAX_JUGADORES) servidor.close(4001, "sala llena");
-    else servidor.serializeAttachment({ jugador: null, seg: 0, n: 0 });
+    servidor.serializeAttachment({ jugador: null, seg: 0, n: 0, desde: ahora, ip });
+    if (total >= MAX_CONEXIONES) cerrar(servidor, 4001, "sala llena");
+    else if (deEstaIp >= MAX_POR_IP) cerrar(servidor, 4004, "demasiadas conexiones desde tu red");
     return new Response(null, { status: 101, webSocket: cliente });
+  }
+
+  /** Las conexiones abiertas (sin las que ya se están cerrando). */
+  vivas() {
+    return this.ctx.getWebSockets().filter((ws) => {
+      const a = ws.deserializeAttachment();
+      return a && !a.cerrando;
+    });
   }
 
   async webSocketMessage(ws, data) {
     if (typeof data !== "string" || data.length > MAX_BYTES) return ws.close(1009, "mensaje demasiado grande");
     const a = ws.deserializeAttachment();
-    if (!a) return;
+    if (!a || a.cerrando) return;
     const seg = Math.floor(Date.now() / 1000);
     if (a.seg !== seg) {
       a.seg = seg;
@@ -82,17 +113,29 @@ export class Sala extends DurableObject {
     if (!m || typeof m !== "object") return;
 
     if (!a.jugador) {
-      if (m.t !== "hola") return;
-      const jugador = await identificar(m, this.env);
-      // Misma persona otra vez (otra pestaña o reconexión): fuera la conexión vieja.
-      for (const otro of this.ctx.getWebSockets()) {
-        if (otro !== ws && otro.deserializeAttachment()?.jugador?.id === jugador.id) otro.close(4002, "conectado en otro sitio");
-      }
-      a.jugador = jugador;
+      if (m.t !== "hola" || a.saludando) return;
+      a.saludando = true; // un solo «hola» a la vez (comprobar el token espera a la red)
       ws.serializeAttachment(a);
+      const jugador = await identificar(m, this.env);
+      // Mientras se comprobaba el token pudo cerrarse o llegar más mensajes: se relee.
+      const b = ws.deserializeAttachment();
+      if (!b || b.cerrando) return;
+      b.saludando = false;
+      // Solo ocupan sitio los que ya saludaron; la misma persona en otra conexión no cuenta (la sustituye).
+      const dentro = this.vivas().filter((o) => {
+        const j = o !== ws && o.deserializeAttachment().jugador;
+        return j && j.id !== jugador.id;
+      }).length;
+      if (dentro >= MAX_JUGADORES) return cerrar(ws, 4001, "sala llena");
+      // Misma persona otra vez (otra pestaña o reconexión): fuera la conexión vieja.
+      for (const otro of this.vivas()) {
+        if (otro !== ws && otro.deserializeAttachment().jugador?.id === jugador.id) cerrar(otro, 4002, "conectado en otro sitio", false);
+      }
+      b.jugador = jugador;
+      ws.serializeAttachment(b);
       const jugadores = [];
-      for (const otro of this.ctx.getWebSockets()) {
-        const j = otro !== ws && otro.deserializeAttachment()?.jugador;
+      for (const otro of this.vivas()) {
+        const j = otro !== ws && otro.deserializeAttachment().jugador;
         if (j && j.id !== jugador.id) jugadores.push({ ...j, estado: this.estados.get(j.id) ?? null });
       }
       ws.send(JSON.stringify({ t: "bienvenida", yo: jugador, jugadores }));
@@ -119,10 +162,14 @@ export class Sala extends DurableObject {
 
   adios(ws) {
     const j = ws.deserializeAttachment()?.jugador;
+    try {
+      ws.serializeAttachment({ jugador: null, seg: 0, n: 0, cerrando: true });
+    } catch {
+      /* ya cerrada */
+    }
     if (!j) return;
-    ws.serializeAttachment({ jugador: null, seg: 0, n: 0 });
     // Si la misma persona sigue en otra conexión (se acaba de reconectar), no se va.
-    const sigue = this.ctx.getWebSockets().some((o) => o !== ws && o.deserializeAttachment()?.jugador?.id === j.id);
+    const sigue = this.vivas().some((o) => o !== ws && o.deserializeAttachment().jugador?.id === j.id);
     if (sigue) return;
     this.estados.delete(j.id);
     this.difundir({ t: "sale", id: j.id }, ws);
@@ -130,8 +177,8 @@ export class Sala extends DurableObject {
 
   difundir(msg, menos) {
     const s = JSON.stringify(msg);
-    for (const ws of this.ctx.getWebSockets()) {
-      if (ws === menos || !ws.deserializeAttachment()?.jugador) continue;
+    for (const ws of this.vivas()) {
+      if (ws === menos || !ws.deserializeAttachment().jugador) continue;
       try {
         ws.send(s);
       } catch {
@@ -141,14 +188,35 @@ export class Sala extends DurableObject {
   }
 }
 
+/**
+ * Cierra una conexión y la marca para que no cuente ni reciba nada más. Si era de alguien, avisa a
+ * los demás de que se fue (salvo `avisar = false`: la misma persona sigue en otra conexión).
+ */
+function cerrar(ws, codigo, motivo, avisar = true) {
+  const a = ws.deserializeAttachment() ?? {};
+  try {
+    ws.serializeAttachment({ ...a, jugador: avisar ? a.jugador : null, cerrando: true });
+    ws.close(codigo, motivo);
+  } catch {
+    /* ya cerrada */
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* Identidad                                                            */
 /* ------------------------------------------------------------------ */
 
-function nombreLimpio(v) {
+// Controles, separadores invisibles y de dirección del texto (con ellos un nombre se ve como otro).
+const INVISIBLES = /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff\ufff9-\ufffb]/g;
+// «#» y sus parecidos: un invitado no puede escribir algo que parezca «nombre #número».
+const ALMOHADILLAS = /[#\uff03\ufe5f\u266f]/g;
+
+function nombreLimpio(v, invitado = false) {
   if (typeof v !== "string") return null;
-  const n = v.trim().replace(/\s+/g, " ");
-  return n.length >= 1 && n.length <= 40 && !/[\u0000-\u001f<>]/.test(n) ? n : null;
+  let n = v.replace(INVISIBLES, "");
+  if (invitado) n = n.replace(ALMOHADILLAS, "");
+  n = n.trim().replace(/\s+/g, " ");
+  return n.length >= 1 && n.length <= 40 && !/[<>]/.test(n) ? n : null;
 }
 
 async function identificar(m, env) {
@@ -159,9 +227,10 @@ async function identificar(m, env) {
       return { id: `x_${c.sub}`, nombre: nombreLimpio(c.name) ?? "Jugador", numero: typeof c.player_no === "number" ? c.player_no : null, avatar, verificado: true };
     }
   }
-  // Invitado: el nombre que diga, sin número ni avatar (no se puede comprobar).
+  // Invitado: el nombre que diga (sin «#»), sin número ni avatar (no se puede comprobar). Los
+  // clientes lo enseñan siempre marcado como invitado; sin nombre, un código corto.
   const id = `i_${crypto.randomUUID().slice(0, 8)}`;
-  return { id, nombre: nombreLimpio(m.nombre) ?? `Invitado ${id.slice(2, 6)}`, numero: null, avatar: null, verificado: false };
+  return { id, nombre: nombreLimpio(m.nombre, true) ?? id.slice(2, 6), numero: null, avatar: null, verificado: false };
 }
 
 let jwks = null; // { at, keys }

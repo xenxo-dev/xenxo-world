@@ -11,8 +11,9 @@
   "avatar": "{{avatar}}",
   "ageRating": "all",
   "monetization": { "hasAds": false, "hasPurchases": false },
-  "author": "Tu nombre",
-  "contact": "https://github.com/tu-usuario",
+  "author": "{{author}}",
+  "contact": "{{contact}}",
+  "privacy": "https://{{name}}.pages.dev/privacidad.html",
   "embed": true,
   "xenxo": {}
 }

@@ -15,6 +15,8 @@ export interface GlbReport {
   /** Lado mayor de la textura más grande (px). 0 si no se pudo leer. */
   maxTextureSize: number;
   textureBytes: number;
+  /** Píxeles de todas las texturas juntas (ancho × alto): lo que ocupan ya decodificadas. */
+  texturePixels: number;
   animations: number;
   skinned: boolean;
   /** VRM 0.x o 1.0 (avatar humanoide estándar). */
@@ -67,6 +69,62 @@ const WHY_FORBIDDEN: Record<string, string> = {
   KHR_lights_punctual: "quita las luces del archivo: la iluminación la pone el mundo",
 };
 
+/**
+ * Topes de estructura: lo que tiene sentido en un modelo de xenxo (un avatar VRM ronda los 300 nodos
+ * y 1.500 accessors). Sin ellos, un GLB de 1 KB puede pedirle al navegador que reserve gigas.
+ */
+const LIMITS = {
+  nodes: 20_000,
+  meshes: 5_000,
+  accessors: 50_000,
+  bufferViews: 50_000,
+  images: 128,
+  materials: 2_000,
+  animations: 500,
+  /** Elementos por accessor (vértices, índices, fotogramas). */
+  accessorCount: 4_000_000,
+  /** Bytes descomprimidos por bufferView con meshopt, y en total. */
+  meshoptView: 64 * 1024 ** 2,
+  meshoptTotal: 256 * 1024 ** 2,
+} as const;
+
+const COMPONENT_BYTES: Record<number, number> = { 5120: 1, 5121: 1, 5122: 2, 5123: 2, 5125: 4, 5126: 4 };
+const TYPE_SIZE: Record<string, number> = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT2: 4, MAT3: 9, MAT4: 16 };
+
+const bad = (message: string) => new GlbError("bad_structure", message);
+const isInt = (v: unknown, min: number, max: number): v is number => typeof v === "number" && Number.isInteger(v) && v >= min && v <= max;
+function list<T>(v: unknown, name: string, max: number): T[] {
+  if (v === undefined) return [];
+  if (!Array.isArray(v)) throw bad(`${name} debe ser una lista`);
+  if (v.length > max) throw bad(`${name}: demasiados (${v.length}; máximo ${max})`);
+  for (const x of v) if (x === null || typeof x !== "object" || Array.isArray(x)) throw bad(`${name}: cada elemento debe ser un objeto`);
+  return v as T[];
+}
+
+/**
+ * Todas las extensiones que aparecen en el archivo (en la raíz, nodos, mallas, primitivas,
+ * materiales, texturas, imágenes, bufferViews, accessors…), no solo las que declara
+ * `extensionsUsed`: los cargadores activan sus plugins aunque no se declaren.
+ */
+function extensionsIn(root: unknown): Set<string> {
+  const found = new Set<string>();
+  const stack: unknown[] = [root];
+  let seen = 0;
+  while (stack.length) {
+    const v = stack.pop();
+    if (++seen > 2_000_000) throw bad("el JSON del GLB es demasiado grande");
+    if (Array.isArray(v)) {
+      for (const x of v) if (x !== null && typeof x === "object") stack.push(x);
+    } else if (v !== null && typeof v === "object") {
+      for (const [k, x] of Object.entries(v as Json)) {
+        if (k === "extensions" && x !== null && typeof x === "object" && !Array.isArray(x)) for (const name of Object.keys(x)) found.add(name);
+        if (x !== null && typeof x === "object") stack.push(x);
+      }
+    }
+  }
+  return found;
+}
+
 const MAGIC = 0x46546c67; // "glTF"
 const CHUNK_JSON = 0x4e4f534a;
 const CHUNK_BIN = 0x004e4942;
@@ -77,8 +135,18 @@ interface GltfJson {
   asset?: { version?: string };
   extensionsUsed?: string[];
   buffers?: { uri?: string; byteLength: number }[];
-  bufferViews?: { buffer: number; byteOffset?: number; byteLength: number }[];
-  accessors?: { count: number; min?: number[]; max?: number[]; normalized?: boolean; componentType?: number }[];
+  bufferViews?: { buffer: number; byteOffset?: number; byteLength: number; byteStride?: number; extensions?: Json }[];
+  accessors?: {
+    count: number;
+    bufferView?: number;
+    byteOffset?: number;
+    type?: string;
+    sparse?: { count: number; indices?: { bufferView: number }; values?: { bufferView: number } };
+    min?: number[];
+    max?: number[];
+    normalized?: boolean;
+    componentType?: number;
+  }[];
   meshes?: { primitives: { mode?: number; indices?: number; attributes: Record<string, number> }[] }[];
   nodes?: {
     mesh?: number;
@@ -94,9 +162,20 @@ interface GltfJson {
   animations?: unknown[];
   skins?: unknown[];
   extensions?: Json;
+  materials?: unknown[];
 }
 
 export function inspectGlb(input: ArrayBuffer | Uint8Array): GlbReport {
+  try {
+    return inspect(input);
+  } catch (e) {
+    // Un archivo malformado (tipos que no son los del glTF) es un GLB que no vale, no un fallo del servidor.
+    if (e instanceof GlbError) throw e;
+    throw bad("el GLB no tiene la estructura de un glTF 2.0 válido");
+  }
+}
+
+function inspect(input: ArrayBuffer | Uint8Array): GlbReport {
   const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
   if (bytes.byteLength < 20) throw new GlbError("not_glb", "el archivo es demasiado pequeño para ser un GLB");
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -126,12 +205,17 @@ export function inspectGlb(input: ArrayBuffer | Uint8Array): GlbReport {
     }
     offset = start + len;
   }
-  if (!json) throw new GlbError("bad_structure", "falta el chunk JSON");
+  if (!json || typeof json !== "object" || Array.isArray(json)) throw new GlbError("bad_structure", "falta el chunk JSON");
   if (json.asset?.version !== "2.0") throw new GlbError("bad_structure", "asset.version debe ser 2.0");
 
-  // Extensiones
+  // Extensiones: las declaradas y todas las que aparecen en cualquier objeto del archivo.
+  if (json.extensionsUsed !== undefined && (!Array.isArray(json.extensionsUsed) || json.extensionsUsed.some((e) => typeof e !== "string"))) {
+    throw bad("extensionsUsed debe ser una lista de nombres");
+  }
   const extensions = json.extensionsUsed ?? [];
-  const forbidden = extensions.filter((e) => !ALLOWED_EXTENSIONS.has(e));
+  const present = extensionsIn(json);
+  for (const e of extensions) present.add(e);
+  const forbidden = [...present].filter((e) => !ALLOWED_EXTENSIONS.has(e));
   if (forbidden.length) {
     throw new GlbError(
       "forbidden_extension",
@@ -148,6 +232,91 @@ export function inspectGlb(input: ArrayBuffer | Uint8Array): GlbReport {
   const images = json.images ?? [];
   if (images.some((i) => i.uri !== undefined)) {
     throw new GlbError("external_reference", "el GLB referencia texturas externas; embébelas en el .glb");
+  }
+
+  // Listas con su tipo y su tope.
+  list(json.nodes, "nodes", LIMITS.nodes);
+  list(json.meshes, "meshes", LIMITS.meshes);
+  list(json.materials as unknown, "materials", LIMITS.materials);
+  list(json.animations, "animations", LIMITS.animations);
+  list(json.images, "images", LIMITS.images);
+  const binLength = bin?.length ?? 0;
+
+  // bufferViews: dentro del chunk BIN (o, con meshopt, su versión comprimida dentro y la
+  // descomprimida con un tamaño acotado).
+  const viewList = list<NonNullable<GltfJson["bufferViews"]>[number]>(json.bufferViews, "bufferViews", LIMITS.bufferViews);
+  let meshoptBytes = 0;
+  viewList.forEach((v, i) => {
+    const off = v.byteOffset ?? 0;
+    if (!isInt(off, 0, 2 ** 31) || !isInt(v.byteLength, 0, 2 ** 31)) throw bad(`bufferView ${i}: tamaño no válido`);
+    if (v.byteStride !== undefined && !isInt(v.byteStride, 4, 252)) throw bad(`bufferView ${i}: byteStride no válido`);
+    const mo = v.extensions?.EXT_meshopt_compression as { buffer?: unknown; byteOffset?: unknown; byteLength?: unknown; byteStride?: unknown; count?: unknown } | undefined;
+    if (mo) {
+      const mOff = mo.byteOffset ?? 0;
+      if (mo.buffer !== 0 || !isInt(mOff, 0, 2 ** 31) || !isInt(mo.byteLength, 0, 2 ** 31) || mOff + mo.byteLength > binLength) throw bad(`bufferView ${i}: datos comprimidos fuera del archivo`);
+      if (!isInt(mo.byteStride, 1, 256) || !isInt(mo.count, 0, LIMITS.accessorCount)) throw bad(`bufferView ${i}: compresión no válida`);
+      const out = mo.byteStride * mo.count;
+      if (out > LIMITS.meshoptView || out > v.byteLength) throw bad(`bufferView ${i}: descomprimido demasiado grande`);
+      meshoptBytes += out;
+      if (meshoptBytes > LIMITS.meshoptTotal) throw bad("el modelo descomprimido es demasiado grande");
+    } else if (v.buffer !== 0 || off + v.byteLength > binLength) {
+      throw bad(`bufferView ${i} fuera del bloque binario del archivo`);
+    } else if (v.byteLength > LIMITS.meshoptView * 2) {
+      throw bad(`bufferView ${i} demasiado grande`);
+    }
+  });
+  // El único buffer con datos es el BIN; los demás solo pueden ser el «respaldo» vacío de meshopt.
+  buffers.forEach((b, i) => {
+    if (i > 0 && !(b as { extensions?: Json }).extensions?.EXT_meshopt_compression) throw bad("solo se admite el bloque binario del propio GLB");
+  });
+
+  // Accessors: tipo, tamaño y que quepan en su bufferView (si no, el navegador reservaría
+  // `count` elementos de la nada: un archivo de 1 KB puede pedir gigas).
+  const accList = list<NonNullable<GltfJson["accessors"]>[number]>(json.accessors, "accessors", LIMITS.accessors);
+  accList.forEach((a, i) => {
+    const comp = COMPONENT_BYTES[a.componentType ?? -1];
+    const size = TYPE_SIZE[a.type ?? ""];
+    if (!comp || !size) throw bad(`accessor ${i}: tipo no válido`);
+    if (!isInt(a.count, 0, LIMITS.accessorCount)) throw bad(`accessor ${i}: demasiados elementos`);
+    if (a.bufferView === undefined) {
+      if (!a.sparse) throw bad(`accessor ${i} sin datos`);
+    } else {
+      const view = isInt(a.bufferView, 0, viewList.length - 1) ? viewList[a.bufferView]! : null;
+      if (!view) throw bad(`accessor ${i}: bufferView inexistente`);
+      const off = a.byteOffset ?? 0;
+      if (!isInt(off, 0, 2 ** 31)) throw bad(`accessor ${i}: desplazamiento no válido`);
+      const elem = comp * size;
+      const stride = view.byteStride ?? elem;
+      if (a.count > 0 && off + (a.count - 1) * stride + elem > view.byteLength) throw bad(`accessor ${i} no cabe en su bufferView`);
+    }
+    if (a.sparse) {
+      const sp = a.sparse;
+      if (!isInt(sp.count, 1, a.count) || !isInt(sp.indices?.bufferView, 0, viewList.length - 1) || !isInt(sp.values?.bufferView, 0, viewList.length - 1)) {
+        throw bad(`accessor ${i}: datos dispersos no válidos`);
+      }
+    }
+  });
+
+  // Nodos: un árbol (sin ciclos ni hijos compartidos) con índices válidos.
+  {
+    const nodeList = json.nodes ?? [];
+    const parentOf = new Int32Array(nodeList.length).fill(-1);
+    nodeList.forEach((n, i) => {
+      if (n.mesh !== undefined && !isInt(n.mesh, 0, (json!.meshes ?? []).length - 1)) throw bad(`nodo ${i}: malla inexistente`);
+      if (n.children !== undefined && !Array.isArray(n.children)) throw bad(`nodo ${i}: children no válido`);
+      for (const c of n.children ?? []) {
+        if (!isInt(c, 0, nodeList.length - 1) || c === i || parentOf[c] !== -1) throw bad(`nodo ${i}: jerarquía no válida`);
+        parentOf[c] = i;
+      }
+    });
+    // Sin ciclos: subiendo de padre en padre se llega a una raíz en menos pasos que nodos hay.
+    for (let i = 0; i < nodeList.length; i++) {
+      let p = parentOf[i]!, steps = 0;
+      while (p !== -1) {
+        if (++steps > nodeList.length) throw bad("la jerarquía de nodos tiene un ciclo");
+        p = parentOf[p]!;
+      }
+    }
   }
 
   const accessors = json.accessors ?? [];
@@ -181,6 +350,7 @@ export function inspectGlb(input: ArrayBuffer | Uint8Array): GlbReport {
       }
       const n = p.indices !== undefined ? acc(p.indices)!.count : pos.count;
       const mode = p.mode ?? 4;
+      if (!isInt(mode, 0, 6)) throw bad("modo de primitiva no válido");
       if (mode === 4) tris += Math.floor(n / 3);
       else if (mode === 5 || mode === 6) tris += Math.max(0, n - 2);
       // puntos y líneas: 0 triángulos
@@ -205,15 +375,20 @@ export function inspectGlb(input: ArrayBuffer | Uint8Array): GlbReport {
   const views = json.bufferViews ?? [];
   let maxTextureSize = 0;
   let textureBytes = 0;
-  for (const img of images) {
-    const view = img.bufferView !== undefined ? views[img.bufferView] : undefined;
-    if (!view || !bin) continue;
+  let texturePixels = 0;
+  images.forEach((img, i) => {
+    // Cada imagen, dentro del archivo y en un formato cuyo tamaño se puede leer: si no, el navegador
+    // la decodificaría sin que cuente en el presupuesto de texturas.
+    const view = isInt(img.bufferView, 0, views.length - 1) ? views[img.bufferView] : undefined;
+    if (!view || !bin || (view.extensions as Json | undefined)?.EXT_meshopt_compression) throw bad(`imagen ${i}: debe ir dentro del archivo`);
     textureBytes += view.byteLength;
     const start = bin.start + (view.byteOffset ?? 0);
     const data = bytes.subarray(start, start + view.byteLength);
     const dims = imageSize(data);
-    if (dims) maxTextureSize = Math.max(maxTextureSize, dims[0], dims[1]);
-  }
+    if (!dims || !(dims[0] > 0 && dims[1] > 0)) throw bad(`imagen ${i}: formato no admitido (usa PNG, JPEG, WebP o KTX2)`);
+    maxTextureSize = Math.max(maxTextureSize, dims[0], dims[1]);
+    texturePixels += dims[0] * dims[1];
+  });
 
   const isVrm = extensions.includes("VRMC_vrm") || extensions.includes("VRM");
   const { bmin, bmax } = sceneBounds(json, meshBoxes);
@@ -228,6 +403,7 @@ export function inspectGlb(input: ArrayBuffer | Uint8Array): GlbReport {
     images: images.length,
     maxTextureSize,
     textureBytes,
+    texturePixels,
     animations: (json.animations ?? []).length,
     skinned: (json.skins ?? []).length > 0,
     isVrm,

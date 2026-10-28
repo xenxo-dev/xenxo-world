@@ -51,10 +51,19 @@ const L = {
   es: {
     noManifest: `falta ${MANIFEST_FILE} en la carpeta`,
     badJson: "no es JSON válido",
+    badJsonAt: (line: number, col: number) => `no es JSON válido: falla en la línea ${line}, columna ${col} (¿una coma de más, una comilla sin cerrar o un comentario?)`,
+    placeholder: (field: string, v: string) => `«${v}» es el de la plantilla: pon el tuyo en «${field}» (se enseña a moderación)`,
     missing: "no existe en la carpeta",
     glb: "no es un GLB válido",
     budget: (what: string, v: number, max: number) =>
-      what === "bytes" ? `ocupa ${(v / 1048576).toFixed(1)} MB (máximo ${(max / 1048576).toFixed(0)} MB)` : what === "triangles" ? `tiene ${v} triángulos (máximo ${max})` : `tiene una textura de ${v} px (máximo ${max})`,
+      ({
+        bytes: `ocupa ${(v / 1048576).toFixed(1)} MB (máximo ${(max / 1048576).toFixed(0)} MB)`,
+        triangles: `tiene ${v} triángulos (máximo ${max})`,
+        texture: `tiene una textura de ${v} px (máximo ${max})`,
+        vertices: `tiene ${v} vértices (máximo ${max})`,
+        images: `tiene ${v} texturas (máximo ${max})`,
+        texturePixels: `sus texturas suman ${(v / 1048576).toFixed(1)} megapíxeles (máximo ${(max / 1048576).toFixed(0)})`,
+      })[what] ?? `${what}: ${v} (máximo ${max})`,
     vrm: "es un avatar VRM, no un modelo",
     cover: `la portada debe ser WebP, JPEG o PNG, de 160×90 a ${COVER_BUDGET.maxWidth}×${COVER_BUDGET.maxHeight} px y como mucho ${COVER_BUDGET.maxBytes / 1024} KB`,
     ratio: "la portada debería ser 16:9 (se recortará)",
@@ -62,15 +71,41 @@ const L = {
   en: {
     noManifest: `${MANIFEST_FILE} is missing from the folder`,
     badJson: "is not valid JSON",
+    badJsonAt: (line: number, col: number) => `is not valid JSON: it breaks at line ${line}, column ${col} (an extra comma, an unclosed quote or a comment?)`,
+    placeholder: (field: string, v: string) => `"${v}" comes from the template: put yours in "${field}" (moderation sees it)`,
     missing: "does not exist in the folder",
     glb: "is not a valid GLB",
     budget: (what: string, v: number, max: number) =>
-      what === "bytes" ? `is ${(v / 1048576).toFixed(1)} MB (max ${(max / 1048576).toFixed(0)} MB)` : what === "triangles" ? `has ${v} triangles (max ${max})` : `has a ${v} px texture (max ${max})`,
+      ({
+        bytes: `is ${(v / 1048576).toFixed(1)} MB (max ${(max / 1048576).toFixed(0)} MB)`,
+        triangles: `has ${v} triangles (max ${max})`,
+        texture: `has a ${v} px texture (max ${max})`,
+        vertices: `has ${v} vertices (max ${max})`,
+        images: `has ${v} textures (max ${max})`,
+        texturePixels: `its textures add up to ${(v / 1048576).toFixed(1)} megapixels (max ${(max / 1048576).toFixed(0)})`,
+      })[what] ?? `${what}: ${v} (max ${max})`,
     vrm: "is a VRM avatar, not a model",
     cover: `the cover must be WebP, JPEG or PNG, from 160×90 to ${COVER_BUDGET.maxWidth}×${COVER_BUDGET.maxHeight} px and at most ${COVER_BUDGET.maxBytes / 1024} KB`,
     ratio: "the cover should be 16:9 (it will be cropped)",
   },
 } as const;
+
+/** Lo que trae la plantilla en `author` y `contact` (avisa si se queda así). */
+export const TEMPLATE_PLACEHOLDERS = ["Tu nombre", "Your name", "tu@ejemplo.com", "you@example.com"] as const;
+
+/**
+ * Dónde falla un JSON (línea y columna, desde 1), a partir del error de `JSON.parse`. Los motores lo
+ * dicen distinto («at position 123», «(line 4 column 7)», «at line 4 column 7»): si no se sabe, null.
+ */
+export function jsonErrorPosition(text: string, e: unknown): { line: number; column: number } | null {
+  const msg = e instanceof Error ? e.message : String(e);
+  const lc = /line (\d+) column (\d+)/i.exec(msg);
+  if (lc) return { line: Number(lc[1]), column: Number(lc[2]) };
+  const pos = /position (\d+)/i.exec(msg);
+  if (!pos) return null;
+  const before = text.slice(0, Number(pos[1])).split("\n");
+  return { line: before.length, column: before[before.length - 1]!.length + 1 };
+}
 
 /**
  * Comprueba una carpeta de distrito. `read(ruta)` devuelve los bytes del archivo o null si no existe.
@@ -89,10 +124,12 @@ export async function checkDistrictFolder(read: (path: string) => Promise<Uint8A
     return fail();
   }
   let json: unknown;
+  const text = new TextDecoder().decode(raw);
   try {
-    json = JSON.parse(new TextDecoder().decode(raw));
-  } catch {
-    problems.push({ at: MANIFEST_FILE, message: t.badJson });
+    json = JSON.parse(text);
+  } catch (e) {
+    const at = jsonErrorPosition(text, e);
+    problems.push({ at: MANIFEST_FILE, message: at ? t.badJsonAt(at.line, at.column) : t.badJson });
     return fail();
   }
   const parsed = DistrictManifest.safeParse(json);
@@ -101,6 +138,9 @@ export async function checkDistrictFolder(read: (path: string) => Promise<Uint8A
     return fail();
   }
   const m = parsed.data;
+  for (const field of ["author", "contact"] as const) {
+    if ((TEMPLATE_PLACEHOLDERS as readonly string[]).includes(m[field])) warnings.push({ at: field, message: t.placeholder(field, m[field]) });
+  }
 
   // Cada modelo: que exista, que sea un GLB sin nada externo y que quepa en su presupuesto de subida.
   const stats: Record<string, DistrictModelStats> = {};

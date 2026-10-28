@@ -35,8 +35,13 @@ export async function conectar() {
   const clientId = f.xenxo?.clientId;
   let jugador = null;
   let puedeEntrar = false;
+  // En desarrollo (npm run dev) va siempre el simulador: también desde el móvil o las gafas en tu red
+  // (npm run dev -- --host) y aunque xenxo.json ya tenga clientId. Para probar el xenxo de verdad en
+  // tu equipo: VITE_XENXO_REAL=1 npm run dev (y registra http://localhost:5173/ como dirección de vuelta).
+  // Publicado (npm run build), decide el SDK: el xenxo de verdad con clientId.
+  const simulate = import.meta.env.DEV && !import.meta.env.VITE_XENXO_REAL ? true : undefined;
   try {
-    jugador = await xenxo.connect({ clientId, project: f.xenxo?.project, scopes: ["profile", "player", "avatar"] });
+    jugador = await xenxo.connect({ clientId, project: f.xenxo?.project, scopes: ["profile", "player", "avatar"], simulate });
     puedeEntrar = xenxo.simulated || !!clientId;
   } catch (e) {
     // Fuera de tu equipo y sin client_id: el juego funciona igual, sin cuentas.

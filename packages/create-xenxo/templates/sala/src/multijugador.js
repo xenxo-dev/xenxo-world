@@ -92,7 +92,8 @@ export function iniciarMultijugador({ jugador } = {}) {
       for (const id of otros.keys()) avisar("sale", id);
       otros.clear();
       if (habia) avisar("conexion", false);
-      if (e.code === 4001 || e.code === 4002) return console.info("[sala]", e.reason); // llena u otra pestaña
+      // Llena, otra pestaña o demasiadas conexiones desde la misma red: no se reintenta.
+      if (e.code === 4001 || e.code === 4002 || e.code === 4004) return console.info("[sala]", e.reason);
       setTimeout(abrir, espera);
       espera = Math.min(espera * 2, 15000);
     };

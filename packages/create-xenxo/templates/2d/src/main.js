@@ -9,7 +9,7 @@
  *   public/xenxo.json → la ficha del juego para xenxo
  */
 import { iniciarMultijugador } from "./multijugador.js";
-import { conectar, idioma, marcador } from "./xenxo-hud.js";
+import { conectar, idioma, marcador, textos } from "./xenxo-hud.js";
 import "./estilo.css";
 
 const jugador = await conectar();
@@ -40,6 +40,11 @@ const yo = { x: innerWidth / 2, y: innerHeight / 2, r: 22 };
 const sala = iniciarMultijugador({ jugador });
 const miEstado = { x: 0.5, y: 0.5 };
 const suaves = new Map(); // id → { x, y } en píxeles, suavizado
+/**
+ * Lo que se lee encima de otro jugador. El número, solo si xenxo lo comprobó (`verificado`); un
+ * invitado va siempre marcado como tal (la sala ya le quita los «#»): nadie se hace pasar por otro.
+ */
+const etiquetaDe = (j) => (j.verificado ? (j.numero !== null && j.numero !== undefined ? `${j.nombre} #${j.numero}` : j.nombre) : `${j.nombre} · ${textos.invitado}`);
 const num01 = (v) => (Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.5);
 sala.on("sale", (id) => suaves.delete(id));
 const ESTRELLAS = 10;
@@ -124,7 +129,7 @@ function bucle(ahora) {
     ctx.fillText((j.nombre.trim().charAt(0) || "?").toUpperCase(), p.x, p.y + 1);
     ctx.fillStyle = "#f6f1e7";
     ctx.font = "600 12px system-ui, sans-serif";
-    ctx.fillText(j.numero !== null && j.numero !== undefined ? `${j.nombre} #${j.numero}` : j.nombre, p.x, p.y - yo.r - 10);
+    ctx.fillText(etiquetaDe(j), p.x, p.y - yo.r - 10);
   }
 
   const t = ahora / 1000;

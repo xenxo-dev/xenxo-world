@@ -136,7 +136,14 @@ async function api<T>(method: string, path: string, body?: unknown, raw?: Blob):
     body: raw ?? (body !== undefined ? JSON.stringify(body) : undefined),
   });
   const data = (await res.json().catch(() => ({}))) as { error?: string; message?: string; detail?: unknown };
-  if (!res.ok) throw new ApiError(data.error ?? String(res.status), data.message ?? "error", data.detail);
+  if (!res.ok) {
+    // La sesión se cerró en otro dispositivo («cerrar sesión en todos») o pasó su vida máxima: fuera.
+    if (token && data.error === "session_expired" && token === accountToken()) {
+      store(null);
+      reconnect();
+    }
+    throw new ApiError(data.error ?? String(res.status), data.message ?? "error", data.detail);
+  }
   return data as T;
 }
 
@@ -164,7 +171,7 @@ export async function refreshSession() {
     schedulePortrait();
   } catch (e) {
     // La cuenta ya no existe o la sesión no vale: se sale.
-    if (e instanceof ApiError && (e.code === "unauthorized" || e.code === "not_found")) store(null);
+    if (e instanceof ApiError && (e.code === "unauthorized" || e.code === "not_found" || e.code === "session_expired")) store(null);
   }
 }
 
@@ -205,11 +212,43 @@ export function authMethods() {
   return methods;
 }
 
+/**
+ * Secreto de este navegador para el viaje a Google: al servidor solo va su huella; al volver, solo
+ * quien lo tiene puede canjear el resultado (nadie te mete en su cuenta con un enlace ni vincula su
+ * Google a la tuya). Vive en sessionStorage: solo esta pestaña.
+ */
+const GOOGLE_BIND = "xenxo:gbind";
+async function googleBindHash(): Promise<string> {
+  const raw = crypto.getRandomValues(new Uint8Array(32));
+  const bind = b64url(raw);
+  try {
+    sessionStorage.setItem(GOOGLE_BIND, bind);
+  } catch {
+    /* sin almacenamiento: el canje fallará y se puede reintentar */
+  }
+  return b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(bind))));
+}
+function googleBind(): string {
+  try {
+    const v = sessionStorage.getItem(GOOGLE_BIND) ?? "";
+    sessionStorage.removeItem(GOOGLE_BIND);
+    return v;
+  } catch {
+    return "";
+  }
+}
+function b64url(bytes: Uint8Array): string {
+  let s = "";
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
 /** Va a Google (la página se va y vuelve con ?google=<código>). Para darse de alta se mandan nombre, edad y condiciones. */
-export function googleStart(mode: "login" | "register", reg?: { name: string; age: boolean; terms: boolean }) {
+export async function googleStart(mode: "login" | "register", reg?: { name: string; age: boolean; terms: boolean }) {
   const u = new URL("/auth/google/start", REALTIME_URL);
   u.searchParams.set("mode", mode);
   u.searchParams.set("origin", location.origin);
+  u.searchParams.set("b", await googleBindHash());
   if (reg) {
     u.searchParams.set("name", reg.name);
     if (reg.age) u.searchParams.set("age", "1");
@@ -220,7 +259,7 @@ export function googleStart(mode: "login" | "register", reg?: { name: string; ag
 
 /** Vincula Google a la cuenta abierta (pide la URL con la sesión y va a Google). */
 export async function googleLink() {
-  const { url } = await api<{ url: string }>("POST", "/me/logins/google");
+  const { url } = await api<{ url: string }>("POST", "/me/logins/google", { bind_hash: await googleBindHash() });
   location.assign(url);
 }
 
@@ -236,17 +275,26 @@ export async function completeGoogleReturn(): Promise<{ error: string | null; li
   const q = new URLSearchParams(location.search);
   const code = q.get("google");
   const error = q.get("auth_error");
-  const linked = q.get("google_linked") === "1";
-  if (!code && !error && !linked) return { error: null, linked: false, returned: false };
+  const linkCode = q.get("google_link");
+  if (!code && !error && !linkCode) return { error: null, linked: false, returned: false };
   history.replaceState(null, "", location.pathname + location.hash);
+  const bind = googleBind();
   if (code) {
     try {
-      adopt(await api("POST", "/auth/google/finish", { code }));
+      adopt(await api("POST", "/auth/google/finish", { code, bind }));
     } catch (e) {
       return { error: (e as ApiError).code ?? "google_failed", linked: false, returned: true };
     }
   }
-  return { error, linked, returned: true };
+  if (linkCode) {
+    try {
+      await api("POST", "/me/logins/google/finish", { code: linkCode, bind });
+    } catch (e) {
+      return { error: (e as ApiError).code ?? "google_failed", linked: false, returned: true };
+    }
+    return { error: null, linked: true, returned: true };
+  }
+  return { error, linked: false, returned: true };
 }
 
 export interface Logins {
@@ -271,6 +319,12 @@ export async function addPasskey() {
 export function logout() {
   store(null);
   reconnect();
+}
+
+/** Cierra la sesión aquí y en todos los dispositivos: los tokens de antes ya no se renuevan. */
+export async function logoutEverywhere() {
+  await api("POST", "/me/logout-all");
+  logout();
 }
 
 export async function rename(name: string) {
@@ -526,12 +580,19 @@ export async function myProjects(): Promise<Project[]> {
 
 export const REPORT_REASONS = ["illegal", "hate", "harassment", "sexual", "minors", "violence", "spam", "ip", "other"] as const;
 
-export async function report(targetType: "project" | "avatar" | "user" | "chat", targetId: string, reason: (typeof REPORT_REASONS)[number], details: string) {
+export async function report(
+  targetType: "project" | "avatar" | "user" | "chat",
+  targetId: string,
+  reason: (typeof REPORT_REASONS)[number],
+  details: string,
+  /** Chat: el lugar donde se dijo (el servidor busca el mensaje solo ahí). */
+  chunkId?: string,
+) {
   const token = accountToken() ?? (await guestToken());
   const res = await fetch(new URL("/reports", REALTIME_URL), {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ target_type: targetType, target_id: targetId, reason, details }),
+    body: JSON.stringify({ target_type: targetType, target_id: targetId, reason, details, ...(chunkId ? { chunk_id: chunkId } : {}) }),
   });
   if (!res.ok) {
     const data = (await res.json().catch(() => ({}))) as { error?: string; message?: string };

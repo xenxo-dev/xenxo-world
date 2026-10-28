@@ -17,7 +17,9 @@ import { ReportButton } from "../panel/ReportButton";
 import { closeGame, gameName, gameSrc, type OpenGame } from "./state";
 
 /** Qué deja hacer el iframe: nada de navegar xenxo, ni ventanas sin aislar de xenxo. */
-const SANDBOX = "allow-scripts allow-same-origin allow-forms allow-pointer-lock allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals";
+// Sin allow-modals (alert/confirm del juego podrían imitar a xenxo) ni allow-downloads (descargas
+// sin que la persona lo pida). Lo que necesite eso, que se abra en su web.
+const SANDBOX = "allow-scripts allow-same-origin allow-forms allow-pointer-lock allow-popups allow-popups-to-escape-sandbox";
 const ALLOW = "fullscreen; gamepad; autoplay; clipboard-write; accelerometer; gyroscope";
 
 const LOGIN_KEYS = ["response_type", "client_id", "redirect_uri", "scope", "state", "nonce", "code_challenge", "code_challenge_method", "prompt"];
@@ -31,6 +33,8 @@ export function Player({ open }: { open: OpenGame }) {
   const [consent, setConsent] = useState<{ request: string; state: string } | null>(null);
   const [loaded, setLoaded] = useState(false);
   const answered = useRef(false);
+  /** Pantalla de permiso abierta (o recién cerrada): el juego no puede volver a pedirla en bucle. */
+  const asking = useRef(0);
 
   const post = (msg: unknown) => frame.current?.contentWindow?.postMessage(msg, origin);
   const fail = (state: string, error: string, description: string) =>
@@ -48,6 +52,8 @@ export function Player({ open }: { open: OpenGame }) {
       } else if (d.type === "xenxo:back") {
         closeGame();
       } else if (d.type === "xenxo:login" && d.params && typeof d.params === "object") {
+        if (asking.current < 0 || Date.now() < asking.current) return; // ya preguntando, o justo después
+        asking.current = -1;
         const params: Record<string, string> = {};
         for (const k of LOGIN_KEYS) if (typeof d.params[k] === "string") params[k] = (d.params[k] as string).slice(0, 600);
         const state = params.state ?? "";
@@ -58,15 +64,24 @@ export function Player({ open }: { open: OpenGame }) {
         } catch {
           /* no válida */
         }
-        if (back !== origin) return fail(state, "invalid_request", "redirect_uri tiene que ser de este mismo juego");
+        if (back !== origin) {
+          asking.current = 0;
+          return fail(state, "invalid_request", "redirect_uri tiene que ser de este mismo juego");
+        }
         // Y el juego de «Entrar con xenxo» tiene que ser el que declara su ficha (xenxo.clientId).
-        if (!p.game?.clientId || params.client_id !== p.game.clientId) return fail(state, "invalid_client", "este juego no es el de la ficha del proyecto");
+        if (!p.game?.clientId || params.client_id !== p.game.clientId) {
+          asking.current = 0;
+          return fail(state, "invalid_client", "este juego no es el de la ficha del proyecto");
+        }
         oidcEmbedded({ ...params, project_id: p.id })
           .then((request) => {
             answered.current = false;
             setConsent({ request, state });
           })
-          .catch((err: { message?: string }) => fail(state, "invalid_request", err.message ?? "error"));
+          .catch((err: { message?: string }) => {
+            asking.current = 0;
+            fail(state, "invalid_request", err.message ?? "error");
+          });
       }
     };
     addEventListener("message", onMessage);
@@ -115,6 +130,7 @@ export function Player({ open }: { open: OpenGame }) {
             // Cerrar sin decidir también contesta al juego (si no, se quedaría esperando).
             if (!answered.current) fail(consent.state, "access_denied", "la persona cerró la pantalla de permiso");
             setConsent(null);
+            asking.current = Date.now() + 3000;
           }}
         />
       )}

@@ -17,5 +17,14 @@ Después:
 2. Crea `.env.production` con `VITE_SALA_URL=wss://{{name}}-sala.<tu-subdominio>.workers.dev` y
    `npm run deploy`.
 
-Salas distintas con `?sala=nombre` en la dirección. Máximo 16 jugadores por sala, 30 mensajes por
-segundo y 1,5 KB por mensaje. En el plan gratuito, los límites cortan, no cobran.
+Salas distintas con `?sala=nombre` en la dirección. Límites de cada sala:
+
+- **16 jugadores**: solo cuentan quienes ya han dicho `hola`; quien no lo dice en **10 s** se cierra
+  (código 4003) cuando llega otra conexión.
+- **48 conexiones** en total (contando las que aún no han saludado; si se pasa, 4001 «sala llena»)
+  y **8 desde la misma red** (4004; el cliente no reconecta solo).
+- 30 mensajes por segundo y 1,5 KB por mensaje.
+
+Sin «Entrar con xenxo» comprobado, se entra como **invitado**: con el nombre que diga, sin `#` (no
+puede hacerse pasar por «nombre #número») y siempre marcado como invitado. En el plan gratuito, los
+límites cortan, no cobran.

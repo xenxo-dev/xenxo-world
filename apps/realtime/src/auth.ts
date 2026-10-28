@@ -19,6 +19,10 @@ export interface Principal {
   avatar?: { hash: string; format: "glb" | "vrm" };
   /** Número de jugador (personas registradas). */
   no?: number;
+  /** Personas: versión de sesiones de la cuenta (subirla cierra todas las anteriores). */
+  sv?: number;
+  /** Personas: cuándo entraron de verdad (las renovaciones lo conservan; hay un máximo). */
+  auth?: number;
   /**
    * Agentes de una parcela: solo construyen en este chunk, dentro de este rectángulo, y lo que
    * hacen es del proyecto (`owner`, `prj_<id>`), no de la clave: revocarla no borra lo construido.

@@ -1,0 +1,67 @@
+<!doctype html>
+<!--
+  Política de privacidad de {{title}}. La trajo la plantilla de xenxo y describe lo que hace la
+  plantilla tal cual: si tu juego hace algo más (analíticas, anuncios, cuentas propias, un servidor
+  que guarda datos, multijugador con tu propia sala), CÁMBIALA antes de publicar. Va en "privacy"
+  de public/xenxo.json con su dirección https definitiva.
+
+  Privacy policy of {{title}}, from the xenxo template. It describes what the template does as is:
+  if your game does more (analytics, ads, its own accounts, a server that stores data, multiplayer
+  with your own room), CHANGE IT before publishing. Put its final https address in "privacy" in
+  public/xenxo.json.
+-->
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Privacidad · Privacy — {{title}}</title>
+    <style>
+      body { font: 16px/1.6 system-ui, sans-serif; max-width: 42rem; margin: 2rem auto; padding: 0 1rem; color: #1d1f2b; background: #fbf9f4; }
+      h1, h2 { line-height: 1.25; }
+      .aviso { border-left: 4px solid #4fa3ff; padding: 0.5rem 1rem; background: #eef5ff; }
+      @media (prefers-color-scheme: dark) { body { color: #f6f1e7; background: #12142b; } .aviso { background: #1b2140; } }
+    </style>
+  </head>
+  <body>
+    <h1>Privacidad de {{title}}</h1>
+    <p class="aviso">Responsable: <strong>Tu nombre</strong> (contacto: <strong>tu email o tu web</strong>). <em>Cámbialo por el tuyo.</em></p>
+
+    <h2>Qué datos usa el juego</h2>
+    <ul>
+      <li><strong>Si juegas sin entrar con xenxo</strong>, el juego no te pide ni guarda nada tuyo.</li>
+      <li><strong>Si entras con xenxo</strong> y das permiso, xenxo nos pasa un identificador tuyo solo para
+        este juego, tu nombre visible, tu número de jugador y tu personaje (con su retrato). Los usamos
+        <strong>solo para representarte en la partida</strong>: no los vendemos, no los pasamos a nadie
+        y no los usamos para anuncios, perfiles ni para entrenar modelos.</li>
+      <li>Lo que recuerda tu sesión se guarda en tu propio navegador (<code>sessionStorage</code>) y se
+        borra al cerrar la pestaña. No usamos cookies, analíticas ni anuncios.</li>{{privacyMulti}}
+      <li>El juego se aloja en un servicio de alojamiento web que, como cualquier web, recibe tu
+        dirección IP para servirte las páginas, según su propia política.</li>
+    </ul>
+
+    <h2>Tus derechos</h2>
+    <p>Puedes retirar el permiso cuando quieras en xenxo.io → Cuenta → Juegos conectados. Para
+      cualquier pregunta sobre tus datos, escríbenos al contacto de arriba.</p>
+
+    <hr />
+
+    <h1 lang="en">{{title}} privacy</h1>
+    <div lang="en">
+      <p class="aviso">Controller: <strong>Your name</strong> (contact: <strong>your email or website</strong>). <em>Replace with yours.</em></p>
+      <h2>What data the game uses</h2>
+      <ul>
+        <li><strong>If you play without signing in with xenxo</strong>, the game neither asks for nor stores anything about you.</li>
+        <li><strong>If you sign in with xenxo</strong> and allow it, xenxo gives us an identifier for you that only works in this
+          game, your display name, your player number and your character (with its portrait). We use them <strong>only to
+          represent you in the game</strong>: we don't sell them, share them, or use them for ads, profiling or training models.</li>
+        <li>Your session is remembered in your own browser (<code>sessionStorage</code>) and cleared when you close the tab.
+          We use no cookies, analytics or ads.</li>{{privacyMultiEn}}
+        <li>The game is hosted on a web hosting service which, like any website, receives your IP address to serve the pages,
+          under its own policy.</li>
+      </ul>
+      <h2>Your rights</h2>
+      <p>You can withdraw your permission at any time at xenxo.io → Account → Connected games. For any question about your
+        data, write to the contact above.</p>
+    </div>
+  </body>
+</html>

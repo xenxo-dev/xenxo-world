@@ -20,6 +20,7 @@ import {
   ENTITY_SCHEMA,
   EntityId,
   estimateTris,
+  MeshV1,
   msg,
   PARCEL_BUDGETS,
   PLACES,
@@ -43,7 +44,7 @@ const CABINET_SCREEN = { y: 1.18, z: 0.34, size: [0.56, 0.5] as [number, number]
 import { isCommunityChunk, type CommunityMeta } from "./community";
 import { fitsZone, localBox, worldBox, type Zone } from "./zone";
 import { assetKey } from "./assets";
-import { ACTIVITY_SCHEMA, activityKey, isoWeek, weekStart, minRaceMs, near, POSE_MAX_AGE_MS, RACE_TIMEOUT_MS, SCORES_LIMIT, type RaceRun } from "./activities";
+import { ACTIVITY_SCHEMA, activityKey, ARRIVALS_FREE, ARRIVALS_WINDOW_MS, isoWeek, JUMP_COOLDOWN_MS, weekStart, minRaceMs, MOVE_BURST, FOOT_BURST, near, POSE_MAX_AGE_MS, RACE_TIMEOUT_MS, SCORES_LIMIT, stepMove, unitQuat, type Move, type RaceRun } from "./activities";
 import { SEED_ASSETS } from "./seed-assets";
 import { figureFor, pointsDay, TILES_IDLE_MS, TILES_PAUSE_MS, TILES_SCHEMA, TILES_START_MS, tileAt, tilesRoundMs, type TileBoard, type TileGame } from "./tiles";
 import { isAvatarPreset } from "./avatar-presets-check";
@@ -106,8 +107,66 @@ function fnv1a(text: string): string {
   return (h >>> 0).toString(16);
 }
 const CHAT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+/** El chat se recorta a sus últimos CHAT_KEEP mensajes cada CHAT_TRIM_EVERY (no en cada uno: cuesta filas leídas). */
+const CHAT_KEEP = 2000;
+const CHAT_TRIM_EVERY = 100;
 const MAX_MESSAGE_BYTES = 64 * 1024;
 const MIN_POSE_INTERVAL_MS = 1000 / BUDGETS.maxPoseHz - 5;
+/**
+ * Mensajes por conexión (de cualquier tipo): un cubo de MSG_BURST que se rellena a MSG_RATE por
+ * segundo; cada 8 KB cuentan uno más. Quien lo vacía se queda sin conexión (4008). Las poses a 15 Hz,
+ * el chat y las actividades caben de sobra.
+ */
+const MSG_BURST = 120;
+const MSG_RATE = 40;
+/** Conexiones a la vez de la misma cuenta (o agente) en un chunk: al pasar, se cierra la más vieja. */
+const MAX_CONN_PER_SUB = 8;
+/** Las manos van con la cabeza: más lejos que esto (m), no se reparten. */
+const HAND_REACH = 2.5;
+/** Un marcador se lee de la base como mucho una vez cada esto (ms), salvo que cambie algo. */
+const SCORES_CACHE_MS = 5000;
+/** Registro de eventos e idempotencia: cuánto se guardan y cuánto se poda de una vez (sin alarmas). */
+const IDEM_RETENTION_MS = 24 * 60 * 60 * 1000;
+const EVENTS_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const PRUNE_EVERY_MS = 60 * 60 * 1000;
+const PRUNE_BATCH = 500;
+/** Un evento guarda como mucho esto de datos (lo que pasa se resume). */
+const EVENT_DATA_MAX = 4096;
+/** Piezas en la zona de pruebas, entre todos (además del tope por persona). */
+const SANDBOX_TOTAL = 240;
+/** Ids que los clientes no pueden elegir: los ponen el sistema y el Worker (portales, máquinas, anuncios). */
+const RESERVED_IDS = /^(stand[a-z]?|show[a-z]?|cabinet|billboard|nexo)_/i;
+/**
+ * Lo que gasta el presupuesto del chunk (BUDGETS): lo construido fuera de las parcelas (que tienen el
+ * suyo), de la zona de pruebas (el suyo) y de los portales de los proyectos (uno por parcela).
+ */
+const CHUNK_BUDGET_WHERE =
+  "owner NOT IN ('system', 'cabinets', 'billboards', 'community_gates') AND owner NOT LIKE 'prj!_%' ESCAPE '!' AND owner NOT LIKE 'dst!_%' ESCAPE '!'" +
+  " AND entity_id NOT IN (SELECT entity_id FROM sandbox) AND NOT (entity_id GLOB 'stand_*' OR entity_id GLOB 'stand[a-z]_*' OR entity_id GLOB 'show_*' OR entity_id GLOB 'show[a-z]_*')";
+/**
+ * Servidor de distritos: medidas de los modelos que ya se le pidieron al Worker (los modelos van por
+ * hash: lo que existe no cambia). Las de «no existe», poco tiempo.
+ */
+const REMOTE_META = new Map<string, { meta: { customMetadata?: Record<string, string> } | null; until: number }>();
+const REMOTE_META_MAX = 2000;
+const REMOTE_META_TTL_MS = 60 * 60 * 1000;
+const REMOTE_META_MISS_MS = 60 * 1000;
+/** Escritura en `entities` (para invalidar las cachés que salen de ella). */
+const ENTITY_WRITE = /^\s*(INSERT|UPDATE|DELETE|REPLACE)\b[^]*?\bentities\b/i;
+
+/**
+ * Texto que viene de la gente (nombres y chat): NFKC, sin caracteres de control ni de formato
+ * (bidi, anchura cero, guion invisible…), sin rellenos de Hangul ni pilas de marcas combinadas.
+ */
+function cleanText(raw: string, max: number): string {
+  const s = raw
+    .normalize("NFKC")
+    .replace(/[\p{Cc}\p{Cf}ᅟᅠㅤﾠ⠀]/gu, " ")
+    .replace(/(\p{M}{3})\p{M}+/gu, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+  return [...s].slice(0, max).join("").trim();
+}
 
 interface Attachment {
   session_id: string;
@@ -115,6 +174,10 @@ interface Attachment {
   hello: boolean;
   client_type: Peer["client_type"];
   display_name: string;
+  /** Cuándo se abrió (para cerrar la más vieja de una cuenta). */
+  since?: number;
+  /** Ya mandó alguna pose (si el objeto hiberna, la siguiente no es una llegada libre). */
+  posed?: boolean;
   /** Avatar de serie elegido en HELLO (invitados y agentes). */
   preset?: { hash: string; format: "vrm" };
   /** Carrera en curso (activities.ts). */
@@ -145,8 +208,25 @@ export interface ChunkDump {
 }
 
 export class ChunkRoom extends DurableObject<Env> {
-  private sql: SqlStorage;
+  /** SQLite del objeto; cada escritura en `entities` invalida las cachés que salen de ella. */
+  private sql: Pick<SqlStorage, "exec">;
   private chunkId: string | null = null;
+  /** Ids de la semilla de este lugar (los clientes no pueden usarlos). */
+  private seedIds = new Set<string>();
+  /** Sube con cada escritura en `entities`: las cachés guardan la vuelta con la que se hicieron. */
+  private entityEpoch = 1;
+  private entitiesJsonCache: { epoch: number; json: string } | null = null;
+  private activityCache: { epoch: number; list: ReturnType<ChunkRoom["readActivityEntities"]> } | null = null;
+  private scoreCache = new Map<string, { at: number; value: ReturnType<ChunkRoom["scoreRows"]> }>();
+  /** Mensajes que le quedan a cada conexión (ver MSG_BURST). */
+  private buckets = new Map<string, { tokens: number; t: number }>();
+  /** Movimiento de cada sesión (activities.ts → stepMove). */
+  private moves = new Map<string, Move>();
+  /** Llegadas recientes de cada cuenta (HELLO) y sesiones cuya llegada ya no es libre. */
+  private arrivals = new Map<string, number[]>();
+  private hotArrival = new Set<string>();
+  private chatSinceTrim = 0;
+  private lastPrune = 0;
   /** Si es un distrito de la comunidad (community.ts): qué es. Se guarda en meta 'community'. */
   private community: CommunityMeta | null = null;
   private poses = new Map<string, AvatarPose>();
@@ -165,7 +245,13 @@ export class ChunkRoom extends DurableObject<Env> {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    this.sql = ctx.storage.sql;
+    const raw = ctx.storage.sql;
+    this.sql = {
+      exec: ((query: string, ...bindings: unknown[]) => {
+        if (ENTITY_WRITE.test(query)) this.entityEpoch++;
+        return raw.exec(query, ...bindings);
+      }) as SqlStorage["exec"],
+    };
     this.sql.exec(`
       CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS entities (
@@ -185,6 +271,12 @@ export class ChunkRoom extends DurableObject<Env> {
       ${TILES_SCHEMA}
       CREATE TABLE IF NOT EXISTS sandbox (entity_id TEXT PRIMARY KEY, owner TEXT NOT NULL, day TEXT NOT NULL, light INTEGER NOT NULL DEFAULT 0);
     `);
+    // Al despertar de la hibernación no llega ningún fetch: el chunk se lee de lo guardado antes de
+    // atender ningún mensaje (sin esto, chunkId era null y las entidades nuevas salían sin chunk_id).
+    void ctx.blockConcurrencyWhile(async () => {
+      const stored = this.sql.exec<{ v: string }>("SELECT v FROM meta WHERE k = 'chunk_id'").toArray()[0]?.v;
+      if (stored) this.ensureChunk(stored);
+    });
   }
 
   /* ---------------------------------------------------------------- */
@@ -200,6 +292,20 @@ export class ChunkRoom extends DurableObject<Env> {
     if (path === "/ws") {
       const principal = JSON.parse(req.headers.get("X-Principal") ?? "null") as Principal | null;
       if (!principal) return new Response("unauthorized", { status: 401 });
+      // Tope de conexiones de la misma cuenta aquí: la más vieja se cierra (suele ser una que se quedó colgada).
+      const mine = this.ctx
+        .getWebSockets()
+        .map((w) => ({ w, a: w.deserializeAttachment() as Attachment | null }))
+        .filter((x) => x.a?.principal.sub === principal.sub)
+        .sort((x, y) => (x.a!.since ?? 0) - (y.a!.since ?? 0));
+      for (const x of mine.slice(0, Math.max(0, mine.length - MAX_CONN_PER_SUB + 1))) {
+        this.dropSession(x.w);
+        try {
+          x.w.close(4009, "demasiadas conexiones de la misma cuenta");
+        } catch {
+          /* ya cerrada */
+        }
+      }
       const pair = new WebSocketPair();
       const [client, server] = [pair[0], pair[1]];
       const session_id = randomId("s_", 6);
@@ -209,8 +315,12 @@ export class ChunkRoom extends DurableObject<Env> {
         principal,
         hello: false,
         client_type: "headless",
+        since: Date.now(),
         display_name:
-          principal.kind === "agent" ? principal.sub.replace(/^agt_/, "") : principal.kind === "user" ? principal.name ?? "user" : "guest",
+          cleanText(
+            principal.kind === "agent" ? principal.sub.replace(/^agt_/, "") : principal.kind === "user" ? (principal.name ?? "user") : "guest",
+            64,
+          ) || principal.kind,
       };
       server.serializeAttachment(att);
       return new Response(null, { status: 101, webSocket: client });
@@ -229,8 +339,9 @@ export class ChunkRoom extends DurableObject<Env> {
     this.chunkId = id ?? stored ?? PLACES.plaza;
     if (stored !== this.chunkId) {
       this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('chunk_id', ?)", this.chunkId);
-      if (stored) this.sql.exec("DELETE FROM meta WHERE k = 'seed_version'");
+      if (stored) this.sql.exec("DELETE FROM meta WHERE k IN ('seed_version', 'chunk_id_fix')");
     }
+    this.repairChunkIds();
 
     if (this.chunkId === PLACES.plaza) this.applySeed("plaza", SEED_VERSION, plazaSeed());
     else if (this.chunkId === PLACES.nexo) {
@@ -258,6 +369,18 @@ export class ChunkRoom extends DurableObject<Env> {
         if (this.community) this.applySeed(`community_${this.community.id}`, 1, this.community.system);
       }
     }
+  }
+
+  /**
+   * Una vez: las entidades que se escribieron tras despertar de la hibernación sin saber el chunk
+   * (chunk_id null) hacían que los clientes descartaran el SNAPSHOT entero. Se les pone el suyo.
+   */
+  private repairChunkIds() {
+    if (this.sql.exec<{ v: string }>("SELECT v FROM meta WHERE k = 'chunk_id_fix'").toArray()[0]?.v === "1") return;
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec("UPDATE entities SET data = json_set(data, '$.chunk_id', ?) WHERE json_extract(data, '$.chunk_id') IS NOT ?", this.chunkId, this.chunkId);
+      this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('chunk_id_fix', '1')");
+    });
   }
 
   /**
@@ -319,6 +442,7 @@ export class ChunkRoom extends DurableObject<Env> {
    * "system" y conserva las de personas y agentes.
    */
   private applySeed(name: string, version: number, seed: Seeded[]) {
+    for (const s of seed) this.seedIds.add(s.id);
     const fingerprint = `${version}:${fnv1a(JSON.stringify(seed))}`;
     const current = this.sql.exec<{ v: string }>("SELECT v FROM meta WHERE k = 'seed_version'").toArray()[0]?.v;
     if (current === fingerprint) return;
@@ -339,6 +463,21 @@ export class ChunkRoom extends DurableObject<Env> {
 
   async webSocketMessage(ws: WebSocket, data: string | ArrayBuffer) {
     const att = ws.deserializeAttachment() as Attachment;
+    // Sin saber qué chunk es no se atiende nada (no debería pasar: el constructor lo lee de lo guardado).
+    if (!this.chunkId) {
+      ws.close(1011, "vuelve a entrar");
+      return;
+    }
+    if (!this.takeToken(att.session_id, typeof data === "string" ? data.length : data.byteLength)) {
+      this.sendError(ws, undefined, "rate_limited", "demasiados mensajes: conexión cerrada");
+      this.dropSession(ws);
+      try {
+        ws.close(4008, "demasiados mensajes");
+      } catch {
+        /* ya cerrada */
+      }
+      return;
+    }
     if (typeof data !== "string") return this.sendError(ws, undefined, "bad_message", "codificación binaria reservada para v1");
     if (data.length > MAX_MESSAGE_BYTES) return this.sendError(ws, undefined, "bad_message", "mensaje demasiado grande");
 
@@ -361,10 +500,12 @@ export class ChunkRoom extends DurableObject<Env> {
 
     switch (m.type) {
       case "HELLO": {
+        // Uno por conexión: cada HELLO manda el SNAPSHOT entero y avisa a todos.
+        if (att.hello) return this.sendError(ws, m.id, "bad_message", "HELLO ya enviado en esta conexión");
         att.hello = true;
         att.client_type = m.payload.client_type;
         // Solo los invitados eligen nombre en HELLO; el de personas registradas y agentes lo fija el servidor.
-        if (m.payload.display_name && att.principal.kind === "guest") att.display_name = m.payload.display_name.trim() || "guest";
+        if (m.payload.display_name && att.principal.kind === "guest") att.display_name = cleanText(m.payload.display_name, 32) || "guest";
         // Invitados y agentes pueden vestir un avatar de serie (nunca un archivo cualquiera).
         if (m.payload.avatar && !att.principal.avatar && isAvatarPreset(m.payload.avatar.hash)) {
           att.preset = { hash: m.payload.avatar.hash, format: "vrm" };
@@ -382,14 +523,21 @@ export class ChunkRoom extends DurableObject<Env> {
         }));
         // En solitario (el nexo) nadie ve a nadie: ni gente, ni poses, ni chat.
         if (this.solo) {
-          this.send(ws, msg("SNAPSHOT", { entities: this.allEntities(), peers: [], poses: [], chat: [] }));
+          this.sendSnapshot(ws, [], [], []);
           return;
         }
-        this.send(
-          ws,
-          msg("SNAPSHOT", { entities: this.allEntities(), peers: this.peers(), poses: [...this.poses.values()], chat: this.recentChat() }),
-        );
+        this.sendSnapshot(ws, this.peers(), [...this.poses.values()], this.recentChat());
         this.broadcast(msg("PEER_JOIN", this.peerOf(att)), ws);
+        // Llegadas de la misma cuenta muy seguidas (reconectar para aparecer en otro sitio): la
+        // siguiente pose ya no es una llegada libre.
+        if (att.principal.kind === "user") {
+          const now = Date.now();
+          const list = (this.arrivals.get(att.principal.sub) ?? []).filter((t) => now - t < ARRIVALS_WINDOW_MS);
+          if (list.length >= ARRIVALS_FREE) this.hotArrival.add(att.session_id);
+          list.push(now);
+          this.arrivals.set(att.principal.sub, list);
+          this.pruneLog(this.arrivals, ARRIVALS_WINDOW_MS);
+        }
         if (att.principal.kind === "user") this.send(ws, msg("PROGRESS", this.progressOf(att.principal.sub)));
         for (const g of this.tileGames.values()) if (g.state === "show") this.send(ws, this.tilesMsg(g));
         return;
@@ -398,16 +546,28 @@ export class ChunkRoom extends DurableObject<Env> {
         if (this.solo) return; // en solitario no se reparten poses
         const now = Date.now();
         if (now - (this.lastPoseAt.get(att.session_id) ?? 0) < MIN_POSE_INTERVAL_MS) return; // descarta en silencio
+        const { emote, vehicle } = m.payload;
+        const headR = unitQuat(m.payload.head.r);
+        if (!headR || !this.inBounds(m.payload.head.p)) return;
         this.lastPoseAt.set(att.session_id, now);
-        const { head, hand_l, hand_r, emote, vehicle, car } = m.payload;
-        if (!this.inBounds(head.p)) return;
+        const head = { p: m.payload.head.p, r: headR };
+        // Las manos, con la cabeza (y con su giro normalizado); si no, no se reparten.
+        const hand = (h: typeof m.payload.hand_l) => {
+          const r = h && unitQuat(h.r);
+          return h && r && Math.hypot(h.p[0] - head.p[0], h.p[1] - head.p[1], h.p[2] - head.p[2]) <= HAND_REACH ? { p: h.p, r } : undefined;
+        };
+        const hand_l = hand(m.payload.hand_l), hand_r = hand(m.payload.hand_r);
         // Coches solo en los distritos (en la plaza se va a pie) y dentro de sus límites.
         const roads = !!districtByChunk(this.chunkId!);
+        const carR = m.payload.car && unitQuat(m.payload.car.r);
+        const car = m.payload.car && carR ? { p: m.payload.car.p, r: carR } : undefined;
         const withCar = roads && car && this.inBounds(car.p) ? { car, ...(vehicle ? { vehicle } : {}) } : {};
-        this.poses.set(att.session_id, { session_id: att.session_id, head, hand_l, hand_r, ...(emote ? { emote } : {}), ...withCar });
+        const jump = this.trackMove(ws, att, head.p, now);
+        this.poses.set(att.session_id, { session_id: att.session_id, head, ...(hand_l ? { hand_l } : {}), ...(hand_r ? { hand_r } : {}), ...(emote ? { emote } : {}), ...withCar });
         this.dirty.add(att.session_id);
         this.scheduleTick();
-        this.tilesPose(att, head.p);
+        // Una pose que llega de un salto no pisa baldosas.
+        if (!jump) this.tilesPose(att, head.p);
         return;
       }
       case "CHAT":
@@ -422,7 +582,7 @@ export class ChunkRoom extends DurableObject<Env> {
       case "CHECKPOINT":
         return this.handleCheckpoint(ws, att, m.id, m.payload.entity_id);
       case "SCORES_GET":
-        return this.handleScores(ws, m.id, m.payload.entity_id);
+        return this.handleScores(ws, att, m.id, m.payload.entity_id);
     }
   }
 
@@ -441,7 +601,61 @@ export class ChunkRoom extends DurableObject<Env> {
     this.dirty.delete(att.session_id);
     this.lastPoseAt.delete(att.session_id);
     this.activityLog.delete(att.session_id);
+    this.buckets.delete(att.session_id);
+    this.moves.delete(att.session_id);
+    this.hotArrival.delete(att.session_id);
     if (att.hello && !this.solo) this.broadcast(msg("PEER_LEAVE", { session_id: att.session_id }), ws);
+  }
+
+  /** Cubo de mensajes de una conexión (ver MSG_BURST): false si se ha quedado sin. */
+  private takeToken(sessionId: string, bytes: number): boolean {
+    const now = Date.now();
+    const b = this.buckets.get(sessionId) ?? { tokens: MSG_BURST, t: now };
+    b.tokens = Math.min(MSG_BURST, b.tokens + ((now - b.t) / 1000) * MSG_RATE);
+    b.t = now;
+    b.tokens -= 1 + Math.floor(bytes / 8192);
+    this.buckets.set(sessionId, b);
+    return b.tokens >= 0;
+  }
+
+  /** Quita de un registro en memoria (por cuenta) lo que ya no cuenta, cuando crece. */
+  private pruneLog(map: Map<string, number[]>, windowMs: number) {
+    if (map.size < 256) return;
+    const now = Date.now();
+    for (const [k, list] of map) if (!list.length || now - list[list.length - 1]! >= windowMs) map.delete(k);
+  }
+
+  /**
+   * Apunta el movimiento de una sesión (activities.ts → stepMove) y dice si esta pose ha sido un
+   * salto. La primera pose de la conexión es la llegada: libre, salvo que la cuenta llegue una y otra
+   * vez o que el objeto haya hibernado con la sesión ya en marcha (entonces cuenta como salto).
+   * Un salto, o ir más rápido que a pie, anula la carrera en curso.
+   */
+  private trackMove(ws: WebSocket, att: Attachment, p: readonly number[], now: number): boolean {
+    let m = this.moves.get(att.session_id);
+    let jump = false, fast = false;
+    if (!m) {
+      jump = !!att.posed || this.hotArrival.has(att.session_id);
+      m = { p: [p[0]!, p[1]!, p[2]!], t: now, budget: MOVE_BURST, foot: FOOT_BURST, jumpAt: jump ? now : 0 };
+      this.moves.set(att.session_id, m);
+      if (!att.posed) {
+        att.posed = true;
+        ws.serializeAttachment(att);
+      }
+    } else ({ jump, fast } = stepMove(m, p, now));
+    if ((jump || fast) && att.run) {
+      const race = att.run.race;
+      att.run = undefined;
+      ws.serializeAttachment(att);
+      this.send(ws, msg("RACE", { race, state: "reset" }));
+    }
+    return jump;
+  }
+
+  /** ¿Acaba de llegar esta sesión de un salto? Entonces no cuentan las actividades. */
+  private jumpedRecently(att: Attachment): boolean {
+    const m = this.moves.get(att.session_id);
+    return !!m && m.jumpAt > 0 && Date.now() - m.jumpAt < JUMP_COOLDOWN_MS;
   }
 
   /** El nexo se recorre en solitario: el multijugador es de los distritos, la plaza y los juegos. */
@@ -535,17 +749,22 @@ export class ChunkRoom extends DurableObject<Env> {
     // Zona de pruebas (Taller): cualquier cuenta construye allí con piezas básicas, sin clave.
     const sandbox = !zone && att.principal.kind === "user" && !att.principal.scopes.includes("build") ? this.sandboxRect() : null;
     try {
-      // Los triángulos de un modelo NO se creen al cliente: se leen de lo que midió el servidor al subirlo.
-      const resolved = await this.resolveAssets(p.mutation);
-      p.mutation = resolved.mu;
-      // Un PATCH en una parcela que no cambia el modelo: sus medidas, las del que ya lleva.
-      if (zone && p.mutation.op === "PATCH" && !p.mutation.components["mesh@1"]) resolved.meshBounds = await this.boundsOfEntity(p.mutation.entity_id);
+      // Primero quién puede y cuánto: nada de leer R2 (ni pedir medidas fuera) por quien no construye.
       if (!att.principal.scopes.includes("build") && !sandbox) throw new MutationError("forbidden", "esta sesión no tiene permiso de construcción");
       if (sandbox && p.mutation.op !== "DESPAWN" && p.mutation.components["mesh@1"]) throw new MutationError("forbidden", "en la zona de pruebas solo hay piezas básicas");
       if (zone && zone.chunk_id !== this.chunkId) {
         throw new MutationError("forbidden", `esta clave solo construye en su parcela (${zone.district} ${zone.parcel})`, { zone });
       }
       if (p.target === "proposal") throw new MutationError("bad_message", "las propuestas (ramas) llegan en una versión futura; usa target: commit");
+      // Los ids del sistema (portales, máquinas, anuncios y la semilla del lugar) no se pueden elegir.
+      if (p.mutation.op === "SPAWN" && p.mutation.entity_id && this.reservedId(p.mutation.entity_id)) {
+        throw new MutationError("forbidden", "ese id está reservado para el sistema; elige otro o deja que lo ponga el servidor", { entity_id: p.mutation.entity_id });
+      }
+      // Un mesh@1 mal formado (hash que no es sha256, más de 4 LOD) se rechaza antes de buscar nada.
+      if (p.mutation.op !== "DESPAWN" && p.mutation.components["mesh@1"] != null) {
+        const mesh = MeshV1.safeParse(p.mutation.components["mesh@1"]);
+        if (!mesh.success) throw new MutationError("bad_message", "componentes no válidos", mesh.error.issues.slice(0, 5));
+      }
 
       const idemKey = `${actor}:${p.idempotency_key}`;
       const prior = this.sql.exec<{ result: string }>("SELECT result FROM idem WHERE key = ?", idemKey).toArray()[0];
@@ -555,6 +774,11 @@ export class ChunkRoom extends DurableObject<Env> {
       }
 
       this.rateLimit(actor);
+      // Los triángulos de un modelo NO se creen al cliente: se leen de lo que midió el servidor al subirlo.
+      const resolved = await this.resolveAssets(p.mutation);
+      p.mutation = resolved.mu;
+      // Un PATCH en una parcela que no cambia el modelo: sus medidas, las del que ya lleva.
+      if (zone && p.mutation.op === "PATCH" && !p.mutation.components["mesh@1"]) resolved.meshBounds = await this.boundsOfEntity(p.mutation.entity_id);
       const result = this.ctx.storage.transactionSync(() => {
         const r = sandbox
           ? this.applySandbox(actor, p.mutation, sandbox)
@@ -565,6 +789,7 @@ export class ChunkRoom extends DurableObject<Env> {
 
       this.send(ws, msg("ACK", { ref, entity_id: result.entity_id, rev: result.rev, replayed: false }));
       this.broadcast(msg("DELTA", { changes: [result.change] }));
+      this.maybePrune();
     } catch (e) {
       if (e instanceof MutationError) return this.sendError(ws, ref, e.code, e.message, e.detail);
       console.error("mutation failed", e);
@@ -609,12 +834,21 @@ export class ChunkRoom extends DurableObject<Env> {
     const allowed = new Set(["transform@1", "primitive@1", "label@1", "light@1", "collider@1"]);
     const extra = Object.keys(c).filter((k) => !allowed.has(k));
     if (extra.length) throw new MutationError("forbidden", "en la zona de pruebas solo hay cajas, cilindros, esferas, carteles y luces", { extra });
-    const [x, y, zz] = c["transform@1"].p;
+    const t = c["transform@1"];
+    if (t.parent) throw new MutationError("bad_message", "en la zona de pruebas, las piezas van sin padre (parent: null)");
     const s = c["primitive@1"]?.size ?? [0.5, 0.5, 0.5];
     if (s.some((v) => v > 4)) throw new MutationError("budget_exceeded", "cada pieza mide como mucho 4 m");
-    const hx = (s[0] / 2) * Math.max(...c["transform@1"].s), hz = (s[2] / 2) * Math.max(...c["transform@1"].s);
-    if (x! - hx < z.x0 || x! + hx > z.x1 || zz! - hz < z.z0 || zz! + hz > z.z1 || y! < 0 || y! > z.max_y) {
-      throw new MutationError("forbidden", "fuera de la zona de pruebas");
+    if (t.s.some((v) => !(v >= 0.1 && v <= 4))) throw new MutationError("budget_exceeded", "en la zona de pruebas, la escala va de 0,1 a 4 en cada eje");
+    // El colisionador, como mucho del tamaño de la pieza (sin pieza, el de una caja de 0,5 m).
+    const col = c["collider@1"];
+    if (col && col.half_extents.some((h, i) => h > s[i]! / 2 + 0.01)) {
+      throw new MutationError("budget_exceeded", "en la zona de pruebas, el colisionador no puede ser más grande que la pieza");
+    }
+    // Todo lo que ocupa (pieza, colisionador y cartel), girado y escalado, dentro del rectángulo.
+    const box = worldBox(t, localBox(c, null) ?? { min: [0, 0, 0], max: [0, 0, 0] });
+    const e = 0.01;
+    if (box.min[0] < z.x0 - e || box.max[0] > z.x1 + e || box.min[2] < z.z0 - e || box.max[2] > z.z1 + e || box.min[1] < -0.5 || box.max[1] > z.max_y + e) {
+      throw new MutationError("forbidden", "fuera de la zona de pruebas", { box: { min: box.min.map(r3), max: box.max.map(r3) } });
     }
     const l = c["light@1"];
     if (l && (l.intensity > 3 || l.range > 10)) throw new MutationError("budget_exceeded", "en la zona de pruebas, luces de intensidad 3 y alcance 10 como mucho");
@@ -629,13 +863,15 @@ export class ChunkRoom extends DurableObject<Env> {
       const mine = this.sql.exec<{ n: number; l: number }>("SELECT COUNT(*) AS n, COALESCE(SUM(light), 0) AS l FROM sandbox WHERE owner = ?", actor).one();
       if (mine.n >= z.per_person) throw new MutationError("budget_exceeded", `en la zona de pruebas, ${z.per_person} piezas por persona como mucho`, { max: z.per_person });
       if (c["light@1"] && mine.l >= z.lights) throw new MutationError("budget_exceeded", `en la zona de pruebas, ${z.lights} luces por persona como mucho`);
-      const r = this.applyMutation(actor, false, { ...mu, components: c as Record<string, unknown> }, null);
+      const all = this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM sandbox").one().n;
+      if (all >= SANDBOX_TOTAL) throw new MutationError("budget_exceeded", "la zona de pruebas está llena por hoy", { max: SANDBOX_TOTAL });
+      const r = this.applyMutation(actor, false, { ...mu, components: c as Record<string, unknown> }, null, "sandbox");
       this.sql.exec("INSERT INTO sandbox (entity_id, owner, day, light) VALUES (?, ?, ?, ?)", r.entity_id, actor, pointsDay(), c["light@1"] ? 1 : 0);
       return r;
     }
     const mine = this.sql.exec("SELECT 1 FROM sandbox WHERE entity_id = ? AND owner = ?", mu.entity_id, actor).toArray().length > 0;
     if (!mine) throw new MutationError("forbidden", "solo puedes cambiar tus piezas de la zona de pruebas");
-    const r = this.applyMutation(actor, false, mu, null);
+    const r = this.applyMutation(actor, false, mu, null, "sandbox");
     if (mu.op === "DESPAWN") this.sql.exec("DELETE FROM sandbox WHERE entity_id = ?", mu.entity_id);
     else if (r.change.kind === "upsert") this.checkSandbox(r.change.entity.components as Components, z);
     return r;
@@ -645,8 +881,19 @@ export class ChunkRoom extends DurableObject<Env> {
    * Aplica una mutación ya validada en forma. Con `zone` (agente de una parcela), lo construido es
    * del proyecto (`zone.owner`), tiene que caber entero en la parcela y cuenta en el presupuesto
    * de la parcela, no en el del chunk.
+   *
+   * `budget` dice de qué presupuesto sale lo que no es de una parcela: `chunk` (lo de siempre), `sandbox`
+   * (la zona de pruebas: su tope lo mira applySandbox; aquí, luces y triángulos) o `stand` (los portales
+   * de los proyectos: uno por parcela, con su monumento ya medido; no gastan el del chunk, así que ni
+   * las parcelas ni la zona de pruebas llenas impiden publicar).
    */
-  private applyMutation(actor: string, isAdmin: boolean, mu: MutationOp, zone: (Zone & { meshBounds: { min: number[]; max: number[] } | null }) | null) {
+  private applyMutation(
+    actor: string,
+    isAdmin: boolean,
+    mu: MutationOp,
+    zone: (Zone & { meshBounds: { min: number[]; max: number[] } | null }) | null,
+    budget: "chunk" | "sandbox" | "stand" = "chunk",
+  ) {
     const owner = zone?.owner ?? actor;
     if (mu.op === "SPAWN") {
       const components = this.validateComponents(mu.components);
@@ -655,10 +902,11 @@ export class ChunkRoom extends DurableObject<Env> {
       if (zone) {
         this.checkZone(components, zone);
         this.checkParcel(zone.owner, { entities: 1, tris: estimateTris(components), lights: components["light@1"] ? 1 : 0 });
-      } else {
-        // Lo del sistema (la ciudad, sus colisiones y actividades) no gasta el presupuesto de lo construido.
-        const count = this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM entities WHERE owner != 'system'").one().n;
-        if (count >= BUDGETS.maxEntitiesPerChunk) throw new MutationError("budget_exceeded", "chunk lleno de entidades", { max: BUDGETS.maxEntitiesPerChunk });
+      } else if (budget !== "stand") {
+        if (budget === "chunk") {
+          const count = this.sql.exec<{ n: number }>(`SELECT COUNT(*) AS n FROM entities WHERE ${CHUNK_BUDGET_WHERE}`).one().n;
+          if (count >= BUDGETS.maxEntitiesPerChunk) throw new MutationError("budget_exceeded", "chunk lleno de entidades", { max: BUDGETS.maxEntitiesPerChunk });
+        }
         if (components["light@1"]) this.checkLights(1);
         this.checkTris(estimateTris(components), 0);
       }
@@ -692,14 +940,17 @@ export class ChunkRoom extends DurableObject<Env> {
       // Un PATCH sin mesh@1 nuevo no trae medidas: se usan las del modelo que ya tiene.
       this.checkZone(components, zone);
       this.checkParcel(zone.owner, { entities: 0, tris: tris - row.tris, lights: components["light@1"] && !hadLight ? 1 : 0 });
-    } else {
+    } else if (budget !== "stand") {
       if (components["light@1"] && !hadLight) this.checkLights(1);
       this.checkTris(tris, row.tris);
     }
     const rev = row.rev + 1;
     const entity = this.entityOf(mu.entity_id, row.owner, rev, components);
     this.sql.exec("UPDATE entities SET rev = ?, tris = ?, data = ? WHERE entity_id = ?", rev, tris, JSON.stringify(entity), mu.entity_id);
-    this.logEvent(actor, "PATCH", mu.entity_id, rev, mu.components);
+    // En el registro, lo cambiado tal como quedó tras validarlo (nunca lo que mandó el cliente sin más).
+    const logged: Record<string, unknown> = {};
+    for (const k of Object.keys(mu.components)) logged[k] = mu.components[k] === null ? null : ((components as Record<string, unknown>)[k] ?? null);
+    this.logEvent(actor, "PATCH", mu.entity_id, rev, logged);
     return { entity_id: mu.entity_id, rev, change: { kind: "upsert" as const, entity } };
   }
 
@@ -735,11 +986,22 @@ export class ChunkRoom extends DurableObject<Env> {
    * Worker de Cloudflare (`ASSETS_URL`/assets/<hash>/meta), que las guarda en su caché.
    */
   private async assetHead(hash: string): Promise<{ customMetadata?: Record<string, string> } | null> {
+    if (!/^sha256:[0-9a-f]{64}$/.test(hash)) return null;
     if (this.env.ASSETS) return this.env.ASSETS.head(assetKey(hash));
     const base = (this.env as unknown as { ASSETS_URL?: string }).ASSETS_URL;
     if (!base) return null;
-    const r = await fetch(new URL(`/assets/${hash.replace(/^sha256:/, "")}/meta`, base));
-    return r.ok ? ((await r.json()) as { customMetadata?: Record<string, string> }) : null;
+    // Cada pregunta es una petición al Worker (cuenta en su cupo diario): se recuerdan las respuestas,
+    // también las de «no existe» (un rato corto: puede subirse después).
+    const now = Date.now();
+    const hit = REMOTE_META.get(hash);
+    if (hit && now < hit.until) return hit.meta;
+    const r = await fetch(new URL(`/assets/${hash.slice(7)}/meta`, base));
+    const meta = r.ok ? ((await r.json()) as { customMetadata?: Record<string, string> }) : null;
+    if (r.ok || r.status === 404) {
+      if (REMOTE_META.size >= REMOTE_META_MAX) REMOTE_META.clear();
+      REMOTE_META.set(hash, { meta, until: now + (meta ? REMOTE_META_TTL_MS : REMOTE_META_MISS_MS) });
+    }
+    return meta;
   }
 
   /** Medidas del modelo que ya lleva una entidad (para un PATCH en una parcela que solo la mueve). */
@@ -852,10 +1114,34 @@ export class ChunkRoom extends DurableObject<Env> {
     const resolved: MutationOp[] = [];
     for (const e of entities) resolved.push((await this.resolveAssets({ op: "SPAWN", entity_id: e.id, components: e.components })).mu);
     return this.ctx.storage.transactionSync(() => {
-      const out = resolved.map((op) => this.applyMutation(owner, false, op, null).change);
+      const out = resolved.map((op) => this.applyMutation(owner, false, op, null, "stand").change);
       also?.();
       return out;
     });
+  }
+
+  /**
+   * Los ids que pone el sistema (máquinas, anuncios, puertas) son suyos: si otro los ocupa (de antes de
+   * reservarlos), se quita lo suyo en vez de dejar de actualizar las pantallas para siempre.
+   */
+  private evictSquatters(ids: string[], owner: string) {
+    const out: { kind: "remove"; entity_id: string }[] = [];
+    for (const id of ids) {
+      const row = this.getRow(id);
+      if (!row || row.owner === owner) continue;
+      this.sql.exec("DELETE FROM entities WHERE entity_id = ?", id);
+      this.sql.exec("DELETE FROM sandbox WHERE entity_id = ?", id);
+      this.logEvent("system", "DESPAWN", id, row.rev + 1, { reason: "reserved_id" });
+      out.push({ kind: "remove", entity_id: id });
+    }
+    return out;
+  }
+
+  /** ¿Es un id que solo pone el sistema? (prefijos reservados, los del distrito y la semilla del lugar). */
+  private reservedId(id: string): boolean {
+    if (RESERVED_IDS.test(id) || this.seedIds.has(id)) return true;
+    const d = this.chunkId ? districtByChunk(this.chunkId) : null;
+    return !!d && id.toLowerCase().startsWith(`${d.id}_`);
   }
 
   /** Borra entidades por id sin pasar por el dueño (solo para el sistema: stands y escaparate). */
@@ -1075,6 +1361,7 @@ export class ChunkRoom extends DurableObject<Env> {
     this.ctx.storage.transactionSync(() => {
       this.sql.exec("DELETE FROM entities WHERE owner = ?", OWNER);
       for (const id of before) if (!seed.some((x) => x.id === id)) changes.push({ kind: "remove", entity_id: id });
+      changes.push(...this.evictSquatters(seed.map((x) => x.id), OWNER));
       for (const e of seed) changes.push({ kind: "upsert", entity: this.insertEntity(e.id, OWNER, e.components) });
       this.logEvent("system", "CABINETS", this.chunkId!, seed.length, null);
     });
@@ -1106,6 +1393,7 @@ export class ChunkRoom extends DurableObject<Env> {
     this.ctx.storage.transactionSync(() => {
       this.sql.exec("DELETE FROM entities WHERE owner = ?", OWNER);
       for (const id of before) if (!seed.some((x) => x.id === id)) changes.push({ kind: "remove", entity_id: id });
+      changes.push(...this.evictSquatters(seed.map((x) => x.id), OWNER));
       for (const e of seed) changes.push({ kind: "upsert", entity: this.insertEntity(e.id, OWNER, e.components) });
       this.logEvent("system", "BILLBOARDS", this.chunkId!, seed.length, null);
     });
@@ -1123,6 +1411,7 @@ export class ChunkRoom extends DurableObject<Env> {
     this.ctx.storage.transactionSync(() => {
       this.sql.exec("DELETE FROM entities WHERE owner = ?", OWNER);
       for (const id of before) if (!seed.some((s) => s.id === id)) changes.push({ kind: "remove", entity_id: id });
+      changes.push(...this.evictSquatters(seed.map((s) => s.id), OWNER));
       for (const e of seed) changes.push({ kind: "upsert", entity: this.insertEntity(e.id, OWNER, e.components) });
       this.logEvent("system", "COMMUNITY_GATES", "nexo", seed.length, null);
     });
@@ -1143,7 +1432,9 @@ export class ChunkRoom extends DurableObject<Env> {
       this.sql.exec("DELETE FROM act_race_week WHERE sub = ?", owner);
       this.sql.exec("DELETE FROM act_points WHERE sub = ?", owner);
       this.sql.exec("DELETE FROM sandbox WHERE owner = ?", owner);
-      this.sql.exec("UPDATE events SET actor = 'deleted' WHERE actor = ?", owner);
+      // Del registro se va quién y lo que escribió (rótulos…); de la idempotencia, sus claves.
+      this.sql.exec("UPDATE events SET actor = 'deleted', data = NULL WHERE actor = ?", owner);
+      this.sql.exec("DELETE FROM idem WHERE substr(key, 1, ?) = ?", owner.length + 1, `${owner}:`);
       if (ids.length) this.logEvent("system", "PURGE", "owner", ids.length, null);
     });
     if (ids.length) this.broadcast(msg("DELTA", { changes: ids.map((entity_id) => ({ kind: "remove" as const, entity_id })) }));
@@ -1158,8 +1449,9 @@ export class ChunkRoom extends DurableObject<Env> {
   private handleChat(ws: WebSocket, att: Attachment, ref: string | undefined, raw: string) {
     const kind = att.principal.kind;
     if (kind === "guest") return this.sendError(ws, ref, "forbidden", "crea una cuenta para escribir en el chat");
-    // Sin caracteres de control ni espacios de más. Los enlaces se muestran como texto, nunca clicables.
-    const text = raw.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, " ").replace(/\s+/g, " ").trim();
+    // Sin caracteres de control ni de formato ni espacios de más (cleanText). Los enlaces se muestran
+    // como texto, nunca clicables.
+    const text = cleanText(raw, BUDGETS.maxChatChars);
     if (!text) return this.sendError(ws, ref, "bad_message", "mensaje vacío");
 
     const sub = att.principal.sub;
@@ -1168,6 +1460,7 @@ export class ChunkRoom extends DurableObject<Env> {
     if (recent.length >= BUDGETS.maxChatPer10s) return this.sendError(ws, ref, "rate_limited", "vas muy rápido; espera unos segundos");
     recent.push(now);
     this.chatLog.set(sub, recent);
+    this.pruneLog(this.chatLog, 10_000);
 
     const message = {
       id: randomId("m_", 8),
@@ -1186,9 +1479,13 @@ export class ChunkRoom extends DurableObject<Env> {
       att.session_id,
       text,
     );
-    // Retención: 7 días y como mucho 2.000 mensajes por chunk.
-    this.sql.exec("DELETE FROM chat WHERE ts < ?", now - CHAT_RETENTION_MS);
-    this.sql.exec("DELETE FROM chat WHERE id IN (SELECT id FROM chat ORDER BY ts DESC LIMIT -1 OFFSET 2000)");
+    // Retención: 7 días y unos 2.000 mensajes por chunk. Recortar lee CHAT_KEEP filas: se hace cada
+    // CHAT_TRIM_EVERY mensajes, no en cada uno.
+    if (++this.chatSinceTrim >= CHAT_TRIM_EVERY) {
+      this.chatSinceTrim = 0;
+      this.sql.exec("DELETE FROM chat WHERE ts < ?", now - CHAT_RETENTION_MS);
+      this.sql.exec("DELETE FROM chat WHERE id IN (SELECT id FROM chat ORDER BY ts DESC LIMIT -1 OFFSET ?)", CHAT_KEEP);
+    }
     this.broadcast(msg("CHAT_MSG", message));
   }
 
@@ -1252,8 +1549,13 @@ export class ChunkRoom extends DurableObject<Env> {
     };
   }
 
-  /** Entidades de actividad del lugar, ya leídas (componente y posición). */
+  /** Entidades de actividad del lugar, ya leídas (en caché hasta que cambie alguna entidad). */
   private activityEntities() {
+    if (this.activityCache?.epoch !== this.entityEpoch) this.activityCache = { epoch: this.entityEpoch, list: this.readActivityEntities() };
+    return this.activityCache.list;
+  }
+
+  private readActivityEntities() {
     const out: { id: string; owner: string; p: number[]; col?: { set: string; radius: number; note?: Record<string, string> }; cp?: { race: string; role: "start" | "cp" | "finish"; order: number; radius: number } }[] = [];
     for (const r of this.sql.exec<{ entity_id: string; owner: string; data: string }>("SELECT entity_id, owner, data FROM entities").toArray()) {
       if (!r.data.includes("collectible@1") && !r.data.includes("checkpoint@1")) continue;
@@ -1302,11 +1604,13 @@ export class ChunkRoom extends DurableObject<Env> {
     const all = this.activityEntities();
     const it = all.find((a) => a.id === entityId && a.col);
     if (!it?.col) return this.sendError(ws, ref, "not_found", "eso no se puede recoger");
+    if (this.jumpedRecently(att)) return this.sendError(ws, ref, "forbidden", "acabas de llegar de un salto: espera unos segundos", { reason: "jump" });
     if (!this.sessionNear(att, it.p, it.col.radius)) return this.sendError(ws, ref, "forbidden", "estás demasiado lejos");
     const sub = att.principal.sub;
     const key = activityKey(it.owner, it.col.set);
     const ids = all.filter((a) => a.owner === it.owner && a.col?.set === it.col!.set).map((a) => a.id);
     this.sql.exec("INSERT OR IGNORE INTO act_collected (sub, entity_id, set_key, ts) VALUES (?, ?, ?, ?)", sub, entityId, key, Date.now());
+    this.scoreCache.clear();
     const mine = new Set(this.sql.exec<{ entity_id: string }>("SELECT entity_id FROM act_collected WHERE sub = ? AND set_key = ?", sub, key).toArray().map((r) => r.entity_id));
     const count = ids.filter((id) => mine.has(id)).length;
     const complete = count >= ids.length;
@@ -1326,6 +1630,7 @@ export class ChunkRoom extends DurableObject<Env> {
     const all = this.activityEntities();
     const it = all.find((a) => a.id === entityId && a.cp);
     if (!it?.cp) return this.sendError(ws, ref, "not_found", "eso no es un punto de carrera");
+    if (this.jumpedRecently(att)) return this.sendError(ws, ref, "forbidden", "acabas de llegar de un salto: espera unos segundos", { reason: "jump" });
     if (!this.sessionNear(att, it.p, it.cp.radius)) return this.sendError(ws, ref, "forbidden", "estás demasiado lejos");
     // Las carreras son a pie: en coche no cuenta (y la que estuviera en marcha se anula).
     if (this.poses.get(att.session_id)?.vehicle) {
@@ -1382,6 +1687,7 @@ export class ChunkRoom extends DurableObject<Env> {
         key, week, sub, att.principal.name ?? att.display_name, att.principal.no ?? null, ms, now,
       );
     }
+    this.scoreCache.clear();
     const best = Math.min(ms, prev ?? ms);
     const rank = 1 + this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM act_race_best WHERE race_key = ? AND ms < ?", key, best).one().n;
     this.send(ws, msg("RACE", { race, state: "finish", ms, best, rank }));
@@ -1475,6 +1781,7 @@ export class ChunkRoom extends DurableObject<Env> {
     if (g.timer) clearTimeout(g.timer);
     g.state = won ? "won" : "lost";
     if (won && g.players.size) {
+      this.scoreCache.clear();
       const key = activityKey(g.board.owner, g.board.id);
       const day = pointsDay(), now = Date.now();
       for (const [sub, who] of g.players) {
@@ -1555,12 +1862,27 @@ export class ChunkRoom extends DurableObject<Env> {
       });
   }
 
-  private handleScores(ws: WebSocket, ref: string | undefined, entityId: string) {
+  private handleScores(ws: WebSocket, att: Attachment, ref: string | undefined, entityId: string) {
+    if (!this.activityAllowed(att)) return this.sendError(ws, ref, "rate_limited", "demasiadas peticiones; espera un poco");
     const row = this.getRow(entityId);
     const sb = row ? ScoreboardV1.safeParse((JSON.parse(row.data) as Entity).components["scoreboard@1"]) : null;
     if (!row || !sb?.success) return this.sendError(ws, ref, "not_found", "eso no es un marcador");
-    const r = this.scoreRows(row.owner, sb.data);
+    const r = this.cachedScoreRows(entityId, row.owner, sb.data);
     this.send(ws, msg("SCORES", { entity_id: entityId, kind: sb.data.kind, period: r.period, rows: r.rows }));
+  }
+
+  /**
+   * Filas de un marcador, guardadas SCORES_CACHE_MS (los «builds» recorren el registro de eventos):
+   * se vacía al apuntar algo nuevo (recoger, una meta, un punto).
+   */
+  private cachedScoreRows(entityId: string, owner: string, sb: Parameters<ChunkRoom["scoreRows"]>[1]) {
+    const now = Date.now();
+    const hit = this.scoreCache.get(entityId);
+    if (hit && now - hit.at < SCORES_CACHE_MS) return hit.value;
+    const value = this.scoreRows(owner, sb);
+    if (this.scoreCache.size > 64) this.scoreCache.clear();
+    this.scoreCache.set(entityId, { at: now, value });
+    return value;
   }
 
   /** Los marcadores del sistema de este lugar, con sus filas (para la web: GET /scores). */
@@ -1573,7 +1895,7 @@ export class ChunkRoom extends DurableObject<Env> {
       if (!sb.success) continue;
       const title = this.getRow(`${r.entity_id}_title`);
       const label = title ? ((JSON.parse(title.data) as Entity).components["label@1"] as { i18n?: Record<string, string> } | undefined)?.i18n ?? null : null;
-      const rows = this.scoreRows(r.owner, sb.data);
+      const rows = this.cachedScoreRows(r.entity_id, r.owner, sb.data);
       out.push({ entity_id: r.entity_id, kind: sb.data.kind, id: sb.data.id, period: rows.period, title: label, rows: rows.rows });
     }
     return out;
@@ -1590,6 +1912,10 @@ export class ChunkRoom extends DurableObject<Env> {
     const r = ComponentsStrict.safeParse(input);
     if (!r.success) throw new MutationError("bad_message", "componentes no válidos", r.error.issues.slice(0, 5));
     const c = r.data;
+    // Giro: cuaternión unidad (uno sin normalizar escala el modelo en los clientes y burla las medidas).
+    const q = unitQuat(c["transform@1"].r);
+    if (!q) throw new MutationError("bad_message", "transform@1.r no es un giro válido (cuaternión nulo)");
+    c["transform@1"].r = q;
     if (!this.inBounds(c["transform@1"].p)) {
       const [lo, hi] = this.bounds;
       throw new MutationError("budget_exceeded", `la posición debe estar dentro del lugar (${lo}..${hi} en x/z, -16..256 en y)`);
@@ -1600,7 +1926,8 @@ export class ChunkRoom extends DurableObject<Env> {
   }
 
   private checkTris(add: number, remove: number) {
-    const total = this.sql.exec<{ t: number | null }>("SELECT SUM(tris) AS t FROM entities").one().t ?? 0;
+    // Lo de las parcelas tiene su propio presupuesto (checkParcel).
+    const total = this.sql.exec<{ t: number | null }>("SELECT SUM(tris) AS t FROM entities WHERE owner NOT LIKE 'prj!_%' ESCAPE '!'").one().t ?? 0;
     if (total - remove + add > BUDGETS.maxTrisPerChunk) {
       throw new MutationError("budget_exceeded", "el chunk superaría su presupuesto de triángulos", { total, add, max: BUDGETS.maxTrisPerChunk });
     }
@@ -1608,7 +1935,7 @@ export class ChunkRoom extends DurableObject<Env> {
 
   private checkLights(add: number) {
     const n = this.sql
-      .exec<{ n: number }>("SELECT COUNT(*) AS n FROM entities WHERE data LIKE '%\"light@1\"%'")
+      .exec<{ n: number }>("SELECT COUNT(*) AS n FROM entities WHERE data LIKE '%\"light@1\"%' AND owner NOT LIKE 'prj!_%' ESCAPE '!'")
       .one().n;
     if (n + add > BUDGETS.maxLightsPerChunk) {
       throw new MutationError("budget_exceeded", "demasiadas luces en este chunk", { max: BUDGETS.maxLightsPerChunk });
@@ -1623,6 +1950,7 @@ export class ChunkRoom extends DurableObject<Env> {
     }
     recent.push(now);
     this.mutationLog.set(actor, recent);
+    this.pruneLog(this.mutationLog, 60_000);
   }
 
   /* ---------------------------------------------------------------- */
@@ -1630,6 +1958,8 @@ export class ChunkRoom extends DurableObject<Env> {
   /* ---------------------------------------------------------------- */
 
   private entityOf(entity_id: string, owner: string, rev: number, components: Components): Entity {
+    // Sin chunk_id los clientes descartan el SNAPSHOT entero: mejor no escribir nada.
+    if (!this.chunkId) throw new Error("el chunk no sabe qué es (chunkId null)");
     return { schema: ENTITY_SCHEMA, entity_id, chunk_id: this.chunkId!, owner, rev, components };
   }
 
@@ -1656,11 +1986,50 @@ export class ChunkRoom extends DurableObject<Env> {
       .toArray()[0];
   }
 
-  private allEntities(): Entity[] {
-    return this.sql.exec<{ data: string }>("SELECT data FROM entities").toArray().map((r) => JSON.parse(r.data) as Entity);
+  /** Las entidades del lugar ya en JSON (en caché hasta que cambie alguna): el grueso del SNAPSHOT. */
+  private entitiesJson(): string {
+    if (this.entitiesJsonCache?.epoch !== this.entityEpoch) {
+      const rows = this.sql.exec<{ data: string }>("SELECT data FROM entities").toArray();
+      this.entitiesJsonCache = { epoch: this.entityEpoch, json: `[${rows.map((r) => r.data).join(",")}]` };
+    }
+    return this.entitiesJsonCache.json;
+  }
+
+  private sendSnapshot(ws: WebSocket, peers: Peer[], poses: AvatarPose[], chat: unknown[]) {
+    const rest = JSON.stringify(msg("SNAPSHOT", { peers, poses, chat }));
+    // Mismo mensaje que msg("SNAPSHOT", { entities, … }), sin volver a leer ni a serializar las entidades.
+    try {
+      const entities = this.entitiesJson();
+      ws.send(rest.replace('"payload":{', () => `"payload":{"entities":${entities},`));
+    } catch {
+      /* socket cerrado */
+    }
+  }
+
+  /**
+   * Poda el registro de eventos (más de EVENTS_RETENTION_MS) y las claves de idempotencia (más de un
+   * día), como mucho una vez cada PRUNE_EVERY_MS y a trozos: lee las PRUNE_BATCH más viejas (por orden
+   * de inserción) y borra las caducadas. Sin alarmas: lo dispara una mutación.
+   */
+  private maybePrune() {
+    const now = Date.now();
+    if (now - this.lastPrune < PRUNE_EVERY_MS) return;
+    this.lastPrune = now;
+    this.sql.exec(
+      "DELETE FROM events WHERE seq IN (SELECT seq FROM (SELECT seq, ts FROM events ORDER BY seq LIMIT ?) WHERE ts < ?)",
+      PRUNE_BATCH,
+      now - EVENTS_RETENTION_MS,
+    );
+    this.sql.exec(
+      "DELETE FROM idem WHERE rowid IN (SELECT rowid FROM (SELECT rowid, ts FROM idem ORDER BY rowid LIMIT ?) WHERE ts < ?)",
+      PRUNE_BATCH,
+      now - IDEM_RETENTION_MS,
+    );
   }
 
   private logEvent(actor: string, op: string, entity_id: string, rev: number, data: unknown) {
+    let json = data === null ? null : JSON.stringify(data);
+    if (json && json.length > EVENT_DATA_MAX) json = JSON.stringify({ truncated: true, bytes: json.length });
     this.sql.exec(
       "INSERT INTO events (ts, actor, op, entity_id, rev, data) VALUES (?, ?, ?, ?, ?, ?)",
       Date.now(),
@@ -1668,7 +2037,7 @@ export class ChunkRoom extends DurableObject<Env> {
       op,
       entity_id,
       rev,
-      data === null ? null : JSON.stringify(data),
+      json,
     );
   }
 
@@ -1686,7 +2055,8 @@ export class ChunkRoom extends DurableObject<Env> {
       online: peers.length,
       agents_online: peers.filter((p) => p.kind === "agent").length,
       entities,
-      recent_events: events,
+      // Sin el id interno de las personas (es público): solo «usr_». Los agentes sí se nombran.
+      recent_events: events.map((e) => ({ ...e, actor: e.actor.startsWith("usr_") ? "usr_" : e.actor })),
     };
   }
 

@@ -41,6 +41,8 @@ const bad = (error: string, message: string, detail?: unknown): Problem => ({ ok
 /** ¿Es un nombre de dominio público? (no una IP, ni localhost, ni un nombre interno). */
 export function publicHostname(host: string): boolean {
   const h = host.toLowerCase();
+  // «localhost.» o «algo.internal.» (con el punto final) también son nombres privados: fuera.
+  if (h.endsWith(".") || h.includes("..")) return false;
   if (!h.includes(".") || h.startsWith("[") || /^[\d.]+$/.test(h)) return false;
   if (h === "localhost" || /\.(localhost|local|internal|lan|home|test|invalid|example)$/.test(h)) return false;
   return /^[a-z0-9.-]+$/.test(h);
@@ -48,7 +50,7 @@ export function publicHostname(host: string): boolean {
 
 /** ¿Vive en xenxo? Entonces no se incrusta: compartiría origen con la web de xenxo. */
 export function xenxoHost(host: string): boolean {
-  const h = host.toLowerCase();
+  const h = host.toLowerCase().replace(/\.+$/, "");
   return h === "xenxo.io" || h.endsWith(".xenxo.io");
 }
 

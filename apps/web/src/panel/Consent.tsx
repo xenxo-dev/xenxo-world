@@ -65,6 +65,15 @@ export function Consent({
   const [info, setInfo] = useState<OidcRequestInfo | null>(null);
   const [problem, setProblem] = useState<string>(error ? errorText({ code: error }) : "");
   const [busy, setBusy] = useState(false);
+  // «Permitir» se activa un momento después de aparecer: un clic que iba para el juego (o una página
+  // que hace aparecer esta pantalla bajo el ratón) no da permiso sin querer.
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    setArmed(false);
+    if (!info) return;
+    const id = setTimeout(() => setArmed(true), 800);
+    return () => clearTimeout(id);
+  }, [info]);
 
   useEffect(() => {
     if (!request) return;
@@ -179,7 +188,7 @@ export function Consent({
                 </ul>
                 <p className="mt-4 text-xs text-cal/45">{t("consent.note")}</p>
                 <div className="mt-5 flex flex-wrap gap-2">
-                  <Button variant="primary" disabled={busy} onClick={() => void decide(true)}>
+                  <Button variant="primary" disabled={busy || !armed} onClick={() => void decide(true)}>
                     {t("consent.allow")}
                   </Button>
                   <Button disabled={busy} onClick={() => void decide(false)}>

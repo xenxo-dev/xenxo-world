@@ -76,7 +76,13 @@ Este documento y [`packages/protocol/src/index.ts`](../packages/protocol/src/ind
    (chunk del distrito, rectángulo de la parcela, `facing` y `owner: "prj_<id>"`) y la respuesta trae
    `budgets` (los de la parcela, §9 bis). Si el proyecto deja de estar publicado, la clave deja de valer.
 2. `GET /chunk/<chunk_id>/ws?token=<token>` → WebSocket.
-3. El cliente envía `HELLO`. El servidor responde `WELCOME` y `SNAPSHOT`, y avisa al resto con `PEER_JOIN`.
+3. El cliente envía `HELLO` (**uno por conexión**: otro da `bad_message` y no repite nada). El servidor
+   responde `WELCOME` y `SNAPSHOT`, y avisa al resto con `PEER_JOIN`.
+
+**Límites de la conexión.** Cada conexión tiene un cubo de 120 mensajes que se rellena a 40 por
+segundo (cada 8 KB de un mensaje cuentan uno más), sea cual sea su tipo, válido o no. Quien lo vacía
+recibe `rate_limited` y el servidor cierra con el código `4008`. Una misma cuenta (o agente) tiene como
+mucho 8 conexiones a la vez en un chunk: con la novena se cierra la más vieja (`4009`).
 
 **Lugares en solitario.** El nexo se recorre a solas: el multijugador es de la plaza, los distritos y
 los juegos. Allí `WELCOME` lleva `solo: true` y `walk: [mín, máx]` (hasta dónde se camina, en X y en
@@ -91,6 +97,7 @@ menos de unos 70 m (quien se aleja deja de llegar; el cliente lo oculta a los po
 cliente carga lo que construye la gente por cercanía (lo del sistema, siempre).
 
 Lectura pública sin WebSocket: `GET /chunk/<chunk_id>/state` (contadores y últimos eventos, para el panel 2D).
+En los eventos, `actor` es el agente (`agt_…`) o solo `usr_` si es una persona: su id interno no se publica.
 
 **Distritos en otro servidor.** Un distrito puede vivir fuera de Cloudflare, en el servidor de
 distritos (`tools/district-host/`, mismo código con workerd). `GET /districts` lo marca con
@@ -106,6 +113,8 @@ plaza ni el nexo, el cliente puede pedir dónde conectar:
 
 Lo que el Worker le pide a un chunk de fuera (colocar o retirar un portal, expulsar, el chat de una
 denuncia…) va por HTTPS firmado (`X-Xenxo-Call`, atado al chunk, al método y al hash del cuerpo, 30 s).
+Cada firma lleva un `jti` al azar y el servidor de distritos atiende cada una **una sola vez** (`409`
+si se repite).
 Las medidas de los modelos de la gente las da `GET /assets/<hash>/meta`. Moverlo de servidor:
 `POST /mod/chunks/<chunk_id>/move { to: "remote" | "local" }` (solo la clave de administración).
 
@@ -116,13 +125,24 @@ Las medidas de los modelos de la gente las da `GET /assets/<hash>/meta`. Moverlo
 | Tipo | Payload | Notas |
 |---|---|---|
 | `HELLO` | `client_type`, `capabilities`, `display_name?`, `avatar?` | Obligatorio antes de cualquier otro. `avatar` = `{hash, format: "vrm"}` de un **avatar de serie** (invitados y agentes); cualquier otro hash se ignora, y las personas registradas llevan el de su cuenta |
-| `POSE` | `t`, `head {p, r}`, `hand_l?`, `hand_r?`, `emote?` | Sin `entity_id`: el servidor sabe de quién es. Máx. 15 Hz; el exceso se descarta. `emote` = gesto en curso (`^[a-z_]{1,24}$`; hoy `dance`, `wave`, `sit`, `talk`, `cheer`, `crouch`, `car_open`, `car_in`, `car_out`). Los clientes ignoran los que no conocen. `vehicle?` = en qué va si no va a pie (hoy solo `car`: va sentada dentro de su coche; `head` sigue siendo su cabeza) y `car?` = dónde está su coche, en marcha o aparcado (`p` = su origen en el suelo, `r` = su giro completo, con la inclinación). Al subir y bajar, `emote` es `car_open` (abre la puerta), `car_in` (se sienta dentro) o `car_out` (sale): con esos tres, la puerta del coche está abierta. Quien no los conozca dibuja a la persona y no el coche. El servidor solo los reparte en los distritos (en la plaza se va a pie; `vehicle` sin `car` no vale) y con `vehicle` no cuentan los puntos de carrera (`CHECKPOINT` → `forbidden`). La cabeza más de 1,6 m por encima de lo que se pisa (el suelo o la cara de arriba de un `collider@1`: se puede estar de pie en un banco) indica un salto |
+| `POSE` | `t`, `head {p, r}`, `hand_l?`, `hand_r?`, `emote?` | Sin `entity_id`: el servidor sabe de quién es. Máx. 15 Hz; el exceso se descarta. `emote` = gesto en curso (`^[a-z_]{1,24}$`; hoy `dance`, `wave`, `sit`, `talk`, `cheer`, `crouch`, `car_open`, `car_in`, `car_out`). Los clientes ignoran los que no conocen. `vehicle?` = en qué va si no va a pie (hoy solo `car`: va sentada dentro de su coche; `head` sigue siendo su cabeza) y `car?` = dónde está su coche, en marcha o aparcado (`p` = su origen en el suelo, `r` = su giro completo, con la inclinación). El servidor normaliza los giros (un cuaternión nulo descarta la pose) y no reparte una mano a más de 2,5 m de la cabeza. Ver «Movimiento» más abajo. Al subir y bajar, `emote` es `car_open` (abre la puerta), `car_in` (se sienta dentro) o `car_out` (sale): con esos tres, la puerta del coche está abierta. Quien no los conozca dibuja a la persona y no el coche. El servidor solo los reparte en los distritos (en la plaza se va a pie; `vehicle` sin `car` no vale) y con `vehicle` no cuentan los puntos de carrera (`CHECKPOINT` → `forbidden`). La cabeza más de 1,6 m por encima de lo que se pisa (el suelo o la cara de arriba de un `collider@1`: se puede estar de pie en un banco) indica un salto |
 | `MUTATE_WORLD` | `idempotency_key`, `target`, `mutation` | Ver §8 |
 | `PING` | `t` | |
-| `COLLECT` | `entity_id` | Estoy en este objeto de búsqueda. Solo personas registradas. El servidor mira la última pose de la sesión (reciente y a menos del radio + 2,5 m) y responde `COLLECTED` |
-| `CHECKPOINT` | `entity_id` | Estoy en este punto de carrera. La salida empieza a contar (en el servidor); un `cp` cuenta solo si es el que toca; la meta, solo con todos y si no se ha ido más rápido que 14 m/s en línea recta. Responde `RACE` (o nada si no toca) |
-| `SCORES_GET` | `entity_id` (un `scoreboard@1`) | Responde `SCORES` |
-| `CHAT` | `text` (1–280) | Solo personas registradas y agentes (los invitados reciben `forbidden`). Máx. 5 cada 10 s (`rate_limited`). El servidor quita caracteres de control y espacios de más |
+| `COLLECT` | `entity_id` | Estoy en este objeto de búsqueda. Solo personas registradas. El servidor mira la última pose de la sesión (reciente y a menos del radio + 2,5 m) y responde `COLLECTED`. Tras un salto, `forbidden` con `detail.reason = "jump"` durante 15 s |
+| `CHECKPOINT` | `entity_id` | Estoy en este punto de carrera. La salida empieza a contar (en el servidor); un `cp` cuenta solo si es el que toca; la meta, solo con todos y si no se ha ido más rápido que 14 m/s en línea recta. Responde `RACE` (o nada si no toca). Como `COLLECT`, no cuenta tras un salto |
+| `SCORES_GET` | `entity_id` (un `scoreboard@1`) | Responde `SCORES`. Cuenta en el mismo tope que `COLLECT` y `CHECKPOINT` (40 cada 10 s por sesión, `rate_limited`); las filas pueden tener unos segundos |
+| `CHAT` | `text` (1–280) | Solo personas registradas y agentes (los invitados reciben `forbidden`). Máx. 5 cada 10 s (`rate_limited`). El servidor normaliza el texto (NFKC) y quita caracteres de control y de formato (bidi, anchura cero…), rellenos invisibles, pilas de marcas combinadas y espacios de más. Lo mismo con el `display_name` de los invitados |
+
+**Movimiento.** El servidor no se fía de dónde dice estar un cliente para las actividades: lleva, por
+sesión, cuánto puede avanzar cada pose (en horizontal, 40 m/s sostenidos —el coche— con 15 m de golpe
+—el arco de las gafas—; en vertical, 12 m más 60 m/s). Lo que se pasa es un **salto**: la pose se
+reparte igual (ir junto a alguien, un teletransporte), pero durante 15 s `COLLECT` y `CHECKPOINT` dan
+`forbidden` (`detail.reason = "jump"`), la pose no pisa baldosas (`tiles@1`) y la carrera en curso se
+anula. También se anula (`RACE` `reset`, sin pedirlo) si en carrera se va más rápido que a pie (16 m/s
+con 8 m de margen). La primera pose de cada conexión es la **llegada** (portal, viaje): libre, salvo
+que la misma cuenta llegue más de 4 veces en 2 minutos al mismo lugar o que la sesión ya hubiera
+mandado poses antes (entonces cuenta como salto). Los clientes se mueven andando o en coche y no
+necesitan nada más; un agente que pruebe actividades tiene que ir andando.
 
 ### Servidor → cliente
 
@@ -163,13 +183,20 @@ Las medidas de los modelos de la gente las da `GET /assets/<hash>/meta`. Moverlo
 - **Idempotencia:** misma `idempotency_key` del mismo actor → mismo resultado (`ACK` con `replayed: true`), sin duplicar.
 - **Concurrencia:** si `base_rev` no es la revisión actual → `version_conflict` con `detail.current_rev`.
 - **Propiedad:** solo el dueño modifica o borra. El scope `admin` puede tocar cualquier entidad (incluida la plaza del sistema).
+- **Ids reservados:** en `SPAWN`, un `entity_id` elegido por el cliente no puede ser de la semilla del
+  lugar ni empezar (sin distinguir mayúsculas) por `stand_`, `standX_`, `show_`, `showX_`, `cabinet_`,
+  `billboard_`, `nexo_` ni por el id del distrito (`taller_`, `cero_`…): `forbidden`. Son los que pone
+  el sistema (portales de proyectos, máquinas-portal, anuncios, semillas).
+- **Giros:** `transform@1.r` se guarda normalizado (un cuaternión nulo → `bad_message`).
+- **Registro:** cada cambio queda en el registro de eventos del chunk con lo validado (como mucho
+  4 KB; si no, un resumen). El registro se guarda 30 días y las claves de idempotencia, 24 h.
 - **`target: "proposal"`** queda reservado para el mundo con ramas.
 
 ## 9. Presupuestos v0
 
 | Límite | Valor |
 |---|---|
-| Entidades por chunk | 400 |
+| Entidades por chunk (lo construido fuera de parcelas, de la zona de pruebas y de los portales de proyectos) | 400 |
 | Triángulos por chunk | 300.000 |
 | Triángulos por entidad | 50.000 |
 | Mutaciones por actor y minuto | 30 |
@@ -236,7 +263,7 @@ un agente de parcela con la clave revocada no vuelve a entrar aunque su token no
 
 Cada juego publica en la raíz de su web un `xenxo.json` con el esquema `xenxo.game/0`
 (`GameManifest` en `packages/protocol`; estricto: un campo desconocido invalida la ficha). La
-plantilla `create-xenxo` la trae rellena; el registro de juegos (fase 4) la leerá desde el servidor.
+plantilla `create-xenxo` la trae rellena (con `npm run check` para comprobarla en su equipo); el servidor la lee al registrar la ficha.
 
 | Campo | Qué es |
 |---|---|
@@ -248,7 +275,7 @@ plantilla `create-xenxo` la trae rellena; el registro de juegos (fase 4) la leer
 | `avatar` | Qué se ve de quien entra con xenxo: `"character"` (se maneja un personaje y es el suyo de xenxo; sin cuenta, uno de serie), `"badge"` (su nombre, su número y, si quiere, su retrato) o `"none"`. Si falta: `"badge"` con `xenxo.clientId` y `"none"` sin él. Con «Entrar con xenxo», `"none"` no vale (`avatar_required`). La revisión comprueba que sea verdad. El personaje, el retrato, el nombre y el número solo sirven para representar a esa persona en la partida (condiciones) |
 | `monetization` | `{ hasAds, hasPurchases }`. Prohibido el juego con dinero real |
 | `author` · `contact` | Texto (≤ 60) · email o web (≤ 200) |
-| `privacy` · `thumbnail` | https · `/ruta` o https. Opcionales al desarrollar, obligatorios al publicar |
+| `privacy` · `thumbnail` | https · `/ruta` o https. `privacy` es opcional al desarrollar y obligatoria al registrar la ficha (`privacy_required`); `thumbnail` es opcional (hoy xenxo enseña la portada del proyecto) |
 | `embed` | ¿Se puede abrir dentro de xenxo (iframe aislado)? Por defecto `true` |
 | `xenxo` | `{ clientId?: "xg_…", project?: "<id del proyecto>" }` |
 
@@ -337,8 +364,10 @@ plantilla (`npm create xenxo@latest mi-distrito -- --district`). Mide lo mismo q
   `slug`, `name`/`description` (es y en obligatorios), `color`, `theme` (ciudad de fondo: uno de
   `DISTRICT_THEMES`), `floor`, `cover` (16:9), `emblem` (monumento, presupuesto `monument`), `models`
   (`{nombre: {file, lod1?}}`), `pieces` (`{model, p, yaw, scale}`), `primitives`, `colliders` (cajas,
-  `half` y `yaw`), `lights`, `labels` (texto con es y en), `portals` (`{p, yaw, size, game}`: el
-  enlace `xenxo.io/j/<game>` de un juego **suyo** publicado), `author` y `contact`.
+  `half` y `yaw`), `lights`, `labels` (texto con es y en), `portals` (`{p, yaw, size, game}`: un juego
+  **suyo** publicado; `game` es el nombre de su enlace `xenxo.io/j/<game>` y admite también el enlace
+  entero —`https://xenxo.io/j/<game>`, `xenxo.io/j/<game>` o `/j/<game>`—, del que se guarda solo el
+  nombre: `portalGameName`; un enlace de otra web no vale), `author` y `contact`.
 - **Presupuestos** (`DISTRICT_KIT_BUDGETS`): 32 modelos (cada uno con el presupuesto de subida
   `model`), 160 piezas, 300.000 triángulos colocados, `lod1` obligatorio por encima de 8.000
   (como mucho la mitad), 40 MB de modelos, 200 primitivas, 300 colisiones, 12 luces, 48 rótulos y
@@ -379,15 +408,28 @@ Un agente debe poder corregirse solo leyendo `code` y `detail`.
 
 El mundo solo se escribe por WebSocket (`MUTATE_WORLD`). Lo que no es mundo va por HTTP:
 
+**Reglas comunes.** Los cuerpos JSON pasan de 64 KB → `413 too_large`. Lo que se puede pedir sin cuenta
+(altas y accesos, tokens de invitado, denuncias, el permiso y los tokens de «Entrar con xenxo») y las
+subidas tienen un tope por dirección de red y minuto → `429 rate_limited` (la IP solo es la clave de un
+contador de un minuto: no se guarda). En local (`RP_ID=localhost`) no se aplica salvo con
+`RATE_LIMIT_LOCAL=1`. Un chunk que no existe (ni fijo ni distrito de la comunidad) da `404` en
+`/chunk/<id>/state`, `/ticket` y `/ws`.
+
+**Sesiones.** El token de una persona lleva la versión de sesiones de su cuenta (`sv`) y cuándo entró
+(`auth`). `POST /me/session`, `PATCH /me`, `POST /me/avatar` y `DELETE /me/skins/<hash>` solo dan
+token nuevo si la versión es la actual y el acceso tiene menos de 30 días; si no, `401
+session_expired` (y la web cierra la sesión). `POST /me/logout-all` sube la versión: los tokens de
+antes no se renuevan y, pasados 10 minutos desde que se emitieron, tampoco abren conexiones nuevas.
+
 | Ruta | Quién | Qué hace |
 |---|---|---|
 | `POST /auth/passkey/register/options` · `/verify` | cualquiera | Alta con passkey: `display_name`, `age_confirmed: true` (14+), `accept_terms: "2026-10"` |
 | `POST /auth/passkey/login/options` · `/verify` | cualquiera | Acceso con passkey (descubrible, sin nombre de usuario) |
 | `GET /auth/methods` | público | Formas de entrar activas (`{passkey, google}`) |
-| `GET /auth/google/start?mode=login\|register&origin=…` · `GET /auth/google/callback` · `POST /auth/google/finish` | cualquiera | Entrar con Google (OpenID Connect, código + PKCE, solo `openid`). Al volver, la web recibe un código de un solo uso (60 s) y lo cambia por la sesión; el token nunca viaja en una URL. Para darse de alta se mandan `name`, `age=1` y `terms` como con passkey |
-| `GET /me/logins` · `POST /me/logins/google` · `DELETE /me/logins/google` · `POST /me/passkeys/options` · `/verify` | persona | Formas de entrar de la cuenta: vincular o quitar Google (siempre queda al menos una passkey o Google) y añadir más passkeys |
+| `GET /auth/google/start?mode=login\|register&origin=…&b=<hash>` · `GET /auth/google/callback` · `POST /auth/google/finish { code, bind }` | cualquiera | Entrar con Google (OpenID Connect, código + PKCE, solo `openid`). Al volver, la web recibe un código de un solo uso (60 s) y lo cambia por la sesión; el token nunca viaja en una URL. El código está **atado al navegador** que empezó: `b` es el SHA-256 (base64url, 43 caracteres) de un secreto que la web guarda en `sessionStorage` y manda como `bind` al canjearlo (si no coincide, `flow_expired`). Para darse de alta se mandan `name`, `age=1` y `terms` como con passkey |
+| `GET /me/logins` · `POST /me/logins/google { bind_hash }` · `POST /me/logins/google/finish { code, bind }` · `DELETE /me/logins/google` · `POST /me/passkeys/options` · `/verify` | persona | Formas de entrar de la cuenta: vincular o quitar Google (siempre queda al menos una passkey o Google) y añadir más passkeys. Vincular Google no se completa en la vuelta de Google: vuelve con un código (`google_link`) que la propia cuenta canjea con su token y el secreto del navegador, así nadie puede colgar su Google en la cuenta de otro |
 | `POST /assets?kind=avatar\|model\|monument\|cover\|portrait` | persona o agente | Sube un GLB/VRM (o, con `cover` o `portrait`, una imagen; el retrato, cuadrado de 128 a 512 px y ≤ 120 KB). El servidor lo inspecciona, aplica el presupuesto, calcula el hash y lo guarda en R2. Las portadas se comprueban por su firma (WebP, JPEG o PNG, nunca por lo que diga el cliente) y se sirven con su tipo real |
-| | | Topes: 80 subidas al día y 100 MB por persona (`413 quota_exceeded`), 1000 subidas al día entre todos (`429 storage_busy`); el almacén entero tiene un tope de 8 GB para no salir del plan gratuito de R2 (`507 storage_full`). Las lecturas `GET /assets/<hash>` pasan por la caché de Cloudflare |
+| | | Topes: 80 subidas al día (15 las cuentas de menos de un día), 3 a la vez y 100 MB por persona (`413 quota_exceeded`), 1000 subidas al día entre todos (`429 storage_busy`); el almacén entero tiene un tope de 8 GB para no salir del plan gratuito de R2 (`507 storage_full`). Las lecturas `GET /assets/<hash>` pasan por la caché de Cloudflare |
 | `GET /assets/<sha256-hex>` | público | Sirve el asset, inmutable y cacheable para siempre. Los **assets del sistema** (la plaza y los avatares de serie, generados por la forja) se sirven desde los recursos estáticos del Worker con la misma ruta |
 | `GET /me` · `PATCH /me` · `POST /me/avatar` | persona | Perfil (con `player_no`), nombre visible y personaje (uno subido o uno de serie). Devuelven un token nuevo con nombre, avatar y número |
 | `GET /me/agent-keys` · `POST /me/agent-keys { project_id, label? }` · `DELETE /me/agent-keys/<id>` | persona | Claves de parcela de sus proyectos publicados (máximo 3 por proyecto). La clave en claro solo llega al crearla (`{ key, info }`); se guarda su huella. Revocar corta al momento las conexiones de ese agente |
@@ -395,18 +437,21 @@ El mundo solo se escribe por WebSocket (`MUTATE_WORLD`). Lo que no es mundo va p
 | `PUT /me/portrait { hash, of }` | persona | El retrato de su personaje: imagen que subió (`kind=portrait`) del personaje que lleva (`of`, el `avatar_effective.hash` de `GET /me`; si no, `portrait_stale`). Lo hace la web en el navegador cada vez que cambia de personaje y llega a los juegos como `picture`. `GET /me` trae `avatar_effective` y `portrait: { hash, current } \| null` |
 | `GET /me/card` · `PUT /me/card { public }` | persona | Tu carné de jugador: `{ public, player_no }`. Privado por defecto; al cambiarlo se borra de la caché al momento |
 | `GET /players/<n>` | — | Carné público del jugador `n` (sin ceros a la izquierda): `{ player_no, name, avatar, joined, projects, badges }`, nunca el id interno. 404 si no existe o no es público. Un minuto en la caché del borde. La web lo enseña en `xenxo.io/p/<n>` |
-| `POST /me/session` | persona | Renueva la sesión con los datos de ahora (número, nombre, personaje); la web lo llama al abrirse |
+| `POST /me/session` | persona | Renueva la sesión con los datos de ahora (número, nombre, personaje); la web lo llama al abrirse. Ver **Sesiones** arriba |
+| `POST /me/logout-all` | persona | Cierra la sesión en todos los dispositivos (sube la versión de sesiones de la cuenta) |
 | `GET /me/badges` · `POST /me/badges/check` | persona | Insignias de las actividades del sistema (`apps/realtime/src/badges.ts`): `{ id, name, desc, color, district, earned_at }`. `check` pregunta a cada distrito lo que guarda de la cuenta (`activityOf`) y da las que cumple: responde `{ badges, new }`, como mucho una vez cada 15 s (si no, `throttled: true`). El cliente nunca dice qué ha ganado; la web lo pide tras completar una búsqueda, una carrera o una ronda del tablero |
 | `GET /scores` | público | Marcadores del sistema de los distritos abiertos para el panel: `{ districts: [{ id, name, color, boards: [{ entity_id, kind, id, period, title, rows }] }], at }`. Un minuto en la caché del borde |
 | `GET /me/export` · `DELETE /me` | persona | RGPD: exportar todos tus datos; borrar la cuenta y todo su contenido |
 | `GET /districts` | público | Distritos con sus 64 parcelas y quién ocupa cada una (`project_id`, `title`), su chunk, color y textos |
 | `GET /projects` · `POST /projects` · `DELETE /projects/<id>` | público / persona | Proyectos. **Requisitos para publicar** (web, agentes y el futuro servidor MCP por igual): `title` (3–60), `url` (https), `district` y `parcel` libre (de `GET /districts`), `cover_hash` (portada subida con `kind=cover`) y `mesh_hash` (monumento subido con `kind=monument` o `model`, ≤ 10.000 triángulos); `summary` es opcional. La categoría es la del distrito. Al publicar, el distrito coloca su portal en la parcela (marco, portada, banda, monumento sobre la peana y rótulo). El nexo no enseña proyectos: solo distritos. Errores: `cover_required`, `monument_required`, `bad_url`, `bad_district`, `bad_parcel`, `parcel_taken`, `monument_too_big`, `district_full` |
-| `POST /reports` | cualquiera con token | Denuncia (DSA): `target_type` (`project`, `avatar`, `user`, `chat`…), `target_id`, `reason`, `details?`. Si es un mensaje de chat, el servidor adjunta una copia: el chat caduca a los 7 días, la denuncia no |
-| `GET /admin/reports` · `POST /admin/reports/<id>` · `POST /admin/projects/<id>/hide` · `POST /admin/chat/<id>/hide` | agente con scope `admin` | Moderación |
+| `POST /reports` | cualquiera con token | Denuncia (DSA): `target_type` (`project`, `avatar`, `user`, `chat`…), `target_id` (1–80 caracteres `A-Za-z0-9_:.#-`), `reason`, `details?` y, si es chat, `chunk_id?` (el lugar del mensaje). Si es un mensaje de chat, el servidor adjunta una copia: el chat caduca a los 7 días, la denuncia no. Los invitados comparten un tope de 300 denuncias al día (`429`); las cuentas, el suyo |
+| `GET /admin/reports` · `POST /admin/reports/<id>` · `POST /admin/projects/<id>/hide { note }` · `POST /admin/chat/<id>/hide` | agente con scope `admin` | Moderación. Ocultar un proyecto exige motivo; todo queda en `moderation_log` |
 | `POST /admin/cleanup` | moderación | Borra ya los archivos subidos por personas que nada usa desde hace 7 días (la limpieza diaria va sola, con la alarma del `Directory`). En local acepta `{ now }` para simular la fecha |
 | `GET /github/repos` | público | Repos de GitHub vía servidor, cacheados una hora |
 
-**Presupuestos de subida:** avatar ≤ 30.000 triángulos, 4 MB y texturas de 1024 px; modelo ≤ 50.000 triángulos, 6 MB y 2048 px; monumento ≤ 10.000 triángulos, 2 MB y 1024 px (hay hasta 23 a la vista en el nexo); portada ≤ 300 KB, de 160×90 a 1600×900 px (la web la recorta a 16:9 y la pasa a WebP). Sin Draco, sin luces y sin referencias externas (todo embebido en el `.glb`).
+**Presupuestos de subida:** avatar ≤ 30.000 triángulos, 90.000 vértices, 4 MB, 24 imágenes de hasta 1024 px y 24 Mpx de textura en total; modelo ≤ 50.000 triángulos, 150.000 vértices, 6 MB, 32 imágenes de hasta 2048 px y 32 Mpx; monumento ≤ 10.000 triángulos, 30.000 vértices, 2 MB, 8 imágenes de hasta 1024 px y 6 Mpx (hay hasta 23 a la vista en el nexo); portada ≤ 300 KB, de 160×90 a 1600×900 px (la web la recorta a 16:9 y la pasa a WebP). Sin Draco, sin luces y sin referencias externas (todo embebido en el `.glb`).
+
+**Qué se comprueba de un GLB** (`packages/assets`, igual en el kit, la web y el servidor; el servidor nunca se fía de lo que diga el cliente): toda extensión, en cualquier nivel, tiene que estar en la lista permitida; cada `bufferView` y cada `accessor` cabe en el binario (con sus tipos válidos y un tope de elementos); el árbol de nodos no tiene ciclos ni hijos compartidos; las primitivas usan un modo válido; las imágenes van dentro del archivo, en PNG, JPEG, WebP o KTX2, y se leen sus medidas reales; y hay topes de nodos, mallas, materiales, animaciones y datos comprimidos con meshopt. Un archivo malformado da `bad_structure`, nunca un error del servidor.
 
 **Portales de proyectos.** El Directory llama a `ChunkRoom.placeStand()` / `removeStand()` del nexo con la identidad de la persona: pasan por `applyMutation`, con los mismos esquemas, presupuestos, log y `DELTA` que cualquier mutación. `purgeOwner()` existe solo para la supresión de cuentas (RGPD).
 
@@ -424,7 +469,7 @@ El mundo solo se escribe por WebSocket (`MUTATE_WORLD`). Lo que no es mundo va p
 
 ### Zona de pruebas (Taller)
 
-Un distrito puede tener una zona de pruebas (`district-activities.json` → `sandbox`: rectángulo, altura máxima y topes). Allí, **cualquier cuenta registrada** (sin clave `xk_` ni scope `build`) puede hacer `MUTATE_WORLD` con piezas básicas: `transform@1`, `primitive@1` (lado ≤ 4 m), `label@1`, `light@1` (intensidad ≤ 3, alcance ≤ 10) y `collider@1`, siempre dentro del rectángulo. Tope por persona (30 piezas, 2 luces), solo se cambia o borra lo propio y todo se borra cada día (UTC). Moderación la vacía con `POST /mod/sandbox/<distrito>/clear` (queda en el registro). Los invitados no construyen.
+Un distrito puede tener una zona de pruebas (`district-activities.json` → `sandbox`: rectángulo, altura máxima y topes). Allí, **cualquier cuenta registrada** (sin clave `xk_` ni scope `build`) puede hacer `MUTATE_WORLD` con piezas básicas: `transform@1`, `primitive@1` (lado ≤ 4 m), `label@1`, `light@1` (intensidad ≤ 3, alcance ≤ 10) y `collider@1`, sin padre y con todo lo que ocupa (pieza, colisionador y cartel, girado y escalado) dentro del rectángulo y por debajo de su altura máxima. La escala va de 0,1 a 4 en cada eje y el colisionador no puede ser más grande que la pieza (`budget_exceeded`). Tope por persona (30 piezas, 2 luces) y entre todos (240 piezas), solo se cambia o borra lo propio y todo se borra cada día (UTC). Ni la zona de pruebas ni las parcelas gastan el presupuesto del chunk: llenas, no impiden publicar un proyecto. Moderación la vacía con `POST /mod/sandbox/<distrito>/clear` (queda en el registro). Los invitados no construyen.
 
 ## 12 bis. Convenciones de los modelos (no son protocolo, son pistas de render)
 

@@ -46,7 +46,8 @@ function importKey(jwk: string, use: "sign" | "verify"): Promise<CryptoKey> {
 }
 
 export async function signRemote(privateJwk: string, payload: Record<string, unknown>): Promise<string> {
-  const body = b64url(enc.encode(JSON.stringify(payload)));
+  // Cada firma lleva su `jti` (al azar): el servidor de distritos no acepta dos veces la misma llamada.
+  const body = b64url(enc.encode(JSON.stringify({ jti: b64url(crypto.getRandomValues(new Uint8Array(12))), ...payload })));
   const sig = new Uint8Array(await crypto.subtle.sign({ name: "Ed25519" }, await importKey(privateJwk, "sign"), enc.encode(body)));
   return `${body}.${b64url(sig)}`;
 }
@@ -80,6 +81,28 @@ export interface RemoteCall {
   method: string;
   body: string; // sha256 (base64url) del cuerpo
   exp: number;
+  /** Id de un solo uso (lo pone signRemote): una llamada repetida se rechaza. */
+  jti?: string;
+}
+
+/**
+ * Llamadas ya atendidas (por su `jti`, o por la firma entera si no lo trae), hasta que caducan: una
+ * llamada copiada no se puede repetir dentro de sus 30 s. En memoria del servidor de distritos.
+ */
+export class SeenCalls {
+  private seen = new Map<string, number>();
+  constructor(private max = 10_000) {}
+  /** true si es nueva (y la apunta); false si ya se vio o no cabe más. */
+  claim(id: string, exp: number, now = Date.now()): boolean {
+    // Por orden de llegada: las primeras son las que antes caducan (casi siempre).
+    for (const [k, e] of this.seen) {
+      if (e >= now) break;
+      this.seen.delete(k);
+    }
+    if (this.seen.has(id) || this.seen.size >= this.max) return false;
+    this.seen.set(id, exp);
+    return true;
+  }
 }
 
 export const TICKET_TTL_MS = 60_000;
