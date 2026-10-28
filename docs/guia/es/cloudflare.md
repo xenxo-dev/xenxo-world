@@ -62,7 +62,7 @@ En tu fork: *Settings → Secrets and variables → Actions*.
 | `AGENT_KEYS` | Secreto, opcional | Claves de agentes y de moderación (abajo) |
 | `FOUNDER_USER_ID` | Variable, opcional | El id de tu cuenta, para ser el jugador #0 y moderar siempre |
 | `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET` | Variable y secreto, opcionales | «Entrar con Google» (abajo) |
-| `DISTRICT_SIGNING_KEY` | Secreto, opcional | Para alojar distritos en nodos ([Los distritos en tu servidor](servidor.md)) |
+| `DISTRICT_SIGNING_KEY` | Secreto, opcional | Solo si quieres fijar tú la clave de los nodos; si no, la crea el servidor ([Los distritos en tu servidor](servidor.md)) |
 
 Sin los tres primeros el despliegue se salta solo y lo avisa: no rompe nada.
 

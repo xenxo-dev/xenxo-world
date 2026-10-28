@@ -7,14 +7,13 @@ import { useEffect, useState } from "react";
 import { REALTIME_URL } from "../config";
 import { errorText, getLang, t } from "../i18n";
 import { ApiError } from "../net/account";
-import { addNode, checkNodes, listNodes, moveDistrict, removeNode, setNodeEnabled, type ChunkHostRow, type NodePlace, type NodeRow } from "../net/nodes";
+import { addNode, checkNodes, listNodes, moveDistrict, removeNode, rotateNodeKey, setNodeEnabled, type ChunkHostRow, type NodePlace, type NodeRow } from "../net/nodes";
 import { Button, input, Label, Notice } from "./ui";
 
 const FAILS_TO_FALLBACK = 3;
 
 export function NodesAdmin() {
   const [data, setData] = useState<{ nodes: NodeRow[]; hosts: ChunkHostRow[]; districts: NodePlace[] } | null>(null);
-  const [off, setOff] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState("");
   const [busy, setBusy] = useState(false);
@@ -23,11 +22,8 @@ export function NodesAdmin() {
 
   const load = () =>
     listNodes()
-      .then((r) => {
-        setData(r);
-        setOff(false);
-      })
-      .catch((e) => (e instanceof ApiError && e.code === "nodes_off" ? setOff(true) : setError(errorText(e))));
+      .then(setData)
+      .catch((e) => setError(errorText(e)));
   useEffect(() => {
     void load();
   }, []);
@@ -52,8 +48,6 @@ export function NodesAdmin() {
   const when = (ms: number) => new Date(ms).toLocaleString(lang === "es" ? "es-ES" : "en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
   const nodeName = (id: string) => data?.nodes.find((n) => n.id === id)?.name ?? id;
   const state = (n: NodeRow) => (n.disabled ? t("nodes.state.off") : n.fails >= FAILS_TO_FALLBACK ? t("nodes.state.down") : n.last_ok ? t("nodes.state.ok") : t("nodes.state.unknown"));
-
-  if (off) return <Notice>{t("nodes.off")}</Notice>;
 
   return (
     <div className="space-y-5">
@@ -191,6 +185,16 @@ export function NodesAdmin() {
             }
           >
             {t("nodes.check")}
+          </Button>
+          <Button
+            variant="ghost"
+            disabled={busy}
+            onClick={() => {
+              if (!window.confirm(t("nodes.rotateConfirm"))) return;
+              void act(() => rotateNodeKey(), t("nodes.rotated"));
+            }}
+          >
+            {t("nodes.rotate")}
           </Button>
         </div>
       )}

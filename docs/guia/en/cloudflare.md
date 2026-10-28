@@ -62,7 +62,7 @@ In your fork: *Settings → Secrets and variables → Actions*.
 | `AGENT_KEYS` | Secret, optional | Agent and moderation keys (below) |
 | `FOUNDER_USER_ID` | Variable, optional | Your account id, to be player #0 and always moderate |
 | `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` | Variable and secret, optional | “Sign in with Google” (below) |
-| `DISTRICT_SIGNING_KEY` | Secret, optional | To host districts on nodes ([Districts on your server](servidor.md)) |
+| `DISTRICT_SIGNING_KEY` | Secret, optional | Only to set the nodes' key yourself; otherwise the server creates it ([Districts on your server](servidor.md)) |
 
 Without the first three the deploy skips itself and says so: nothing breaks.
 

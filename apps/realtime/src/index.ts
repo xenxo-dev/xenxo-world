@@ -42,9 +42,9 @@ export interface Env {
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
   /**
-   * Nodos (nodes.ts): la clave privada Ed25519 (JWK, un secreto) con la que se firman los pases y
-   * las llamadas a los servidores de distritos. Sin ella no se usa ningún nodo: todo vive en Cloudflare.
-   * Qué nodo lleva cada distrito está en el registro (/mod/nodes), no aquí.
+   * Nodos (nodes.ts), opcional: una clave privada Ed25519 propia (JWK, un secreto) para firmar los
+   * pases y las llamadas a los nodos. Sin ella, el Directory crea y guarda una al dar de alta el primer
+   * nodo. Qué nodo lleva cada distrito está en el registro (/mod/nodes), no aquí.
    */
   DISTRICT_SIGNING_KEY?: string;
   /**
@@ -431,8 +431,7 @@ async function clearParcel(env: Env, district: string | null | undefined, projec
 }
 
 /** El nodo que atiende ahora este chunk (null = Cloudflare). Lee las rutas ya cargadas (loadRoutes). */
-function nodeFor(env: Env, id: string): { id: string; name: string; url: string } | null {
-  if (!env.DISTRICT_SIGNING_KEY) return null;
+function nodeFor(_env: Env, id: string): { id: string; name: string; url: string } | null {
   const r = currentRoutes();
   const nid = r.chunks[id];
   const n = nid ? r.nodes[nid] : undefined;
@@ -444,10 +443,22 @@ function isRemote(env: Env, id: string): boolean {
   return !!nodeFor(env, id);
 }
 
-/** Carga las rutas de los nodos (si hay clave de nodos): antes de cualquier chunk(env, id). */
+/** Carga las rutas de los nodos: antes de cualquier chunk(env, id). */
 async function routes(env: Env, force = false) {
-  if (!env.DISTRICT_SIGNING_KEY) return;
   await loadRoutes(() => directory(env).nodeRoutes(), force);
+}
+
+/**
+ * La clave con la que se firma lo que va a los nodos: DISTRICT_SIGNING_KEY si está (secreto), si no la
+ * que guarda el Directory (se crea al dar de alta el primer nodo). En memoria 10 minutos.
+ */
+let nodeKeyMem: { at: number; jwk: string | null } | null = null;
+async function signingKey(env: Env): Promise<string | null> {
+  if (env.DISTRICT_SIGNING_KEY) return env.DISTRICT_SIGNING_KEY;
+  if (nodeKeyMem && Date.now() - nodeKeyMem.at < (nodeKeyMem.jwk ? 600_000 : 60_000)) return nodeKeyMem.jwk;
+  const k = await directory(env).nodeSigningKey(false);
+  nodeKeyMem = { at: Date.now(), jwk: k?.privateJwk ?? null };
+  return nodeKeyMem.jwk;
 }
 
 /**
@@ -455,12 +466,14 @@ async function routes(env: Env, force = false) {
  * (solo los de REMOTE_METHODS, con `aud` = el nodo) y fetch lleva el estado público.
  */
 function remoteChunk(env: Env, id: string, node: { id: string; url: string } | null = nodeFor(env, id)) {
-  if (!node || !env.DISTRICT_SIGNING_KEY) throw new Error("ese chunk no vive en ningún nodo");
+  if (!node) throw new Error("ese chunk no vive en ningún nodo");
   const host = node.url.replace(/\/+$/, "");
   const call = async (method: string, args: unknown[]) => {
     if (!REMOTE_METHODS.has(method)) throw new Error(`método remoto no permitido: ${method}`);
     const body = JSON.stringify(args);
-    const token = await signRemote(env.DISTRICT_SIGNING_KEY!, { typ: "rpc", aud: node.id, chunk: id, method, body: await sha256B64(body), exp: Date.now() + CALL_TTL_MS });
+    const key = await signingKey(env);
+    if (!key) throw new Error("no hay clave para firmar a los nodos");
+    const token = await signRemote(key, { typ: "rpc", aud: node.id, chunk: id, method, body: await sha256B64(body), exp: Date.now() + CALL_TTL_MS });
     const r = await fetch(`${host}/rpc/${encodeURIComponent(id)}/${method}`, { method: "POST", headers: { "Content-Type": "application/json", "X-Xenxo-Call": token }, body });
     if (!r.ok) throw new Error(`nodo ${node.id}: ${method} → ${r.status}`);
     return (await r.json()) as unknown;
@@ -573,7 +586,9 @@ async function checkSubmission(env: Env, req: Request): Promise<{ ok: true; sub:
 async function socketFor(env: Env, req: Request, chunkId: string, p: Principal, token: string): Promise<string> {
   const node = nodeFor(env, chunkId);
   if (node) {
-    const ticket = await signRemote(env.DISTRICT_SIGNING_KEY!, { typ: "ticket", aud: node.id, chunk: chunkId, principal: p, exp: Date.now() + TICKET_TTL_MS });
+    const key = await signingKey(env);
+    if (!key) throw new Error("no hay clave para firmar a los nodos");
+    const ticket = await signRemote(key, { typ: "ticket", aud: node.id, chunk: chunkId, principal: p, exp: Date.now() + TICKET_TTL_MS });
     const u = new URL(`${node.url.replace(/\/+$/, "")}/chunk/${encodeURIComponent(chunkId)}/ws`);
     u.protocol = u.protocol === "http:" ? "ws:" : "wss:";
     u.searchParams.set("ticket", ticket);
@@ -636,7 +651,9 @@ async function fallbackChunk(env: Env, host: ChunkHostRow, moderator: string | n
  */
 async function runNodeChecks(env: Env): Promise<{ checked: number; down: string[]; snapshots: string[]; fallback: string[] }> {
   const out = { checked: 0, down: [] as string[], snapshots: [] as string[], fallback: [] as string[] };
-  if (!env.DISTRICT_SIGNING_KEY) return out;
+  // Sin nodos (lo normal), sale sin despertar al Directory: las rutas vacías se guardan 5 minutos.
+  await routes(env);
+  if (!Object.keys(currentRoutes().nodes).length) return out;
   const dir = directory(env);
   const { nodes, hosts } = await dir.listNodes();
   const active = nodes.filter((n) => !n.disabled);
@@ -829,10 +846,12 @@ export default {
 
     try {
       // Dónde vive cada distrito (nodos): en memoria 30 s, luego la caché del centro de datos.
-      if (env.DISTRICT_SIGNING_KEY && path !== "/health" && !path.startsWith("/assets/") && !path.startsWith("/s/")) await routes(env);
+      if (path !== "/health" && !path.startsWith("/assets/") && !path.startsWith("/s/")) await routes(env);
       // La clave pública con la que los nodos comprueban lo que firma este Worker (no es secreta).
       if (path === "/nodes/key" && req.method === "GET") {
-        const k = env.DISTRICT_SIGNING_KEY ? publicJwk(env.DISTRICT_SIGNING_KEY) : null;
+        // Sale de la clave en memoria (signingKey): un visitante insistente no despierta al Directory.
+        const priv = await signingKey(env);
+        const k = priv ? publicJwk(priv) : null;
         return k ? new Response(JSON.stringify(k), { headers: { ...h, "Content-Type": "application/json", "Cache-Control": "public, max-age=300" } }) : json({ error: "not_found" }, 404, h);
       }
       if (path === "/health") return json({ ok: true, protocol: 0 }, 200, h);
@@ -1462,7 +1481,6 @@ export default {
         // Solo el fundador o la clave de administración: un nodo ve el chat y las poses de sus distritos.
         if (path === "/mod/nodes" || path.startsWith("/mod/nodes/") || /^\/mod\/chunks\/[^/]+\/move$/.test(path)) {
           if (!isAdmin && !(await dir.isFounder(uid))) return json({ error: "forbidden", message: "los nodos los gestiona el fundador" }, 403, h);
-          if (!env.DISTRICT_SIGNING_KEY) return json({ error: "nodes_off", message: "falta DISTRICT_SIGNING_KEY: sin ella no se usa ningún nodo" }, 400, h);
           const noStore = { ...h, "Cache-Control": "no-store" };
           if (path === "/mod/nodes" && req.method === "GET") {
             const { nodes, hosts } = await dir.listNodes();
@@ -1473,12 +1491,24 @@ export default {
             const b = await readJson(req);
             const nurl = nodeUrl(b.url, env.RP_ID === "localhost");
             if (!nurl) return json({ error: "bad_url", message: "la dirección del nodo tiene que ser https://… (sin usuario, consulta ni #)" }, 400, h);
+            if (b.id === "check" || b.id === "key") return json({ error: "bad_node_id", message: "ese id está reservado" }, 400, h);
             const r = await dir.addNode(modId, b.id, b.name, nurl);
             if (!r.ok) return failure(r, h);
+            // El primer nodo crea la clave de firma (si no hay DISTRICT_SIGNING_KEY): su pública, en /nodes/key.
+            if (!env.DISTRICT_SIGNING_KEY) await dir.nodeSigningKey(true);
+            nodeKeyMem = null;
+            await forgetRoutes();
             const alive = await nodeAlive(r.data.id, r.data.url, true);
             return json({ node: r.data, alive: alive.ok, chunks: alive.chunks }, 201, noStore);
           }
           if (path === "/mod/nodes/check" && req.method === "POST") return json(await runNodeChecks(env), 200, noStore);
+          // Clave nueva para firmar a los nodos (cada nodo tiene que poner la pública nueva de /nodes/key).
+          if (path === "/mod/nodes/key/rotate" && req.method === "POST") {
+            if (env.DISTRICT_SIGNING_KEY) return json({ error: "env_key", message: "la clave la fija DISTRICT_SIGNING_KEY: cámbiala ahí" }, 409, h);
+            const r = await dir.rotateNodeKey(modId);
+            nodeKeyMem = null;
+            return json(r, 200, noStore);
+          }
           const nd = path.match(/^\/mod\/nodes\/([a-z0-9-]{3,32})(?:\/(disable|enable))?$/);
           if (nd && nd[2] && req.method === "POST") {
             const b = await readJson(req);
@@ -1686,7 +1716,6 @@ export default {
   },
   /** Cron (wrangler.toml → triggers): la ronda de los nodos. Sin nodos no hace nada. */
   async scheduled(_c: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    if (!env.DISTRICT_SIGNING_KEY) return;
     ctx.waitUntil(runNodeChecks(env).then(() => undefined).catch((e) => console.warn("nodos:", (e as Error).message)));
   },
 } satisfies ExportedHandler<Env>;

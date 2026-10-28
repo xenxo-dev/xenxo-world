@@ -43,8 +43,9 @@ async function remoteSocket(chunkId: string, token: string): Promise<string | un
   const r = await fetch(new URL(`/chunk/${chunkId}/ticket`, REALTIME_URL), { method: "POST", headers: { Authorization: `Bearer ${token}` } });
   if (r.status === 503) throw new Unavailable();
   if (!r.ok) throw new Error(`ticket ${r.status}`);
-  const t = (await r.json()) as { url: string; remote?: boolean };
+  const t = (await r.json()) as { url: string; remote?: boolean; host?: string };
   remoteNow = !!t.remote;
+  world.setHost(t.remote && t.host ? t.host : null);
   return t.remote ? t.url : undefined;
 }
 

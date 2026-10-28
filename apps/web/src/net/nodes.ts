@@ -34,3 +34,4 @@ export const setNodeEnabled = (id: string, on: boolean) => authedApi<{ fallback?
 export const removeNode = (id: string) => authedApi("DELETE", `/mod/nodes/${id}`);
 export const checkNodes = () => authedApi<{ checked: number; down: string[]; snapshots: string[]; fallback: string[] }>("POST", "/mod/nodes/check", {});
 export const moveDistrict = (chunkId: string, to: string) => authedApi("POST", `/mod/chunks/${chunkId}/move`, { to });
+export const rotateNodeKey = () => authedApi<{ x: string }>("POST", "/mod/nodes/key/rotate", {});

@@ -69,19 +69,9 @@ Si es para tu instancia, clona **tu** repositorio. El instalador:
 
 El servicio va endurecido con systemd: sin privilegios nuevos, sistema de archivos de solo lectura y escritura solo en sus datos.
 
-## 3. Las claves y el id del nodo
+## 3. Configura el nodo
 
-**Una sola vez por instancia** (no por nodo): el Worker necesita su clave para firmar. En tu ordenador, con el repositorio y `npx wrangler login` hecho:
-
-```bash
-node tools/district-host/keys.mjs
-npx wrangler secret put DISTRICT_SIGNING_KEY --config apps/realtime/wrangler.toml < distrito-privada.jwk
-rm distrito-privada.jwk
-```
-
-La clave privada queda solo en Cloudflare. Si despliegas con GitHub Actions, guárdala en su lugar como secreto `DISTRICT_SIGNING_KEY` del repositorio (el contenido del archivo, en una línea) y borra el archivo: el despliegue la pone. Desde ese momento, tu Worker reparte la pública en `/nodes/key`.
-
-**En cada nodo**, edita `/etc/xenxo-distritos.env`:
+Edita `/etc/xenxo-distritos.env` en la máquina:
 
 ```bash
 NODE_ID=casa-1
@@ -91,8 +81,9 @@ ASSETS_URL=https://api.tudominio.com
 ```
 
 - `NODE_ID`: el id con el que lo darás de alta (3–32 letras minúsculas, números y guiones).
-- `DISTRICT_PUBLIC_KEY`: la línea que devuelve `curl https://api.tudominio.com/nodes/key`.
+- `DISTRICT_PUBLIC_KEY`: la clave **pública** de tu servidor, la línea que devuelve `curl https://api.tudominio.com/nodes/key`. Tu servidor crea su par de claves solo al dar de alta el primer nodo (paso 5) y la privada no sale nunca de él. Si aún da 404, deja este valor para después del alta.
 - `HOSTED_CHUNKS`: qué distritos aceptas llevar (`*` = los que te asignen, o una lista como `c_1_0,c_-1_0`).
+- `ASSETS_URL`: tu servidor, de donde el nodo saca las medidas de los modelos de la gente.
 
 Reinicia y comprueba:
 
@@ -101,10 +92,10 @@ sudo systemctl restart xenxo-distritos
 curl http://127.0.0.1:8788/node
 ```
 
-Tiene que responder con tu id: `{"id":"casa-1","chunks":["*"],"protocol":0}`.
+Tiene que responder con tu id: `{"id":"casa-1","chunks":["*"],"protocol":0}`. Cada vez que cambies la clave pública, reinicia el servicio.
 
-> [!WARNING]
-> La clave privada no se pega en ningún chat ni se sube al repositorio. Si se filtra, genera otra, vuelve a ponerla con `wrangler secret put` y cambia la pública en cada nodo.
+> [!NOTE]
+> Si prefieres fijar tú la clave de firma (por ejemplo, para que la misma valga en otra instancia), créala con `node tools/district-host/keys.mjs` y guárdala como secreto `DISTRICT_SIGNING_KEY` del Worker o de GitHub. Si existe, manda sobre la que guarda el servidor.
 
 ## 4. El túnel
 
@@ -121,7 +112,7 @@ La política de seguridad de la web ya permite conectar con cualquier subdominio
 
 En tu web, con la cuenta de fundador: *Cuenta → Nodos*.
 
-1. **Dar de alta un nodo:** su id (el mismo `NODE_ID`), un nombre (lo verá la gente: «este distrito lo aloja…») y su dirección `https://…`. Si responde con su id, sale **En línea**.
+1. **Dar de alta un nodo:** su id (el mismo `NODE_ID`), un nombre (lo verá la gente: «este distrito lo aloja…») y su dirección `https://…`. Si responde con su id, sale **En línea**. Si era el primero, ahora ya hay clave: pon la de `/nodes/key` en el nodo (paso 3) y reinícialo.
 2. **Dónde vive cada distrito:** elige el nodo junto al distrito y pulsa **Llevar**. Se copia todo lo de la gente (portales de proyectos, lo construido, actividades y chat) y, en cuanto termina, la gente entra ya en el nodo.
 
 Lo que cambie en el distrito mientras se copia (unos segundos) se pierde: hazlo con poca gente dentro.
@@ -186,6 +177,7 @@ Los chunks de los distritos:
 | El panel dice que no responde, pero el túnel va | El `NODE_ID` del nodo no coincide con el id del alta. |
 | **Llevar** devuelve `node_refuses` | El distrito no está en el `HOSTED_CHUNKS` del nodo. |
 | **Llevar** devuelve `node_unreachable` | El nodo no responde por su dirección `https://…`: revisa el túnel. |
-| *Cuenta → Nodos* dice que los nodos están apagados | Falta el secreto `DISTRICT_SIGNING_KEY` en el Worker (paso 3). |
+| `/nodes/key` da 404 | Aún no has dado de alta ningún nodo: la clave se crea con el primero. |
+| El nodo responde a `/node` pero no deja entrar | Su `DISTRICT_PUBLIC_KEY` no es la de `/nodes/key` (¿se cambió la clave en el panel?). Pon la de ahora y reinicia. |
 | Los modelos de la gente no salen en el distrito | `ASSETS_URL` tiene que ser tu `https://api.tudominio.com`. |
 | El navegador no conecta con un nodo de otro dominio | Añade su `wss://…` a `connect-src` en `apps/web/public/_headers`. |

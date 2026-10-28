@@ -1168,11 +1168,8 @@ await scenario("pase: /chunk/<id>/ticket dice dónde conectar (aquí con el mism
 });
 
 await scenario("nodos: el registro lo gestiona solo el fundador; un nodo que no responde no recibe distritos (y con XENXO_NODE_URL, un traslado de ida y vuelta)", async () => {
-  const key = await fetch(new URL("/nodes/key", baseUrl));
-  assert(key.status === 200 || key.status === 404, "/nodes/key: la clave pública o 404 si no hay nodos");
-  if (key.status === 404) return console.log("    (sin DISTRICT_SIGNING_KEY en el servidor: se omite)");
-  const pub = (await key.json()) as { kty: string; x: string; d?: string };
-  assert(pub.kty === "OKP" && !!pub.x && pub.d === undefined, "la clave que se reparte es solo la pública");
+  const key0 = await fetch(new URL("/nodes/key", baseUrl));
+  assert(key0.status === 200 || key0.status === 404, "/nodes/key: la clave pública, o 404 si aún no hay ningún nodo");
   const someone = new Api(baseUrl);
   await someone.register(`conf ${randomUUID().slice(0, 6)}`);
   const nope = await someone.call("POST", "/mod/nodes", { id: "intruso", name: "Intruso", url: "https://example.com" });
@@ -1185,6 +1182,10 @@ await scenario("nodos: el registro lo gestiona solo el fundador; un nodo que no 
   const ghostId = `fantasma-${randomUUID().slice(0, 6)}`;
   const ghost = await admin.call<{ alive: boolean }>("POST", "/mod/nodes", { id: ghostId, name: "Fantasma", url: "http://127.0.0.1:9" });
   assert(ghost.ok && ghost.data.alive === false, "se puede dar de alta, pero consta que no responde");
+  const key = await fetch(new URL("/nodes/key", baseUrl));
+  assert(key.ok, "con un nodo dado de alta ya hay clave de firma");
+  const pub = (await key.json()) as { kty: string; x: string; d?: string };
+  assert(pub.kty === "OKP" && !!pub.x && pub.d === undefined, "la clave que se reparte es solo la pública");
   const mv = await admin.call("POST", "/mod/chunks/c_-1_0/move", { to: ghostId });
   assert(!mv.ok && mv.status === 502, "a un nodo que no responde no se lleva ningún distrito");
   const plaza = await admin.call("POST", "/mod/chunks/c_0_0/move", { to: ghostId });

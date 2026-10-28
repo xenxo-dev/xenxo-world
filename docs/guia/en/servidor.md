@@ -69,19 +69,9 @@ If it's for your instance, clone **your** repository. The installer:
 
 The service is hardened with systemd: no new privileges, a read-only file system, and writes only to its data.
 
-## 3. The keys and the node id
+## 3. Configure the node
 
-**Once per instance** (not per node): the Worker needs its key to sign. On your computer, with the repository and `npx wrangler login` done:
-
-```bash
-node tools/district-host/keys.mjs
-npx wrangler secret put DISTRICT_SIGNING_KEY --config apps/realtime/wrangler.toml < distrito-privada.jwk
-rm distrito-privada.jwk
-```
-
-The private key stays only on Cloudflare. If you deploy with GitHub Actions, store it instead as the repository secret `DISTRICT_SIGNING_KEY` (the file's content, on one line) and delete the file: the deploy sets it. From then on, your Worker hands out the public one at `/nodes/key`.
-
-**On each node**, edit `/etc/xenxo-distritos.env`:
+Edit `/etc/xenxo-distritos.env` on the machine:
 
 ```bash
 NODE_ID=home-1
@@ -91,8 +81,9 @@ ASSETS_URL=https://api.yourdomain.com
 ```
 
 - `NODE_ID`: the id you'll register it with (3–32 lowercase letters, numbers and hyphens).
-- `DISTRICT_PUBLIC_KEY`: the line returned by `curl https://api.yourdomain.com/nodes/key`.
+- `DISTRICT_PUBLIC_KEY`: your server's **public** key, the line returned by `curl https://api.yourdomain.com/nodes/key`. Your server creates its key pair on its own when you register the first node (step 5), and the private key never leaves it. If it still returns 404, fill this in after registering.
 - `HOSTED_CHUNKS`: which districts you're willing to host (`*` = whatever you're assigned, or a list like `c_1_0,c_-1_0`).
+- `ASSETS_URL`: your server, where the node gets the measurements of people's models.
 
 Restart and check:
 
@@ -101,10 +92,10 @@ sudo systemctl restart xenxo-distritos
 curl http://127.0.0.1:8788/node
 ```
 
-It should answer with your id: `{"id":"home-1","chunks":["*"],"protocol":0}`.
+It should answer with your id: `{"id":"home-1","chunks":["*"],"protocol":0}`. Restart the service whenever you change the public key.
 
-> [!WARNING]
-> Never paste the private key into a chat or commit it. If it leaks, generate a new one, set it again with `wrangler secret put` and update the public key on every node.
+> [!NOTE]
+> If you'd rather set the signing key yourself (for example, so the same one works on another instance), create it with `node tools/district-host/keys.mjs` and store it as the `DISTRICT_SIGNING_KEY` secret on the Worker or on GitHub. If it exists, it takes precedence over the one the server keeps.
 
 ## 4. The tunnel
 
@@ -121,7 +112,7 @@ The web's security policy already allows connecting to any subdomain of yours. I
 
 On your site, with the founder account: *Account → Nodes*.
 
-1. **Add a node:** its id (the same `NODE_ID`), a name (people will see it: “this district is hosted by…”) and its `https://…` address. If it answers with its id, it shows **Online**.
+1. **Add a node:** its id (the same `NODE_ID`), a name (people will see it: “this district is hosted by…”) and its `https://…` address. If it answers with its id, it shows **Online**. If it was the first one, there's now a key: put the one from `/nodes/key` on the node (step 3) and restart it.
 2. **Where each district lives:** pick the node next to the district and press **Move**. Everything people made (project portals, builds, activities and chat) is copied and, as soon as it finishes, people go straight to the node.
 
 Whatever changes in the district while it's being copied (a few seconds) is lost: do it when few people are inside.
@@ -186,6 +177,7 @@ The districts' chunks:
 | The panel says it isn't responding, but the tunnel works | The node's `NODE_ID` doesn't match the id it was registered with. |
 | **Move** returns `node_refuses` | The district isn't in the node's `HOSTED_CHUNKS`. |
 | **Move** returns `node_unreachable` | The node doesn't answer at its `https://…` address: check the tunnel. |
-| *Account → Nodes* says nodes are off | The Worker is missing the `DISTRICT_SIGNING_KEY` secret (step 3). |
+| `/nodes/key` returns 404 | You haven't registered any node yet: the key is created with the first one. |
+| The node answers `/node` but lets nobody in | Its `DISTRICT_PUBLIC_KEY` isn't the one at `/nodes/key` (was the key changed in the panel?). Set the current one and restart. |
 | People's models don't show in the district | `ASSETS_URL` must be your `https://api.yourdomain.com`. |
 | The browser can't connect to a node on another domain | Add its `wss://…` to `connect-src` in `apps/web/public/_headers`. |

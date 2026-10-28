@@ -19,6 +19,10 @@
 import type { NodeRoutes } from "./directory";
 
 export const ROUTES_TTL_MS = 30_000;
+/** Sin ningún nodo, las rutas se vuelven a mirar cada 5 minutos (el alta de un nodo las borra al momento aquí). */
+const EMPTY_TTL_MS = 300_000;
+const isEmpty = (r: NodeRoutes) => Object.keys(r.nodes).length === 0;
+const ttlOf = (r: NodeRoutes) => (isEmpty(r) ? EMPTY_TTL_MS : ROUTES_TTL_MS);
 const ROUTES_KEY = "https://xenxo-cache.local/node-routes";
 const EMPTY: NodeRoutes = { nodes: {}, chunks: {} };
 
@@ -35,7 +39,7 @@ function edgeCache(): Cache | undefined {
 
 /** Carga las rutas si las de memoria tienen más de 30 s: primero la caché del centro de datos, luego el Directory. */
 export async function loadRoutes(fresh: () => Promise<NodeRoutes>, force = false): Promise<NodeRoutes> {
-  if (!force && mem && Date.now() - mem.at < ROUTES_TTL_MS) return mem.routes;
+  if (!force && mem && Date.now() - mem.at < ttlOf(mem.routes)) return mem.routes;
   const cache = edgeCache();
   if (!force && cache) {
     const hit = await cache.match(ROUTES_KEY).catch(() => undefined);
@@ -52,13 +56,13 @@ export async function loadRoutes(fresh: () => Promise<NodeRoutes>, force = false
   mem = { at: Date.now(), routes };
   if (cache) {
     await cache
-      .put(ROUTES_KEY, new Response(JSON.stringify(routes), { headers: { "Content-Type": "application/json", "Cache-Control": `public, max-age=${ROUTES_TTL_MS / 1000}` } }))
+      .put(ROUTES_KEY, new Response(JSON.stringify(routes), { headers: { "Content-Type": "application/json", "Cache-Control": `public, max-age=${ttlOf(routes) / 1000}` } }))
       .catch(() => {});
   }
   return routes;
 }
 
-/** Tras cambiar el registro: se olvida aquí y en la caché de este centro de datos (los demás tardan como mucho 30 s). */
+/** Tras cambiar el registro: se olvida aquí y en la caché de este centro de datos (los demás tardan como mucho 30 s, o 5 min si aún no había nodos). */
 export async function forgetRoutes(): Promise<void> {
   mem = null;
   await edgeCache()?.delete(ROUTES_KEY).catch(() => false);

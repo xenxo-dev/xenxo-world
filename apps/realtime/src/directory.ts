@@ -259,6 +259,9 @@ export class Directory extends DurableObject<Env> {
       CREATE TABLE IF NOT EXISTS nodes (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, url TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL,
         disabled INTEGER NOT NULL DEFAULT 0, fails INTEGER NOT NULL DEFAULT 0, last_ok INTEGER, last_fail INTEGER);
+      -- La clave Ed25519 con la que el Worker firma pases y llamadas a los nodos. Se crea al dar de
+      -- alta el primer nodo; la pública se reparte en /nodes/key. (DISTRICT_SIGNING_KEY, si existe, manda.)
+      CREATE TABLE IF NOT EXISTS node_key (id INTEGER PRIMARY KEY CHECK (id = 1), private_jwk TEXT NOT NULL, public_jwk TEXT NOT NULL, created_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS chunk_hosts (
         chunk_id TEXT PRIMARY KEY, node_id TEXT NOT NULL, state TEXT NOT NULL, since INTEGER NOT NULL,
         snapshot_rev TEXT, snapshot_at INTEGER);
@@ -1423,6 +1426,30 @@ export class Directory extends DurableObject<Env> {
       if (nodes[h.node_id]) chunks[h.chunk_id] = h.node_id;
     }
     return { nodes, chunks };
+  }
+
+  /**
+   * La clave con la que el Worker firma lo que va a los nodos. Solo la pide el propio Worker (por RPC,
+   * dentro de la misma cuenta) y la guarda en memoria; a los nodos solo les llega la pública.
+   */
+  async nodeSigningKey(create: boolean): Promise<{ privateJwk: string; publicJwk: { kty: string; crv: string; x: string } } | null> {
+    let row = this.sql.exec<{ private_jwk: string; public_jwk: string }>("SELECT private_jwk, public_jwk FROM node_key WHERE id = 1").toArray()[0];
+    if (!row && create) {
+      const pair = (await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"])) as CryptoKeyPair;
+      const priv = (await crypto.subtle.exportKey("jwk", pair.privateKey)) as JsonWebKey;
+      const pub = (await crypto.subtle.exportKey("jwk", pair.publicKey)) as JsonWebKey;
+      row = { private_jwk: JSON.stringify({ kty: priv.kty, crv: priv.crv, x: priv.x, d: priv.d }), public_jwk: JSON.stringify({ kty: pub.kty, crv: pub.crv, x: pub.x }) };
+      this.sql.exec("INSERT INTO node_key (id, private_jwk, public_jwk, created_at) VALUES (1, ?, ?, ?)", row.private_jwk, row.public_jwk, Date.now());
+    }
+    return row ? { privateJwk: row.private_jwk, publicJwk: JSON.parse(row.public_jwk) as { kty: string; crv: string; x: string } } : null;
+  }
+
+  /** Clave nueva para los nodos (si la anterior pudo filtrarse). Cada nodo tiene que poner la pública nueva. */
+  async rotateNodeKey(moderator: string): Promise<{ x: string }> {
+    this.sql.exec("DELETE FROM node_key");
+    const k = (await this.nodeSigningKey(true))!;
+    this.logDecision(moderator, "node_key_rotate", "node", "*", null);
+    return { x: k.publicJwk.x };
   }
 
   /** Para el panel: los nodos con su salud y lo que lleva cada uno. */

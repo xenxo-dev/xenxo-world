@@ -40,21 +40,14 @@ El instalador crea el usuario `xenxo`, las carpetas, el servicio `xenxo-distrito
 `127.0.0.1:8788`), la copia al NAS cada 15 minutos, la vigilancia del relevo y hace que cerrar la
 tapa no suspenda.
 
-## 3. Las claves y el id del nodo
+## 3. El id del nodo y la clave pública
 
-Una sola vez (la clave es del Worker, no de cada nodo), en tu ordenador con el repo y la sesión de
-Wrangler de xenxo:
-
-```bash
-node tools/district-host/keys.mjs            # crea distrito-privada.jwk y enseña la pública
-npx wrangler secret put DISTRICT_SIGNING_KEY --config apps/realtime/wrangler.toml < distrito-privada.jwk
-rm distrito-privada.jwk                      # la privada solo vive en Cloudflare
-```
-
-En el portátil, `/etc/xenxo-distritos.env`:
+La clave de firma la crea xenxo.io sola al dar de alta el primer nodo (paso 5); la privada no sale de
+Cloudflare. En el portátil, `/etc/xenxo-distritos.env`:
 
 - `NODE_ID=portatil` (el id con el que lo darás de alta),
-- `DISTRICT_PUBLIC_KEY=` la línea de `curl https://api.xenxo.io/nodes/key`,
+- `DISTRICT_PUBLIC_KEY=` la línea de `curl https://api.xenxo.io/nodes/key` (si da 404, rellénala
+  después del alta),
 - `HOSTED_CHUNKS=*` (o la lista de distritos que aceptas),
 - `ASSETS_URL=https://api.xenxo.io`.
 

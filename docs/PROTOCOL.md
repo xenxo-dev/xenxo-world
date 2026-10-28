@@ -405,7 +405,8 @@ archivos, la web, el nexo ni la plaza.
 
 | Ruta | Quién | Qué hace |
 |---|---|---|
-| `GET /nodes/key` | público | La clave **pública** Ed25519 (JWK `{kty, crv, x}`) con la que los nodos comprueban lo que firma el Worker. 404 si no hay `DISTRICT_SIGNING_KEY` |
+| `GET /nodes/key` | público | La clave **pública** Ed25519 (JWK `{kty, crv, x}`) con la que los nodos comprueban lo que firma el Worker. El `Directory` crea el par al dar de alta el primer nodo (la privada solo la usa el Worker); `DISTRICT_SIGNING_KEY`, si existe, manda. 404 si aún no hay clave |
+| `POST /mod/nodes/key/rotate` | fundador | Clave nueva (`{x}`); cada nodo tiene que poner la pública nueva. `409 env_key` si la fija `DISTRICT_SIGNING_KEY` |
 | `GET /mod/nodes` | fundador o clave `admin` | `{nodes, hosts, districts}`: cada nodo con su salud (`fails`, `last_ok`, `last_fail`, `disabled`) y dónde vive cada distrito (`hosts`: `chunk_id`, `node_id`, `state`, `snapshot_at`) |
 | `POST /mod/nodes {id, name, url}` | fundador | Alta. `id`: 3–32 `[a-z0-9-]`; `url`: `https://…` (en local, `http://localhost`). Responde `{node, alive, chunks}` tras preguntarle quién es. Como mucho 32 nodos |
 | `POST /mod/nodes/<id>/disable {note?}` · `/enable` | fundador | Apagar saca al momento sus distritos a Cloudflare con su última copia. Encender no los devuelve |

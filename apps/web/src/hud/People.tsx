@@ -75,6 +75,7 @@ export function People({ selfName, selfNo }: { selfName: string; selfNo: number 
       >
         <span className={`h-2 w-2 rounded-full ${live ? "bg-huerta" : "bg-ocre"}`} />
         {live ? t("hud.inPlace", { n: world.peers.size + 1, place: placeName(world.chunkId) }) : t("hud.connecting")}
+        {live && world.host && <span className="text-xs text-cal/45">{t("hud.hostedBy", { name: world.host })}</span>}
         {live && <span aria-hidden className="text-cal/40">▾</span>}
       </button>
       {open && live && (

@@ -44,6 +44,8 @@ class WorldStore {
   lastError: string | null = null;
   /** El nodo que lleva este distrito no responde: se avisa y se sigue intentando (nodes.ts del servidor). */
   unavailable = false;
+  /** Nombre del nodo de la comunidad que aloja el lugar actual (null = los servidores de xenxo). */
+  host: string | null = null;
   /** serverTime ≈ Date.now() + clockOffset */
   clockOffset = 0;
 
@@ -67,6 +69,12 @@ class WorldStore {
       this.peers.clear();
       this.poseBuffers.clear();
     }
+    this.bump();
+  }
+
+  setHost(h: string | null) {
+    if (this.host === h) return;
+    this.host = h;
     this.bump();
   }
 
@@ -94,6 +102,7 @@ class WorldStore {
     this.big = false;
     this.theme = null;
     this.unavailable = false;
+    this.host = null;
     // Sin límites hasta que el lugar diga los suyos en WELCOME: el punto de llegada (p. ej. una
     // isla del nexo) puede estar fuera del chunk.
     this.walk = [-Infinity, Infinity];
