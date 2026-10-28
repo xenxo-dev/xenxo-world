@@ -15,6 +15,9 @@
 /anims/*
   Cache-Control: public, max-age=604800
 
+/xr/*
+  Cache-Control: public, max-age=604800
+
 /mcp/*
   Cache-Control: public, max-age=300
 

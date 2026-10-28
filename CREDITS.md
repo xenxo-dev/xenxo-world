@@ -16,6 +16,11 @@ La excepción son las texturas generadas con IA (abajo), que tienen su propia no
   `tools/models/library/concept-car.mjs`: sin los logotipos de Khronos (sus marcas no entran en la
   licencia), sin piezas ocultas, simplificado, con el cristal sin transmisión y separado en
   carrocería, puertas y ruedas. No es CC0: hay que mantener esta atribución.
+- **Mandos y manos en la VR** (`apps/web/public/xr/profiles/`, copiados con `tools/xr/fetch-profiles.mjs`):
+  [WebXR Input Profiles](https://github.com/immersive-web/webxr-input-profiles) del grupo Immersive Web
+  del W3C, © Amazon, con licencia MIT (su `LICENSE.md` va al lado). Los modelos de los mandos llevan
+  las marcas de sus fabricantes solo para que se reconozca el aparato; la licencia no da permiso para
+  usarlas en otra cosa.
 - **Física del coche**: [Rapier](https://rapier.rs) de Dimforge (Apache-2.0), su vehículo de rayos con suspensión.
 - **Tipografías**: Space Grotesk (titulares y carteles), Inter (texto), IBM Plex Mono (datos técnicos) y Tilt Neon de Andy Clymer (rótulos de neón), todas con licencia SIL Open Font License y empaquetadas con la web (sin CDN).
 

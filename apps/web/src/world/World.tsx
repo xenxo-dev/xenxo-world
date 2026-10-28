@@ -28,10 +28,20 @@ import districtsLayout from "../../../realtime/src/districts.json";
 
 const DISTRICT_IDS = new Map((districtsLayout.districts as { id: string; chunk: string }[]).map((d) => [d.chunk, d.id]));
 import { Activities } from "./Activities";
+import { VRTeleport } from "./xr/VRTeleport";
 import skyDay from "./sky-day.json";
 
-/** Una sola tienda XR para toda la app. Activa foveation para ganar rendimiento en Quest. */
-export const xrStore = createXRStore({ foveation: 1, emulate: false });
+/**
+ * Una sola tienda XR para toda la app. Activa foveation para ganar rendimiento en Quest. Los modelos
+ * de los mandos y de las manos se sirven desde xenxo (tools/xr/fetch-profiles.mjs), nunca de un CDN:
+ * un mando que no esté en la lista usa el genérico.
+ */
+export const xrStore = createXRStore({
+  foveation: 1,
+  emulate: false,
+  baseAssetPath: new URL("/xr/profiles/", location.origin).href,
+  defaultControllerProfileId: "generic-trigger-squeeze-thumbstick",
+});
 
 /** Los efectos de pantalla completa solo se descargan en equipos que los usan. */
 const Effects = lazy(() => import("./Effects"));
@@ -304,15 +314,17 @@ function DevStats() {
   const scene = useThree((s) => s.scene);
   useEffect(() => {
     gl.info.autoReset = false;
-    const stats = { calls: 0, triangles: 0, scene };
+    const stats = { calls: 0, triangles: 0, frames: 0, scene, camera: null as THREE.Camera | null };
     (globalThis as { __xenxoStats?: typeof stats }).__xenxoStats = stats;
     return () => void (gl.info.autoReset = true);
   }, [gl, scene]);
-  useFrame(() => {
-    const s = (globalThis as { __xenxoStats?: { calls: number; triangles: number } }).__xenxoStats;
+  useFrame(({ camera }) => {
+    const s = (globalThis as { __xenxoStats?: { calls: number; triangles: number; frames: number; camera: THREE.Camera | null } }).__xenxoStats;
     if (s) {
       s.calls = gl.info.render.calls;
       s.triangles = gl.info.render.triangles;
+      s.frames++;
+      s.camera = camera;
     }
     gl.info.reset();
   }, -1000);
@@ -383,6 +395,7 @@ function Scene({ active }: { active: boolean }) {
         <Avatars />
       </Suspense>
       <Player active={active} />
+      {g.inXR && <VRTeleport />}
       <InputBinder active={active} />
       <PhotoTaker />
       <MaterialClock />
@@ -398,15 +411,18 @@ function Scene({ active }: { active: boolean }) {
 export function World({ active, paused = false }: { active: boolean; paused?: boolean }) {
   const g = useGraphics();
   const f = g.features;
+  // El MSAA del canvas no se puede cambiar en caliente: si cambia, se recrea. Nunca en VR: recrearlo
+  // mata la sesión (al entrar desde un nivel sin MSAA, o si el nivel baja solo por los FPS).
+  const aa = useRef(f.antialias);
+  if (!g.inXR) aa.current = f.antialias;
 
   return (
     <Canvas
-      // El MSAA del canvas no se puede cambiar en caliente: si cambia, se recrea.
-      key={f.antialias ? "aa" : "post"}
+      key={aa.current ? "aa" : "post"}
       className="!absolute inset-0 touch-none"
       dpr={f.dpr}
       shadows
-      gl={{ antialias: f.antialias, powerPreference: "high-performance" }}
+      gl={{ antialias: aa.current, powerPreference: "high-performance" }}
       // Con un juego abierto encima, el mundo no se dibuja (la GPU es para el juego).
       frameloop={paused ? "never" : "always"}
       camera={{ fov: 70, near: 0.1, far: 400, position: [32, 14, 66] }}

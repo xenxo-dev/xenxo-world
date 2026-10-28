@@ -9,9 +9,11 @@ import type { AvatarRef } from "@xenxo/protocol";
 import { useAccount } from "../net/account";
 import { AvatarBody, ChatBubble } from "./Avatars";
 import { createMotion, smoothSpeed } from "./motion";
-import { cameraReach, findSeat, resolveCircle } from "./collision";
+import { cameraReach, findSeat } from "./collision";
 import { boost } from "../net/activity-store";
-import { BODY_HEIGHT, STEP_UP, createBody, placeBody, requestJump, stepBody } from "./locomotion";
+import { STEP_UP, createBody, placeBody, requestJump, stepBody } from "./locomotion";
+import { VRMenu } from "./xr/VRMenu";
+import { placeOrigin, vr, vrFollowGround, vrStick, VR_SNAP, VR_WALK } from "./xr/vr-move";
 import { guestPreset, useAccountPreset, useChosenPreset } from "./presets";
 import { input, setFirstPerson, view } from "./input";
 import { self } from "./self";
@@ -49,7 +51,6 @@ const _headQ = new THREE.Quaternion();
 const _euler = new THREE.Euler(0, 0, 0, "YXZ");
 const _lastP = new THREE.Vector3(Infinity, 0, 0);
 const _lastQ = new THREE.Quaternion();
-const _xr = { x: 0, z: 0 };
 const _yawE = new THREE.Euler();
 const _carQ = new THREE.Quaternion();
 const _seat = new THREE.Vector3();
@@ -128,8 +129,13 @@ export function Player({ active }: { active: boolean }) {
     cam.lookAt(_camTarget);
   }
 
-  // En VR: joystick izquierdo para moverse, derecho para girar (giro por pasos, menos mareo).
-  useXRControllerLocomotion(origin, { speed: 3 }, { type: "snap", degrees: 30 });
+  // En VR: joystick izquierdo para moverse, derecho para girar (giro por pasos alrededor de la cabeza,
+  // menos mareo) y, hacia delante, el teletransporte (xr/VRTeleport.tsx).
+  useXRControllerLocomotion(
+    (velocity, yRot, dt: number, state: { camera: THREE.Camera }) => vrStick(velocity, yRot, dt, state.camera),
+    { speed: VR_WALK },
+    { type: "snap", degrees: (VR_SNAP * 180) / Math.PI },
+  );
 
   useFrame((state, dt) => {
     const cam = state.camera;
@@ -145,7 +151,10 @@ export function Player({ active }: { active: boolean }) {
       l.yaw = spawn.yaw;
       bodyYaw.current = spawn.yaw;
       motion.emote = null;
-      if (inXR) origin.current.position.set(spawn.p[0], 0, spawn.p[2]);
+      if (inXR) {
+        placeOrigin(spawn.p[0], spawn.p[1], spawn.p[2]);
+        origin.current.rotation.set(0, spawn.yaw, 0);
+      }
       // Al ir a otro lugar, el coche se queda.
       if (drive.phase !== "none") {
         dropCar();
@@ -154,28 +163,32 @@ export function Player({ active }: { active: boolean }) {
     }
 
     if (inXR) {
+      vr.origin = origin.current;
+      // Paredes y suelo de verdad (escaleras, pasarelas, interiores): xr/vr-move.ts.
+      const feet = vrFollowGround(cam, dt);
       cam.getWorldPosition(_headP);
       cam.getWorldQuaternion(_headQ);
-      // Las paredes también cuentan en VR: si la cabeza se mete en una, el mundo la saca.
-      _xr.x = _headP.x;
-      _xr.z = _headP.z;
-      resolveCircle(_xr, 0.25, STEP_UP, BODY_HEIGHT);
-      if (_xr.x !== _headP.x || _xr.z !== _headP.z) {
-        origin.current.position.x += _xr.x - _headP.x;
-        origin.current.position.z += _xr.z - _headP.z;
-        _headP.x = _xr.x;
-        _headP.z = _xr.z;
-      }
       body.x = _headP.x;
-      body.y = 0;
+      body.y = feet;
       body.z = _headP.z;
-      playerPos.set(body.x, 0, body.z);
+      playerPos.set(body.x, feet, body.z);
       self.x = body.x;
-      self.y = 0;
+      self.y = feet;
       self.z = body.z;
+      // En VR el propio cuerpo no se dibuja (la cabeza es la de la persona).
+      avatar.current.visible = false;
+      // Gestos desde el panel de la VR (los ven los demás); moverse los cancela.
+      if (input.emote) {
+        motion.emote = input.emote;
+        emoteUntil.current = state.clock.elapsedTime + (EMOTE_SECONDS[input.emote] ?? Infinity);
+        input.emote = null;
+      }
+      if (motion.emote && (vr.moved || state.clock.elapsedTime > emoteUntil.current)) motion.emote = null;
+      vr.moved = false;
     } else {
       // Mantén el origen XR donde está el jugador, para entrar en VR en el mismo sitio.
       origin.current.position.set(body.x, body.y, body.z);
+      origin.current.rotation.set(0, look.current.yaw, 0);
       const fp = view.firstPerson;
 
       if (active) {
@@ -355,7 +368,7 @@ export function Player({ active }: { active: boolean }) {
 
   return (
     <>
-      <XROrigin ref={origin} />
+      <XROrigin ref={origin}>{inXR && <VRMenu />}</XROrigin>
       {driving.phase !== "none" && (
         <Suspense fallback={null}>
           <CarModel handle={carHandle} paint={paintFor(user?.player_no != null ? `n${user.player_no}` : (world.sessionId ?? "local"))} />

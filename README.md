@@ -183,12 +183,12 @@ El agente de ejemplo usa la variable `XENXO_URL=https://api.xenxo.io` y el secre
 - [x] Español e inglés en el panel, el HUD y los carteles del mundo
 - [x] Datos de los chunks en la UE
 - [x] Cliente headless con banco de conformidad y agente de ejemplo
-- [ ] Panel dentro de la VR con `@react-three/uikit`
-- [ ] Manos en VR y teletransporte
+- [x] Panel dentro de la VR (botón de la muñeca o Y): viajar, gestos, día y noche, chat rápido y salir
+- [x] Manos y mandos en VR servidos desde xenxo, teletransporte con arco y escaleras de verdad
 - [x] Assets glTF en R2 con validación de presupuesto y optimización en el navegador
 - [x] Cuentas con passkey, personaje propio (GLB o VRM) y proyectos con portal en el nexo
 - [x] Exportar y borrar datos (RGPD), denuncias y moderación (DSA), páginas legales en borrador
-- [ ] Agente con LLM y servidor MCP del mundo ("trae tu propio agente")
+- [x] Agente con LLM y servidor MCP del mundo ("trae tu propio agente")
 - [x] Nexo de entrada con portales (3D y 2D) y paso de un lugar a otro
 - [x] Distritos temáticos de 256 m con su ciudad y 64 parcelas: cada proyecto elige la suya
 - [x] Construir en tu parcela con tu agente (MCP): clave de parcela y servidor MCP
@@ -200,8 +200,7 @@ El agente de ejemplo usa la variable `XENXO_URL=https://api.xenxo.io` y el secre
 - [x] Personajes que caminan (VRM con huesos humanoides, GLB con animaciones `idle`/`walk`)
 - [x] Carga inicial rápida: el panel no espera a la escena 3D
 - [x] Gráficos por niveles según el equipo (bloom, sombras, reflejos, AO) y ambiente día/noche con neones
-- [ ] Parcelas con dueño y retos con insignias
-- [ ] Manos y panel dentro de la VR
+- [x] Parcelas con dueño y retos con insignias
 
 ## Licencia
 

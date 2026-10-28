@@ -5,7 +5,7 @@
  * - Páginas: primero la red (así las actualizaciones llegan al momento); sin red, la última copia.
  * - /assets/* (con hash, inmutables): primero la caché. No se borran al actualizar, para que una
  *   pestaña abierta con la versión anterior pueda seguir cargando sus trozos.
- * - Texturas, cielo, animaciones, avatares de serie e iconos: la copia guardada al instante y se
+ * - Texturas, cielo, animaciones, avatares de serie, mandos de la VR e iconos: la copia guardada al instante y se
  *   refresca por detrás.
  * Todo queda en el dispositivo de la persona; no hay datos personales en estas cachés.
  */
@@ -88,7 +88,7 @@ self.addEventListener("fetch", (event) => {
 
   if (req.mode === "navigate") return event.respondWith(networkFirst(event));
   if (p.startsWith("/assets/")) return event.respondWith(cacheFirst(event, ASSETS));
-  if (/^\/(materials|sky|anims|avatars|covers|icons)\//.test(p) || p === "/favicon.svg" || p === "/manifest.webmanifest") {
+  if (/^\/(materials|sky|anims|avatars|covers|icons|xr)\//.test(p) || p === "/favicon.svg" || p === "/manifest.webmanifest") {
     return event.respondWith(staleWhileRevalidate(event, MEDIA));
   }
 });
