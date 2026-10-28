@@ -15,3 +15,6 @@ __pycache__/
 # Se generan con npm run build -w @xenxo/sdk
 apps/web/public/sdk/xenxo.mjs
 apps/web/public/sdk/ejemplo.js
+
+# Se genera con npm run docs (y al compilar la web) desde docs/guia
+apps/web/public/docs/

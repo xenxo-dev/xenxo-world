@@ -84,7 +84,7 @@ self.addEventListener("fetch", (event) => {
   // Rangos (vídeo, audio) y lo que no es de la app: directo a la red.
   if (req.headers.has("range")) return;
   const p = url.pathname;
-  if (p === "/sw.js" || p.startsWith("/sdk/") || p.startsWith("/legal/") || p.startsWith("/mcp/")) return;
+  if (p === "/sw.js" || p.startsWith("/sdk/") || p.startsWith("/legal/") || p.startsWith("/docs/") || p.startsWith("/mcp/")) return;
 
   if (req.mode === "navigate") return event.respondWith(networkFirst(event));
   if (p.startsWith("/assets/")) return event.respondWith(cacheFirst(event, ASSETS));

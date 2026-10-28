@@ -228,6 +228,7 @@ function LangSwitch() {
 }
 
 function LegalLinks() {
+  const lang = useLang();
   return (
     <p className="flex gap-3 text-xs text-muted">
       <a href={legalPath("privacy")} target="_blank" rel="noreferrer" className="hover:text-cal/70">
@@ -235,6 +236,10 @@ function LegalLinks() {
       </a>
       <a href={legalPath("terms")} target="_blank" rel="noreferrer" className="hover:text-cal/70">
         {t("legal.terms")}
+      </a>
+      {/* Guía para desarrolladores: desplegar xenxo en local, en Cloudflare o en un servidor propio. */}
+      <a href={lang === "en" ? "/docs/en/" : "/docs/"} target="_blank" rel="noreferrer" className="hover:text-cal/70">
+        {t("legal.docs")}
       </a>
       {/* AGPL §13: quien usa xenxo por la red puede llegar a su código. */}
       <a href="https://github.com/xenxo-dev/xenxo-world" target="_blank" rel="noreferrer" className="hover:text-cal/70">

@@ -25,6 +25,7 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 | `games/` | Juegos de ejemplo hechos como cualquier creador (cada uno con su licencia, su `NOTICE.md` y su dominio): `hexgl` (Arcade; uso no comercial), `2048` (Píxel; MIT), `hextris` (Píxel; GPL-3.0) y `nucleo` (Distrito Cero; MIT, original de xenxo: el pirateo de la puerta del núcleo) |
 | `tools/district-host` | El servidor de distritos en una máquina propia: workerd (`src/district-host.ts`, `wrangler.district.toml`), servicios, copias al NAS y guía (`README.md`) |
 | `docs/PROTOCOL.md` | Explicación del contrato |
+| `docs/guia/{es,en}` | Guía para desarrolladores (xenxo.io/docs): local, instancia en Cloudflare, distritos en un servidor propio, crear y operar. La genera `tools/docs/build.mjs` (`npm run docs`, también al compilar la web) en `apps/web/public/docs/` (no se sube) |
 
 ## Antes de dar algo por terminado
 
@@ -32,6 +33,7 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 - `npm run build`
 - Con `npm run dev:realtime` en marcha: `XENXO_AGENT_KEY=dev-agent-key-change-me npm run conformance`
 - Si cambias el protocolo: actualiza `docs/PROTOCOL.md` y añade un escenario en `apps/headless/src/conformance.ts`.
+- Si cambias cómo se arranca, se despliega o se aloja algo (scripts, secretos, variables, `tools/district-host`): actualiza `docs/guia` en los dos idiomas.
 
 ## Idiomas, nexo y distritos
 

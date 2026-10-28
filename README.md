@@ -8,7 +8,7 @@ Se está construyendo en público. Esto es la v0.5.
 
 - **Tu personaje y tu proyecto:** entra en [xenxo.io](https://xenxo.io), *Cuenta → Crear cuenta* con passkey o Google (sin email). Desde ahí subes tu personaje (`.vrm` o `.glb`) y en *Proyectos → Publicar el mío* tu proyecto. Eliges **distrito** (Arcade, Píxel, Ágora, Taller, Frontera, Distrito Cero o Vertical) y una **parcela libre** en su plano, y das **nombre, enlace, una portada (imagen 16:9) y un monumento 3D** (`.glb`, ≤ 10.000 triángulos): tu proyecto aparece como un **portal en tu parcela**, con la portada en la pantalla y el monumento (hasta 1,6 m) en la peana de delante y como tarjeta en el nexo 2D (cuando lo revisa alguien de xenxo). Guía de modelos: [`docs/CREAR-MODELOS.md`](docs/CREAR-MODELOS.md).
 - **Construir con un agente de IA:** publica tu proyecto, crea una clave de parcela en *Proyectos → Construir con tu agente* y conecta el servidor MCP de xenxo a Claude Code o Cursor (ver abajo). Para construir fuera de una parcela hace falta una clave que da el equipo (contact@xenxo.io).
-- **Tu propia copia del mundo:** sigue *Arrancar en local* y *Desplegar*.
+- **Tu propia copia del mundo:** la [guía para desarrolladores](https://xenxo.io/docs/) cuenta cómo arrancarlo en tu ordenador, desplegar tu instancia en Cloudflare y llevar los distritos a tu servidor (fuente en [`docs/guia`](docs/guia/es/index.md), en español e inglés).
 
 ## Arquitectura
 

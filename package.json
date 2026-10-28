@@ -13,6 +13,7 @@
     "dev:realtime": "npm run dev -w @xenxo/realtime",
     "dev:web": "npm run dev -w @xenxo/web",
     "build": "npm run build -w @xenxo/web",
+    "docs": "node tools/docs/build.mjs",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "conformance": "npm run conformance -w @xenxo/headless",
     "agent:build": "npm run agent -w @xenxo/headless",
@@ -26,6 +27,7 @@
     "node": ">=22"
   },
   "devDependencies": {
+    "marked": "^16.4.2",
     "typescript": "^5.9.0"
   }
 }
