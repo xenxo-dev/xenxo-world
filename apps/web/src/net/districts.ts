@@ -39,6 +39,18 @@ export const DISTRICT_SPAWN = layout.spawn as unknown as [number, number, number
 /** Distancia del marco del portal al centro de la parcela, hacia el fondo (districts.json). */
 const PARCEL_D = layout.parcel.d;
 
+/**
+ * Orden del panel: primero los abiertos según su `rank` de districts.json, luego los de la
+ * comunidad (en el orden del servidor) y al final los «próximamente».
+ */
+const RANK = new Map(layout.districts.map((d, i) => [d.id, (d as { rank?: number }).rank ?? 100 + i]));
+const rankOf = (d: DistrictInfo) => (d.soon ? 10_000 : 0) + (d.community ? 1_000 : (RANK.get(d.id) ?? 999));
+const byImportance = (list: DistrictInfo[]) =>
+  list
+    .map((d, i) => ({ d, i }))
+    .sort((a, b) => rankOf(a.d) - rankOf(b.d) || a.i - b.i)
+    .map(({ d }) => d);
+
 let cache: DistrictInfo[] | null = null;
 let loadedAt = 0;
 let pending: Promise<DistrictInfo[]> | null = null;
@@ -50,12 +62,13 @@ export function refreshDistricts(force = false): Promise<DistrictInfo[]> {
   pending ??= fetch(new URL("/districts", REALTIME_URL))
     .then((r) => (r.ok ? (r.json() as Promise<{ districts: DistrictInfo[] }>) : Promise.reject(new Error(String(r.status)))))
     .then(({ districts }) => {
-      cache = districts;
+      const sorted = byImportance(districts);
+      cache = sorted;
       loadedAt = Date.now();
       for (const d of districts) registerPlaceName(d.chunk_id, d.name);
       version++;
       for (const fn of listeners) fn();
-      return districts;
+      return sorted;
     })
     .catch(() => cache ?? [])
     .finally(() => {

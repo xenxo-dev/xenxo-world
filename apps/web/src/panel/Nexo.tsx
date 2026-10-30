@@ -35,6 +35,25 @@ export function NexoSection({ onEnter }: { onEnter: () => void }) {
   }, []);
   const shown = (projects ?? []).filter((p) => filter === "all" || p.district === filter);
   const name = (d: DistrictInfo) => d.name[lang] ?? d.name.en!;
+  const open = (districts ?? []).filter((d) => !d.soon);
+  const soon = (districts ?? []).filter((d) => d.soon);
+  const districtCard = (d: DistrictInfo) => (
+    <DistrictCard
+      key={d.id}
+      cover={d.community && d.cover ? assetUrl(d.cover) : `/covers/${d.id}.webp`}
+      color={d.color}
+      title={name(d)}
+      desc={d.desc[lang] ?? d.desc.en!}
+      free={d.community ? undefined : d.parcels.filter((q) => !q.project_id).length}
+      total={d.parcels.length}
+      soon={d.soon}
+      staff={staff}
+      onGo={() => {
+        travel(d.chunk_id, DISTRICT_SPAWN, 0);
+        onEnter();
+      }}
+    />
+  );
 
   return (
     <>
@@ -43,6 +62,8 @@ export function NexoSection({ onEnter }: { onEnter: () => void }) {
         <p className="-mt-2 mb-5 max-w-prose text-[15px] leading-relaxed text-soft">{t("nexo.intro")}</p>
         <h3 className="meta mb-3 text-xs uppercase tracking-[0.14em] text-muted">{t("nexo.districts")}</h3>
         <ul className="grid gap-3 sm:grid-cols-2">
+          {/* De más a menos importante: los abiertos (rank de districts.json), la plaza y los «próximamente». */}
+          {open.map(districtCard)}
           <DistrictCard
             cover="/covers/plaza.webp"
             color="#ff9e52"
@@ -53,23 +74,7 @@ export function NexoSection({ onEnter }: { onEnter: () => void }) {
               onEnter();
             }}
           />
-          {districts?.map((d) => (
-            <DistrictCard
-              key={d.id}
-              cover={d.community && d.cover ? assetUrl(d.cover) : `/covers/${d.id}.webp`}
-              color={d.color}
-              title={name(d)}
-              desc={d.desc[lang] ?? d.desc.en!}
-              free={d.community ? undefined : d.parcels.filter((q) => !q.project_id).length}
-              total={d.parcels.length}
-              soon={d.soon}
-              staff={staff}
-              onGo={() => {
-                travel(d.chunk_id, DISTRICT_SPAWN, 0);
-                onEnter();
-              }}
-            />
-          ))}
+          {soon.map(districtCard)}
         </ul>
       </Block>
 

@@ -48,6 +48,8 @@ export interface District {
   emblem: string;
   name: { es: string; en: string };
   desc: { es: string; en: string };
+  /** Orden en el panel (1 = el más importante). Los «próximamente» van siempre detrás. */
+  rank?: number;
   /** Próximamente: su isla está en el nexo con la puerta cerrada; solo entra moderación y no se publica en él. */
   soon?: boolean;
 }
