@@ -30,6 +30,7 @@ const DISTRICT_IDS = new Map((districtsLayout.districts as { id: string; chunk: 
 import { Activities } from "./Activities";
 import { VRTeleport } from "./xr/VRTeleport";
 import skyDay from "./sky-day.json";
+import { splashActive, splashDone, splashProgress } from "../splash";
 
 /**
  * Una sola tienda XR para toda la app. Activa foveation para ganar rendimiento en Quest. Los modelos
@@ -331,6 +332,43 @@ function DevStats() {
   return null;
 }
 
+/**
+ * Quita la pantalla de carga cuando el mundo ya se ve: ha llegado la foto del lugar, no queda
+ * nada descargándose (modelos, texturas) y se han dibujado unos cuantos frames seguidos (los
+ * primeros compilan los shaders, que es lo que más bloquea). Mientras, la barra sigue las descargas.
+ */
+const SPLASH_FRAMES = 8;
+function SplashWatcher() {
+  const pending = useRef(0);
+  const calm = useRef(0);
+  useEffect(() => {
+    if (!splashActive()) return;
+    splashProgress(0.5);
+    const m = THREE.DefaultLoadingManager;
+    const prev = { onStart: m.onStart, onProgress: m.onProgress, onLoad: m.onLoad, onError: m.onError };
+    const track = (loaded: number, total: number) => {
+      pending.current = Math.max(0, total - loaded);
+      if (total > 0) splashProgress(0.5 + 0.45 * (loaded / total));
+    };
+    m.onStart = (_url, loaded, total) => track(loaded, total);
+    m.onProgress = (_url, loaded, total) => track(loaded, total);
+    m.onLoad = () => {
+      pending.current = 0;
+    };
+    m.onError = () => {};
+    return () => {
+      Object.assign(m, prev);
+    };
+  }, []);
+  useFrame(() => {
+    if (!splashActive()) return;
+    const settled = world.snapshots > 0 && pending.current === 0;
+    calm.current = settled ? calm.current + 1 : 0;
+    if (calm.current >= SPLASH_FRAMES) splashDone();
+  });
+  return null;
+}
+
 function Scene({ active }: { active: boolean }) {
   const g = useGraphics();
   const f = g.features;
@@ -357,6 +395,7 @@ function Scene({ active }: { active: boolean }) {
   return (
     <>
       <XRWatcher />
+      <SplashWatcher />
       {import.meta.env.DEV && <DevStats />}
       <PerformanceMonitor bounds={(hz) => (hz > 90 ? [60, 100] : [45, 58])} flipflops={3} onDecline={() => graphics.decline()} />
       {daySky ? <primitive key="sky" attach="background" object={daySky.tex} /> : <color key="color" attach="background" args={[sky.fog]} />}

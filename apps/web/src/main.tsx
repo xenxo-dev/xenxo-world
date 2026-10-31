@@ -1,4 +1,5 @@
 import "./zod-config";
+import { splashDone, splashProgress } from "./splash";
 import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { cardRoute } from "./net/card";
@@ -12,8 +13,19 @@ import "./index.css";
 
 // xenxo.io/p/<n>: el carné público, sin cargar el mundo ni el panel.
 const cardNo = cardRoute(location.pathname);
-const App = lazy(() => import("./App").then((m) => ({ default: m.App })));
-const CardPage = lazy(() => import("./card/CardPage").then((m) => ({ default: m.CardPage })));
+const App = lazy(() =>
+  import("./App").then((m) => {
+    splashProgress(0.3);
+    return { default: m.App };
+  }),
+);
+// El carné no monta el mundo: la pantalla de carga se va en cuanto llega su código.
+const CardPage = lazy(() =>
+  import("./card/CardPage").then((m) => {
+    splashDone();
+    return { default: m.CardPage };
+  }),
+);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

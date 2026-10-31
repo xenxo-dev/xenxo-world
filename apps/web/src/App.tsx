@@ -26,12 +26,14 @@ import { gameBySlug, gameRoute } from "./net/games";
 import { Panel, type Section } from "./panel/Panel";
 import { TouchJoystick } from "./world/TouchJoystick";
 import { ambient } from "./world/ambient-audio";
+import { splashDone, splashProgress } from "./splash";
 
 /**
  * La escena 3D (Three.js, WebXR, cargadores de modelos) se descarga aparte:
  * el panel aparece al instante y la plaza se monta detrás en cuanto llega.
  */
 const worldModule = import("./world/World");
+void worldModule.then(() => splashProgress(0.45)).catch(() => splashDone());
 const World = lazy(() => worldModule.then((m) => ({ default: m.World })));
 
 function randomName() {
@@ -81,6 +83,10 @@ export function App() {
     setInWorld(true);
   };
   const game = useOpenGame();
+  // Un juego abierto (enlace directo a /j/<juego>) va encima del mundo: no se espera a que se dibuje.
+  useEffect(() => {
+    if (game) splashDone();
+  }, [game]);
   // Sonido ambiente: solo en el mundo (no en el panel ni dentro de un juego) y tras un gesto.
   useEffect(() => ambient.setActive(inWorld && !game), [inWorld, game]);
   useEffect(() => {

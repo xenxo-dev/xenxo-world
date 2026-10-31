@@ -46,6 +46,8 @@ class WorldStore {
   unavailable = false;
   /** Nombre del nodo de la comunidad que aloja el lugar actual (null = los servidores de xenxo). */
   host: string | null = null;
+  /** Cuántas fotos completas del lugar (SNAPSHOT) han llegado: la pantalla de carga espera a la primera. */
+  snapshots = 0;
   /** serverTime ≈ Date.now() + clockOffset */
   clockOffset = 0;
 
@@ -128,6 +130,7 @@ class WorldStore {
         this.bump();
         break;
       case "SNAPSHOT":
+        this.snapshots++;
         chat.reset(m.payload.chat ?? []);
         this.entities = new Map(m.payload.entities.map((e) => [e.entity_id, e]));
         this.peers = new Map(m.payload.peers.filter((p) => p.session_id !== this.sessionId).map((p) => [p.session_id, p]));

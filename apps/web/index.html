@@ -16,6 +16,11 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Pantalla de carga: se ve desde el primer pintado y la quita src/splash.ts cuando el mundo ya se dibuja. -->
+    <div id="splash" class="splash" role="progressbar" aria-label="xenxo.io" aria-busy="true">
+      <span class="display neon-sign splash-logo" translate="no">xenxo<span class="dot">.io</span></span>
+      <span class="splash-bar"><span class="splash-fill"></span></span>
+    </div>
     <noscript>xenxo.io necesita JavaScript para el mundo 3D · xenxo.io needs JavaScript for the 3D world — https://github.com/xenxo-dev</noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>

@@ -81,6 +81,68 @@ body,
   40%, 100% { opacity: 1; }
 }
 
+/*
+ * Pantalla de carga (index.html #splash, src/splash.ts): la marca y una barra fina. La barra se
+ * mueve con transform y el brillo con una animación CSS: los dos los pinta el compositor, así que
+ * siguen vivos aunque el hilo principal esté ocupado montando el mundo.
+ */
+.splash {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  background:
+    radial-gradient(circle at 20% 85%, rgb(62 230 255 / 0.12), transparent 45%),
+    radial-gradient(circle at 85% 10%, rgb(255 79 216 / 0.12), transparent 50%),
+    var(--color-noche);
+  transition: opacity 0.5s ease, visibility 0.5s;
+}
+.splash.splash-out {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.splash-logo {
+  font-size: clamp(34px, 7vw, 52px);
+  line-height: 1;
+}
+.splash-bar {
+  position: relative;
+  width: min(200px, 50vw);
+  height: 2px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgb(246 241 231 / 0.1);
+}
+.splash-fill {
+  position: absolute;
+  inset: 0;
+  transform: scaleX(0.06);
+  transform-origin: left;
+  background: var(--color-neon);
+  box-shadow: 0 0 10px var(--color-neon);
+  transition: transform 0.45s ease-out;
+}
+.splash-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.55), transparent);
+  animation: splash-sweep 1.3s ease-in-out infinite;
+}
+@keyframes splash-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(250%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .splash-bar::after { animation: none; }
+}
+
 /* El botón principal (CTA): cian lleno, texto oscuro de alto contraste y un brillo sutil. */
 .neon-tube {
   border: 1px solid #8ff0ff;
