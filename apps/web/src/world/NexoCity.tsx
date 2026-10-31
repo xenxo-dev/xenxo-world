@@ -25,7 +25,7 @@ import { assetUrl } from "../config";
 import type { Ambience, Features } from "./graphics";
 import { SkipOnError } from "./Entities";
 import { lightweight, paintedLights } from "./materials";
-import { PANO_TONES } from "./NexoBackdrop";
+import { footTexture, PANO_TONES } from "./nexo-tones";
 import { SKY } from "./Sky";
 
 const C = CHUNK_SIZE / 2;
@@ -46,8 +46,12 @@ const shared = {
   uNight: { value: 1 },
   uHaze: { value: new THREE.Color(SKY.night.fog) },
   uDensity: { value: 0.0042 },
-  /** 1 en el nexo: la ciudad se desvanece donde empieza la panorámica (ver CUT). */
+  /** 1 en el nexo: la ciudad se desvanece donde empieza la panorámica (ver CUT) y toma sus colores. */
   uCut: { value: 0 },
+  /** Tono de la foto alrededor (nexo-tones.ts), su ganancia y cuánto se tiñe la ciudad de él. */
+  uFoot: { value: footTexture },
+  uFootGain: { value: 1 },
+  uGrade: { value: 0.4 },
 };
 
 /**
@@ -72,26 +76,54 @@ export function rng(seed: number) {
 
 const HAZE = /* glsl */ `
   uniform vec3 uHaze; uniform float uDensity; uniform float uNight;
-  vec3 haze(vec3 col, vec3 w) {
+  uniform float uCut; uniform sampler2D uFoot; uniform float uFootGain; uniform float uGrade;
+  // El tono de la foto del nexo en la dirección de este punto (la misma vuelta que su cilindro).
+  vec3 panoTone(vec3 w) {
+    vec2 d = w.xz - vec2(${C.toFixed(1)});
+    float u = fract(atan(d.x, d.y) / 6.2831853);
+    return texture2D(uFoot, vec2(1.0 - u, 0.5)).rgb * uFootGain;
+  }
+  float panoSlope(vec3 w) {
+    return (w.y - cameraPosition.y) / max(length(w.xz - cameraPosition.xz), 1.0);
+  }
+  // mapped: el color ya viene con el mapeo de tonos (los materiales de three, como los coches).
+  vec3 hazeOf(vec3 col, vec3 w, bool mapped) {
+    vec3 tone = uHaze;
+    if (uCut > 0.5) {
+      // Lo propio de la ciudad, con el mismo mapeo de tonos de siempre; la foto y su tono, sin él.
+      #ifdef TONE_MAPPING
+        if (!mapped) col = toneMapping(col);
+      #endif
+      tone = panoTone(w);
+      // Gradación: el color de la foto en esa dirección, conservando el brillo de cada cosa.
+      float l = dot(col, vec3(0.299, 0.587, 0.114));
+      float tl = max(dot(tone, vec3(0.299, 0.587, 0.114)), 0.03);
+      col = mix(col, tone * (l / tl), uGrade);
+      // Junto al borde de la foto, su color: el tramado entre las dos casi no se nota.
+      col = mix(col, tone, smoothstep(${(CUT_LO - 0.04).toFixed(2)}, ${CUT_HI.toFixed(2)}, panoSlope(w)) * 0.6);
+    }
     float h = 1.0 - exp(-distance(w, cameraPosition) * uDensity);
     // Bruma del abismo: lo más hondo se pierde en ella.
-    float mist = smoothstep(-55.0, -125.0, w.y) * mix(0.28, 0.65, uNight);
-    return mix(col, uHaze, clamp(max(h, mist), 0.0, 1.0));
+    float mist = smoothstep(-55.0, -125.0, w.y) * mix(0.28, 0.65, uNight) * mix(1.0, mix(0.55, 0.3, uNight), uCut);
+    return mix(col, tone, clamp(max(h, mist), 0.0, 1.0));
   }
+  vec3 haze(vec3 col, vec3 w) { return hazeOf(col, w, false); }
   float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-  uniform float uCut;
   // En el nexo, lo que se ve casi de frente (hacia el horizonte) es la foto: aquí no se pinta.
   void panoCut(vec3 w) {
     if (uCut < 0.5) return;
-    float slope = (w.y - cameraPosition.y) / max(length(w.xz - cameraPosition.xz), 1.0);
-    float keep = smoothstep(${CUT_HI.toFixed(2)}, ${CUT_LO.toFixed(2)}, slope);
+    float keep = smoothstep(${CUT_HI.toFixed(2)}, ${CUT_LO.toFixed(2)}, panoSlope(w));
     float dither = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
     if (keep < dither) discard;
   }
 `;
 
+// En el nexo, sin mapeo de tonos: la foto no lo lleva y, si no, la ciudad sale más apagada y de
+// otro color que ella. Alrededor de los distritos, como el resto de la escena.
 const OUT = /* glsl */ `
-  #include <tonemapping_fragment>
+  #ifdef TONE_MAPPING
+    if (uCut < 0.5) gl_FragColor.rgb = toneMapping(gl_FragColor.rgb);
+  #endif
   #include <colorspace_fragment>
 `;
 
@@ -531,7 +563,7 @@ function Flyers({ list, features, ambience }: { list: Car[]; features: Features;
         .replace("#include <begin_vertex>", "#include <begin_vertex>\ntransformed = turn(transformed, fDir, fRoll) + fPos;\nvFlyW = transformed;");
       shader.fragmentShader = shader.fragmentShader
         .replace("#include <common>", `#include <common>\nvarying vec3 vFlyW; varying float vFade;\n${HAZE}`)
-        .replace("#include <fog_fragment>", "#include <fog_fragment>\ngl_FragColor.rgb = mix(uHaze, haze(gl_FragColor.rgb, vFlyW), vFade);");
+        .replace("#include <fog_fragment>", "#include <fog_fragment>\ngl_FragColor.rgb = mix(uHaze, hazeOf(gl_FragColor.rgb, vFlyW, true), vFade);");
     };
     m.customProgramCacheKey = () => `nexo-flyer|${prevKey()}`;
     return m;
@@ -649,12 +681,14 @@ function Hull() {
 /* ------------------------------------------------------------------ */
 
 const ABYSS_FS = /* glsl */ `
-  uniform vec3 uHaze;
   varying vec3 vDir;
+  ${HAZE}
   void main() {
-    // Por encima del horizonte, transparente (cielo y panorámica); por debajo, la bruma.
+    // Por encima del horizonte, transparente (cielo y panorámica); por debajo, la bruma (en el
+    // nexo, del tono de la foto en esa dirección).
     float a = smoothstep(0.02, -0.06, normalize(vDir).y);
-    gl_FragColor = vec4(uHaze, a);
+    vec3 tone = uCut > 0.5 ? panoTone(cameraPosition + normalize(vDir) * 300.0) : uHaze;
+    gl_FragColor = vec4(tone, a);
     ${OUT}
   }`;
 
@@ -694,8 +728,12 @@ export function CityClock({ ambience, pano = false }: { ambience: Ambience; pano
     // En el nexo, la bruma tiene el tono del pie de la panorámica (así la ciudad en 3D se funde
     // con la foto); alrededor de los distritos, la de su cielo.
     shared.uHaze.value.set(pano ? PANO_TONES[ambience].foot : night ? SKY.night.fog : "#bcd0e2");
-    shared.uDensity.value = night ? 0.0042 : pano ? 0.0026 : 0.0017;
+    // En el nexo, menos bruma: la foto es nítida y con contraste; con más, la ciudad sale lechosa.
+    shared.uDensity.value = pano ? (night ? 0.0022 : 0.0016) : night ? 0.0042 : 0.0017;
     shared.uCut.value = pano ? 1 : 0;
+    // La foto de noche se pinta un 15 % más clara (NexoBackdrop): su tono, igual.
+    shared.uFootGain.value = night ? 1.15 : 1;
+    shared.uGrade.value = night ? 0.45 : 0.4;
   }, [ambience, pano]);
   useFrame((_, dt) => {
     // Con un tope: al volver de otra pestaña los coches no dan un salto enorme.

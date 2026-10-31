@@ -14,19 +14,9 @@ import { useEffect, useMemo, useState } from "react";
 import * as THREE from "three";
 import { CHUNK_SIZE } from "@xenxo/protocol";
 import type { Ambience } from "./graphics";
+import { fillFoot, HORIZON, measureFoot, PANO_TONES } from "./nexo-tones";
 
 const RADIUS = 240;
-
-/**
- * Colores medidos en las propias imágenes: el cielo de arriba (para el Sky del nexo) y el pie de
- * la foto (la bruma del abismo y de la ciudad en 3D), para que no se note dónde acaba cada cosa.
- */
-export const PANO_TONES: Record<Ambience, { top: string; foot: string }> = {
-  day: { top: "#72a8de", foot: "#66748a" },
-  night: { top: "#091432", foot: "#393c60" },
-};
-/** Fila del horizonte en cada franja (0 arriba, 1 abajo), medida en las imágenes. */
-const HORIZON: Record<Ambience, number> = { night: 0.49, day: 0.445 };
 
 const cache = new Map<string, Promise<THREE.Texture>>();
 function load(url: string) {
@@ -58,9 +48,11 @@ const material = () =>
       uniform sampler2D map; uniform float gain;
       varying vec2 vUv;
       void main() {
-        vec4 c = texture2D(map, vec2(1.0 - vUv.x, vUv.y));
+        // Hacia el pie, la foto se desenfoca (mipmaps más bajos): ahí se funde con la ciudad en 3D.
+        float soft = smoothstep(0.16, 0.0, vUv.y) * 4.0;
+        vec4 c = texture2D(map, vec2(1.0 - vUv.x, vUv.y), soft);
         // La foto entera: abajo funde con la bruma del abismo y arriba con el cielo.
-        float a = smoothstep(0.0, 0.04, vUv.y) * smoothstep(1.0, 0.86, vUv.y);
+        float a = smoothstep(0.0, 0.05, vUv.y) * smoothstep(1.0, 0.86, vUv.y);
         gl_FragColor = vec4(c.rgb * gain, a);
         #include <colorspace_fragment>
       }`,
@@ -72,10 +64,12 @@ export function NexoBackdrop({ ambience, hd }: { ambience: Ambience; hd: boolean
   const url = `/sky/nexo-${ambience}-${hd ? 8 : 4}k.webp`;
   useEffect(() => {
     let alive = true;
+    fillFoot(PANO_TONES[ambience].foot);
     void load(url)
       .then((t) => {
         if (!alive) return;
         mat.uniforms.map!.value = t;
+        measureFoot(t.image as HTMLImageElement, ambience);
         mat.uniforms.gain!.value = ambience === "night" ? 1.15 : 1;
         const img = t.image as { width: number; height: number };
         setAspect(img.width / img.height);

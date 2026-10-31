@@ -6,6 +6,7 @@
  * una entidad o un avatar), nunca de cada pose.
  */
 import { activity, ACTIVITY_REF } from "./activity-store";
+import { people, PEOPLE_REF } from "./people-store";
 import { sandbox, SANDBOX_REF } from "./sandbox";
 import { useSyncExternalStore } from "react";
 import { CHUNK_SIZE, PLACES, type AvatarPose, type ChatMessage, type Entity, type Peer, type ServerMessage } from "@xenxo/protocol";
@@ -117,6 +118,7 @@ class WorldStore {
   }
 
   apply(m: ServerMessage) {
+    people.apply(m);
     switch (m.type) {
       case "WELCOME":
         this.sessionId = m.payload.session_id;
@@ -179,8 +181,8 @@ class WorldStore {
         if (m.payload.ref?.startsWith(SANDBOX_REF)) sandbox.ack(m.payload.ref, m.payload.entity_id);
         break;
       case "ERROR":
-        // Los avisos de actividad (demasiado lejos, fuera de orden…) no son errores para el chat.
-        if (m.payload.ref?.startsWith(ACTIVITY_REF)) break;
+        // Los avisos de actividad (demasiado lejos, fuera de orden…) y de gente no son errores para el chat.
+        if (m.payload.ref?.startsWith(ACTIVITY_REF) || m.payload.ref?.startsWith(PEOPLE_REF)) break;
         // Los de la zona de pruebas, a su panel.
         if (m.payload.ref?.startsWith(SANDBOX_REF)) {
           sandbox.error(m.payload.ref, m.payload.code, m.payload.message);

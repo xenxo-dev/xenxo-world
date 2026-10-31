@@ -125,13 +125,17 @@ Las medidas de los modelos de la gente las da `GET /assets/<hash>/meta`. Moverlo
 | Tipo | Payload | Notas |
 |---|---|---|
 | `HELLO` | `client_type`, `capabilities`, `display_name?`, `avatar?` | Obligatorio antes de cualquier otro. `avatar` = `{hash, format: "vrm"}` de un **avatar de serie** (invitados y agentes); cualquier otro hash se ignora, y las personas registradas llevan el de su cuenta |
-| `POSE` | `t`, `head {p, r}`, `hand_l?`, `hand_r?`, `emote?` | Sin `entity_id`: el servidor sabe de quién es. Máx. 15 Hz; el exceso se descarta. `emote` = gesto en curso (`^[a-z_]{1,24}$`; hoy `dance`, `wave`, `sit`, `talk`, `cheer`, `crouch`, `car_open`, `car_in`, `car_out`). Los clientes ignoran los que no conocen. `vehicle?` = en qué va si no va a pie (hoy solo `car`: va sentada dentro de su coche; `head` sigue siendo su cabeza) y `car?` = dónde está su coche, en marcha o aparcado (`p` = su origen en el suelo, `r` = su giro completo, con la inclinación). El servidor normaliza los giros (un cuaternión nulo descarta la pose) y no reparte una mano a más de 2,5 m de la cabeza. Ver «Movimiento» más abajo. Al subir y bajar, `emote` es `car_open` (abre la puerta), `car_in` (se sienta dentro) o `car_out` (sale): con esos tres, la puerta del coche está abierta. Quien no los conozca dibuja a la persona y no el coche. El servidor solo los reparte en los distritos (en la plaza se va a pie; `vehicle` sin `car` no vale) y con `vehicle` no cuentan los puntos de carrera (`CHECKPOINT` → `forbidden`). La cabeza más de 1,6 m por encima de lo que se pisa (el suelo o la cara de arriba de un `collider@1`: se puede estar de pie en un banco) indica un salto |
+| `POSE` | `t`, `head {p, r}`, `hand_l?`, `hand_r?`, `emote?` | Sin `entity_id`: el servidor sabe de quién es. Máx. 15 Hz; el exceso se descarta. `emote` = gesto en curso (`^[a-z_]{1,24}$`; hoy `dance`, `wave`, `sit`, `talk`, `cheer`, `crouch`, `clap`, `point`, `beckon`, `laugh`, `shrug`, los de pareja `high_five`, `hug`, `handshake`, los de pelea `punch`, `kick`, `shove`, `hit_stagger`, `hit_down`, `get_up`, y `car_open`, `car_in`, `car_out`). Los clientes ignoran los que no conocen. `vehicle?` = en qué va si no va a pie (hoy solo `car`: va sentada dentro de su coche; `head` sigue siendo su cabeza) y `car?` = dónde está su coche, en marcha o aparcado (`p` = su origen en el suelo, `r` = su giro completo, con la inclinación). El servidor normaliza los giros (un cuaternión nulo descarta la pose) y no reparte una mano a más de 2,5 m de la cabeza. Ver «Movimiento» más abajo. Al subir y bajar, `emote` es `car_open` (abre la puerta), `car_in` (se sienta dentro) o `car_out` (sale): con esos tres, la puerta del coche está abierta. Quien no los conozca dibuja a la persona y no el coche. El servidor solo los reparte en los distritos (en la plaza se va a pie; `vehicle` sin `car` no vale) y con `vehicle` no cuentan los puntos de carrera (`CHECKPOINT` → `forbidden`). La cabeza más de 1,6 m por encima de lo que se pisa (el suelo o la cara de arriba de un `collider@1`: se puede estar de pie en un banco) indica un salto |
 | `MUTATE_WORLD` | `idempotency_key`, `target`, `mutation` | Ver §8 |
 | `PING` | `t` | |
 | `COLLECT` | `entity_id` | Estoy en este objeto de búsqueda. Solo personas registradas. El servidor mira la última pose de la sesión (reciente y a menos del radio + 2,5 m) y responde `COLLECTED`. Tras un salto, `forbidden` con `detail.reason = "jump"` durante 15 s |
 | `CHECKPOINT` | `entity_id` | Estoy en este punto de carrera. La salida empieza a contar (en el servidor); un `cp` cuenta solo si es el que toca; la meta, solo con todos y si no se ha ido más rápido que 14 m/s en línea recta. Responde `RACE` (o nada si no toca). Como `COLLECT`, no cuenta tras un salto |
 | `SCORES_GET` | `entity_id` (un `scoreboard@1`) | Responde `SCORES`. Cuenta en el mismo tope que `COLLECT` y `CHECKPOINT` (40 cada 10 s por sesión, `rate_limited`); las filas pueden tener unos segundos |
 | `CHAT` | `text` (1–280) | Solo personas registradas y agentes (los invitados reciben `forbidden`). Máx. 5 cada 10 s (`rate_limited`). El servidor normaliza el texto (NFKC) y quita caracteres de control y de formato (bidi, anchura cero…), rellenos invisibles, pilas de marcas combinadas y espacios de más. Lo mismo con el `display_name` de los invitados |
+| `REACT` | `kind` | Reacción flotante (§9 octies). Máx. una cada 600 ms. No en el nexo |
+| `PAIR` | `to`, `kind`, `answer?` | Propone (`answer` ausente) o contesta (`true`/`false`) una acción en pareja (§9 octies) |
+| `FIGHT` | `on` | Activa o quita el modo pelea de la sesión (§9 octies) |
+| `HIT` | `to`, `move` | Golpe a otra sesión en modo pelea (§9 octies) |
 
 **Movimiento.** El servidor no se fía de dónde dice estar un cliente para las actividades: lleva, por
 sesión, cuánto puede avanzar cada pose (en horizontal, 40 m/s sostenidos —el coche— con 15 m de golpe
@@ -148,7 +152,7 @@ necesitan nada más; un agente que pruebe actividades tiene que ir andando.
 
 | Tipo | Payload |
 |---|---|
-| `WELCOME` | `session_id`, `principal`, `chunk_id`, `server_time`, `tick_hz`, `budgets` |
+| `WELCOME` | `session_id`, `principal`, `chunk_id`, `server_time`, `tick_hz`, `budgets`, `fight?` (estilo de pelea del lugar, §9 octies; ausente = aquí no se pelea) |
 | `SNAPSHOT` | `entities[]`, `peers[]`, `poses[]`, `chat[]?` (últimos 30 mensajes) |
 | `DELTA` | `changes[]`: `{kind: "upsert", entity}` o `{kind: "remove", entity_id}` |
 | `POSES` | `t` (hora del servidor), `poses[]` (cada una con su `emote?`, su `vehicle?` y su `car?`) — lote por tick (8 Hz; los clientes envían su pose a 8 Hz como mucho y se interpolan con ~200 ms de retraso) |
@@ -163,6 +167,11 @@ necesitan nada más; un agente que pruebe actividades tiene que ir andando.
 | `RACE` | `race`, `state` (`start` \| `cp` \| `finish` \| `reset`), `next?`, `total?`, `ms?`, `best?`, `rank?` | La carrera de esta sesión. `reset` = anulada (demasiado rápida) |
 | `SCORES` | `entity_id`, `kind`, `period?`, `rows` (`name`, `player_no?`, `value`, `ts`) | Los 10 primeros: tiempo en ms (carreras), fecha en que se completó (búsquedas), puntos del tramo (`points`, días UTC) o piezas construidas (`builds`: `name` es el proyecto, `ts` la última) |
 | `TILES` | `entity_id`, `round`, `state` (`show` \| `won` \| `lost` \| `idle`), `lit`, `done`, `ms_left?` | Estado de un tablero de baldosas, a todo el lugar. Índice de baldosa = fila × `cols` + columna, desde la esquina noroeste |
+| `REACTION` | `session_id`, `kind` | Alguien ha reaccionado (a quien esté cerca) |
+| `PAIR_OFFER` | `from`, `kind` | Solo a quien recibe la propuesta |
+| `PAIR_START` | `a` (quien propuso), `b`, `kind`, `t` | Empieza la acción en pareja (a quien esté cerca) |
+| `PAIR_END` | `a`, `b`, `kind`, `reason` (`declined` \| `expired` \| `far`) | A los dos |
+| `HIT_EVENT` | `from`, `to`, `move`, `style`, `dir` ([x, z], unitario), `power` (0–1), `fall`, `ko?` | Un golpe que ha llegado (a quien esté cerca) |
 
 ## 8. Mutaciones
 
@@ -428,6 +437,39 @@ archivos, la web, el nexo ni la plaza.
   seguidas sin respuesta, sus distritos pasan a Cloudflare con esa copia (`state: fallback`) y sale
   el aviso `node.down` (n8n). La vuelta al nodo es a mano (`move`): nunca hay dos sitios escribiendo
   el mismo distrito.
+
+## 9 octies. Gente: reacciones, acciones en pareja y modo pelea
+
+Para socializar sin escribir. Nada se guarda: vive mientras dura la conexión y no hay datos nuevos
+de nadie. Todo se comprueba con la **última pose** de cada sesión (reciente: menos de 3 s), nunca con
+lo que dice el cliente. Los errores van como `ERROR` con el `ref` del mensaje.
+
+- **Reacciones** (`REACT`): `heart`, `laugh`, `wow`, `clap`, `fire`, `thumbs_up`. El servidor
+  reparte `REACTION` a quien esté cerca. Una cada 600 ms (`rate_limited`). No en el nexo (se va en
+  solitario).
+- **Acciones en pareja** (`PAIR`): `high_five`, `hug`, `handshake`. Se propone a una sesión a menos de
+  `PAIR_RANGE` (3 m entre cabezas); le llega `PAIR_OFFER`. Si contesta `answer: true` y siguen a menos
+  de 3,5 m, todos los de cerca reciben `PAIR_START` y cada cliente pone a los dos frente a frente y
+  hace el gesto. Si no, los dos reciben `PAIR_END` (`declined`, `far`); una propuesta vale 20 s
+  (`expired`). Una propuesta por sesión a la vez (la nueva pisa la anterior); proponer y contestar
+  cuentan en el mismo tope que `COLLECT`.
+- **Modo pelea** (`FIGHT {on}`): es de **consentimiento**. Solo se golpea a quien también lo tiene
+  activado, y solo te golpean si lo activas. Se ve en la pose (`fight: true`). No hay vida ni sangre:
+  quien cae se levanta. Nunca en el nexo ni en la plaza: allí `WELCOME` no trae `fight` y `FIGHT`/`HIT`
+  dan `forbidden`. Al cambiar de lugar se pierde; el cliente lo vuelve a pedir si estaba activado.
+- **Estilos** (`WELCOME.fight`, de `fight` en `districts.json`; los distritos de la comunidad, `comic`):
+  `comic` (de dibujos: un golpe fuerte te lanza y te levantas), `pixel` (8 bits), `duel` (nadie cae
+  por un golpe; tres seguidos en 8 s dejan fuera de combate un momento, `ko`) y `shove` (solo
+  empujones: `punch` y `kick` dan `forbidden`).
+- **Golpes** (`HIT {to, move}`): `punch` (alcance 2 m), `kick` (2,3 m), `shove` (1,8 m) entre cabezas,
+  con 0,3 m de margen por la red y menos de 1,2 m de diferencia de altura; nadie en coche. Uno cada 600 ms por sesión
+  (`rate_limited`). Quien acaba de caer no recibe golpes durante 2,5 s (se ignoran sin error). El
+  servidor reparte `HIT_EVENT` con la dirección (de quien golpea hacia quien recibe), la fuerza y si cae;
+  cada cliente lo dibuja (traspié, o caída con física y levantarse) y quien recibe se mueve él mismo:
+  el servidor no mueve a nadie.
+- **Choques:** las personas son sólidas para los demás (cada cliente aparta a su jugador de las poses
+  de los demás) y la gente de decorado se aparta de ellas. Con el modo pelea, un golpe sin nadie en
+  modo pelea delante puede tirar a alguien de la gente de decorado (solo en ese cliente).
 
 ## 10. Códigos de error
 

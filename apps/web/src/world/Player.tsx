@@ -22,6 +22,9 @@ import { carForPose, carFrame, carPose, drive, dropCar, requestCar, seated } fro
 import { useDrive } from "./vehicle/drive-state";
 import { applyCarPose, CarModel, createCarHandle } from "./vehicle/CarModel";
 import { CAR, paintFor } from "./vehicle/car";
+import { bumpNpcs, hitNpc, peopleBusy, peopleFrame } from "./people/selfPeople";
+import { attack } from "../net/people";
+import { people } from "../net/people-store";
 
 const WALK = 2.1; // m/s
 const RUN = 5.4;
@@ -31,7 +34,14 @@ const CAM_DIST = 3.4;
 const CAM_MIN = 1.3;
 const CAM_MAX = 9;
 /** Gestos que terminan solos (segundos); los demás duran hasta que te mueves. */
-const EMOTE_SECONDS: Record<string, number> = { wave: 2.6, cheer: 1.5 };
+const EMOTE_SECONDS: Record<string, number> = {
+  wave: 2.6, cheer: 1.5, clap: 2.6, point: 1.9, beckon: 2.4, laugh: 2.6, shrug: 1.4,
+  punch: 0.7, kick: 0.8, shove: 0.8,
+};
+/** Gestos que no se cortan al moverse (los golpes se dan andando). */
+const WHILE_MOVING = new Set(["punch", "kick", "shove"]);
+/** Lo que devuelve la gente cada frame (people/selfPeople.ts), sin crear objetos. */
+const _pf = { lock: false, wantX: 0, wantZ: 0, drawn: false };
 // 5 Hz: el movimiento se suaviza al otro lado (interpolación). Cada pose es 1/20 de petición del plan
 // gratuito de Durable Objects (docs/LIMITES-CLOUDFLARE.md): a 8 Hz costaba un 60 % más.
 const SEND_EVERY_MS = 200;
@@ -91,6 +101,7 @@ export function Player({ active }: { active: boolean }) {
   const carHandle = useRef(createCarHandle()).current;
   const lastPhase = useRef("none");
   const seqCtx = useRef({ body, motion, bodyYaw }).current;
+  const peopleCtx = useRef({ body, motion, bodyYaw, avatar: null as unknown as THREE.Group }).current;
 
   /**
    * Cámara al volante: sigue al coche por detrás y se pone detrás de él cuando se mueve (parado, se
@@ -241,8 +252,25 @@ export function Player({ active }: { active: boolean }) {
         let speed = input.run || (controls.autoRun && amount > 0.92) ? RUN : WALK;
         // Placa de impulso (boost@1): más rápido unos segundos, mientras te muevas.
         if (boost.until > performance.now()) speed = Math.max(speed, boost.speed);
-        const wantX = (_fwd.x * input.move.y + _right.x * input.move.x) * speed;
-        const wantZ = (_fwd.z * input.move.y + _right.z * input.move.x) * speed;
+        let wantX = (_fwd.x * input.move.y + _right.x * input.move.x) * speed;
+        let wantZ = (_fwd.z * input.move.y + _right.z * input.move.x) * speed;
+
+        // Modo pelea (Q, E, R o el HUD): el gesto siempre; el golpe, a quien esté en modo pelea a tu
+        // alcance o, si no hay nadie, a la gente de decorado que tengas delante.
+        if (input.attack) {
+          const m = input.attack;
+          input.attack = null;
+          if (free && !peopleBusy() && !attack(m) && people.fightOn) hitNpc(m, body, bodyYaw.current);
+        }
+        // La gente: golpes recibidos (traspié o caída con física), acciones en pareja.
+        peopleCtx.avatar = avatar.current;
+        if (free) peopleFrame(dt, peopleCtx, _pf);
+        else _pf.lock = _pf.drawn = false;
+        if (_pf.lock) {
+          wantX = _pf.wantX;
+          wantZ = _pf.wantZ;
+          input.jump = false;
+        }
 
         if (input.jump && free) {
           requestJump(body);
@@ -253,14 +281,15 @@ export function Player({ active }: { active: boolean }) {
         // En el nexo (en solitario) se camina más allá del chunk: por las pasarelas hasta las islas.
         // Mientras se viaja (aún sin WELCOME ni suelo del lugar nuevo) el cuerpo espera quieto: si
         // diera pasos, los límites y el suelo del lugar anterior lo dejarían fuera de lo caminable.
-        if (free && motion.emote !== "sit" && world.status === "open") stepBody(body, wantX, wantZ, dt, world.walk[0], world.walk[1]);
+        if (free && !_pf.drawn && motion.emote !== "sit" && world.status === "open") stepBody(body, wantX, wantZ, dt, world.walk[0], world.walk[1]);
+        if (free && !_pf.lock) bumpNpcs(body, bodyYaw.current);
         if (free) smoothSpeed(motion, Math.hypot(body.vx, body.vz), dt);
         motion.airborne = free && !body.grounded;
 
         // El cuerpo gira hacia donde camina (la cámara puede mirar a otro lado); en primera
         // persona, hacia donde miras.
-        if (!free) {
-          // Lo mueve la secuencia del coche.
+        if (!free || _pf.lock) {
+          // Lo mueve la secuencia del coche (o la gente: un golpe, una pareja).
         } else if (fp) bodyYaw.current = l.yaw;
         else if (amount > 0.05) {
           const want = Math.atan2(-wantX, -wantZ);
@@ -270,7 +299,7 @@ export function Player({ active }: { active: boolean }) {
         }
 
         // Gestos: se piden con el teclado (1-4) o el HUD; moverse los cancela.
-        if (input.emote && free) {
+        if (input.emote && free && !_pf.lock) {
           let emote = input.emote;
           if (emote === "sit") {
             // Sentarse en el banco más cercano; sin banco, en cuclillas.
@@ -284,7 +313,7 @@ export function Player({ active }: { active: boolean }) {
           emoteUntil.current = state.clock.elapsedTime + (EMOTE_SECONDS[emote] ?? Infinity);
           input.emote = null;
         }
-        if (free && motion.emote && (amount > 0.05 || motion.airborne || state.clock.elapsedTime > emoteUntil.current)) motion.emote = null;
+        if (free && !_pf.lock && motion.emote && ((amount > 0.05 && !WHILE_MOVING.has(motion.emote)) || motion.airborne || state.clock.elapsedTime > emoteUntil.current)) motion.emote = null;
 
         // La altura de la cámara sigue al cuerpo con suavidad (al subir un escalón no da un tirón).
         c3.y += (body.y - c3.y) * Math.min(1, dt * (body.grounded ? 10 : 25));
@@ -324,7 +353,7 @@ export function Player({ active }: { active: boolean }) {
         avatar.current.position.copy(seated.pos);
         avatar.current.quaternion.copy(seated.q);
         visY.current = body.y;
-      } else {
+      } else if (!_pf.drawn) {
         avatar.current.position.set(body.x, visY.current, body.z);
         avatar.current.rotation.set(0, bodyYaw.current, 0);
       }
@@ -332,6 +361,7 @@ export function Player({ active }: { active: boolean }) {
       self.x = body.x;
       self.y = body.y;
       self.z = body.z;
+      self.yaw = bodyYaw.current;
       // En primera persona no se dibuja el propio cuerpo (taparía la vista); en coche, tampoco.
       avatar.current.visible = active && !view.firstPerson;
 

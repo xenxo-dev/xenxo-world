@@ -17,7 +17,8 @@ import { Player } from "./Player";
 import { Portals } from "./Portals";
 import { Sky, SKY } from "./Sky";
 import { Skyline } from "./Skyline";
-import { NexoBackdrop, PANO_TONES } from "./NexoBackdrop";
+import { NexoBackdrop } from "./NexoBackdrop";
+import { PANO_TONES } from "./nexo-tones";
 import { NexoCity } from "./NexoCity";
 import { DistrictSkyline } from "./DistrictSkyline";
 import { Pedestrians, Traffic } from "./CityLife";
@@ -28,6 +29,7 @@ import districtsLayout from "../../../realtime/src/districts.json";
 
 const DISTRICT_IDS = new Map((districtsLayout.districts as { id: string; chunk: string }[]).map((d) => [d.chunk, d.id]));
 import { Activities } from "./Activities";
+import { PeopleFx } from "./people/PeopleFx";
 import { VRTeleport } from "./xr/VRTeleport";
 import skyDay from "./sky-day.json";
 import { splashActive, splashDone, splashProgress } from "../splash";
@@ -434,6 +436,7 @@ function Scene({ active }: { active: boolean }) {
         <Avatars />
       </Suspense>
       <Player active={active} />
+      {!inNexo && <PeopleFx />}
       {g.inXR && <VRTeleport />}
       <InputBinder active={active} />
       <PhotoTaker />

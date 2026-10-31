@@ -155,6 +155,88 @@ await scenario("coche: en un distrito los demás ven el coche de A (y si va dent
   pb.close();
 });
 
+await scenario("gente: reacciones a los de alrededor, acciones en pareja con propuesta y respuesta, y modo pelea solo con consentimiento y en los distritos", async () => {
+  const send = (c: XenxoClient, type: string, payload: unknown) => c.sendRaw(JSON.stringify(msg(type, payload)));
+  const chunkId = "c_1_0"; // Arcade: estilo «comic»
+  const a = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-gente-a" });
+  const b = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-gente-b" });
+  assert(a.welcome.fight === "comic", `Arcade pelea en estilo «comic» (WELCOME.fight = ${a.welcome.fight})`);
+  const A = a.welcome.session_id, B = b.welcome.session_id;
+  for (let i = 0; i < 2; i++) {
+    a.pose([40, 1.6, 120]);
+    b.pose([41, 1.6, 120]);
+    await sleep(220);
+  }
+  // Reacción: le llega al de al lado.
+  const react = b.next("REACTION", (m) => m.payload.session_id === A && m.payload.kind === "heart", 3000);
+  send(a, "REACT", { kind: "heart" });
+  await react;
+  const fast = a.next("ERROR", (m) => m.payload.code === "rate_limited", 3000);
+  send(a, "REACT", { kind: "fire" });
+  await fast;
+  // En pareja: A propone, B recibe la propuesta y acepta; empieza para los dos.
+  const offer = b.next("PAIR_OFFER", (m) => m.payload.from === A && m.payload.kind === "high_five", 3000);
+  send(a, "PAIR", { to: B, kind: "high_five" });
+  await offer;
+  const startA = a.next("PAIR_START", (m) => m.payload.a === A && m.payload.b === B, 3000);
+  send(b, "PAIR", { to: A, kind: "high_five", answer: true });
+  await startA;
+  // Una respuesta a una propuesta que no existe no hace nada.
+  const gone = b.next("ERROR", (m) => m.payload.code === "not_found", 3000);
+  send(b, "PAIR", { to: A, kind: "hug", answer: true });
+  await gone;
+  // Rechazar: a quien propuso le llega PAIR_END.
+  const offer2 = b.next("PAIR_OFFER", (m) => m.payload.kind === "hug", 3000);
+  send(a, "PAIR", { to: B, kind: "hug" });
+  await offer2;
+  const declined = a.next("PAIR_END", (m) => m.payload.reason === "declined", 3000);
+  send(b, "PAIR", { to: A, kind: "hug", answer: false });
+  await declined;
+  // Pelea: sin el modo pelea de los dos, no; con los dos, el golpe llega a todos.
+  const noFight = a.next("ERROR", (m) => m.payload.code === "forbidden", 3000);
+  send(a, "HIT", { to: B, move: "punch" });
+  await noFight;
+  send(a, "FIGHT", { on: true });
+  const noConsent = a.next("ERROR", (m) => m.payload.code === "forbidden" && /modo pelea/.test(m.payload.message), 3000);
+  send(a, "HIT", { to: B, move: "punch" });
+  await noConsent;
+  send(b, "FIGHT", { on: true });
+  const flagged = a.next("POSES", (m) => m.payload.poses.some((p) => p.session_id === B && p.fight === true), 3000);
+  b.pose([41, 1.6, 120]);
+  await flagged;
+  await sleep(650);
+  const hit = b.next("HIT_EVENT", (m) => m.payload.from === A && m.payload.to === B && m.payload.style === "comic" && m.payload.move === "kick", 3000);
+  send(a, "HIT", { to: B, move: "kick" });
+  const ev = await hit;
+  assert(ev.payload.dir[0] > 0.9 && ev.payload.fall, `una patada de dibujos tira al suelo hacia donde se da (dir ${ev.payload.dir}, cae ${ev.payload.fall})`);
+  // Lejos, no (tras levantarse: mientras está en el suelo, los golpes no cuentan).
+  await sleep(2600);
+  for (let i = 0; i < 2; i++) {
+    a.pose([40, 1.6, 120]);
+    b.pose([50, 1.6, 120]);
+    await sleep(220);
+  }
+  const far = a.next("ERROR", (m) => m.payload.code === "forbidden" && /lejos/.test(m.payload.message), 3000);
+  send(a, "HIT", { to: B, move: "punch" });
+  await far;
+  a.close();
+  b.close();
+  // En la plaza no hay modo pelea; en Taller solo se empuja.
+  const p = await XenxoClient.connect({ baseUrl, displayName: "conf-gente-plaza" });
+  assert(!p.welcome.fight, "en la plaza no se pelea");
+  const plaza = p.next("ERROR", (m) => m.payload.code === "forbidden", 3000);
+  send(p, "FIGHT", { on: true });
+  await plaza;
+  p.close();
+  const t = await XenxoClient.connect({ baseUrl, chunkId: "c_0_-1", displayName: "conf-gente-taller" });
+  assert(t.welcome.fight === "shove", "Taller: solo empujones");
+  send(t, "FIGHT", { on: true });
+  const onlyShove = t.next("ERROR", (m) => m.payload.code === "forbidden" && /empuja/.test(m.payload.message), 3000);
+  send(t, "HIT", { to: "alguien", move: "punch" });
+  await onlyShove;
+  t.close();
+});
+
 await scenario("avatar de serie: un invitado puede llevarlo; un hash cualquiera se ignora", async () => {
   const preset = AVATAR_PRESETS[0]!;
   const watcher = await XenxoClient.connect({ baseUrl });

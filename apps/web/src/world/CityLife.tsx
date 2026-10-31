@@ -21,7 +21,7 @@ import { AvatarBody } from "./Avatars";
 import { createMotion, type Motion } from "./motion";
 import { rng } from "./NexoCity";
 import { playerBulk, playerPos } from "./Player";
-import { floorAt, NPC_CITY, npcs } from "./collision";
+import { floorAt, NPC_CITY, npcs, others } from "./collision";
 import { knockApply, knockPaused } from "./knock";
 
 interface Loop {
@@ -196,6 +196,8 @@ export function Pedestrians({ chunk, count }: { chunk: string; count: number }) 
     //    uno al otro (en un cruce), espera solo uno (el de índice mayor): nadie se queda atascado.
     for (let i = 0; i < m; i++) {
       let b = ahead(i, playerPos.x, playerPos.y, playerPos.z, playerBulk.r - 0.3);
+      // Y a las demás personas (multijugador).
+      for (let k = 0; k < others.count && !b; k++) b = ahead(i, others.pos[k * 3]!, others.pos[k * 3 + 1]!, others.pos[k * 3 + 2]!);
       for (let j = 0; j < m && !b; j++) {
         if (j === i || !ahead(i, _px[j]!, _py[j]!, _pz[j]!)) continue;
         if (!ahead(j, _px[i]!, _py[i]!, _pz[i]!) || i > j) b = true;

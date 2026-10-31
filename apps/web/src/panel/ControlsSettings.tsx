@@ -59,7 +59,7 @@ function Preview() {
       )}
       <div className="absolute flex gap-1" style={{ bottom: 10 + stick + 6, opacity: c.opacity, ...side(!left) }}>
         {c.showCamera && <span className="h-4 w-4 rounded bg-cal/25" />}
-        {c.showEmotes && [0, 1, 2, 3].map((i) => <span key={i} className="h-4 w-4 rounded bg-cal/25" />)}
+        {c.showEmotes && <span className="h-4 w-4 rounded-full bg-cal/25" />}
       </div>
     </div>
   );

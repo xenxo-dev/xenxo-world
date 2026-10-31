@@ -31,6 +31,10 @@ import {
   type ErrorCode,
   type MutationOp,
   type Peer,
+  type FightMove,
+  type FightStyle,
+  type PairAction,
+  type Reaction,
 } from "@xenxo/protocol";
 import type { Env } from "./index";
 import { randomId, type Principal } from "./auth";
@@ -48,6 +52,7 @@ import { ACTIVITY_SCHEMA, activityKey, ARRIVALS_FREE, ARRIVALS_WINDOW_MS, isoWee
 import { SEED_ASSETS } from "./seed-assets";
 import { figureFor, pointsDay, TILES_IDLE_MS, TILES_PAUSE_MS, TILES_SCHEMA, TILES_START_MS, tileAt, tilesRoundMs, type TileBoard, type TileGame } from "./tiles";
 import { isAvatarPreset } from "./avatar-presets-check";
+import { DOWN_IMMUNE_MS, DUEL_WINDOW_MS, HIT_GAP_MS, HIT_MAX_DY, hitOutcome, moveAllowed, PAIR_OFFER_RANGE, PAIR_START_RANGE, PAIR_TTL_MS, REACH, REACT_GAP_MS, styleOf } from "./people";
 
 const TICK_HZ = 8;
 /** En lugares más grandes que un chunk, cada uno recibe las poses de quien tiene a menos de esto (m). */
@@ -182,6 +187,8 @@ interface Attachment {
   preset?: { hash: string; format: "vrm" };
   /** Carrera en curso (activities.ts). */
   run?: RaceRun;
+  /** Modo pelea activado (people.ts): solo con él se puede golpear y recibir golpes. */
+  fight?: boolean;
 }
 
 class MutationError extends Error {
@@ -242,6 +249,12 @@ export class ChunkRoom extends DurableObject<Env> {
   private tileBoardsList: TileBoard[] = [];
   private tileGames = new Map<string, TileGame>();
   private tickTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Gente (people.ts): última reacción, propuestas en pareja, golpes y caídas de cada sesión. */
+  private reactAt = new Map<string, number>();
+  private pairOffers = new Map<string, { to: string; kind: PairAction; t: number }>();
+  private hitAt = new Map<string, number>();
+  private downUntil = new Map<string, number>();
+  private duelHits = new Map<string, number[]>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -520,6 +533,7 @@ export class ChunkRoom extends DurableObject<Env> {
           budgets: { ...BUDGETS },
           ...(this.solo ? { solo: true, walk: NEXO_BOUNDS } : this.big ? { walk: this.bounds } : {}),
           ...this.themeHint(),
+          ...(this.fightStyle ? { fight: this.fightStyle } : {}),
         }));
         // En solitario (el nexo) nadie ve a nadie: ni gente, ni poses, ni chat.
         if (this.solo) {
@@ -563,7 +577,7 @@ export class ChunkRoom extends DurableObject<Env> {
         const car = m.payload.car && carR ? { p: m.payload.car.p, r: carR } : undefined;
         const withCar = roads && car && this.inBounds(car.p) ? { car, ...(vehicle ? { vehicle } : {}) } : {};
         const jump = this.trackMove(ws, att, head.p, now);
-        this.poses.set(att.session_id, { session_id: att.session_id, head, ...(hand_l ? { hand_l } : {}), ...(hand_r ? { hand_r } : {}), ...(emote ? { emote } : {}), ...withCar });
+        this.poses.set(att.session_id, { session_id: att.session_id, head, ...(hand_l ? { hand_l } : {}), ...(hand_r ? { hand_r } : {}), ...(emote ? { emote } : {}), ...withCar, ...(att.fight ? { fight: true } : {}) });
         this.dirty.add(att.session_id);
         this.scheduleTick();
         // Una pose que llega de un salto no pisa baldosas.
@@ -583,6 +597,14 @@ export class ChunkRoom extends DurableObject<Env> {
         return this.handleCheckpoint(ws, att, m.id, m.payload.entity_id);
       case "SCORES_GET":
         return this.handleScores(ws, att, m.id, m.payload.entity_id);
+      case "REACT":
+        return this.handleReact(ws, att, m.id, m.payload.kind);
+      case "PAIR":
+        return this.handlePair(ws, att, m.id, m.payload.to, m.payload.kind, m.payload.answer);
+      case "FIGHT":
+        return this.handleFight(ws, att, m.id, m.payload.on);
+      case "HIT":
+        return this.handleHit(ws, att, m.id, m.payload.to, m.payload.move);
     }
   }
 
@@ -604,6 +626,11 @@ export class ChunkRoom extends DurableObject<Env> {
     this.buckets.delete(att.session_id);
     this.moves.delete(att.session_id);
     this.hotArrival.delete(att.session_id);
+    this.reactAt.delete(att.session_id);
+    this.pairOffers.delete(att.session_id);
+    this.hitAt.delete(att.session_id);
+    this.downUntil.delete(att.session_id);
+    this.duelHits.delete(att.session_id);
     if (att.hello && !this.solo) this.broadcast(msg("PEER_LEAVE", { session_id: att.session_id }), ws);
   }
 
@@ -2101,6 +2128,133 @@ export class ChunkRoom extends DurableObject<Env> {
           ? { avatar: att.preset }
           : {}),
     };
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Gente: reacciones, acciones en pareja y modo pelea (people.ts)      */
+  /* ---------------------------------------------------------------- */
+
+  /** Estilo de pelea de este lugar: el de su distrito, «comic» en los de la comunidad; nunca en el nexo ni la plaza. */
+  private get fightStyle(): FightStyle | null {
+    if (this.solo || !this.chunkId) return null;
+    if (this.community) return "comic";
+    const d = districtByChunk(this.chunkId);
+    return d ? styleOf(d.fight) : null;
+  }
+
+  /** La conexión de una sesión de este lugar (si sigue). */
+  private sessionById(id: string): { ws: WebSocket; att: Attachment } | null {
+    for (const ws of this.ctx.getWebSockets()) {
+      const att = ws.deserializeAttachment() as Attachment | null;
+      if (att?.hello && att.session_id === id) return { ws, att };
+    }
+    return null;
+  }
+
+  /** La cabeza de una sesión según su última pose, si es reciente. */
+  private headOf(id: string): number[] | null {
+    const pose = this.poses.get(id);
+    const age = Date.now() - (this.lastPoseAt.get(id) ?? 0);
+    return pose && age <= POSE_MAX_AGE_MS ? pose.head.p : null;
+  }
+
+  /** A quien está cerca de `p` (en los lugares grandes; en los demás, a todos). */
+  private broadcastNear(p: number[], m: unknown) {
+    if (!this.big) return this.broadcast(m);
+    const data = JSON.stringify(m);
+    const R2 = AOI_RADIUS * AOI_RADIUS;
+    for (const ws of this.ctx.getWebSockets()) {
+      const att = ws.deserializeAttachment() as Attachment | null;
+      if (!att?.hello) continue;
+      const me = this.poses.get(att.session_id)?.head.p;
+      if (me && (me[0]! - p[0]!) ** 2 + (me[2]! - p[2]!) ** 2 > R2) continue;
+      try {
+        ws.send(data);
+      } catch {
+        /* socket cerrado */
+      }
+    }
+  }
+
+  private handleReact(ws: WebSocket, att: Attachment, ref: string | undefined, kind: Reaction) {
+    if (this.solo) return this.sendError(ws, ref, "forbidden", "en el nexo se va en solitario");
+    const now = Date.now();
+    if (now - (this.reactAt.get(att.session_id) ?? 0) < REACT_GAP_MS) return this.sendError(ws, ref, "rate_limited", "más despacio");
+    const me = this.headOf(att.session_id);
+    if (!me) return this.sendError(ws, ref, "bad_message", "manda tu pose primero");
+    this.reactAt.set(att.session_id, now);
+    this.broadcastNear(me, msg("REACTION", { session_id: att.session_id, kind }));
+  }
+
+  private handlePair(ws: WebSocket, att: Attachment, ref: string | undefined, to: string, kind: PairAction, answer: boolean | undefined) {
+    if (this.solo) return this.sendError(ws, ref, "forbidden", "en el nexo se va en solitario");
+    if (to === att.session_id) return this.sendError(ws, ref, "bad_message", "contigo no");
+    if (!this.activityAllowed(att)) return this.sendError(ws, ref, "rate_limited", "más despacio");
+    const other = this.sessionById(to);
+    const me = this.headOf(att.session_id), them = this.headOf(to);
+    const now = Date.now();
+    if (answer === undefined) {
+      // Propuesta: a alguien que está aquí y cerca. Una por sesión (la nueva pisa la anterior).
+      if (!other || !me || !them || !near(me, them, PAIR_OFFER_RANGE)) return this.sendError(ws, ref, "forbidden", "acércate más");
+      this.pairOffers.set(att.session_id, { to, kind, t: now });
+      return this.send(other.ws, msg("PAIR_OFFER", { from: att.session_id, kind }));
+    }
+    // Respuesta: a una propuesta de `to` para mí, de este tipo y aún vigente.
+    const offer = this.pairOffers.get(to);
+    if (!offer || offer.to !== att.session_id || offer.kind !== kind) return this.sendError(ws, ref, "not_found", "esa propuesta ya no está");
+    this.pairOffers.delete(to);
+    const end = (reason: "declined" | "expired" | "far") => {
+      const m = msg("PAIR_END", { a: to, b: att.session_id, kind, reason });
+      if (other) this.send(other.ws, m);
+      this.send(ws, m);
+    };
+    if (now - offer.t > PAIR_TTL_MS) return end("expired");
+    if (!answer) return end("declined");
+    if (!other || !me || !them || !near(me, them, PAIR_START_RANGE)) return end("far");
+    this.broadcastNear(me, msg("PAIR_START", { a: to, b: att.session_id, kind, t: now }));
+  }
+
+  private handleFight(ws: WebSocket, att: Attachment, ref: string | undefined, on: boolean) {
+    if (on && !this.fightStyle) return this.sendError(ws, ref, "forbidden", "aquí no se puede pelear");
+    if (!!att.fight === on) return;
+    att.fight = on;
+    ws.serializeAttachment(att);
+    // Los demás lo ven en su siguiente pose (con su marca encima).
+    const pose = this.poses.get(att.session_id);
+    if (pose) {
+      const { fight: _was, ...rest } = pose;
+      this.poses.set(att.session_id, on ? { ...rest, fight: true } : rest);
+      this.dirty.add(att.session_id);
+      this.scheduleTick();
+    }
+  }
+
+  private handleHit(ws: WebSocket, att: Attachment, ref: string | undefined, to: string, move: FightMove) {
+    const style = this.fightStyle;
+    if (!style) return this.sendError(ws, ref, "forbidden", "aquí no se puede pelear");
+    if (!moveAllowed(style, move)) return this.sendError(ws, ref, "forbidden", "aquí solo se empuja");
+    if (!att.fight) return this.sendError(ws, ref, "forbidden", "activa el modo pelea");
+    const other = this.sessionById(to);
+    // Consentimiento: solo a quien también tiene el modo pelea (sin decir quién lo tiene si no).
+    if (!other || !other.att.fight || to === att.session_id) return this.sendError(ws, ref, "forbidden", "esa persona no está en modo pelea");
+    const now = Date.now();
+    if (now - (this.hitAt.get(att.session_id) ?? 0) < HIT_GAP_MS) return this.sendError(ws, ref, "rate_limited", "más despacio");
+    if ((this.downUntil.get(to) ?? 0) > now || (this.downUntil.get(att.session_id) ?? 0) > now) return; // en el suelo: no cuenta
+    const me = this.headOf(att.session_id), them = this.headOf(to);
+    if (!me || !them) return this.sendError(ws, ref, "bad_message", "manda tu pose primero");
+    if (this.poses.get(att.session_id)?.vehicle || this.poses.get(to)?.vehicle) return this.sendError(ws, ref, "forbidden", "en coche no");
+    const dx = them[0]! - me[0]!, dz = them[2]! - me[2]!;
+    const d = Math.hypot(dx, dz);
+    if (d > REACH[move] || Math.abs(them[1]! - me[1]!) > HIT_MAX_DY) return this.sendError(ws, ref, "forbidden", "demasiado lejos");
+    this.hitAt.set(att.session_id, now);
+    const recent = (this.duelHits.get(to) ?? []).filter((t) => now - t < DUEL_WINDOW_MS);
+    recent.push(now);
+    const out = hitOutcome(style, move, recent.length);
+    if (out.ko) this.duelHits.delete(to);
+    else this.duelHits.set(to, recent);
+    if (out.fall) this.downUntil.set(to, now + DOWN_IMMUNE_MS);
+    const dir: [number, number] = d > 0.05 ? [dx / d, dz / d] : [0, 1];
+    this.broadcastNear(them, msg("HIT_EVENT", { from: att.session_id, to, move, style, dir: [Math.round(dir[0] * 1000) / 1000, Math.round(dir[1] * 1000) / 1000], power: out.power, fall: out.fall, ...(out.ko ? { ko: true } : {}) }));
   }
 
   private peers(): Peer[] {

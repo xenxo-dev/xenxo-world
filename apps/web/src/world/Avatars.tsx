@@ -6,6 +6,7 @@ import type { AvatarRef } from "@xenxo/protocol";
 import { assetUrl } from "../config";
 import { t } from "../i18n";
 import { BUBBLE_MS, chat, useChatVersion, useWorldVersion, world } from "../net/world-store";
+import { people } from "../net/people-store";
 import { walkAmount } from "./avatar-model";
 import { groundHeight } from "./collision";
 import { CustomAvatar } from "./CustomAvatar";
@@ -36,6 +37,18 @@ const _b = new THREE.Vector3();
 const _qa = new THREE.Quaternion();
 const _qb = new THREE.Quaternion();
 const _e = new THREE.Euler();
+
+/**
+ * Dónde se dibuja ahora a cada persona (pies, ya interpolado): lo leen los efectos de la gente
+ * (reacciones, golpes, marca del modo pelea) para salir justo encima de ella.
+ */
+export const remoteFeet = new Map<string, THREE.Vector3>();
+/** Caer al suelo (gesto hit_down): cuánto se tumba (rad) y hacia dónde, si no se sabe del golpe. */
+const DOWN_TILT = 1.45;
+const _tq = new THREE.Quaternion();
+const _ty = new THREE.Quaternion();
+const _tAxis = new THREE.Vector3();
+const _Y = new THREE.Vector3(0, 1, 0);
 
 export function colorFor(id: string) {
   let h = 0;
@@ -169,6 +182,12 @@ function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; n
   const car = useRef(createCarPose()).current;
   const carHandle = useRef(createCarHandle()).current;
   const [hasCar, setHasCar] = useState(false);
+  const tilt = useRef(0);
+  const feetAt = useRef(new THREE.Vector3()).current;
+  useEffect(() => {
+    remoteFeet.set(sessionId, feetAt);
+    return () => void remoteFeet.delete(sessionId);
+  }, [sessionId, feetAt]);
 
   useFrame((_, dt) => {
     const buf = world.poseBuffers.get(sessionId);
@@ -222,8 +241,21 @@ function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; n
       body.current.quaternion.copy(car.q).multiply(_seatQ);
     } else {
       body.current.position.set(_a.x, feet, _a.z);
-      body.current.rotation.set(0, _e.setFromQuaternion(_qa, "YXZ").y, 0);
+      const yaw = _e.setFromQuaternion(_qa, "YXZ").y;
+      // En el suelo tras un golpe (modo pelea): se tumba hacia donde le dieron y se levanta despacio.
+      const want = s1.emote === "hit_down" ? DOWN_TILT : 0;
+      tilt.current += (want - tilt.current) * Math.min(1, dt * (want ? 9 : 3));
+      if (tilt.current > 0.01) {
+        const hit = people.lastHit.get(sessionId);
+        const dx = hit?.dir[0] ?? Math.sin(yaw), dz = hit?.dir[1] ?? Math.cos(yaw);
+        _tAxis.set(dz, 0, -dx).normalize();
+        _tq.setFromAxisAngle(_tAxis, tilt.current);
+        _ty.setFromAxisAngle(_Y, yaw);
+        body.current.quaternion.copy(_tq).multiply(_ty);
+        body.current.position.y = Math.max(feet, groundHeight(_a.x, _a.z, 0.24, feet + 1.8));
+      } else body.current.rotation.set(0, yaw, 0);
     }
+    feetAt.set(_a.x, driving ? body.current.position.y : feet, _a.z);
   });
 
   return (

@@ -109,6 +109,15 @@ export const npcs = {
    */
   knock: new Float32Array(MAX_NPC * 4),
 };
+/**
+ * Las demás personas (multijugador), según su última pose: pies x, y, z. Las escribe
+ * people/PeopleFx.tsx cada frame. Son sólidas para el jugador (cada uno se aparta él solo: así no
+ * hay que ponerse de acuerdo por la red) y la gente de decorado les cede el paso como al jugador.
+ */
+export const OTHER_RADIUS = 0.3;
+const MAX_OTHERS = 48;
+export const others = { count: 0, pos: new Float32Array(MAX_OTHERS * 3), max: MAX_OTHERS };
+
 /** Índice del hueco k de la lista de gente (peatones primero, luego residentes). */
 const npcAt = (k: number) => (k < npcs.count ? k : NPC_CITY + k - npcs.count);
 /** La gente de ahora, en orden (para la física del coche). */
@@ -233,6 +242,19 @@ export function resolveCircle(p: { x: number; z: number }, r: number, feet: numb
       }
       p.x += (dx / d) * (rr - d);
       p.z += (dz / d) * (rr - d);
+    }
+    // Las demás personas: igual, cilindros de su altura.
+    const ro = r + OTHER_RADIUS;
+    for (let k = 0; k < others.count; k++) {
+      const oy = others.pos[k * 3 + 1]!;
+      if (oy > head || oy + 1.75 < feet - 0.6) continue;
+      const dx = p.x - others.pos[k * 3]!;
+      const dz = p.z - others.pos[k * 3 + 2]!;
+      const d2 = dx * dx + dz * dz;
+      if (d2 >= ro * ro || d2 < 1e-10) continue;
+      const d = Math.sqrt(d2);
+      p.x += (dx / d) * (ro - d);
+      p.z += (dz / d) * (ro - d);
     }
     if (meshCols.size) resolveMeshes(p, r, feet, head);
   }

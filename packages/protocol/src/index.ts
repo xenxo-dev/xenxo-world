@@ -445,7 +445,13 @@ export const HelloMsg = envelope(
  * cada cliente reproduce los que conoce y trata los demás como si no hubiera gesto.
  */
 export const Emote = z.string().regex(/^[a-z_]{1,24}$/);
-export const EMOTES = ["dance", "wave", "sit", "talk", "cheer", "crouch", "car_in", "car_out"] as const;
+export const EMOTES = [
+  "dance", "wave", "sit", "talk", "cheer", "crouch", "car_in", "car_out",
+  // Gestos (§9 octies): aplaudir, señalar, llamar con la mano, reírse y encogerse de hombros.
+  "clap", "point", "beckon", "laugh", "shrug",
+  // Acciones en pareja y pelea (el cliente las pone en su pose mientras duran).
+  "high_five", "hug", "handshake", "punch", "kick", "shove", "hit_stagger", "hit_down", "get_up",
+] as const;
 
 /**
  * Vehículos de los distritos. `vehicle` dice en qué va la persona si no va a pie ("car": va dentro
@@ -493,7 +499,51 @@ export const CollectMsg = envelope("COLLECT", z.object({ entity_id: EntityId }))
 export const CheckpointMsg = envelope("CHECKPOINT", z.object({ entity_id: EntityId }));
 export const ScoresRequestMsg = envelope("SCORES_GET", z.object({ entity_id: EntityId }));
 
-export const ClientMessage = z.discriminatedUnion("type", [HelloMsg, PoseMsg, MutateWorldMsg, PingMsg, ChatMsg, CollectMsg, CheckpointMsg, ScoresRequestMsg]);
+/*
+ * Gente (§9 octies): reacciones, acciones en pareja y el modo pelea. Solo en lugares compartidos
+ * (nunca en el nexo). El servidor comprueba siempre cercanía (con la última pose de cada sesión),
+ * ritmo y consentimiento; el cliente solo pide.
+ */
+
+/** Reacciones que flotan sobre la cabeza y ven los de alrededor. */
+export const REACTIONS = ["heart", "laugh", "wow", "clap", "fire", "thumbs_up"] as const;
+export const Reaction = z.enum(REACTIONS);
+export type Reaction = z.infer<typeof Reaction>;
+
+/** Acciones en pareja: una persona propone y la otra acepta. */
+export const PAIR_ACTIONS = ["high_five", "hug", "handshake"] as const;
+export const PairAction = z.enum(PAIR_ACTIONS);
+export type PairAction = z.infer<typeof PairAction>;
+
+/** Golpes del modo pelea (cómicos: sin vida ni sangre; cómo caen depende del distrito). */
+export const FIGHT_MOVES = ["punch", "kick", "shove"] as const;
+export const FightMove = z.enum(FIGHT_MOVES);
+export type FightMove = z.infer<typeof FightMove>;
+/** Alcance de cada golpe (m, entre cabezas): el servidor no admite más; el cliente apunta con él. */
+export const FIGHT_REACH: Record<FightMove, number> = { punch: 2.0, kick: 2.3, shove: 1.8 };
+/** Distancia (m) para proponer una acción en pareja. */
+export const PAIR_RANGE = 3;
+
+/**
+ * Estilo de pelea de un lugar (lo dice el distrito, `fight` en districts.json): `comic` (golpe de
+ * dibujos, salen despedidos), `pixel` (rebotan como en un arcade de 8 bits), `duel` (al tercer golpe
+ * seguido, fuera de combate un momento) o `shove` (solo empujones).
+ */
+export const FIGHT_STYLES = ["comic", "pixel", "duel", "shove"] as const;
+export const FightStyle = z.enum(FIGHT_STYLES);
+export type FightStyle = z.infer<typeof FightStyle>;
+
+const SessionRef = z.string().min(1).max(64);
+
+export const ReactMsg = envelope("REACT", z.object({ kind: Reaction }));
+/** Proponer (`to` = a quién) o responder (`to` = quién lo propuso, `answer`) una acción en pareja. */
+export const PairMsg = envelope("PAIR", z.object({ to: SessionRef, kind: PairAction, answer: z.boolean().optional() }));
+/** Activar o apagar el modo pelea de esta sesión (solo donde el lugar tiene estilo de pelea). */
+export const FightMsg = envelope("FIGHT", z.object({ on: z.boolean() }));
+/** Un golpe a otra sesión: solo si las dos tienen el modo pelea y están cerca. */
+export const HitMsg = envelope("HIT", z.object({ to: SessionRef, move: FightMove }));
+
+export const ClientMessage = z.discriminatedUnion("type", [HelloMsg, PoseMsg, MutateWorldMsg, PingMsg, ChatMsg, CollectMsg, CheckpointMsg, ScoresRequestMsg, ReactMsg, PairMsg, FightMsg, HitMsg]);
 export type ClientMessage = z.infer<typeof ClientMessage>;
 
 /* --- servidor → cliente --- */
@@ -506,6 +556,8 @@ export const AvatarPose = z.object({
   emote: Emote.optional(),
   vehicle: Vehicle.optional(),
   car: Pose.optional(),
+  /** Tiene el modo pelea activado (lo pone el servidor; quien no lo entienda lo ignora). */
+  fight: z.boolean().optional(),
 });
 export type AvatarPose = z.infer<typeof AvatarPose>;
 
@@ -553,6 +605,8 @@ export const WelcomeMsg = envelope(
      * DISTRICT_THEMES) y su color. Un cliente que no la entienda la ignora.
      */
     theme: z.object({ id: z.string().regex(/^[a-z0-9_-]{1,24}$/), color: z.string().regex(/^#[0-9a-fA-F]{6}$/) }).optional(),
+    /** Estilo de pelea del lugar; sin el campo, aquí no se puede activar el modo pelea. */
+    fight: FightStyle.optional(),
   }),
 );
 
@@ -672,6 +726,36 @@ export const TilesMsg = envelope(
   }),
 );
 
+/** Una reacción de alguien cercano. */
+export const ReactionMsg = envelope("REACTION", z.object({ session_id: z.string(), kind: Reaction }));
+/** Alguien cercano te propone una acción en pareja (responde con PAIR y `answer`). */
+export const PairOfferMsg = envelope("PAIR_OFFER", z.object({ from: z.string(), kind: PairAction }));
+/** Empieza una acción en pareja (`a` la propuso, `b` aceptó): los dos se miran y la hacen. */
+export const PairStartMsg = envelope("PAIR_START", z.object({ a: z.string(), b: z.string(), kind: PairAction, t: z.number() }));
+/** Una propuesta que no sale: rechazada, caducada o ya no están cerca. */
+export const PairEndMsg = envelope(
+  "PAIR_END",
+  z.object({ a: z.string(), b: z.string(), kind: PairAction, reason: z.enum(["declined", "expired", "far"]) }),
+);
+/**
+ * Un golpe que ha dado: `dir` es hacia dónde sale (horizontal, unitario), `power` de 0 a 1, `fall`
+ * si cae al suelo y `ko` si queda fuera de combate un momento (estilo `duel`). Quien lo recibe se
+ * mueve él solo (su pose); los demás ven el efecto y su pose.
+ */
+export const HitEventMsg = envelope(
+  "HIT_EVENT",
+  z.object({
+    from: z.string(),
+    to: z.string(),
+    move: FightMove,
+    style: FightStyle,
+    dir: z.tuple([z.number(), z.number()]),
+    power: z.number().min(0).max(1),
+    fall: z.boolean(),
+    ko: z.boolean().optional(),
+  }),
+);
+
 export const ServerMessage = z.discriminatedUnion("type", [
   ProgressMsg,
   TilesMsg,
@@ -689,6 +773,11 @@ export const ServerMessage = z.discriminatedUnion("type", [
   PongMsg,
   ChatBroadcastMsg,
   ChatRemovedMsg,
+  ReactionMsg,
+  PairOfferMsg,
+  PairStartMsg,
+  PairEndMsg,
+  HitEventMsg,
 ]);
 export type ServerMessage = z.infer<typeof ServerMessage>;
 

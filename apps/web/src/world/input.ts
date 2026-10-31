@@ -28,7 +28,18 @@ export const input = {
   car: false,
   /** Freno de mano (Espacio mantenido) mientras se conduce. */
   brake: false,
+  /** Golpe pedido en modo pelea (Q, E, R o el HUD). Lo consume el jugador. */
+  attack: null as "punch" | "kick" | "shove" | null,
+  /** Abrir o cerrar la rueda de acciones (G). La consume el HUD. */
+  wheel: false,
 };
+
+/** El HUD se entera de la tecla de la rueda de acciones sin mirar cada frame. */
+const wheelListeners = new Set<() => void>();
+export function onWheelKey(fn: () => void) {
+  wheelListeners.add(fn);
+  return () => void wheelListeners.delete(fn);
+}
 
 /** Primera persona activa (lo cambia el jugador con `setFirstPerson`; el HUD se suscribe). */
 export const view = { firstPerson: false };
@@ -85,6 +96,11 @@ export function attachDesktopInput(el: HTMLElement) {
     if (e.code === "KeyV" && !e.repeat) input.toggleView = true;
     if (e.code === "KeyP" && !e.repeat) input.photo = true;
     if (e.code === "KeyC" && !e.repeat) input.car = true;
+    // Modo pelea (si está activado; si no, el jugador lo ignora) y la rueda de acciones.
+    if (e.code === "KeyQ" && !e.repeat) input.attack = "punch";
+    if (e.code === "KeyE" && !e.repeat) input.attack = "kick";
+    if (e.code === "KeyR" && !e.repeat) input.attack = "shove";
+    if (e.code === "KeyG" && !e.repeat) for (const fn of wheelListeners) fn();
     if (e.code === "KeyF" && !e.repeat) void toggleFullscreen();
     updateFromKeys();
   };

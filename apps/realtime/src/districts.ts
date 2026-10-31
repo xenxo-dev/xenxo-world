@@ -50,6 +50,8 @@ export interface District {
   desc: { es: string; en: string };
   /** Orden en el panel (1 = el más importante). Los «próximamente» van siempre detrás. */
   rank?: number;
+  /** Estilo de pelea del distrito (FightStyle del protocolo); sin él, «comic». */
+  fight?: string;
   /** Próximamente: su isla está en el nexo con la puerta cerrada; solo entra moderación y no se publica en él. */
   soon?: boolean;
 }

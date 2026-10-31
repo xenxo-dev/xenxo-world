@@ -1,5 +1,5 @@
 {
- "$comment": "Distritos y su plantilla (coordenadas del chunk: X este, Z sur, metros). La usan el servidor (districts.ts), la forja (tools/forge/district.py y city.py) y la web (por GET /districts). Disposición v3 (tools/forge/layout_v3.py): 256 × 256 m (`bounds`), más grande que su chunk. En el centro, la ciudad (`city`: 3 × 3 manzanas, la del medio es la plaza); alrededor, dos anillos de calles (`roads`) con 64 parcelas de 15 × 15 m mirando a ellos (N, S, E y W: fila 1 del 1 al 6, fila 2 del 7 al 16) y cuatro avenidas; al sur, la puerta del nexo. Si cambias algo, vuelve a forjar (npm run forge:districts) y sube DISTRICT_SEED_VERSION; si mueves parcelas, añade su migración (districts.ts). `rank`: su orden en el panel (1 = el más importante; los «próximamente» van siempre detrás).",
+ "$comment": "Distritos y su plantilla (coordenadas del chunk: X este, Z sur, metros). La usan el servidor (districts.ts), la forja (tools/forge/district.py y city.py) y la web (por GET /districts). Disposición v3 (tools/forge/layout_v3.py): 256 × 256 m (`bounds`), más grande que su chunk. En el centro, la ciudad (`city`: 3 × 3 manzanas, la del medio es la plaza); alrededor, dos anillos de calles (`roads`) con 64 parcelas de 15 × 15 m mirando a ellos (N, S, E y W: fila 1 del 1 al 6, fila 2 del 7 al 16) y cuatro avenidas; al sur, la puerta del nexo. Si cambias algo, vuelve a forjar (npm run forge:districts) y sube DISTRICT_SEED_VERSION; si mueves parcelas, añade su migración (districts.ts). `rank`: su orden en el panel (1 = el más importante; los «próximamente» van siempre detrás). `fight`: su estilo de pelea (FIGHT_STYLES del protocolo).",
  "parcel": {
   "w": 15,
   "d": 15,
@@ -426,7 +426,7 @@
  ],
  "districts": [
   {
-   "id": "arcade", "rank": 2,
+   "id": "arcade", "rank": 2, "fight": "comic",
    "chunk": "c_1_0",
    "category": "game3d",
    "color": "#4fa3ff",
@@ -441,7 +441,7 @@
    }
   },
   {
-   "id": "pixel", "rank": 3,
+   "id": "pixel", "rank": 3, "fight": "pixel",
    "chunk": "c_-1_0",
    "category": "game2d",
    "color": "#ff4fd8",
@@ -456,7 +456,7 @@
    }
   },
   {
-   "id": "agora", "rank": 5, "soon": true,
+   "id": "agora", "rank": 5, "fight": "shove", "soon": true,
    "chunk": "c_0_1",
    "category": "social",
    "color": "#6dff8a",
@@ -471,7 +471,7 @@
    }
   },
   {
-   "id": "taller", "rank": 4,
+   "id": "taller", "rank": 4, "fight": "shove",
    "chunk": "c_0_-1",
    "category": "tool",
    "color": "#ffd54f",
@@ -486,7 +486,7 @@
    }
   },
   {
-   "id": "frontera", "rank": 6, "soon": true,
+   "id": "frontera", "rank": 6, "fight": "comic", "soon": true,
    "chunk": "c_1_-1",
    "category": "other",
    "color": "#b8c2d6",
@@ -501,7 +501,7 @@
    }
   },
   {
-   "id": "cero", "rank": 1,
+   "id": "cero", "rank": 1, "fight": "duel",
    "chunk": "c_-1_-1",
    "category": "other",
    "color": "#a26bff",
@@ -516,7 +516,7 @@
    }
   },
   {
-   "id": "vertical", "rank": 7, "soon": true,
+   "id": "vertical", "rank": 7, "fight": "comic", "soon": true,
    "chunk": "c_-1_1",
    "category": "other",
    "color": "#ff7a45",

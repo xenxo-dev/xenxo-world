@@ -10,6 +10,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { VRM } from "@pixiv/three-vrm";
 import { createVRMAnimationClip, VRMAnimationLoaderPlugin, type VRMAnimation } from "@pixiv/three-vrm-animation";
+import { buildGesture, PROCEDURAL } from "./people/gestures";
 
 /**
  * Gesto → clip. `once`: se reproduce una vez y vuelve al reposo; con `hold`, se queda en la última
@@ -26,6 +27,21 @@ export const EMOTE_CLIPS: Record<string, { clip: string; once?: boolean; hold?: 
   car_open: { clip: "interact", once: true, hold: true },
   car_in: { clip: "sit_enter", once: true, hold: true },
   car_out: { clip: "sit_exit", once: true, hold: true },
+  // Gestos hechos en código (people/gestures.ts): sociales, en pareja y del modo pelea.
+  clap: { clip: "clap" },
+  point: { clip: "point", once: true },
+  beckon: { clip: "beckon" },
+  laugh: { clip: "laugh" },
+  shrug: { clip: "shrug", once: true },
+  high_five: { clip: "high_five", once: true },
+  hug: { clip: "hug", once: true },
+  handshake: { clip: "handshake", once: true },
+  punch: { clip: "punch", once: true },
+  kick: { clip: "kick", once: true },
+  shove: { clip: "shove", once: true },
+  hit_stagger: { clip: "hit_stagger", once: true },
+  hit_down: { clip: "hit_down" },
+  get_up: { clip: "crouch_idle" },
 };
 
 const LOCOMOTION = ["idle", "walk", "jog", "sprint", "jump_loop"] as const;
@@ -35,6 +51,10 @@ const cache = new Map<string, Promise<VRMAnimation | null>>();
 
 export function loadVrma(name: string): Promise<VRMAnimation | null> {
   let p = cache.get(name);
+  if (!p && PROCEDURAL.has(name)) {
+    p = loadVrma("idle").then((idle) => (idle ? buildGesture(name, idle) : null));
+    cache.set(name, p);
+  }
   if (!p) {
     loader ??= new GLTFLoader().register((parser) => new VRMAnimationLoaderPlugin(parser));
     p = loader
