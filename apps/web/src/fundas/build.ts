@@ -268,11 +268,13 @@ export function smoothNormals(pos: Float32Array, idx: Uint16Array | Uint32Array,
 
 /**
  * Índices del cuerpo sin lo que tapa la ropa: un vértice del cuerpo se esconde si su vértice de la
- * jaula principal está en la lista de borrado de alguna prenda; un triángulo, si tiene alguno.
+ * base más pesado está en la lista de borrado de alguna prenda (`hard`: basta uno para quitar el
+ * triángulo) o justo debajo de una prenda (`soft`: solo si lo están los tres, para no abrir huecos en
+ * los bordes).
  */
-export function bodyIndex(body: Bin, hidden: Set<number> | null): Uint16Array | Uint32Array {
+export function bodyIndex(body: Bin, hard: Set<number>, soft: Set<number>): Uint16Array | Uint32Array {
   const idx = body.get<Uint16Array | Uint32Array>("idx");
-  if (!hidden || !hidden.size) return idx;
+  if (!hard.size && !soft.size) return idx;
   const refs = body.get<Uint16Array>("refs");
   const w = body.get<Float32Array>("w");
   const nv = refs.length / 3;
@@ -280,11 +282,14 @@ export function bodyIndex(body: Bin, hidden: Set<number> | null): Uint16Array | 
   for (let i = 0; i < nv; i++) {
     let best = 0;
     for (let k = 1; k < 3; k++) if (w[i * 3 + k]! > w[i * 3 + best]!) best = k;
-    if (hidden.has(refs[i * 3 + best]!)) gone[i] = 1;
+    const v = refs[i * 3 + best]!;
+    gone[i] = hard.has(v) ? 2 : soft.has(v) ? 1 : 0;
   }
   const keep: number[] = [];
   for (let f = 0; f < idx.length; f += 3) {
-    if (gone[idx[f]!] || gone[idx[f + 1]!] || gone[idx[f + 2]!]) continue;
+    const a = gone[idx[f]!]!, b = gone[idx[f + 1]!]!, c = gone[idx[f + 2]!]!;
+    if (a === 2 || b === 2 || c === 2) continue;
+    if (a && b && c) continue;
     keep.push(idx[f]!, idx[f + 1]!, idx[f + 2]!);
   }
   return idx instanceof Uint32Array ? new Uint32Array(keep) : new Uint16Array(keep);

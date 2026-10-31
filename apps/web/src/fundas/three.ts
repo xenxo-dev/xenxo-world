@@ -119,6 +119,8 @@ async function materialFor(kit: Kit, p: KitPart, r: Recipe): Promise<THREE.MeshS
       m.alphaTest = 0.4;
       m.side = THREE.DoubleSide;
     }
+    // La ropa por las dos caras: por el cuello o las mangas se ve su interior (la piel de debajo no está).
+    if (COVERS.has(p.cat) || p.cat === "hat") m.side = THREE.DoubleSide;
     if (p.cat === "hair" || p.cat === "beard" || p.cat === "brows" || p.cat === "lashes") m.roughness = 0.55;
     if (p.cat === "glasses") {
       m.roughness = 0.3;
@@ -144,13 +146,82 @@ function geometry(pos: Float32Array, bin: Bin, index: Uint16Array | Uint32Array)
   return g;
 }
 
-function hiddenOf(d: KitData, parts: KitPart[]): Set<number> {
-  const hidden = new Set<number>();
+/** Prendas que tapan la piel que tienen debajo (y entre las que hay que ordenar capas). */
+const COVERS = new Set(["top", "bottom", "outfit", "shoes", "gloves"]);
+/** Partes de arriba que van por dentro del pantalón. */
+const TUCKED = new Set(["top_tucked", "top_bodice", "top_turtle"]);
+/** Cuánto se mete hacia dentro la prenda de debajo donde la cubre otra (m). */
+const LAYER_GAP = 0.01;
+
+/** Vértice de la base más pesado de cada vértice de una pieza. */
+function primaryRefs(bin: Bin): Uint16Array {
+  const refs = bin.get<Uint16Array>("refs");
+  const w = bin.get<Float32Array>("w");
+  const out = new Uint16Array(refs.length / 3);
+  for (let i = 0; i < out.length; i++) {
+    let best = 0;
+    for (let k = 1; k < 3; k++) if (w[i * 3 + k]! > w[i * 3 + best]!) best = k;
+    out[i] = refs[i * 3 + best]!;
+  }
+  return out;
+}
+
+/** Vértices del cuerpo que quedan bajo una prenda (los calcula la forja: `cover`). */
+function coverOf(bin: Bin, which: "cover" | "under" = "cover"): Set<number> {
+  const set = new Set<number>();
+  if (bin.has(which)) for (const v of bin.get<Uint16Array>(which)) set.add(v);
+  else for (const v of primaryRefs(bin)) set.add(v);
+  return set;
+}
+
+/**
+ * Capas: qué piel se esconde (lo que borra cada prenda, y lo que queda del todo bajo una prenda) y qué
+ * prenda va por dentro de otra (la de dentro se mete un poco donde la cubre la de fuera: sin piel ni
+ * prenda que asome por los bordes).
+ */
+function layersOf(d: KitData, parts: KitPart[]) {
+  const hard = new Set<number>();
+  const soft = new Set<number>();
+  const covers = new Map<string, Set<number>>();
   for (const p of parts) {
     const b = d.parts.get(p.id)!;
-    if (p.cat !== "body" && b.has("delete")) for (const v of b.get<Uint16Array>("delete")) hidden.add(v);
+    if (p.cat === "body") continue;
+    if (b.has("delete")) for (const v of b.get<Uint16Array>("delete")) hard.add(v);
+    if (COVERS.has(p.cat)) {
+      for (const v of coverOf(b)) soft.add(v);
+      covers.set(p.id, coverOf(b, "under"));
+    }
   }
-  return hidden;
+  const by = (cat: string) => parts.find((p) => p.cat === cat);
+  const top = by("top") ?? by("outfit"), bottom = by("bottom"), shoes = by("shoes");
+  /** Pieza de dentro → conjunto de vértices de la base que cubre la de fuera. */
+  const inner = new Map<string, Set<number>>();
+  const under = (inside: KitPart | undefined, outside: KitPart | undefined) => {
+    if (!inside || !outside || inside === outside) return;
+    const c = covers.get(outside.id);
+    if (!c) return;
+    // Donde se solapan las dos, la piel queda tapada seguro (también junto a los bordes).
+    const ci = covers.get(inside.id);
+    if (ci) for (const v of ci) if (c.has(v)) soft.add(v);
+    const had = inner.get(inside.id);
+    inner.set(inside.id, had ? new Set([...had, ...c]) : c);
+  };
+  if (top && bottom) TUCKED.has(top.id) ? under(top, bottom) : under(bottom, top);
+  under(shoes, bottom ?? (top?.cat === "outfit" ? top : undefined));
+  return { hard, soft, inner };
+}
+
+/** Mete hacia dentro (contra su normal) los vértices de una prenda que quedan bajo otra. */
+function tuckIn(pos: Float32Array, bin: Bin, idx: Uint16Array | Uint32Array, outer: Set<number> | undefined) {
+  if (!outer) return;
+  const prim = primaryRefs(bin);
+  const n = smoothNormals(pos, idx);
+  for (let i = 0; i < prim.length; i++) {
+    if (!outer.has(prim[i]!)) continue;
+    pos[i * 3] = pos[i * 3]! - n[i * 3]! * LAYER_GAP;
+    pos[i * 3 + 1] = pos[i * 3 + 1]! - n[i * 3 + 1]! * LAYER_GAP;
+    pos[i * 3 + 2] = pos[i * 3 + 2]! - n[i * 3 + 2]! * LAYER_GAP;
+  }
 }
 
 /** Vista previa: mallas sin esqueleto en la pose de MakeHuman (brazos caídos). */
@@ -159,14 +230,15 @@ export async function buildPreview(r: Recipe): Promise<{ group: THREE.Group; sha
   const parts = partsOf(d.kit, r);
   await loadParts(d, parts);
   const shape = computeShape(d, r);
-  const hidden = hiddenOf(d, parts);
+  const layers = layersOf(d, parts);
   const group = new THREE.Group();
   let tris = 0;
   const mats = await Promise.all(parts.map((p) => materialFor(d.kit, p, r)));
   parts.forEach((p, i) => {
     const bin = d.parts.get(p.id)!;
     const pos = fitPart(p, bin, d.kit, shape.cage);
-    const idx = p.cat === "body" ? bodyIndex(bin, hidden) : bin.get<Uint16Array>("idx");
+    const idx = p.cat === "body" ? bodyIndex(bin, layers.hard, layers.soft) : bin.get<Uint16Array>("idx");
+    tuckIn(pos, bin, idx, layers.inner.get(p.id));
     tris += idx.length / 3;
     const mesh = new THREE.Mesh(geometry(pos, bin, idx), mats[i]);
     mesh.name = p.id;
@@ -188,7 +260,7 @@ export async function buildSkinned(r: Recipe): Promise<{ root: THREE.Group; bone
   await loadParts(d, parts);
   const shape = computeShape(d, r);
   const pose = tPose(kit, shape);
-  const hidden = hiddenOf(d, parts);
+  const layers = layersOf(d, parts);
   const bones = kit.rig.bones.map((b) => {
     const bone = new THREE.Bone();
     bone.name = b.name;
@@ -214,9 +286,10 @@ export async function buildSkinned(r: Recipe): Promise<{ root: THREE.Group; bone
   parts.forEach((p, i) => {
     const bin = d.parts.get(p.id)!;
     const rest = fitPart(p, bin, kit, shape.cage);
+    const idx = p.cat === "body" ? bodyIndex(bin, layers.hard, layers.soft) : bin.get<Uint16Array>("idx");
+    tuckIn(rest, bin, idx, layers.inner.get(p.id));
     const skin = partSkin(bin, d.rig);
     const pos = poseVertices(rest, skin, shape.heads, pose);
-    const idx = p.cat === "body" ? bodyIndex(bin, hidden) : bin.get<Uint16Array>("idx");
     tris += idx.length / 3;
     const g = geometry(pos, bin, idx);
     g.setAttribute("skinIndex", new THREE.BufferAttribute(skin.index, 4));

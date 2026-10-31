@@ -48,3 +48,7 @@ en el navegador (`apps/web/src/fundas/`):
 
 `inventory.py` lista las piezas instaladas con su licencia y su tamaño (para elegir qué entra).
 Con ids sueltos (`forge_kit.py hair_afro top_tee`) rehace solo esas piezas y conserva las demás.
+
+`calibrate.mjs` (con la web en marcha) renderiza las fundas neutras de frente, les pasa MediaPipe y
+mide cuánto cambia cada medida de la cara con cada ajuste: la «funda desde una foto» usa esa tabla
+(`public/fundas/vision/calibration.json`). Rehazla si cambias el kit o `face-measure.ts`.

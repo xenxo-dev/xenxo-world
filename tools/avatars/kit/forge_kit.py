@@ -483,6 +483,42 @@ def decimate(pos: np.ndarray, uv: np.ndarray, tris: np.ndarray, target_tris: int
     return np.array(npos, np.float64), np.array(nuv, np.float64), np.array(ntris, np.int64)
 
 
+COVER_CATS = {"top", "bottom", "outfit", "shoes", "gloves"}
+BODY_VERTS = 13380  # los primeros vértices de la base son el cuerpo (los demás, ayudas)
+
+
+def covered(human: np.ndarray, pos: np.ndarray, tris: np.ndarray, gap: float = 0.22, edge: float = 0.35) -> np.ndarray:
+    """Vértices del cuerpo que quedan bajo la prenda: a menos de `gap` (dm) de su superficie y a más de `edge` de sus bordes."""
+    rng = np.random.default_rng(1)
+    pts = [pos]
+    a, b, c = pos[tris[:, 0]], pos[tris[:, 1]], pos[tris[:, 2]]
+    for _ in range(12):
+        u, v = rng.random((2, len(tris), 1))
+        flip = (u + v) > 1
+        u, v = np.where(flip, 1 - u, u), np.where(flip, 1 - v, v)
+        pts.append(a + (b - a) * u + (c - a) * v)
+    tree = cKDTree(np.concatenate(pts))
+    d, _ = tree.query(human[:BODY_VERTS])
+    under = d < gap
+    if edge <= 0:
+        return np.where(under)[0]
+    # Nada cerca de los bordes de la prenda (cuello, mangas, bajos): ahí se vería el hueco.
+    key = {}
+    weld = np.array([key.setdefault(tuple(np.round(p, 4)), i) for i, p in enumerate(pos)])
+    count: dict[tuple[int, int], int] = {}
+    for t in tris:
+        for i, j in ((0, 1), (1, 2), (2, 0)):
+            e = tuple(sorted((weld[t[i]], weld[t[j]])))
+            count[e] = count.get(e, 0) + 1
+    edges = np.array([e for e, n in count.items() if n == 1])
+    if len(edges):
+        ea, eb = pos[edges[:, 0]], pos[edges[:, 1]]
+        bpts = np.concatenate([ea + (eb - ea) * k for k in np.linspace(0, 1, 6)])
+        db, _ = cKDTree(bpts).query(human[:BODY_VERTS])
+        under &= db > edge
+    return np.where(under)[0]
+
+
 def rebind(new_pos: np.ndarray, old_pos: np.ndarray, b: dict, src: np.ndarray, s: np.ndarray) -> dict:
     """La atadura de cada vértice nuevo: la de su vértice original más cercano, con el desplazamiento corregido."""
     _, near = cKDTree(old_pos).query(new_pos)
@@ -722,6 +758,9 @@ def main() -> None:
         b.add("idx", tris, "<u2" if len(pos) < 65536 else "<u4")
         if bnd["delete"]:
             b.add("delete", np.array(bnd["delete"]), "<u2")
+        if spec["cat"] in COVER_CATS:
+            b.add("cover", covered(human, pos, tris), "<u2")  # piel que se esconde
+            b.add("under", covered(human, pos, tris, gap=0.3, edge=0), "<u2")  # para ordenar capas
         size = b.save(f"{OUT}/parts/{spec['id']}.bin")
         total += size
         entry = {"id": spec["id"], "cat": spec["cat"], "file": f"parts/{spec['id']}.bin", "bytes": size, "index": b.index,

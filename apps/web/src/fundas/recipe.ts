@@ -28,6 +28,12 @@ export interface Recipe {
 export const HAIR_COLORS = ["#1b1512", "#3b2a20", "#5a3b25", "#8a5a32", "#b8834c", "#d9b77a", "#e8d7a8", "#a33b20", "#c45a2c", "#9a9a9a", "#e8e8e8", "#3a5aa8", "#c04a8a", "#4aa86a"];
 export const CLOTH_COLORS = ["#f6f1e7", "#d8d8d8", "#7a7a7a", "#2a2a2e", "#111114", "#1e2f55", "#2f6fb0", "#36d9ff", "#2e5a3a", "#5b8f3a", "#d9a441", "#c8553d", "#8a2a2a", "#ff4fd8", "#6a4a8a", "#8a6a4a"];
 
+/** Color de muestra de cada textura de ojos (selector y funda desde una foto). */
+export const EYE_SWATCH: Record<string, string> = {
+  brown: "#4a2c1a", brownlight: "#7a5230", green: "#4f7a3a", bluegreen: "#3f7f7a", blue: "#3a6aa8",
+  lightblue: "#7aa8d8", deepblue: "#24407a", grey: "#7a8088", ice: "#b8d4e8",
+};
+
 export function defaultRecipe(base: "f" | "m" = "f"): Recipe {
   return {
     v: 1,

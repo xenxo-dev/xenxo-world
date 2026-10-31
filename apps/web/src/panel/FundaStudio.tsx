@@ -12,7 +12,7 @@ import { checkBudget, inspectGlb } from "@xenxo/assets";
 import { errorText, t, useLang, type Key } from "../i18n";
 import { removeSkin, setAvatar, uploadModel, useAccount } from "../net/account";
 import { KIT_BASE, loadKit, type Kit, type KitPart } from "../fundas/kit";
-import { CLOTH_COLORS, cleanRecipe, defaultRecipe, HAIR_COLORS, type Recipe, type Slot } from "../fundas/recipe";
+import { CLOTH_COLORS, cleanRecipe, defaultRecipe, EYE_SWATCH, HAIR_COLORS, type Recipe, type Slot } from "../fundas/recipe";
 import { buildPreview } from "../fundas/three";
 import { Button, input, Notice } from "./ui";
 
@@ -27,11 +27,6 @@ const FACE_GROUPS: Record<string, string[]> = {
   ears: ["ear_size", "ear_out", "ear_point", "neck_width"],
 };
 const CLOTH_SLOTS: Slot[] = ["outfit", "top", "bottom", "shoes", "hat", "glasses", "gloves"];
-/** Color de muestra de cada textura de ojos (solo para el selector). */
-const EYE_SWATCH: Record<string, string> = {
-  brown: "#4a2c1a", brownlight: "#7a5230", green: "#4f7a3a", bluegreen: "#3f7f7a", blue: "#3a6aa8",
-  lightblue: "#7aa8d8", deepblue: "#24407a", grey: "#7a8088", ice: "#b8d4e8",
-};
 
 export interface FundaEditing {
   hash: string;
@@ -159,7 +154,10 @@ export default function FundaStudio({ onClose, onSaved, editing, full }: { onClo
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-4">
             {!kit ? null : tab === "base" ? (
-              <BaseTab kit={kit} r={recipe} set={set} />
+              <>
+                <FromPhoto kit={kit} r={recipe} set={set} />
+                <BaseTab kit={kit} r={recipe} set={set} />
+              </>
             ) : tab === "body" ? (
               <Sliders ids={kit.body} values={recipe.body} label={(id) => t(`funda.body.${id}` as Key)} onChange={(id, v) => set((r) => ({ ...r, body: { ...r.body, [id]: v } }))} />
             ) : tab === "face" ? (
@@ -344,6 +342,57 @@ function PartGrid({ parts, value, onPick, none }: { parts: KitPart[]; value: str
 }
 
 type Setter = (fn: (r: Recipe) => Recipe) => void;
+
+/**
+ * Funda desde una foto (opcional): se analiza en el dispositivo (fundas/photo.ts) y propone cara,
+ * piel, ojos y pelo. La foto no se envía ni se guarda.
+ */
+function FromPhoto({ kit, r, set }: { kit: Kit; r: Recipe; set: Setter }) {
+  const [state, setState] = useState<"idle" | "working" | "done" | "no_face" | "turned" | "error">("idle");
+  const camera = useRef<HTMLInputElement>(null);
+  const gallery = useRef<HTMLInputElement>(null);
+  const run = async (file: File | undefined) => {
+    if (!file) return;
+    setState("working");
+    const { fromPhoto } = await import("../fundas/photo");
+    const res = await fromPhoto(file, kit, r);
+    if (!res.ok) return setState(res.reason);
+    set((x) => ({ ...x, ...res.patch, parts: { ...x.parts, ...res.patch.parts } }));
+    setState("done");
+  };
+  const input = (ref: typeof camera, capture: boolean) => (
+    <input
+      ref={ref}
+      type="file"
+      accept="image/*"
+      {...(capture ? { capture: "user" as const } : {})}
+      className="hidden"
+      onChange={(e) => {
+        void run(e.target.files?.[0]);
+        e.target.value = "";
+      }}
+    />
+  );
+  return (
+    <Section title={t("funda.photo.title")}>
+      <p className="mb-2 text-xs text-cal/60">{t("funda.photo.note")}</p>
+      <div className="flex flex-wrap gap-2">
+        <Button onClick={() => camera.current?.click()} disabled={state === "working"} className="!py-1.5 text-xs">
+          {t("funda.photo.take")}
+        </Button>
+        <Button onClick={() => gallery.current?.click()} disabled={state === "working"} className="!py-1.5 text-xs">
+          {t("funda.photo.pick")}
+        </Button>
+      </div>
+      {input(camera, true)}
+      {input(gallery, false)}
+      <p className="mt-2 text-[11px] text-cal/40">{state === "idle" ? `${t("funda.photo.tip")} ${t("funda.photo.size")}` : null}</p>
+      {state === "working" && <p className="text-xs text-neon-suave">{t("funda.photo.working")}</p>}
+      {state === "done" && <p className="text-xs text-neon-suave">{t("funda.photo.done")}</p>}
+      {(state === "no_face" || state === "turned" || state === "error") && <p className="text-xs text-red-200">{t(`funda.photo.${state}` as Key)}</p>}
+    </Section>
+  );
+}
 
 function BaseTab({ kit, r, set }: { kit: Kit; r: Recipe; set: Setter }) {
   const skins = kit.skins.filter((s) => s.id.endsWith(`_${r.base}`));

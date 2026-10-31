@@ -11,6 +11,8 @@ La excepción son las texturas generadas con IA (abajo), que tienen su propia no
   malla base, sus ajustes de cuerpo y cara, el esqueleto, las pieles y las piezas (pelo, cejas,
   barbas, ropa, calzado, gorros, gafas y guantes) de [MakeHuman](http://www.makehumancommunity.org)
   y sus paquetes de la comunidad, solo los publicados como CC0 (la lista está en `CATALOG`).
+- **Funda desde una foto**: [MediaPipe](https://ai.google.dev/edge/mediapipe) de Google (Face Landmarker y
+  su motor en WebAssembly, Apache-2.0), servidos desde xenxo (`apps/web/public/fundas/vision/NOTICE.txt`).
 - **Animaciones**: [Universal Animation Library](https://quaternius.com) de Quaternius (CC0).
 - **Kits de ciudad** (`tools/kits/kenney/`): packs de [Kenney](https://kenney.nl) (CC0), descargados el 27-10-2026. La lista está en `tools/kits/README.md`.
 - **Coche para conducir** (`tools/models/library/vehicle_car*`): «Car Concept», de los modelos de
