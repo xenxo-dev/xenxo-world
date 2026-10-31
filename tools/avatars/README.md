@@ -29,3 +29,22 @@ python3 tools/avatars/pack_avatars.py out                     # texturas WebP, p
   y los retratos en `apps/web/public/avatars/`.
 - Las animaciones VRMA valen para **cualquier** VRM, también los que sube la gente.
 - Presupuesto de avatar: 30.000 triángulos, 4 MB, texturas de 1024 px (la forja reduce pelo y ropa si hace falta).
+
+## Kit del configurador de fundas
+
+`python3 tools/avatars/kit/forge_kit.py` (con MPFB instalado como arriba; tarda unos 3 minutos)
+escribe en `apps/web/public/fundas/` lo que el configurador de la web necesita para montar una funda
+en el navegador (`apps/web/src/fundas/`):
+
+- `cage-f.bin` / `cage-m.bin`: la malla base de MakeHuman (sin dibujar) en su forma neutra de mujer y
+  de hombre, con los ajustes del cuerpo (`BODY_SLIDERS`) como diferencias; `face.bin`, los de la cara
+  (`FACE_SLIDERS`, compartidos); `rig.bin`, el esqueleto `game_engine` (cada articulación es la media
+  de unos vértices de la base) y los pesos de piel.
+- `parts/*.bin`: cada pieza de `CATALOG` (solo CC0, nada que imite a nadie) con su atadura a la base
+  (formato mhclo: tres vértices, pesos y desplazamiento), simplificada al presupuesto de su categoría
+  (`BUDGET`: cualquier combinación cabe en los 30.000 triángulos de un avatar); `tex/` (WebP, con el
+  color de cada isla UV extendido) y `thumbs/`.
+- `kit.json`: el índice de todo.
+
+`inventory.py` lista las piezas instaladas con su licencia y su tamaño (para elegir qué entra).
+Con ids sueltos (`forge_kit.py hair_afro top_tee`) rehace solo esas piezas y conserva las demás.

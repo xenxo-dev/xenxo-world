@@ -7,6 +7,10 @@ La excepción son las texturas generadas con IA (abajo), que tienen su propia no
   `apps/web/src/world/material-library.json` y `apps/web/src/world/sky-day.json`.
 - **Personas de serie**: generadas con [MPFB / MakeHuman](https://static.makehumancommunity.org)
   y sus paquetes de recursos CC0 (pieles, pelo, ropa).
+- **Configurador de fundas** (`apps/web/public/fundas/`, de `tools/avatars/kit/forge_kit.py`): la
+  malla base, sus ajustes de cuerpo y cara, el esqueleto, las pieles y las piezas (pelo, cejas,
+  barbas, ropa, calzado, gorros, gafas y guantes) de [MakeHuman](http://www.makehumancommunity.org)
+  y sus paquetes de la comunidad, solo los publicados como CC0 (la lista está en `CATALOG`).
 - **Animaciones**: [Universal Animation Library](https://quaternius.com) de Quaternius (CC0).
 - **Kits de ciudad** (`tools/kits/kenney/`): packs de [Kenney](https://kenney.nl) (CC0), descargados el 27-10-2026. La lista está en `tools/kits/README.md`.
 - **Coche para conducir** (`tools/models/library/vehicle_car*`): «Car Concept», de los modelos de

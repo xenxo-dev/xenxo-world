@@ -40,6 +40,8 @@ import { ModDistricts, MyDistrict } from "./District";
 import { ConnectedGames } from "./Games";
 import { ModelPicker } from "./ModelPicker";
 import { Block, Button, card, input, Label, Notice, Segmented } from "./ui";
+import { recipeInGlb } from "../fundas/recipe";
+import type { FundaEditing } from "./FundaStudio";
 
 export interface CustomizeProps {
   guestName: string;
@@ -52,6 +54,8 @@ export interface CustomizeProps {
 
 /** La vista previa 3D se descarga aparte (Three.js) y solo cuando se ve la sección Cuenta. */
 const AvatarPreview = lazy(() => import("./AvatarPreview"));
+/** El configurador de fundas: Three.js y el kit, solo al abrirlo. */
+const FundaStudio = lazy(() => import("./FundaStudio"));
 
 /** Cuenta: quién eres (cuenta o invitado), tu personaje con su vista previa y tu armario. */
 export function AccountSection(props: CustomizeProps) {
@@ -169,6 +173,10 @@ function Wardrobe() {
   const [note, setNote] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  /** Configurador abierto (para una nueva o para editar una con su receta). */
+  const [studio, setStudio] = useState<{ editing: FundaEditing | null } | null>(null);
+  /** Receta de la funda propia que se ve (si se hizo en el configurador). */
+  const [recipeOf, setRecipeOf] = useState<FundaEditing | null>(null);
 
   useEffect(() => {
     if (!user) return setSkins([]);
@@ -192,6 +200,22 @@ function Wardrobe() {
   const shownHash = selected ?? worn ?? AVATAR_PRESETS[0]!.hash;
   const shown = all.find((l) => l.hash === shownHash) ?? { hash: shownHash, name: t("wardrobe.yours"), own: true };
   const isWorn = shown.hash === worn;
+
+  useEffect(() => {
+    setRecipeOf(null);
+    if (!shown.own) return;
+    let alive = true;
+    fetch(assetUrl(shown.hash))
+      .then((r) => (r.ok ? r.arrayBuffer() : null))
+      .then((b) => {
+        const recipe = b ? recipeInGlb(new Uint8Array(b)) : null;
+        if (alive && recipe) setRecipeOf({ hash: shown.hash, recipe, label: shown.name });
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [shown.hash, shown.own, shown.name]);
 
   const run = async (fn: () => Promise<void>, ok?: string) => {
     setBusy(true);
@@ -251,12 +275,36 @@ function Wardrobe() {
               {t("wardrobe.wear")}
             </Button>
           )}
+          {recipeOf && recipeOf.hash === shown.hash && (
+            <Button className="mt-2 w-full" onClick={() => setStudio({ editing: recipeOf })}>
+              {t("funda.edit")}
+            </Button>
+          )}
           {!worn && <p className="mt-2 text-center text-xs text-cal/40">{t("wardrobe.randomNote")}</p>}
         </div>
       </div>
 
       <div className="min-w-0">
-        {/* Tus personajes */}
+        {/* Configurador de fundas */}
+        <button onClick={() => setStudio({ editing: null })} className="neon-tube mb-4 w-full rounded-2xl px-4 py-3 text-left">
+          <span className="display block text-base font-semibold">{t("funda.open")}</span>
+          <span className="block text-xs text-cal/70">{t("funda.openNote")}</span>
+        </button>
+        {studio && (
+          <Suspense fallback={null}>
+            <FundaStudio
+              editing={studio.editing}
+              full={own.length >= max}
+              onClose={() => setStudio(null)}
+              onSaved={(hash) => {
+                setSelected(hash);
+                setStudio(null);
+                setNote({ tone: "ok", text: t("funda.saved") });
+              }}
+            />
+          </Suspense>
+        )}
+        {/* Tus fundas */}
         <p className="mb-2 text-sm font-medium text-cal/80">
           {t("wardrobe.mine")} <span className="font-normal text-cal/45">({own.length}/{max})</span>
         </p>
