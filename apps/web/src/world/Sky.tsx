@@ -13,7 +13,8 @@ export const SKY = {
   night: { top: "#04060f", horizon: "#3a1c5c", ground: "#06070d", fog: "#120d26" },
 } as const;
 
-export function Sky({ ambience }: { ambience: Ambience }) {
+/** `top`: otro azul para lo alto (en el nexo, el de su panorámica). */
+export function Sky({ ambience, top }: { ambience: Ambience; top?: string }) {
   const material = useMemo(
     () =>
       new THREE.ShaderMaterial({
@@ -62,11 +63,11 @@ export function Sky({ ambience }: { ambience: Ambience }) {
 
   useEffect(() => {
     const k = SKY[ambience];
-    material.uniforms.top!.value.set(k.top);
+    material.uniforms.top!.value.set(top ?? k.top);
     material.uniforms.horizon!.value.set(k.horizon);
     material.uniforms.ground!.value.set(k.ground);
     material.uniforms.night!.value = ambience === "night" ? 1 : 0;
-  }, [ambience, material]);
+  }, [ambience, top, material]);
 
   // La esfera va con la cámara: si se quedara en el origen, en los distritos (256 m) parte de ella
   // quedaría más lejos que el plano lejano (400 m) y se vería recortada como una cúpula.

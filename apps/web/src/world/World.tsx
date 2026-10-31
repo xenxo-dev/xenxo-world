@@ -17,7 +17,7 @@ import { Player } from "./Player";
 import { Portals } from "./Portals";
 import { Sky, SKY } from "./Sky";
 import { Skyline } from "./Skyline";
-import { NexoBackdrop } from "./NexoBackdrop";
+import { NexoBackdrop, PANO_TONES } from "./NexoBackdrop";
 import { NexoCity } from "./NexoCity";
 import { DistrictSkyline } from "./DistrictSkyline";
 import { Pedestrians, Traffic } from "./CityLife";
@@ -400,10 +400,10 @@ function Scene({ active }: { active: boolean }) {
       <PerformanceMonitor bounds={(hz) => (hz > 90 ? [60, 100] : [45, 58])} flipflops={3} onDecline={() => graphics.decline()} />
       {daySky ? <primitive key="sky" attach="background" object={daySky.tex} /> : <color key="color" attach="background" args={[sky.fog]} />}
       <fog attach="fog" args={[sky.fog, ambience === "night" ? 45 : 70, ambience === "night" ? 230 : 260]} />
-      {!skyReady && <Sky ambience={ambience} />}
+      {!skyReady && <Sky ambience={ambience} top={inNexo ? PANO_TONES[ambience].top : undefined} />}
       {inPlaza && <Skyline count={f.skyline} ambience={ambience} pbr={f.pbr} />}
       {inNexo && <NexoBackdrop ambience={ambience} hd={f.textures >= 1024} />}
-      {inNexo && <NexoCity ambience={ambience} density={f.nexoCity} />}
+      {inNexo && <NexoCity ambience={ambience} density={f.nexoCity} features={f} />}
       {!inNexo && !inPlaza && <DistrictSkyline chunk={place} density={f.nexoCity} ambience={ambience} />}
       {!inNexo && !inPlaza && (
         <Suspense fallback={null}>

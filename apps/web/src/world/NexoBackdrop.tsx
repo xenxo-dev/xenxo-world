@@ -4,8 +4,11 @@
  * noche. Son imágenes generadas con IA, guardadas en el repo y servidas desde xenxo
  * (tools/materials/generated/nexo-panorama, CREDITS.md). Decorado del cliente, no datos del mundo.
  *
- * Un cilindro abierto con una textura (un draw call, sin luces): arriba funde con el cielo y por
- * debajo del horizonte desaparece (ahí se ve la ciudad en 3D). 4096 px en gafas y móvil; 8192 en escritorio.
+ * Un cilindro abierto con una textura (un draw call, sin luces) que se ve entera: también la
+ * ciudad de la foto por debajo del horizonte, hasta unos 25° hacia abajo. Arriba funde con el cielo
+ * (Sky, con el mismo azul de la foto) y abajo con la bruma del abismo, del mismo tono que el pie de
+ * la foto (PANO_TONES). Más abajo, mirando hacia la plataforma, manda la ciudad en 3D (NexoCity),
+ * que se desvanece justo donde empieza la foto. 4096 px en gafas y móvil; 8192 en escritorio.
  */
 import { useEffect, useMemo, useState } from "react";
 import * as THREE from "three";
@@ -13,6 +16,15 @@ import { CHUNK_SIZE } from "@xenxo/protocol";
 import type { Ambience } from "./graphics";
 
 const RADIUS = 240;
+
+/**
+ * Colores medidos en las propias imágenes: el cielo de arriba (para el Sky del nexo) y el pie de
+ * la foto (la bruma del abismo y de la ciudad en 3D), para que no se note dónde acaba cada cosa.
+ */
+export const PANO_TONES: Record<Ambience, { top: string; foot: string }> = {
+  day: { top: "#72a8de", foot: "#66748a" },
+  night: { top: "#091432", foot: "#393c60" },
+};
 /** Fila del horizonte en cada franja (0 arriba, 1 abajo), medida en las imágenes. */
 const HORIZON: Record<Ambience, number> = { night: 0.49, day: 0.445 };
 
@@ -38,17 +50,17 @@ const material = () =>
     transparent: true,
     depthWrite: false,
     side: THREE.BackSide,
-    uniforms: { map: { value: null as THREE.Texture | null }, gain: { value: 1 }, cut: { value: 0.5 } },
+    uniforms: { map: { value: null as THREE.Texture | null }, gain: { value: 1 } },
     vertexShader: /* glsl */ `
       varying vec2 vUv;
       void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
     fragmentShader: /* glsl */ `
-      uniform sampler2D map; uniform float gain; uniform float cut;
+      uniform sampler2D map; uniform float gain;
       varying vec2 vUv;
       void main() {
         vec4 c = texture2D(map, vec2(1.0 - vUv.x, vUv.y));
-        // Por debajo del horizonte no hay imagen: ahí está la ciudad en 3D (NexoCity), entre la bruma.
-        float a = smoothstep(cut - 0.01, cut + 0.05, vUv.y) * smoothstep(1.0, 0.86, vUv.y);
+        // La foto entera: abajo funde con la bruma del abismo y arriba con el cielo.
+        float a = smoothstep(0.0, 0.04, vUv.y) * smoothstep(1.0, 0.86, vUv.y);
         gl_FragColor = vec4(c.rgb * gain, a);
         #include <colorspace_fragment>
       }`,
@@ -65,7 +77,6 @@ export function NexoBackdrop({ ambience, hd }: { ambience: Ambience; hd: boolean
         if (!alive) return;
         mat.uniforms.map!.value = t;
         mat.uniforms.gain!.value = ambience === "night" ? 1.15 : 1;
-        mat.uniforms.cut!.value = 1 - HORIZON[ambience];
         const img = t.image as { width: number; height: number };
         setAspect(img.width / img.height);
       })
