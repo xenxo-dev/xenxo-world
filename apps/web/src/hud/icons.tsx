@@ -90,6 +90,45 @@ export function CarIcon() {
   );
 }
 
+/** Acelerar (dos flechas hacia arriba). */
+export function GasIcon() {
+  return (
+    <svg aria-hidden className="h-5 w-5" {...svg}>
+      <path d="M6.5 12.5 12 7l5.5 5.5M6.5 18 12 12.5l5.5 5.5" />
+    </svg>
+  );
+}
+
+/** Frenar y marcha atrás (dos flechas hacia abajo). */
+export function BrakeIcon() {
+  return (
+    <svg aria-hidden className="h-5 w-5" {...svg}>
+      <path d="M6.5 6 12 11.5 17.5 6M6.5 11.5 12 17l5.5-5.5" />
+    </svg>
+  );
+}
+
+/** Freno de mano (una P en un círculo). */
+export function HandbrakeIcon() {
+  return (
+    <svg aria-hidden className="h-5 w-5" {...svg}>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M10 16.5v-9h2.6a2.7 2.7 0 0 1 0 5.4H10" />
+    </svg>
+  );
+}
+
+/** Volante (girar). */
+export function SteerIcon() {
+  return (
+    <svg aria-hidden className="h-5 w-5" {...svg}>
+      <circle cx="12" cy="12" r="8.5" />
+      <circle cx="12" cy="12" r="2" />
+      <path d="M3.6 10.5 10 12M20.4 10.5 14 12M12 14v6.5" />
+    </svg>
+  );
+}
+
 /** Estilo común de los botones de icono del HUD. */
 export const hudIconButton =
   "grid h-11 w-11 place-items-center rounded-xl border border-cal/10 bg-noche/70 text-[#f4f7ff] backdrop-blur transition hover:border-neon/50 hover:text-neon aria-pressed:border-neon/60 aria-pressed:text-neon active:scale-95";

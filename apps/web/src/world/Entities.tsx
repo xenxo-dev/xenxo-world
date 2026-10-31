@@ -81,6 +81,7 @@ function MeshAsset({ hash, features, ambience, holo, dim }: { hash: string; feat
         if (!out) {
           const ref = parseLibraryName(m.name);
           const ao = (m as THREE.MeshStandardMaterial).aoMap ?? null;
+          if (ao) bakedAo(ao);
           out = ref ? libraryMaterial(ref, features, ambience, ao, dim) : features.pbr ? m : lightweight(m);
           if (m.name === "xenxo-glow") out = paintedLights(out, ambience);
           materialCache.set(key, out);
@@ -106,6 +107,21 @@ function MeshAsset({ hash, features, ambience, holo, dim }: { hash: string; feat
     return c;
   }, [gltf, hash, shadows, features, ambience, holo, dim]);
   return <primitive object={scene} />;
+}
+
+/**
+ * Oclusión horneada (la forja): cada modelo la lleva en un atlas donde también están las caras que
+ * nunca se ven (el suelo bajo las calles, la base del distrito), que salen negras. Con mipmaps, al
+ * mirar el suelo de lejos o de canto se mezclan esos texeles negros con los de al lado y aparecen
+ * manchas oscuras que se mueven con la cámara. La oclusión es suave: sin mipmaps se ve igual de
+ * cerca y no se cuela nada (y ocupa un tercio menos de memoria).
+ */
+function bakedAo(t: THREE.Texture) {
+  if (t.userData.bakedAo) return;
+  t.userData.bakedAo = true;
+  t.generateMipmaps = false;
+  t.minFilter = THREE.LinearFilter;
+  t.needsUpdate = true;
 }
 
 /** Brillo de los emisivos: por encima de 1 para que el bloom los haga resplandecer, sobre todo de noche. */

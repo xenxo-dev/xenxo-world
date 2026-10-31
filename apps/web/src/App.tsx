@@ -25,6 +25,7 @@ import { closeGame, openGame, useOpenGame } from "./games/state";
 import { gameBySlug, gameRoute } from "./net/games";
 import { Panel, type Section } from "./panel/Panel";
 import { TouchJoystick } from "./world/TouchJoystick";
+import { TouchCarControls } from "./world/TouchCarControls";
 import { ambient } from "./world/ambient-audio";
 import { splashDone, splashProgress } from "./splash";
 
@@ -243,9 +244,10 @@ export function App() {
             )}
           </div>
           <CarNotice className={`absolute left-1/2 top-24 -translate-x-1/2 px-3 py-1.5 text-center text-sm text-cal ${hudBox}`} />
-          <CarSpeed className={`absolute left-1/2 top-[max(1rem,env(safe-area-inset-top))] -translate-x-1/2 px-3 py-1 ${hudBox}`} />
+          {/* En pantallas estrechas, por debajo de la fila de arriba (si no, tapa a la gente del lugar). */}
+          <CarSpeed className={`absolute left-1/2 top-[calc(max(1rem,env(safe-area-inset-top))+3.5rem)] -translate-x-1/2 px-3 py-1 sm:top-[max(1rem,env(safe-area-inset-top))] ${hudBox}`} />
           {touch ? (
-            <TouchJoystick />
+            driving.on ? <TouchCarControls /> : <TouchJoystick />
           ) : (
             <p className={`absolute bottom-5 left-1/2 -translate-x-1/2 px-3 py-1.5 text-center text-xs text-cal/70 ${hudBox}`}>
               {driving.on ? t("car.hint") : t("hud.desktopHint")}
