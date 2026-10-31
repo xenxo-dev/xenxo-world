@@ -44,7 +44,8 @@ export default function FundaStudio({ onClose, onSaved, editing, full }: { onClo
   const [name, setName] = useState(editing?.label ?? "");
   const [state, setState] = useState<"idle" | "saving" | "error" | "saved">("idle");
   const [error, setError] = useState("");
-  const [model, setModel] = useState<{ group: THREE.Group; tris: number } | null>(null);
+  const [model, setModel] = useState<{ group: THREE.Group; tris: number; top: number } | null>(null);
+  const [cam, setCam] = useState<CamCmd>({ view: "body", n: 0, zoom: 1 });
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
@@ -88,7 +89,9 @@ export default function FundaStudio({ onClose, onSaved, editing, full }: { onClo
   }, [onClose]);
 
   const set = (fn: (r: Recipe) => Recipe) => setRecipe((r) => (kit ? cleanRecipe(fn(r), kit) : fn(r)));
-  const face = tab === "face" || tab === "hair";
+  // La pestaña elige la vista (cara para la cara y el pelo); los botones la cambian cuando se quiera.
+  useEffect(() => setCam((c) => ({ ...c, view: tab === "face" || tab === "hair" ? "face" : "body" })), [tab]);
+  const zoom = (f: number) => setCam((c) => ({ ...c, n: c.n + 1, zoom: f }));
 
   const save = async () => {
     if (!kit || !user) return;
@@ -131,11 +134,28 @@ export default function FundaStudio({ onClose, onSaved, editing, full }: { onClo
             <directionalLight position={[-2.5, 1.6, -1.5]} intensity={1.2} color="#9beaff" />
             <Suspense fallback={null}>{model && <primitive object={model.group} />}</Suspense>
             <Floor />
-            <CameraRig face={face} />
+            <CameraRig cmd={cam} top={model?.top ?? 1.7} />
           </Canvas>
           {!model && !failed && <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-cal/50">{t("funda.loading")}</p>}
           {failed && <p className="absolute inset-0 flex items-center justify-center p-6 text-center text-sm text-red-200">{t("funda.error")}</p>}
-          <p className="pointer-events-none absolute bottom-2 left-3 text-xs text-cal/40">{t("funda.dragHint")}</p>
+          <p className="pointer-events-none absolute bottom-2 left-3 hidden text-xs text-cal/40 sm:block">{t("funda.dragHint")}</p>
+          <div className="absolute right-3 top-3 flex flex-col gap-1.5">
+            <div className="flex overflow-hidden rounded-xl border border-cal/10 bg-noche/70 text-xs backdrop-blur">
+              {(["body", "face"] as const).map((v) => (
+                <button key={v} onClick={() => setCam((c) => ({ ...c, view: v }))} aria-pressed={cam.view === v} className={`px-3 py-1.5 ${cam.view === v ? "bg-neon/15 text-neon" : "text-cal/70 hover:text-cal"}`}>
+                  {t(`funda.view.${v}` as Key)}
+                </button>
+              ))}
+            </div>
+            <div className="ml-auto flex gap-1.5">
+              <button onClick={() => zoom(0.75)} aria-label={t("funda.zoomIn")} title={t("funda.zoomIn")} className="grid h-9 w-9 place-items-center rounded-xl border border-cal/10 bg-noche/70 text-lg text-cal/85 backdrop-blur hover:text-neon">
+                +
+              </button>
+              <button onClick={() => zoom(1.33)} aria-label={t("funda.zoomOut")} title={t("funda.zoomOut")} className="grid h-9 w-9 place-items-center rounded-xl border border-cal/10 bg-noche/70 text-lg text-cal/85 backdrop-blur hover:text-neon">
+                −
+              </button>
+            </div>
+          </div>
         </div>
         {/* Controles */}
         <div className="flex min-h-0 flex-col border-t border-cal/10 md:border-l md:border-t-0">
@@ -223,26 +243,82 @@ function dispose(g: THREE.Group) {
 }
 
 const _off = new THREE.Vector3();
+const _goal = new THREE.Vector3();
 
-/** Cámara: cuerpo entero o la cara (para la cara y el pelo), con un paso suave entre las dos. */
-function CameraRig({ face }: { face: boolean }) {
+type View = "face" | "body";
+/** Órdenes de la vista para la cámara (botones de zoom y de cara/cuerpo). */
+export interface CamCmd {
+  view: View;
+  /** Se incrementa con cada pulsación de zoom; `zoom` es el factor de esa pulsación. */
+  n: number;
+  zoom: number;
+}
+
+/**
+ * Cámara: va sola a la cara o al cuerpo entero (según la pestaña o los botones) a la altura real de
+ * la funda; luego queda libre para girar, acercar o alejar (rueda, pellizco o botones) y desplazar.
+ */
+function CameraRig({ cmd, top }: { cmd: CamCmd; top: number }) {
   const controls = useRef<ComponentRef<typeof OrbitControls>>(null);
   const { camera } = useThree();
-  const goal = useMemo(() => ({ target: new THREE.Vector3(), dist: 4.4 }), []);
-  goal.target.set(0, face ? 1.58 : 0.92, 0);
-  goal.dist = face ? 1.15 : 4.4;
+  const goal = useRef({ y: 0.9, dist: 4.4, active: true, level: true });
+  const last = useRef({ view: "", top: 0, n: -1 });
+  useEffect(() => {
+    const c = controls.current;
+    const g = goal.current;
+    const l = last.current;
+    if (cmd.view !== l.view || Math.abs(top - l.top) > 0.01) {
+      // La cara: a la altura de los ojos (unos 11 cm bajo lo alto de la cabeza).
+      g.y = cmd.view === "face" ? top - 0.11 : top * 0.52;
+      g.dist = cmd.view === "face" ? 0.95 : Math.max(3, top * 2.65);
+      g.active = true;
+      g.level = true;
+    } else if (cmd.n !== l.n && c) {
+      g.y = c.target.y;
+      g.dist = Math.min(7, Math.max(0.35, camera.position.distanceTo(c.target) * cmd.zoom));
+      g.active = true;
+      g.level = false;
+    }
+    last.current = { view: cmd.view, top, n: cmd.n };
+  }, [cmd, top, camera]);
   useFrame((_, dt) => {
     const c = controls.current;
-    if (!c) return;
-    const k = Math.min(1, dt * 5);
-    c.target.lerp(goal.target, k);
+    const g = goal.current;
+    if (!c || !g.active) return;
+    const k = Math.min(1, dt * 6);
+    _goal.set(0, g.y, 0);
+    c.target.lerp(_goal, k);
     const off = _off.copy(camera.position).sub(c.target);
     const d = off.length();
-    off.setLength(d + (goal.dist - d) * k);
+    // Al cambiar de vista, la cámara vuelve a la altura de lo que mira (de frente, no desde arriba).
+    if (g.level) off.y += (d * 0.06 - off.y) * k;
+    off.setLength(d + (g.dist - d) * k);
     camera.position.copy(c.target).add(off);
     c.update();
+    if (c.target.distanceTo(_goal) < 0.002 && Math.abs(d - g.dist) < 0.004 && (!g.level || Math.abs(off.y - d * 0.06) < 0.004)) g.active = false;
   });
-  return <OrbitControls ref={controls} enablePan={false} enableZoom={false} minPolarAngle={Math.PI / 3} maxPolarAngle={Math.PI / 1.85} />;
+  return (
+    <OrbitControls
+      ref={controls}
+      enablePan
+      screenSpacePanning
+      enableZoom
+      zoomSpeed={0.8}
+      minDistance={0.35}
+      maxDistance={7}
+      minPolarAngle={Math.PI / 4}
+      maxPolarAngle={Math.PI / 1.7}
+      onStart={() => (goal.current.active = false)}
+      onChange={() => {
+        // Que el centro no se salga de la funda al desplazar.
+        const c = controls.current;
+        if (!c) return;
+        c.target.x = Math.max(-0.6, Math.min(0.6, c.target.x));
+        c.target.z = Math.max(-0.4, Math.min(0.4, c.target.z));
+        c.target.y = Math.max(0.05, Math.min(top + 0.1, c.target.y));
+      }}
+    />
+  );
 }
 
 function Floor() {

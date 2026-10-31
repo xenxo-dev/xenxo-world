@@ -225,7 +225,7 @@ function tuckIn(pos: Float32Array, bin: Bin, idx: Uint16Array | Uint32Array, out
 }
 
 /** Vista previa: mallas sin esqueleto en la pose de MakeHuman (brazos caídos). */
-export async function buildPreview(r: Recipe): Promise<{ group: THREE.Group; shape: Shape; tris: number }> {
+export async function buildPreview(r: Recipe): Promise<{ group: THREE.Group; shape: Shape; tris: number; top: number }> {
   const d = await kitData();
   const parts = partsOf(d.kit, r);
   await loadParts(d, parts);
@@ -233,6 +233,7 @@ export async function buildPreview(r: Recipe): Promise<{ group: THREE.Group; sha
   const layers = layersOf(d, parts);
   const group = new THREE.Group();
   let tris = 0;
+  let top = 1.7;
   const mats = await Promise.all(parts.map((p) => materialFor(d.kit, p, r)));
   parts.forEach((p, i) => {
     const bin = d.parts.get(p.id)!;
@@ -245,8 +246,13 @@ export async function buildPreview(r: Recipe): Promise<{ group: THREE.Group; sha
     mesh.renderOrder = p.z;
     mesh.castShadow = true;
     group.add(mesh);
+    // Lo alto de la cabeza (sin pelo ni gorro): para encuadrar la cara a la altura de cada funda.
+    if (p.cat === "body") {
+      mesh.geometry.computeBoundingBox();
+      top = mesh.geometry.boundingBox!.max.y;
+    }
   });
-  return { group, shape, tris };
+  return { group, shape, tris, top };
 }
 
 /**
