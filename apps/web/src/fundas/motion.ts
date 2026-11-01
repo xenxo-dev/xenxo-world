@@ -1,0 +1,91 @@
+/**
+ * La funda en movimiento, dentro del configurador. Se monta con su esqueleto en pose T (la misma que
+ * se exporta: three.ts → buildSkinned), se arma un VRM en memoria (sin exportar ni volver a cargar) y
+ * se anima con lo mismo que en el mundo (world/animation.ts): reposo, andar, trotar, correr, saltar y
+ * los gestos. Así se ve cómo se moverá esa funda antes de guardarla.
+ */
+import * as THREE from "three";
+import { VRM, VRMHumanoid, type VRM1Meta, type VRMHumanBones } from "@pixiv/three-vrm";
+import { VrmAnimator } from "../world/animation";
+import type { Recipe } from "./recipe";
+import { buildSkinned, kitData } from "./three";
+
+/** Lo que se puede ver hacer a la funda. */
+export type Act = "idle" | "walk" | "jog" | "sprint" | "jump" | "dance" | "wave" | "clap";
+export const ACTS: Act[] = ["idle", "walk", "jog", "sprint", "jump", "dance", "wave", "clap"];
+
+/** Velocidad (m/s) de cada desplazamiento, en el sitio (como en una cinta). */
+const SPEED: Partial<Record<Act, number>> = { walk: 1.25, jog: 3.0, sprint: 5.8 };
+/** Gesto de cada acción (los que van una vez se repiten cada poco). */
+const EMOTE: Partial<Record<Act, { name: string; every?: number }>> = {
+  dance: { name: "dance" },
+  wave: { name: "wave", every: 3.2 },
+  clap: { name: "clap" },
+};
+/** Salto: ciclo de 1,6 s, en el aire de 0,15 a 0,85 s, hasta 40 cm. */
+const JUMP = { cycle: 1.6, from: 0.15, air: 0.7, height: 0.4 };
+
+export interface MovingFunda {
+  root: THREE.Group;
+  /** ¿Han llegado ya las animaciones? (hasta entonces estaría en pose T). */
+  ready(): boolean;
+  update(dt: number, act: Act): void;
+  dispose(): void;
+}
+
+export async function buildMoving(r: Recipe): Promise<MovingFunda> {
+  const { kit } = await kitData();
+  const { root, bones, meshes } = await buildSkinned(r);
+  const humanBones: Record<string, { node: THREE.Object3D }> = {};
+  kit.rig.bones.forEach((b, i) => {
+    const name = kit.humanoid[b.name];
+    if (name) humanBones[name] = { node: bones[i]! };
+  });
+  const humanoid = new VRMHumanoid(humanBones as unknown as VRMHumanBones);
+  root.add(humanoid.normalizedHumanBonesRoot);
+  const meta: VRM1Meta = { metaVersion: "1", name: "funda", authors: ["xenxo.io"], licenseUrl: "https://vrm.dev/licenses/1.0/" };
+  const vrm = new VRM({ scene: root, meta, humanoid });
+  // Recorte con una esfera holgada (cabe cualquier gesto), como los personajes del mundo.
+  for (const m of meshes) {
+    m.geometry.computeBoundingBox();
+    const sphere = m.geometry.boundingBox!.clone().expandByScalar(0.6).getBoundingSphere(new THREE.Sphere());
+    m.boundingSphere = sphere;
+    m.geometry.boundingSphere = sphere.clone();
+  }
+  const animator = new VrmAnimator(vrm);
+  let t = 0;
+  let last: Act | null = null;
+  return {
+    root,
+    ready: () => animator.ready,
+    update(dt, act) {
+      if (act !== last) {
+        t = 0;
+        last = act;
+      }
+      t += dt;
+      let airborne = false;
+      root.position.y = 0;
+      if (act === "jump") {
+        const u = ((t % JUMP.cycle) - JUMP.from) / JUMP.air;
+        if (u > 0 && u < 1) {
+          airborne = true;
+          root.position.y = 4 * JUMP.height * u * (1 - u);
+        }
+      }
+      const e = EMOTE[act];
+      // Un gesto que va una vez: se suelta un momento para que vuelva a empezar.
+      const emote = e && !(e.every && t % e.every < 0.12) ? e.name : null;
+      animator.update(dt, SPEED[act] ?? 0, airborne, emote);
+      vrm.update(dt);
+    },
+    dispose() {
+      animator.dispose();
+      root.removeFromParent();
+      for (const m of meshes) {
+        m.geometry.dispose();
+        (m.material as THREE.Material).dispose(); // las texturas quedan en su caché (three.ts, paint.ts)
+      }
+    },
+  };
+}

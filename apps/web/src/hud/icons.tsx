@@ -159,3 +159,21 @@ export function FlagIcon() {
     </svg>
   );
 }
+
+/** Reproducir (ver la funda en movimiento). */
+export function PlayIcon() {
+  return (
+    <svg aria-hidden className="h-4 w-4" {...svg}>
+      <path d="M7 4.5v15l12-7.5z" />
+    </svg>
+  );
+}
+
+/** Parar. */
+export function StopIcon() {
+  return (
+    <svg aria-hidden className="h-4 w-4" {...svg}>
+      <rect x="6" y="6" width="12" height="12" rx="1.5" />
+    </svg>
+  );
+}

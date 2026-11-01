@@ -19,6 +19,8 @@ import { buildPreview } from "../fundas/three";
 import { Button, input, Notice } from "./ui";
 import { PartGrid, Section, Sliders, Swatches, type Setter } from "./funda-ui";
 import { Customize, preset, PRESETS, SkinTab, SynthTab } from "./FundaLooks";
+import { ACTS, buildMoving, type Act, type MovingFunda } from "../fundas/motion";
+import { PlayIcon, StopIcon } from "../hud/icons";
 
 type Tab = "base" | "body" | "face" | "skin" | "hair" | "clothes" | "synth";
 const TABS: Tab[] = ["base", "body", "face", "skin", "hair", "clothes", "synth"];
@@ -51,6 +53,9 @@ export default function FundaStudio({ onClose, onSaved, editing, full }: { onClo
   const [model, setModel] = useState<{ group: THREE.Group; tris: number; top: number } | null>(null);
   const [cam, setCam] = useState<CamCmd>({ view: "body", n: 0, zoom: 1 });
   const [failed, setFailed] = useState(false);
+  // Ver la funda en movimiento (con las animaciones del mundo).
+  const [moving, setMoving] = useState(false);
+  const [act, setAct] = useState<Act>("walk");
 
   useEffect(() => {
     let alive = true;
@@ -133,16 +138,44 @@ export default function FundaStudio({ onClose, onSaved, editing, full }: { onClo
         {/* Vista 3D */}
         <div className="relative min-h-0 bg-[radial-gradient(circle_at_50%_70%,rgb(62_230_255/0.12),transparent_65%)]">
           <Canvas dpr={[1, 1.75]} camera={{ position: [0, 1.0, 4.4], fov: 28 }} gl={{ antialias: true, alpha: true }}>
+            <StudioEnv />
             <hemisphereLight args={["#dfe9ff", "#20182c", 1.2]} />
             <directionalLight position={[1.5, 3, 3]} intensity={2.1} />
             <directionalLight position={[-2.5, 1.6, -1.5]} intensity={1.2} color="#9beaff" />
-            <Suspense fallback={null}>{model && <primitive object={model.group} />}</Suspense>
+            <Suspense fallback={null}>{moving ? <MovingModel r={recipe} act={act} still={model?.group ?? null} /> : model && <primitive object={model.group} />}</Suspense>
             <Floor />
             <CameraRig cmd={cam} top={model?.top ?? 1.7} />
           </Canvas>
           {!model && !failed && <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-cal/50">{t("funda.loading")}</p>}
           {failed && <p className="absolute inset-0 flex items-center justify-center p-6 text-center text-sm text-red-200">{t("funda.error")}</p>}
-          <p className="pointer-events-none absolute bottom-2 left-3 hidden text-xs text-cal/40 sm:block">{t("funda.dragHint")}</p>
+          {!moving && <p className="pointer-events-none absolute bottom-2 left-3 hidden text-xs text-cal/40 sm:block">{t("funda.dragHint")}</p>}
+          <div className="absolute left-3 top-3">
+            <button
+              onClick={() => {
+                setMoving((m) => !m);
+                setCam((c) => ({ ...c, view: "body" }));
+              }}
+              aria-pressed={moving}
+              className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs backdrop-blur ${moving ? "border-neon/60 bg-neon/15 text-neon" : "border-cal/10 bg-noche/70 text-cal/80 hover:text-neon"}`}
+            >
+              {moving ? <StopIcon /> : <PlayIcon />}
+              {moving ? t("funda.motion.stop") : t("funda.motion.start")}
+            </button>
+          </div>
+          {moving && (
+            <div className="absolute inset-x-2 bottom-2 flex gap-1 overflow-x-auto sm:bottom-8 sm:flex-wrap sm:justify-center" role="group" aria-label={t("funda.motion.acts")}>
+              {ACTS.map((a) => (
+                <button
+                  key={a}
+                  onClick={() => setAct(a)}
+                  aria-pressed={act === a}
+                  className={`shrink-0 rounded-full border px-2.5 py-1 text-xs backdrop-blur ${act === a ? "border-neon/60 bg-neon/15 text-neon" : "border-cal/15 bg-noche/70 text-cal/75 hover:text-cal"}`}
+                >
+                  {t(`funda.motion.${a}` as Key)}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="absolute right-3 top-3 flex flex-col gap-1.5">
             <div className="flex overflow-hidden rounded-xl border border-cal/10 bg-noche/70 text-xs backdrop-blur">
               {(["body", "face"] as const).map((v) => (
@@ -336,6 +369,59 @@ function CameraRig({ cmd, top }: { cmd: CamCmd; top: number }) {
       }}
     />
   );
+}
+
+/**
+ * La funda en movimiento (fundas/motion.ts): se monta con esqueleto y se anima con las animaciones
+ * del mundo. Al cambiar la receta se vuelve a montar (con un respiro) y la nueva sustituye a la
+ * anterior cuando ya se mueve; mientras tanto se ve la vista previa quieta.
+ */
+function MovingModel({ r, act, still }: { r: Recipe; act: Act; still: THREE.Group | null }) {
+  const shown = useRef<MovingFunda | null>(null);
+  const pending = useRef<MovingFunda | null>(null);
+  const latest = useRef(0);
+  const [, redraw] = useState(0);
+  useEffect(() => {
+    const n = ++latest.current;
+    const id = window.setTimeout(
+      () => {
+        buildMoving(r)
+          .then((m) => {
+            if (n !== latest.current) return m.dispose();
+            pending.current?.dispose();
+            pending.current = m;
+          })
+          .catch(() => {});
+      },
+      shown.current ? 300 : 0,
+    );
+    return () => window.clearTimeout(id);
+  }, [r]);
+  useEffect(
+    () => () => {
+      latest.current++;
+      shown.current?.dispose();
+      pending.current?.dispose();
+      shown.current = pending.current = null;
+    },
+    [],
+  );
+  useFrame((_, delta) => {
+    const dt = Math.min(delta, 0.1);
+    const p = pending.current;
+    if (p) {
+      p.update(dt, act);
+      if (p.ready()) {
+        shown.current?.dispose();
+        shown.current = p;
+        pending.current = null;
+        redraw((x) => x + 1);
+      }
+    }
+    shown.current?.update(dt, act);
+  });
+  if (shown.current) return <primitive object={shown.current.root} />;
+  return still ? <primitive object={still} /> : null;
 }
 
 /** Reflejos para los acabados de metal: un estudio neutro hecho en la GPU (como en el mundo). */
