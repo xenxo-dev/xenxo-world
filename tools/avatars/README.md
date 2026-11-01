@@ -32,7 +32,8 @@ python3 tools/avatars/pack_avatars.py out                     # texturas WebP, p
 
 ## Kit del configurador de fundas
 
-`python3 tools/avatars/kit/forge_kit.py` (con MPFB instalado como arriba; tarda unos 3 minutos)
+`python3 tools/avatars/kit/forge_kit.py` (con MPFB instalado como arriba y `pip install trimesh embreex`
+para los rayos; tarda unos 5 minutos)
 escribe en `apps/web/public/fundas/` lo que el configurador de la web necesita para montar una funda
 en el navegador (`apps/web/src/fundas/`):
 
@@ -44,10 +45,24 @@ en el navegador (`apps/web/src/fundas/`):
   (formato mhclo: tres vértices, pesos y desplazamiento), simplificada al presupuesto de su categoría
   (`BUDGET`: cualquier combinación cabe en los 30.000 triángulos de un avatar); `tex/` (WebP, con el
   color de cada isla UV extendido) y `thumbs/`.
+- Para cada prenda y gorro, qué piel tapa de verdad (`coverage`, con rayos: desde cada vértice de la
+  piel se sigue su normal hasta la prenda, solo por partes atadas al mismo trozo del cuerpo, y otros
+  seis rayos en cono ven si esa piel asoma por alguna abertura): `under` (piel tapada, que se mete un
+  poco hacia dentro), `gap` (a cuántos mm queda la prenda) y `cover` (la tapada por todos lados y
+  lejos de los bordes, que se quita). Así no se abren huecos en cuellos, mangas ni capuchas.
+- `DETAIL_SLIDERS`: más ajustes del cuerpo (hombros, cintura, caderas, largo de brazos y piernas…),
+  compartidos como los de la cara (van en `face.bin`).
+- `tex/body_maps.webp`, `face_maps.webp` y `skin_maps.webp` (`maps.py`): en el espacio UV del cuerpo
+  (el mismo para todas las pieles), las zonas para los acabados sintéticos y robóticos, sus juntas y
+  líneas de panel (con grosor fijo en milímetros), y las zonas de maquillaje, barba de tres días y
+  pecas; `tex/eye_mask.webp`, el iris. El navegador pinta con ellos (`fundas/paint.ts`).
+- Los implantes (`IMPLANTS`: discos en la nuca, la columna o las sienes), hechos aquí con su textura y
+  lo que brilla.
 - `kit.json`: el índice de todo.
 
 `inventory.py` lista las piezas instaladas con su licencia y su tamaño (para elegir qué entra).
-Con ids sueltos (`forge_kit.py hair_afro top_tee`) rehace solo esas piezas y conserva las demás.
+Con ids sueltos (`forge_kit.py hair_afro top_tee`) rehace solo esas piezas y conserva las demás;
+`forge_kit.py none --maps` rehace solo los mapas de la piel.
 
 `calibrate.mjs` (con la web en marcha) renderiza las fundas neutras de frente, les pasa MediaPipe y
 mide cuánto cambia cada medida de la cara con cada ajuste: la «funda desde una foto» usa esa tabla

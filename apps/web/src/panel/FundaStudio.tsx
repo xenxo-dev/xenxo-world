@@ -1,23 +1,27 @@
 /**
- * El configurador de fundas: base, cuerpo, cara, pelo y ropa con vista 3D al momento. Monta la funda
- * en el navegador (fundas/), la exporta a VRM con su receta dentro y la sube como cualquier otra.
+ * El configurador de fundas: base, cuerpo, cara, piel, pelo, ropa (con estampados e imágenes) y
+ * acabados sintéticos o robóticos, con vista 3D al momento. Monta la funda en el navegador (fundas/),
+ * la exporta a VRM con su receta dentro y la sube como cualquier otra.
  * Se carga aparte (Three.js y el kit) y solo cuando se abre.
  */
-import { Suspense, useEffect, useMemo, useRef, useState, type ComponentRef, type ReactNode } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState, type ComponentRef } from "react";
 import { createPortal } from "react-dom";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import { checkBudget, inspectGlb } from "@xenxo/assets";
 import { errorText, t, useLang, type Key } from "../i18n";
 import { removeSkin, setAvatar, uploadModel, useAccount } from "../net/account";
-import { KIT_BASE, loadKit, type Kit, type KitPart } from "../fundas/kit";
-import { CLOTH_COLORS, cleanRecipe, defaultRecipe, EYE_SWATCH, HAIR_COLORS, type Recipe, type Slot } from "../fundas/recipe";
+import { loadKit, type Kit } from "../fundas/kit";
+import { CLOTH_COLORS, cleanRecipe, defaultRecipe, EYE_SWATCH, HAIR_COLORS, PATTERNS, type Recipe, type Slot } from "../fundas/recipe";
 import { buildPreview } from "../fundas/three";
 import { Button, input, Notice } from "./ui";
+import { PartGrid, Section, Sliders, Swatches, type Setter } from "./funda-ui";
+import { Customize, preset, PRESETS, SkinTab, SynthTab } from "./FundaLooks";
 
-type Tab = "base" | "body" | "face" | "hair" | "clothes";
-const TABS: Tab[] = ["base", "body", "face", "hair", "clothes"];
+type Tab = "base" | "body" | "face" | "skin" | "hair" | "clothes" | "synth";
+const TABS: Tab[] = ["base", "body", "face", "skin", "hair", "clothes", "synth"];
 const FACE_GROUPS: Record<string, string[]> = {
   head: ["head_width", "head_height", "head_depth", "head_fat", "head_round", "head_oval", "forehead", "forehead_slope"],
   eyes: ["eye_size", "eye_height", "eye_dist", "eye_angle", "eye_fold", "brow_height", "brow_angle"],
@@ -90,7 +94,7 @@ export default function FundaStudio({ onClose, onSaved, editing, full }: { onClo
 
   const set = (fn: (r: Recipe) => Recipe) => setRecipe((r) => (kit ? cleanRecipe(fn(r), kit) : fn(r)));
   // La pestaña elige la vista (cara para la cara y el pelo); los botones la cambian cuando se quiera.
-  useEffect(() => setCam((c) => ({ ...c, view: tab === "face" || tab === "hair" ? "face" : "body" })), [tab]);
+  useEffect(() => setCam((c) => ({ ...c, view: tab === "face" || tab === "hair" || tab === "skin" ? "face" : "body" })), [tab]);
   const zoom = (f: number) => setCam((c) => ({ ...c, n: c.n + 1, zoom: f }));
 
   const save = async () => {
@@ -159,14 +163,14 @@ export default function FundaStudio({ onClose, onSaved, editing, full }: { onClo
         </div>
         {/* Controles */}
         <div className="flex min-h-0 flex-col border-t border-cal/10 md:border-l md:border-t-0">
-          <div role="tablist" className="flex gap-1 overflow-x-auto border-b border-cal/10 p-2">
+          <div role="tablist" className="flex gap-0.5 overflow-x-auto border-b border-cal/10 p-2">
             {TABS.map((id) => (
               <button
                 key={id}
                 role="tab"
                 aria-selected={tab === id}
                 onClick={() => setTab(id)}
-                className={`shrink-0 rounded-lg px-3 py-1.5 text-sm ${tab === id ? "bg-neon/15 text-neon" : "text-cal/65 hover:text-cal"}`}
+                className={`shrink-0 rounded-lg px-2.5 py-1.5 text-sm ${tab === id ? "bg-neon/15 text-neon" : "text-cal/65 hover:text-cal"}`}
               >
                 {t(`funda.tab.${id}` as Key)}
               </button>
@@ -179,7 +183,20 @@ export default function FundaStudio({ onClose, onSaved, editing, full }: { onClo
                 <BaseTab kit={kit} r={recipe} set={set} />
               </>
             ) : tab === "body" ? (
-              <Sliders ids={kit.body} values={recipe.body} label={(id) => t(`funda.body.${id}` as Key)} onChange={(id, v) => set((r) => ({ ...r, body: { ...r.body, [id]: v } }))} />
+              <>
+                <Section title={t("funda.build")}>
+                  <Sliders ids={kit.body} values={recipe.body} label={(id) => t(`funda.body.${id}` as Key)} onChange={(id, v) => set((r) => ({ ...r, body: { ...r.body, [id]: v } }))} />
+                </Section>
+                {kit.detail?.length ? (
+                  <Section title={t("funda.detail")}>
+                    <Sliders ids={kit.detail} values={recipe.body} label={(id) => t(`funda.body.${id}` as Key)} onChange={(id, v) => set((r) => ({ ...r, body: { ...r.body, [id]: v } }))} />
+                  </Section>
+                ) : null}
+              </>
+            ) : tab === "skin" ? (
+              <SkinTab r={recipe} set={set} />
+            ) : tab === "synth" ? (
+              <SynthTab kit={kit} r={recipe} set={set} />
             ) : tab === "face" ? (
               <>
                 <div className="mb-3 flex flex-wrap gap-1">
@@ -321,6 +338,27 @@ function CameraRig({ cmd, top }: { cmd: CamCmd; top: number }) {
   );
 }
 
+/** Reflejos para los acabados de metal: un estudio neutro hecho en la GPU (como en el mundo). */
+function StudioEnv() {
+  const gl = useThree((st) => st.gl);
+  const scene = useThree((st) => st.scene);
+  const env = useMemo(() => {
+    const pm = new THREE.PMREMGenerator(gl);
+    const tex = pm.fromScene(new RoomEnvironment(), 0.04).texture;
+    pm.dispose();
+    return tex;
+  }, [gl]);
+  useEffect(() => {
+    scene.environment = env;
+    scene.environmentIntensity = 0.75;
+    return () => {
+      scene.environment = null;
+      env.dispose();
+    };
+  }, [scene, env]);
+  return null;
+}
+
 function Floor() {
   return (
     <group>
@@ -336,88 +374,7 @@ function Floor() {
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="mb-5">
-      <h3 className="mb-2 text-sm font-medium text-cal/80">{title}</h3>
-      {children}
-    </section>
-  );
-}
 
-function Sliders({ ids, values, label, onChange }: { ids: string[]; values: Record<string, number>; label: (id: string) => string; onChange: (id: string, v: number) => void }) {
-  return (
-    <div className="space-y-3">
-      {ids.map((id) => (
-        <label key={id} className="block">
-          <span className="flex justify-between text-xs text-cal/70">
-            {label(id)}
-            <span className="meta text-cal/40">{Math.round((values[id] ?? 0) * 100)}</span>
-          </span>
-          <input
-            type="range"
-            min={-100}
-            max={100}
-            step={1}
-            value={Math.round((values[id] ?? 0) * 100)}
-            onChange={(e) => onChange(id, Number(e.target.value) / 100)}
-            onDoubleClick={() => onChange(id, 0)}
-            className="mt-1 w-full accent-[var(--color-neon)]"
-          />
-        </label>
-      ))}
-    </div>
-  );
-}
-
-function Swatches({ colors, value, onPick }: { colors: { id: string; color: string; label?: string }[]; value: string | null; onPick: (id: string) => void }) {
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {colors.map((c) => (
-        <button
-          key={c.id}
-          onClick={() => onPick(c.id)}
-          aria-pressed={value === c.id}
-          aria-label={c.label ?? c.color}
-          title={c.label ?? c.color}
-          className={`h-8 w-8 rounded-full border-2 transition ${value === c.id ? "border-neon scale-110" : "border-cal/15 hover:border-cal/40"}`}
-          style={{ backgroundColor: c.color }}
-        />
-      ))}
-    </div>
-  );
-}
-
-function partName(p: KitPart, i: number, lang: string): string {
-  return (lang === "en" ? p.en : p.es) ?? `${i + 1}`;
-}
-
-function PartGrid({ parts, value, onPick, none }: { parts: KitPart[]; value: string | undefined; onPick: (id: string | null) => void; none: boolean }) {
-  const lang = useLang();
-  return (
-    <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-5">
-      {none && (
-        <button onClick={() => onPick(null)} aria-pressed={!value} className={`flex aspect-square items-center justify-center rounded-xl border text-xs ${!value ? "border-neon text-neon" : "border-cal/15 text-cal/55 hover:border-cal/40"}`}>
-          {t("funda.none")}
-        </button>
-      )}
-      {parts.map((p, i) => (
-        <button
-          key={p.id}
-          onClick={() => onPick(p.id)}
-          aria-pressed={value === p.id}
-          title={partName(p, i, lang)}
-          className={`relative aspect-square overflow-hidden rounded-xl border bg-cal/[0.06] ${value === p.id ? "border-neon ring-2 ring-neon/40" : "border-cal/10 hover:border-cal/35"}`}
-        >
-          {p.thumb ? <img src={KIT_BASE + p.thumb} alt="" loading="lazy" className="h-full w-full object-cover" /> : null}
-          <span className="absolute inset-x-0 bottom-0 truncate bg-noche/75 px-1 py-0.5 text-[10px] text-cal/85">{partName(p, i, lang)}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-type Setter = (fn: (r: Recipe) => Recipe) => void;
 
 /**
  * Funda desde una foto (opcional): se analiza en el dispositivo (fundas/photo.ts) y propone cara,
@@ -480,7 +437,21 @@ function BaseTab({ kit, r, set }: { kit: Kit; r: Recipe; set: Setter }) {
             <button
               key={b}
               aria-pressed={r.base === b}
-              onClick={() => set((x) => ({ ...defaultRecipe(b), body: x.body, face: x.face, hair: x.hair, skin: x.skin.replace(/_[fm]$/, `_${b}`), eyes: x.eyes }))}
+              onClick={() =>
+                set((x) => ({
+                  ...defaultRecipe(b),
+                  body: x.body,
+                  face: x.face,
+                  hair: x.hair,
+                  skin: x.skin.replace(/_[fm]$/, `_${b}`),
+                  eyes: x.eyes,
+                  skinTone: x.skinTone,
+                  iris: x.iris,
+                  looks: x.looks,
+                  synth: x.synth,
+                  parts: { ...defaultRecipe(b).parts, implant: x.parts.implant },
+                }))
+              }
               className={`rounded-lg px-4 py-1.5 text-sm ${r.base === b ? "bg-neon/20 text-cal" : "text-cal/60"}`}
             >
               {t(`funda.base.${b}` as Key)}
@@ -489,10 +460,20 @@ function BaseTab({ kit, r, set }: { kit: Kit; r: Recipe; set: Setter }) {
         </div>
       </Section>
       <Section title={t("funda.skin")}>
-        <Swatches colors={skins.map((s) => ({ id: s.id, color: s.tone }))} value={r.skin} onPick={(id) => set((x) => ({ ...x, skin: id }))} />
+        <Swatches
+          colors={skins.map((s) => ({ id: s.id, color: s.tone }))}
+          value={r.skinTone ?? r.skin}
+          onPick={(id) => set((x) => ({ ...x, skin: id, skinTone: undefined }))}
+          custom={(c) => set((x) => ({ ...x, skinTone: c }))}
+        />
       </Section>
       <Section title={t("funda.eyes")}>
-        <Swatches colors={kit.eyes.map((e) => ({ id: e, color: EYE_SWATCH[e] ?? "#888888" }))} value={r.eyes} onPick={(id) => set((x) => ({ ...x, eyes: id }))} />
+        <Swatches
+          colors={kit.eyes.map((e) => ({ id: e, color: EYE_SWATCH[e] ?? "#888888" }))}
+          value={r.iris ?? r.eyes}
+          onPick={(id) => set((x) => ({ ...x, eyes: id, iris: undefined }))}
+          custom={(c) => set((x) => ({ ...x, iris: c }))}
+        />
       </Section>
     </>
   );
@@ -507,7 +488,7 @@ function HairTab({ kit, r, set }: { kit: Kit; r: Recipe; set: Setter }) {
         <PartGrid parts={of("hair")} value={r.parts.hair} onPick={pick("hair")} none />
       </Section>
       <Section title={t("funda.hairColor")}>
-        <Swatches colors={HAIR_COLORS.map((c) => ({ id: c, color: c }))} value={r.hair} onPick={(c) => set((x) => ({ ...x, hair: c }))} />
+        <Swatches colors={HAIR_COLORS.map((c) => ({ id: c, color: c }))} value={r.hair} onPick={(c) => set((x) => ({ ...x, hair: c }))} custom={(c) => set((x) => ({ ...x, hair: c }))} />
       </Section>
       <Section title={t("funda.slot.brows")}>
         <PartGrid parts={of("brows")} value={r.parts.brows} onPick={pick("brows")} none />
@@ -554,7 +535,9 @@ function ClothesTab({ kit, r, set }: { kit: Kit; r: Recipe; set: Setter }) {
                       return { ...x, colors };
                     })
                   }
+                  custom={(c) => set((x) => ({ ...x, colors: { ...x.colors, [part.id]: c } }))}
                 />
+                {part.tex && <Customize part={part} r={r} set={set} />}
               </div>
             )}
           </Section>
@@ -588,5 +571,9 @@ export function randomRecipe(kit: Kit, base: "f" | "m"): Recipe {
     const id = r.parts[s];
     if (id && Math.random() < 0.6) r.colors[id] = rnd(CLOTH_COLORS);
   }
+  // A veces, un estampado arriba y una funda sintética o robótica.
+  const up = r.parts.outfit ?? r.parts.top;
+  if (up && Math.random() < 0.25) r.patterns = { [up]: { kind: rnd([...PATTERNS]), color: rnd(CLOTH_COLORS), scale: Math.random() } };
+  if (Math.random() < 0.15) return cleanRecipe(preset(rnd(PRESETS.filter((p) => p !== "natural")), r, kit), kit);
   return cleanRecipe(r, kit);
 }

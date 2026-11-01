@@ -98,6 +98,7 @@ CATALOG: list[dict] = [
         ("top_turtle", "toigo_turtleneck_halter_top", "Cuello alto", "Turtleneck"),
         ("top_bodice", "toigo_bodice-style_top", "Corpiño", "Bodice top"),
         ("top_tunic", "rehmanpolanski_viking_tunic", "Túnica", "Tunic"),
+        ("top_camisole", "toigo_camisole_top", "Camisola", "Camisole"),
     ]],
     # Parte de abajo
     *[{"id": i, "src": f"clothes/{d}", "cat": "bottom", "tint": "cloth", "es": es, "en": en} for i, d, es, en in [
@@ -128,6 +129,11 @@ CATALOG: list[dict] = [
         ("fit_cyborg", "joachip_cyborg_suit", "Traje cíborg", "Cyborg suit"),
         ("fit_warrior", "thegreatengineer_galactic_warrior_uniform", "Uniforme estelar", "Star uniform"),
         ("fit_robe", "donitz_monk_robe", "Hábito", "Robe"),
+        ("fit_skinsuit", "matcreator_mc-skinsuit_2022", "Traje ceñido", "Skinsuit"),
+        ("fit_casual_m0", "male_casualsuit01", "Informal 8", "Casual 8"),
+        ("fit_skirt_suit", "toigo_female_suit", "Traje con falda", "Skirt suit"),
+        ("fit_suit_f2", "toigo_female_suit_2", "Traje 2", "Suit 2"),
+        ("fit_bowtie", "toigo_suit_with_jacket_and_bowtie", "Traje con pajarita", "Suit and bow tie"),
     ]],
     # Calzado
     *[{"id": i, "src": f"clothes/{d}", "cat": "shoes", "tint": "cloth", "es": es, "en": en} for i, d, es, en in [
@@ -141,6 +147,9 @@ CATALOG: list[dict] = [
         ("sh_cloth", "toigo_mj_cloth_shoes", "Zapatillas de tela", "Canvas shoes"),
         ("sh_tbar", "cortu_t-bar", "Merceditas", "T-bar shoes"),
         ("sh_boots", "rehmanpolanski_viking_boots", "Botas", "Boots"),
+        ("sh_ankle_f", "toigo_ankle_boots_female", "Botines 2", "Ankle boots 2"),
+        ("sh_overknee", "cortu_floppy_overknee_shoes", "Botas altas", "Over-knee boots"),
+        ("sh_bows", "toigo_ballet_flats_with_bows", "Bailarinas con lazo", "Flats with bows"),
     ]],
     # Gorros
     *[{"id": i, "src": f"clothes/{d}", "cat": "hat", "tint": "cloth", "es": es, "en": en} for i, d, es, en in [
@@ -148,6 +157,7 @@ CATALOG: list[dict] = [
         ("hat_fedora2", "fedora_cocked", "Sombrero ladeado", "Cocked fedora"),
         ("hat_cloche", "aethelraed_unraed_cloche_hat", "Gorro campana", "Cloche"),
         ("hat_xmas", "joepal_xmas_cap", "Gorro de Navidad", "Christmas hat"),
+        ("hat_hood", "donitz_monk_robe_hood", "Capucha", "Hood"),
     ]],
     # Gafas
     *[{"id": i, "src": f"clothes/{d}", "cat": "glasses", "es": es, "en": en} for i, d, es, en in [
@@ -219,6 +229,25 @@ FACE_SLIDERS = [
     ("ear_out", "ears/l-ear-flap-decr+ears/r-ear-flap-decr", "ears/l-ear-flap-incr+ears/r-ear-flap-incr"),
     ("ear_point", "ears/l-ear-shape-round+ears/r-ear-shape-round", "ears/l-ear-shape-pointed+ears/r-ear-shape-pointed"),
     ("neck_width", "neck/neck-scale-horiz-decr", "neck/neck-scale-horiz-incr"),
+]
+# Más ajustes del cuerpo, compartidos por las dos bases (como los de la cara). Sin ajustes de pecho.
+DETAIL_SLIDERS = [
+    ("shoulders", "torso/measure-shoulder-dist-decr", "torso/measure-shoulder-dist-incr"),
+    ("vshape", "torso/torso-vshape-decr", "torso/torso-vshape-incr"),
+    ("waist", "torso/measure-waist-circ-decr", "torso/measure-waist-circ-incr"),
+    ("hips", "torso/measure-hips-circ-decr", "torso/measure-hips-circ-incr"),
+    ("belly", "stomach/stomach-pregnant-decr", "stomach/stomach-pregnant-incr"),
+    ("torso_length", "torso/torso-scale-vert-decr", "torso/torso-scale-vert-incr"),
+    ("neck_length", "neck/measure-neck-height-decr", "neck/measure-neck-height-incr"),
+    ("arm_length", "arms/measure-upperarm-length-decr+arms/measure-lowerarm-length-decr",
+     "arms/measure-upperarm-length-incr+arms/measure-lowerarm-length-incr"),
+    ("arms", "arms/l-upperarm-muscle-decr+arms/r-upperarm-muscle-decr+arms/l-lowerarm-muscle-decr+arms/r-lowerarm-muscle-decr",
+     "arms/l-upperarm-muscle-incr+arms/r-upperarm-muscle-incr+arms/l-lowerarm-muscle-incr+arms/r-lowerarm-muscle-incr"),
+    ("leg_length", "legs/upperlegs-height-decr+legs/lowerlegs-height-decr", "legs/upperlegs-height-incr+legs/lowerlegs-height-incr"),
+    ("legs", "legs/l-upperleg-muscle-decr+legs/r-upperleg-muscle-decr+legs/l-lowerleg-muscle-decr+legs/r-lowerleg-muscle-decr",
+     "legs/l-upperleg-muscle-incr+legs/r-upperleg-muscle-incr+legs/l-lowerleg-muscle-incr+legs/r-lowerleg-muscle-incr"),
+    ("hands", "hands/l-hand-scale-decr+hands/r-hand-scale-decr", "hands/l-hand-scale-incr+hands/r-hand-scale-incr"),
+    ("feet", "feet/l-foot-scale-decr+feet/r-foot-scale-decr", "feet/l-foot-scale-incr+feet/r-foot-scale-incr"),
 ]
 SKINS = [  # (id, carpeta, tono para el selector)
     *[(f"{a}_{r}_{g}", f"{a}_{r}_{g}ale" if g == "m" else f"{a}_{r}_{g}emale") for a in ("young", "middleage", "old")
@@ -483,40 +512,176 @@ def decimate(pos: np.ndarray, uv: np.ndarray, tris: np.ndarray, target_tris: int
     return np.array(npos, np.float64), np.array(nuv, np.float64), np.array(ntris, np.int64)
 
 
-COVER_CATS = {"top", "bottom", "outfit", "shoes", "gloves"}
+COVER_CATS = {"top", "bottom", "outfit", "shoes", "gloves", "hat"}
 BODY_VERTS = 13380  # los primeros vértices de la base son el cuerpo (los demás, ayudas)
+REACH = 0.6  # dm: hasta dónde se busca la prenda siguiendo la normal de la piel
+BEHIND = 0.15  # dm: o un poco por dentro (prendas que se meten en la piel)
+EDGE_DEEP = 0.4  # dm: la piel se quita solo a más de esto de los bordes de la prenda
 
 
-def covered(human: np.ndarray, pos: np.ndarray, tris: np.ndarray, gap: float = 0.22, edge: float = 0.35) -> np.ndarray:
-    """Vértices del cuerpo que quedan bajo la prenda: a menos de `gap` (dm) de su superficie y a más de `edge` de sus bordes."""
-    rng = np.random.default_rng(1)
-    pts = [pos]
-    a, b, c = pos[tris[:, 0]], pos[tris[:, 1]], pos[tris[:, 2]]
-    for _ in range(12):
-        u, v = rng.random((2, len(tris), 1))
-        flip = (u + v) > 1
-        u, v = np.where(flip, 1 - u, u), np.where(flip, 1 - v, v)
-        pts.append(a + (b - a) * u + (c - a) * v)
-    tree = cKDTree(np.concatenate(pts))
-    d, _ = tree.query(human[:BODY_VERTS])
-    under = d < gap
-    if edge <= 0:
-        return np.where(under)[0]
-    # Nada cerca de los bordes de la prenda (cuello, mangas, bajos): ahí se vería el hueco.
-    key = {}
-    weld = np.array([key.setdefault(tuple(np.round(p, 4)), i) for i, p in enumerate(pos)])
+def body_quads(faces) -> np.ndarray:
+    """Caras del cuerpo de la base (cuadriláteros; un triángulo repite su último vértice)."""
+    out = []
+    for f in faces:
+        ids = [vi for vi, _ in f]
+        if max(ids) >= BODY_VERTS or len(ids) not in (3, 4):
+            continue
+        out.append(ids if len(ids) == 4 else ids + [ids[2]])
+    return np.array(out, np.int64)
+
+
+def vertex_normals(v: np.ndarray, quads: np.ndarray) -> np.ndarray:
+    """Normales de los vértices del cuerpo (hacia fuera)."""
+    a, b, c, d = (v[quads[:, k]] for k in range(4))
+    fn = np.cross(c - a, d - b)
+    n = np.zeros((BODY_VERTS, 3))
+    for k in range(4):
+        np.add.at(n, quads[:, k], fn)
+    return n / np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-12)
+
+
+def bone_distance(parents: list[int]) -> np.ndarray:
+    """Saltos entre cada par de huesos en el árbol del esqueleto."""
+    n = len(parents)
+    chain = []
+    for b in range(n):
+        c, x = [], b
+        while x >= 0:
+            c.append(x)
+            x = parents[x]
+        chain.append(c)
+    out = np.zeros((n, n), np.int64)
+    for a in range(n):
+        da = {x: i for i, x in enumerate(chain[a])}
+        for b in range(n):
+            for j, x in enumerate(chain[b]):
+                if x in da:
+                    out[a, b] = da[x] + j
+                    break
+    return out
+
+
+def coverage(human: np.ndarray, nrm: np.ndarray, pos: np.ndarray, tris: np.ndarray, part_bone: np.ndarray,
+             body_bone: np.ndarray, near: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Qué piel tapa de verdad una prenda (con rayos: trimesh + Embree). Desde cada vértice del cuerpo
+    se sigue su normal hacia fuera (o un poco hacia dentro) y se busca la prenda, contando solo las
+    partes atadas a ese mismo trozo del cuerpo (mismo hueso o uno contiguo: así, la cara interior del
+    brazo no queda «tapada» por el costado de la camiseta). Además se lanzan seis rayos en cono
+    alrededor de la normal: si alguno se escapa (por un cuello, una manga o la abertura de una
+    capucha), esa piel se ve desde fuera y no se quita. Devuelve:
+      - `under`: vértices tapados (ordenan las capas y, si la prenda va pegada, se meten un poco),
+      - `gap`: a cuánto queda la prenda de cada uno (mm),
+      - `deep`: los tapados por todos lados y lejos de los bordes de la prenda, que se quitan.
+    """
+    import trimesh
+    from trimesh.ray.ray_pyembree import RayMeshIntersector
+
+    mesh = trimesh.Trimesh(pos, tris, process=False)
+    rmi = RayMeshIntersector(mesh)
+    tn = np.cross(pos[tris[:, 1]] - pos[tris[:, 0]], pos[tris[:, 2]] - pos[tris[:, 0]])
+    tri_bones = part_bone[tris]
+    cent = pos[tris].mean(1)
+    d, _ = cKDTree(np.concatenate([pos, cent])).query(human[:BODY_VERTS], distance_upper_bound=REACH + 0.25)
+    cand = np.where(np.isfinite(d))[0]
+    n0 = nrm[cand]
+
+    def cast(dirs: np.ndarray, reach: float) -> tuple[np.ndarray, np.ndarray]:
+        """Primer cruce con una parte compatible de la prenda: distancia (o inf) y triángulo."""
+        origins = human[cand] - dirs * BEHIND
+        loc, ir, it = rmi.intersects_location(origins, dirs, multiple_hits=True)
+        best = np.full(len(cand), np.inf)
+        tri = np.full(len(cand), -1)
+        if len(ir):
+            t = np.einsum("ij,ij->i", loc - origins[ir], dirs[ir])
+            ok = (t >= 0) & (t <= reach + BEHIND) & near[body_bone[cand[ir]][:, None], tri_bones[it]].any(1)
+            ir, it, t = ir[ok], it[ok], t[ok]
+            order = np.lexsort((t, ir))
+            ir, it, t = ir[order], it[order], t[order]
+            first = np.r_[True, ir[1:] != ir[:-1]]
+            best[ir[first]] = t[first] - BEHIND
+            tri[ir[first]] = it[first]
+        return best, tri
+
+    hit, tri = cast(n0, REACH)
+    # Seis rayos en cono (unos 33° alrededor de la normal), algo más largos.
+    up = np.where(np.abs(n0[:, 1:2]) < 0.9, np.array([[0.0, 1.0, 0.0]]), np.array([[1.0, 0.0, 0.0]]))
+    t1 = np.cross(n0, up)
+    t1 /= np.maximum(np.linalg.norm(t1, axis=1, keepdims=True), 1e-9)
+    t2 = np.cross(n0, t1)
+    cone = np.zeros(len(cand), int)
+    for k in range(6):
+        a = k * np.pi / 3
+        dirs = n0 + 0.65 * (np.cos(a) * t1 + np.sin(a) * t2)
+        dirs /= np.linalg.norm(dirs, axis=1, keepdims=True)
+        h, _ = cast(dirs, REACH * 1.6)
+        cone += np.isfinite(h)
+    under_c = np.isfinite(hit)
+    back = np.zeros(len(cand), bool)
+    has = tri >= 0
+    back[has] = np.einsum("ij,ij->i", n0[has], tn[tri[has]]) > 0
+    # Las prendas de MakeHuman tienen la normal hacia fuera; si la mayoría de cruces van al revés,
+    # la malla está dada la vuelta.
+    if under_c.sum() and back[under_c].mean() < 0.5:
+        back = ~back
+    # Bordes de la prenda (con las costuras de UV soldadas).
+    key: dict = {}
+    weld = np.array([key.setdefault(tuple(np.round(x, 4)), i) for i, x in enumerate(pos)])
     count: dict[tuple[int, int], int] = {}
-    for t in tris:
+    for tr in tris:
         for i, j in ((0, 1), (1, 2), (2, 0)):
-            e = tuple(sorted((weld[t[i]], weld[t[j]])))
+            e = tuple(sorted((weld[tr[i]], weld[tr[j]])))
             count[e] = count.get(e, 0) + 1
     edges = np.array([e for e, n in count.items() if n == 1])
+    far = np.ones(len(cand), bool)
     if len(edges):
         ea, eb = pos[edges[:, 0]], pos[edges[:, 1]]
         bpts = np.concatenate([ea + (eb - ea) * k for k in np.linspace(0, 1, 6)])
-        db, _ = cKDTree(bpts).query(human[:BODY_VERTS])
-        under &= db > edge
-    return np.where(under)[0]
+        db, _ = cKDTree(bpts).query(human[cand])
+        far = db > EDGE_DEEP
+    deep_c = under_c & (cone == 6) & far & back
+    ids = cand[under_c]
+    gap = np.clip(np.round(hit[under_c] * 100), 0, 255)  # dm → mm
+    return ids, gap, cand[deep_c]
+
+
+def skin_under(human: np.ndarray, quads: np.ndarray, pos: np.ndarray, tris: np.ndarray) -> np.ndarray:
+    """Por cada vértice de una pieza, el vértice de la piel que queda debajo (hacia dentro de la pieza)."""
+    import trimesh
+    from trimesh.ray.ray_pyembree import RayMeshIntersector
+
+    near = cKDTree(human[:BODY_VERTS]).query(pos)[1]
+    if not len(tris):
+        return near
+    btris = np.concatenate([quads[:, [0, 1, 2]], quads[:, [0, 2, 3]]])
+    btris = btris[(btris[:, 0] != btris[:, 1]) & (btris[:, 1] != btris[:, 2]) & (btris[:, 0] != btris[:, 2])]
+    body = trimesh.Trimesh(human[:BODY_VERTS], btris, process=False)
+    # Normales de la pieza (soldando las costuras de UV).
+    key: dict = {}
+    weld = np.array([key.setdefault(tuple(np.round(x, 4)), i) for i, x in enumerate(pos)])
+    fn = np.cross(pos[tris[:, 1]] - pos[tris[:, 0]], pos[tris[:, 2]] - pos[tris[:, 0]])
+    vn = np.zeros_like(pos)
+    for k in range(3):
+        np.add.at(vn, weld[tris[:, k]], fn)
+    vn = vn[weld]
+    vn /= np.maximum(np.linalg.norm(vn, axis=1, keepdims=True), 1e-12)
+    rmi = RayMeshIntersector(body)
+    out = near.copy()
+    for sign in (1.0, -1.0):
+        todo = np.where(out == near)[0] if sign < 0 else np.arange(len(pos))
+        if not len(todo):
+            break
+        dirs = -vn[todo] * sign
+        loc, ir, it = rmi.intersects_location(pos[todo], dirs, multiple_hits=False)
+        if not len(ir):
+            continue
+        dist = np.linalg.norm(loc - pos[todo][ir], axis=1)
+        ok = dist < 1.5  # dm
+        ir, it, loc = ir[ok], it[ok], loc[ok]
+        cand = btris[it]
+        best = cand[np.arange(len(cand)), np.argmin(np.linalg.norm(human[cand] - loc[:, None, :], axis=2), axis=1)]
+        out[todo[ir]] = best
+    return out
 
 
 def rebind(new_pos: np.ndarray, old_pos: np.ndarray, b: dict, src: np.ndarray, s: np.ndarray) -> dict:
@@ -632,21 +797,261 @@ def material_texture(folder: str, meta: dict) -> str | None:
 
 
 # ---------------------------------------------------------------------------------------------
+def proxy_body(folder: str, human: np.ndarray) -> dict:
+    """Un cuerpo de MakeHuman (proxy) colocado en `human`: UV, triángulos, posiciones (m) y atadura."""
+    bind = read_binding(next(os.path.join(folder, f) for f in os.listdir(folder) if f.endswith(".proxy")))
+    _, uv, faces = read_obj(next(os.path.join(folder, f) for f in os.listdir(folder) if f.endswith(".obj")))
+    pos, puv, tris, src = unweld(fit(human, bind), uv, faces)
+    return {"uv": puv, "tris": tris, "pos": pos * UNIT, "refs": bind["refs"][src], "w": bind["w"][src]}
+
+
+def forge_skin_maps(base: np.ndarray, quads: np.ndarray, groups: dict, order: list[str], ji: np.ndarray, jw: np.ndarray,
+                    joint_ids: dict, body_bone: np.ndarray, near: np.ndarray) -> None:
+    """Zonas, juntas, líneas de panel, maquillaje, barba de tres días y pecas en el espacio UV del cuerpo."""
+    from maps import ZONES, blur_on_mesh, make_maps, smoothstep, zone_of_bone
+
+    human = shape(base, neutral(0.5))
+    hm = human * UNIT
+    n = len(base)
+    nb = len(order)
+    bone_w = np.zeros((n, nb))
+    for k in range(4):
+        np.add.at(bone_w, (np.arange(n), ji[:, k]), jw[:, k])
+    zone_w = np.zeros((n, len(ZONES)))
+    for bi, name in enumerate(order):
+        zone_w[:, zone_of_bone(name)] += bone_w[:, bi]
+    tris = np.concatenate([quads[:, [0, 1, 2]], quads[:, [0, 2, 3]]])
+    tris = tris[(tris[:, 0] != tris[:, 1]) & (tris[:, 1] != tris[:, 2]) & (tris[:, 0] != tris[:, 2])]
+    nrm = np.zeros((n, 3))
+    nrm[:BODY_VERTS] = vertex_normals(human, quads)
+
+    def joint(name: str, end: str) -> np.ndarray:
+        return hm[joint_ids[f"{name}.{end}"]].mean(0)
+
+    def grp(name: str) -> np.ndarray:
+        ids = []
+        for a, c in groups[name]:
+            ids.extend(range(a, c + 1))
+        return np.array(ids)
+
+    eyes = [hm[grp(g)] for g in ("helper-l-eye", "helper-r-eye")]
+    ec = [e.mean(0) for e in eyes]
+    er = float(np.mean([np.linalg.norm(e - c, axis=1).max() for e, c in zip(eyes, ec)]))
+    body = np.zeros(n, bool)
+    body[:BODY_VERTS] = True
+    p = hm
+    front = nrm[:, 2]
+
+    # Labios: lo que mueven los objetivos de volumen de los labios.
+    lip = np.linalg.norm(target("mouth/mouth-upperlip-volume-incr", n), axis=1) + np.linalg.norm(target("mouth/mouth-lowerlip-volume-incr", n), axis=1)
+    lip = lip / max(np.percentile(lip[lip > 0], 92), 1e-9)
+    lips = smoothstep(0.18, 0.55, lip) * body
+
+    # Párpados: alrededor de cada ojo, por encima de su centro y por delante.
+    shadow = np.zeros(n)
+    blush = np.zeros(n)
+    for c in ec:
+        d = np.linalg.norm(p - c, axis=1)
+        m = (1 - smoothstep(er * 1.02, er * 1.95, d)) * smoothstep(c[1] - er * 0.15, c[1] + er * 0.45, p[:, 1]) * (p[:, 2] > c[2] - er * 0.4)
+        shadow = np.maximum(shadow, m)
+        # Mejillas: bajo el ojo y hacia fuera, sobre la piel.
+        side = np.sign(c[0])
+        want = c + np.array([side * er * 0.55, -er * 2.6, 0.0])
+        cand = np.where(body & (front > 0.25))[0]
+        onskin = p[cand[np.argmin(np.linalg.norm(p[cand] - want, axis=1))]]
+        dd = np.linalg.norm(p - onskin, axis=1)
+        blush = np.maximum(blush, (1 - smoothstep(er * 0.4, er * 2.3, dd)) * (front > 0.1))
+    shadow *= body
+    blush *= body * (1 - lips)
+
+    # Pecas: nariz y mejillas.
+    mid = (ec[0] + ec[1]) / 2
+    cand = np.where(body & (front > 0.5))[0]
+    want = mid + np.array([0.0, -er * 1.4, er * 1.5])
+    nose = p[cand[np.argmin(np.linalg.norm(p[cand] - want, axis=1))]]
+    ell = np.sqrt(((p[:, 0] - nose[0]) / (er * 4.6)) ** 2 + ((p[:, 1] - nose[1]) / (er * 2.3)) ** 2)
+    freckle = (1 - smoothstep(0.55, 1.0, ell)) * (p[:, 2] > nose[2] - er * 3.0) * (front > 0.15) * body * (1 - lips)
+
+    # Barba de tres días: la piel que tapan la barba larga y el bigote, suavizada.
+    beard = np.zeros(n)
+    for src in ("clothes/rehmanpolanski_beard_viking", "clothes/rehmanpolanski_moustache_viking"):
+        folder = os.path.join(ASSETS, src)
+        bnd = read_binding(next(os.path.join(folder, f) for f in os.listdir(folder) if f.endswith(".mhclo")))
+        _, uv, faces = read_obj(os.path.join(folder, bnd["meta"].get("obj_file") or next(f for f in os.listdir(folder) if f.endswith(".obj"))))
+        pos, _, btris, srcv = unweld(fit(human, bnd), uv, faces)
+        prim = bnd["refs"][srcv][np.arange(len(pos)), np.argmax(bnd["w"][srcv], axis=1)]
+        under, _, _ = coverage(human, nrm, pos, btris, body_bone[prim], body_bone, near)
+        beard[under] = 1.0
+    beard = blur_on_mesh(beard, tris, 3)
+    stubble = smoothstep(0.25, 0.75, beard) * body * (1 - smoothstep(0.05, 0.4, lips))
+
+    # Cabeza: centro, barbilla, frente y ángulo del contorno de la cara.
+    head_c = (joint("head", "head") + joint("head", "tail")) / 2
+    head_c[0] = 0.0
+    face = body & (bone_w[:, order.index("head")] > 0.6) & (p[:, 2] > head_c[2])
+    chin_y = float(p[face, 1].min()) + 0.004
+    joints = {"head_center": head_c, "chin_y": chin_y, "forehead_y": float(mid[1] + er * 3.0), "face_angle": np.radians(60.0)}
+    bodies = [proxy_body(os.path.join(ASSETS, "proxymeshes", d), shape(base, neutral(g))) for d, g in (("female_generic", 0.0), ("male_generic", 1.0))]
+    fields = {"zone_w": zone_w, "bone_w": bone_w, "lips": lips, "shadow": shadow, "blush": blush,
+              "stubble_area": stubble, "freckle_area": freckle}
+    make_maps(f"{OUT}/tex", 1024, bodies, fields, joints)
+    print("mapas de piel: body_maps, face_maps, skin_maps")
+
+
+# Implantes (piezas propias, hechas aquí: CC0). (id, ES, EN, discos: (sitio, desplazamiento en dm, radio en dm))
+IMPLANTS = [
+    ("imp_nape", "Nuca", "Nape", [("nape", 0.0, 0.11)]),
+    ("imp_spine", "Columna", "Spine", [("nape", 0.24, 0.07), ("nape", 0.0, 0.08), ("nape", -0.24, 0.07)]),
+    ("imp_temples", "Sienes", "Temples", [("temple_l", 0.0, 0.07), ("temple_r", 0.0, 0.07)]),
+]
+
+
+def implant_texture() -> None:
+    """Un disco metálico con lente y un aro que puede brillar (y su máscara de brillo)."""
+    size = 128
+    yy, xx = np.mgrid[0:size, 0:size] + 0.5
+    rho = np.hypot(xx - size / 2, yy - size / 2) / (size / 2)
+    ang = np.arctan2(yy - size / 2, xx - size / 2)
+
+    def band(a: float, b: float) -> np.ndarray:
+        return ((rho >= a) & (rho < b)).astype(float)
+
+    col = np.zeros((size, size, 3))
+    lens = band(0, 0.28)
+    hl = np.clip(1 - np.hypot(xx - size * 0.44, yy - size * 0.42) / (size * 0.07), 0, 1) * lens
+    col += lens[..., None] * np.array([14, 17, 22]) + hl[..., None] * 160
+    col += band(0.28, 0.4)[..., None] * np.array([184, 192, 200])
+    col += band(0.4, 0.58)[..., None] * np.array([226, 244, 252])
+    grooves = 0.9 + 0.1 * np.cos(ang * 48)
+    col += (band(0.58, 0.86) * grooves)[..., None] * np.array([142, 152, 163])
+    col += band(0.86, 1.01)[..., None] * np.array([42, 48, 56])
+    col += (rho >= 1.01)[..., None] * np.array([42, 48, 56])
+    Image.fromarray(np.clip(col, 0, 255).astype(np.uint8), "RGB").save(f"{OUT}/tex/implant.webp", "WEBP", quality=90)
+    glow = np.clip(1 - np.abs(rho - 0.49) / 0.075, 0, 1) ** 0.7
+    g = np.repeat(np.round(glow * 255).astype(np.uint8)[..., None], 3, axis=2)
+    Image.fromarray(g, "RGB").save(f"{OUT}/tex/implant_glow.webp", "WEBP", lossless=True)
+
+
+def forge_implants(base: np.ndarray, quads: np.ndarray, joint_ids: dict, body_bone: np.ndarray, order: list[str]) -> list[dict]:
+    """Discos atados a la piel (nuca, columna o sienes): siguen al cuerpo sea cual sea su forma."""
+    human = shape(base, neutral(0.5))
+    nrm = vertex_normals(human, quads)
+    hv = human[:BODY_VERTS]
+
+    def jpos(name: str, end: str) -> np.ndarray:
+        return human[joint_ids[f"{name}.{end}"]].mean(0)
+
+    neck0, head0 = jpos("neck_01", "head"), jpos("head", "head")
+    nape_y = neck0[1] + (head0[1] - neck0[1]) * 0.45
+    head_ids = np.where(body_bone[:BODY_VERTS] == order.index("head"))[0]
+    hx = np.abs(hv[head_ids, 0]).max()
+    top = hv[head_ids, 1].max()
+
+    def anchor(site: str, dy: float) -> int:
+        if site == "nape":
+            c = np.where((np.abs(hv[:, 0]) < 0.06) & (hv[:, 2] < neck0[2]) & (nrm[:, 2] < -0.6))[0]
+            want = np.array([0.0, nape_y + dy, hv[c, 2].min()])
+        else:
+            side = 1 if site.endswith("_l") else -1
+            c = head_ids[(np.sign(hv[head_ids, 0]) == side) & (np.abs(nrm[head_ids, 0]) > 0.7)]
+            want = np.array([side * hx, top - 0.62, head0[2] + 0.55])
+        return int(c[np.argmin(np.linalg.norm(hv[c] - want, axis=1))])
+
+    entries = []
+    for pid, es, en, discs in IMPLANTS:
+        pos_l, uv_l, tri_l, ref_l = [], [], [], []
+        for site, dy, rad in discs:
+            a = anchor(site, dy)
+            n = nrm[a]
+            up = np.array([0.0, 1.0, 0.0]) if abs(n[1]) < 0.9 else np.array([1.0, 0.0, 0.0])
+            t1 = np.cross(up, n)
+            t1 /= np.linalg.norm(t1)
+            t2 = np.cross(n, t1)
+            seg = 28
+            h, sink = 0.035, 0.03
+            rings = [(0.0, h + 0.012), (0.3, h + 0.009), (0.92, h), (1.0, h * 0.55), (1.0, -sink)]
+            start = sum(len(x) for x in pos_l)
+            verts, uvs = [], []
+            for ri, (rr, hh) in enumerate(rings):
+                count = 1 if rr == 0 else seg
+                for k in range(count):
+                    ang = 2 * np.pi * k / seg
+                    lx, ly = np.cos(ang) * rr * rad, np.sin(ang) * rr * rad
+                    verts.append(hv[a] + t1 * lx + t2 * ly + n * hh)
+                    ur = rr * (0.97 if ri < 4 else 1.0)
+                    uvs.append((0.5 + np.cos(ang) * ur * 0.5, 0.5 + np.sin(ang) * ur * 0.5))
+            tris = []
+            for k in range(seg):  # tapa
+                tris.append((0, 1 + k, 1 + (k + 1) % seg))
+            for ri in range(1, len(rings) - 1):
+                o0, o1 = 1 + (ri - 1) * seg, 1 + ri * seg
+                for k in range(seg):
+                    k2 = (k + 1) % seg
+                    tris.append((o0 + k, o1 + k, o1 + k2))
+                    tris.append((o0 + k, o1 + k2, o0 + k2))
+            pos_l.append(np.array(verts))
+            uv_l.append(np.array(uvs))
+            tri_l.append(np.array(tris) + start)
+            ref_l.append(np.full(len(verts), a))
+        pos = np.concatenate(pos_l)
+        uv = np.concatenate(uv_l)
+        tris = np.concatenate(tri_l)
+        ref = np.concatenate(ref_l)
+        b = Bin()
+        b.add("refs", np.stack([ref, ref, ref], 1), "<u2")
+        b.add("w", np.tile([1.0, 0.0, 0.0], (len(pos), 1)), "<f4")
+        b.add("off", q16((pos - human[ref]) * UNIT, Q_POS), "<i2")
+        b.add("uv", np.round(np.clip(uv, 0, 1) * 65535), "<u2")
+        b.add("idx", tris, "<u2")
+        size = b.save(f"{OUT}/parts/{pid}.bin")
+        # Miniatura: los discos sobre fondo oscuro, colocados como van.
+        th = Image.new("RGB", (96, 96), (18, 22, 30))
+        disc = Image.open(f"{OUT}/tex/implant.webp").convert("RGB")
+        spots = {"imp_nape": [(48, 48, 40)], "imp_spine": [(48, 20, 24), (48, 48, 28), (48, 76, 24)], "imp_temples": [(24, 48, 30), (72, 48, 30)]}[pid]
+        for cx, cy, d in spots:
+            m = Image.new("L", (d, d), 0)
+            from PIL import ImageDraw
+            ImageDraw.Draw(m).ellipse((0, 0, d - 1, d - 1), fill=255)
+            th.paste(disc.resize((d, d), Image.LANCZOS), (cx - d // 2, cy - d // 2), m)
+        th.save(f"{OUT}/thumbs/{pid}.webp", "WEBP", quality=85)
+        entries.append({"id": pid, "cat": "implant", "file": f"parts/{pid}.bin", "bytes": size, "index": b.index, "verts": int(len(pos)),
+                        "tris": int(len(tris)), "scale": {}, "z": 60, "es": es, "en": en, "tex": "tex/implant.webp",
+                        "glow": "tex/implant_glow.webp", "thumb": f"thumbs/{pid}.webp"})
+        print(f"  {pid:<18} implant  {len(tris):>6} tri  {size / 1e3:6.0f} kB")
+    return entries
+
+
+def forge_eye_mask() -> None:
+    """Iris y pupila de la textura de ojos (todas comparten dibujo): para teñirlos o hacerlos brillar."""
+    from scipy import ndimage
+
+    im = np.asarray(Image.open(os.path.join(ASSETS, "eyes", "materials", "brown_eye.png")).convert("RGB").resize((256, 256), Image.LANCZOS)).astype(float)
+    lum = im @ np.array([0.2126, 0.7152, 0.0722])
+    sat = im.max(2) - im.min(2)
+    m = np.clip((175 - lum) / 70, 0, 1) * np.clip((sat + 60 - (lum - 60) * 0.2) / 60, 0, 1)
+    m = ndimage.gaussian_filter(m, 0.8)
+    m = np.clip((m - 0.25) / 0.5, 0, 1)
+    rgb = np.repeat(np.round(m * 255).astype(np.uint8)[..., None], 3, axis=2)
+    Image.fromarray(rgb, "RGB").save(f"{OUT}/tex/eye_mask.webp", "WEBP", lossless=True)
+
+
 def main() -> None:
     os.makedirs(f"{OUT}/parts", exist_ok=True)
     os.makedirs(f"{OUT}/tex", exist_ok=True)
     os.makedirs(f"{OUT}/thumbs", exist_ok=True)
     only = set(a for a in sys.argv[1:] if not a.startswith("--"))
 
-    base, _, _ = read_obj(f"{MPFB}/3dobjs/base.obj")
+    base, _, base_faces = read_obj(f"{MPFB}/3dobjs/base.obj")
     n = len(base)
+    quads = body_quads(base_faces)
     groups = json.load(open(f"{MPFB}/mesh_metadata/basemesh_vertex_groups.json"))
     rig = json.load(open(f"{MPFB}/rigs/standard/rig.game_engine.json"))
     weights = json.load(open(f"{MPFB}/rigs/standard/weights.game_engine.json"))["weights"]
     default_human = shape(base, neutral(0.5))
 
     kit: dict = {"version": KIT_VERSION, "unit": UNIT, "q": Q_POS, "cage": n, "bases": {}, "body": [s[0] for s in BODY_SLIDERS],
-                 "face": [s[0] for s in FACE_SLIDERS], "parts": [], "skins": [], "eyes": EYES, "humanoid": HUMANOID}
+                 "face": [s[0] for s in FACE_SLIDERS], "detail": [s[0] for s in DETAIL_SLIDERS], "parts": [], "skins": [],
+                 "eyes": EYES, "humanoid": HUMANOID}
 
     # ---- Jaula: forma neutra y ajustes de cada base ----
     for key, g in (("f", 0.0), ("m", 1.0)):
@@ -666,7 +1071,7 @@ def main() -> None:
 
     # ---- Cara (compartida) ----
     b = Bin()
-    for sid, lo, hi in FACE_SLIDERS:
+    for sid, lo, hi in FACE_SLIDERS + DETAIL_SLIDERS:
         sparse_delta(b, f"{sid}.lo", target(lo, n))
         sparse_delta(b, f"{sid}.hi", target(hi, n))
     size = b.save(f"{OUT}/face.bin")
@@ -681,6 +1086,7 @@ def main() -> None:
         return ids
 
     bones, joints = [], {}
+    joint_ids: dict[str, np.ndarray] = {}
     order = []
 
     def visit(name):
@@ -706,6 +1112,7 @@ def main() -> None:
             else:
                 raise ValueError(f"articulación desconocida {name}.{end}: {h['strategy']}")
             b.add(f"{name}.{end}", np.array(ids), "<u2")
+            joint_ids[f"{name}.{end}"] = np.array(ids)
         bones.append(out)
     # Pesos: hasta 4 huesos por vértice de la jaula.
     per: list[list[tuple[int, float]]] = [[] for _ in range(n)]
@@ -721,6 +1128,9 @@ def main() -> None:
         for k, (bi, w) in enumerate(lst):
             ji[vi, k] = bi
             jw[vi, k] = w / s
+    # Hueso que más mueve cada vértice y qué huesos son contiguos (para saber qué piel tapa cada prenda).
+    body_bone = ji[:, 0]
+    near = bone_distance([x["parent"] for x in bones]) <= 1
     b.add("skin.i", ji, "u1")
     b.add("skin.w", np.round(jw * 255), "u1")
     size = b.save(f"{OUT}/rig.bin")
@@ -758,9 +1168,19 @@ def main() -> None:
         b.add("idx", tris, "<u2" if len(pos) < 65536 else "<u4")
         if bnd["delete"]:
             b.add("delete", np.array(bnd["delete"]), "<u2")
+        if spec["cat"] != "body":
+            # La piel que cada vértice de la pieza tiene debajo: muchas prendas se atan a las «ayudas»
+            # de MakeHuman (mallas que no se dibujan), no a la piel, y para ordenar capas hace falta
+            # saberlo. Se busca hacia dentro, siguiendo la normal de la pieza (lo abultado, como una
+            # cinturilla, cae sobre la piel de debajo y no sobre la más cercana).
+            on_body = skin_under(human, quads, pos, tris)
+            b.add("body", on_body, "<u2")
         if spec["cat"] in COVER_CATS:
-            b.add("cover", covered(human, pos, tris), "<u2")  # piel que se esconde
-            b.add("under", covered(human, pos, tris, gap=0.3, edge=0), "<u2")  # para ordenar capas
+            under, gap, deep = coverage(human, vertex_normals(human, quads), pos, tris, body_bone[on_body], body_bone, near)
+            b.add("under", under, "<u2")  # piel tapada: se mete hacia dentro y ordena las capas
+            b.add("gap", gap, "u1")  # a cuántos mm queda la prenda de cada una
+            b.add("cover", deep, "<u2")  # piel que se quita (lejos de los bordes)
+            print(f"    piel tapada {len(under)}, se quita {len(deep)}")
         size = b.save(f"{OUT}/parts/{spec['id']}.bin")
         total += size
         entry = {"id": spec["id"], "cat": spec["cat"], "file": f"parts/{spec['id']}.bin", "bytes": size, "index": b.index,
@@ -784,6 +1204,9 @@ def main() -> None:
         kit["parts"].append(entry)
         print(f"  {spec['id']:<18} {spec['cat']:<8} {len(tris):>6} tri  {size / 1e3:6.0f} kB")
     print(f"piezas: {total / 1e6:.2f} MB")
+    if not only or any(x[0] in only for x in IMPLANTS):
+        implant_texture()
+        kit["parts"] += forge_implants(base, quads, joint_ids, body_bone, order)
 
     # ---- Pieles y ojos (con las islas UV de los cuerpos y de los ojos) ----
     def obj_uvs(folder):
@@ -804,6 +1227,11 @@ def main() -> None:
         kit["skins"].append({"id": sid, "tex": f"tex/skin_{sid}.webp", "tone": tone})
     for e in EYES:
         tex_out(os.path.join(ASSETS, "eyes", "materials", f"{e}_eye.png"), f"{OUT}/tex/eye_{e}.webp", 256, keep_alpha=False, uvs=eye_uvs)
+    if not only or "--maps" in sys.argv:
+        forge_skin_maps(base, quads, groups, order, ji, jw, joint_ids, body_bone, near)
+        forge_eye_mask()
+    kit["maps"] = {"body": "tex/body_maps.webp", "face": "tex/face_maps.webp", "skin": "tex/skin_maps.webp", "iris": "tex/eye_mask.webp",
+                   "zones": __import__("maps").ZONES}
 
     # Con piezas sueltas en la línea de órdenes, se conservan las demás del kit anterior.
     if only and os.path.isfile(f"{OUT}/kit.json"):

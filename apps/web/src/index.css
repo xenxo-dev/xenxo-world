@@ -229,3 +229,26 @@ body,
     display: none;
   }
 }
+
+/* Configurador de fundas: muestras de los acabados y del color libre. */
+.swatch-any {
+  background: conic-gradient(#ff5a5a, #ffd23e, #58ff9a, #36d9ff, #7a5cff, #ff4fd8, #ff5a5a);
+}
+.finish-skin {
+  background: linear-gradient(135deg, #f1c9a8, #b97c58);
+}
+.finish-synth {
+  background: radial-gradient(circle at 35% 30%, #fbeee4, #d9b49c 75%);
+}
+.finish-chrome {
+  background: linear-gradient(135deg, #f4f6f8 0%, #8b939c 42%, #eef1f4 58%, #5d656e 100%);
+}
+.finish-matte {
+  background: linear-gradient(135deg, #ececef, #c9c9ce);
+}
+.finish-carbon {
+  background: repeating-linear-gradient(45deg, #23262c 0 3px, #353940 3px 6px);
+}
+.finish-porcelain {
+  background: radial-gradient(circle at 35% 30%, #ffffff, #e6e2da 72%);
+}

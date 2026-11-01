@@ -25,7 +25,10 @@ export async function exportFunda(r: Recipe): Promise<FundaFile> {
   const webp = canWebp();
   root.traverse((o) => {
     const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
-    if (m?.map) m.map.userData.mimeType = webp ? "image/webp" : m.alphaTest > 0 ? "image/png" : "image/jpeg";
+    if (!m) return;
+    for (const t of [m.map, m.emissiveMap, m.metalnessMap, m.roughnessMap]) {
+      if (t) t.userData.mimeType = webp ? "image/webp" : t === m.map && m.alphaTest > 0 ? "image/png" : "image/jpeg";
+    }
   });
   const exporter = new GLTFExporter();
   exporter.register((writer) => ({

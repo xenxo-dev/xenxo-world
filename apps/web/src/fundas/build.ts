@@ -58,6 +58,11 @@ export function computeShape(d: KitData, r: Recipe, out?: Shape): Shape {
     if (v < 0) add(d.face, `${k}.lo`, -v);
     else if (v > 0) add(d.face, `${k}.hi`, v);
   }
+  for (const k of kit.detail ?? []) {
+    const v = r.body[k] ?? 0;
+    if (v < 0) add(d.face, `${k}.lo`, -v);
+    else if (v > 0) add(d.face, `${k}.hi`, v);
+  }
   // Articulaciones y suelo (la cabeza de Root es el suelo entre los pies).
   const bones = kit.rig.bones;
   const heads = out?.heads ?? new Float32Array(bones.length * 3);
@@ -267,30 +272,53 @@ export function smoothNormals(pos: Float32Array, idx: Uint16Array | Uint32Array,
 }
 
 /**
- * Índices del cuerpo sin lo que tapa la ropa: un vértice del cuerpo se esconde si su vértice de la
- * base más pesado está en la lista de borrado de alguna prenda (`hard`: basta uno para quitar el
- * triángulo) o justo debajo de una prenda (`soft`: solo si lo están los tres, para no abrir huecos en
- * los bordes).
+ * Índices del cuerpo sin la piel que tapa la ropa: un triángulo se quita solo si sus tres vértices
+ * (por su vértice de la base más pesado) están bien tapados (`gone`). Así no se abren huecos en los
+ * bordes de las prendas: ahí la piel se queda, metida un poco hacia dentro (`shrinkBody`).
  */
-export function bodyIndex(body: Bin, hard: Set<number>, soft: Set<number>): Uint16Array | Uint32Array {
+export function bodyIndex(body: Bin, gone: Set<number>): Uint16Array | Uint32Array {
   const idx = body.get<Uint16Array | Uint32Array>("idx");
-  if (!hard.size && !soft.size) return idx;
-  const refs = body.get<Uint16Array>("refs");
-  const w = body.get<Float32Array>("w");
-  const nv = refs.length / 3;
-  const gone = new Uint8Array(nv);
-  for (let i = 0; i < nv; i++) {
-    let best = 0;
-    for (let k = 1; k < 3; k++) if (w[i * 3 + k]! > w[i * 3 + best]!) best = k;
-    const v = refs[i * 3 + best]!;
-    gone[i] = hard.has(v) ? 2 : soft.has(v) ? 1 : 0;
-  }
+  if (!gone.size) return idx;
+  const prim = primaryRefs(body);
   const keep: number[] = [];
   for (let f = 0; f < idx.length; f += 3) {
-    const a = gone[idx[f]!]!, b = gone[idx[f + 1]!]!, c = gone[idx[f + 2]!]!;
-    if (a === 2 || b === 2 || c === 2) continue;
-    if (a && b && c) continue;
-    keep.push(idx[f]!, idx[f + 1]!, idx[f + 2]!);
+    const a = idx[f]!, b = idx[f + 1]!, c = idx[f + 2]!;
+    if (gone.has(prim[a]!) && gone.has(prim[b]!) && gone.has(prim[c]!)) continue;
+    keep.push(a, b, c);
   }
   return idx instanceof Uint32Array ? new Uint32Array(keep) : new Uint16Array(keep);
+}
+
+/** Vértice de la base más pesado de cada vértice de una pieza. */
+export function primaryRefs(bin: Bin): Uint16Array {
+  const refs = bin.get<Uint16Array>("refs");
+  const w = bin.get<Float32Array>("w");
+  const out = new Uint16Array(refs.length / 3);
+  for (let i = 0; i < out.length; i++) {
+    let best = 0;
+    for (let k = 1; k < 3; k++) if (w[i * 3 + k]! > w[i * 3 + best]!) best = k;
+    out[i] = refs[i * 3 + best]!;
+  }
+  return out;
+}
+
+/**
+ * Vértice de la piel bajo cada vértice de una pieza: el que calcula la forja (`body`; muchas prendas se
+ * atan a mallas de ayuda que no son piel) o, si no está, su vértice de la base más pesado.
+ */
+export function bodyRefs(bin: Bin): Uint16Array {
+  return bin.has("body") ? bin.get<Uint16Array>("body") : primaryRefs(bin);
+}
+
+/** Mete hacia dentro (contra su normal) los vértices de una pieza según la piel que tienen debajo (m). */
+export function pushIn(pos: Float32Array, bin: Bin, idx: Uint16Array | Uint32Array, amount: (v: number) => number) {
+  const prim = bodyRefs(bin);
+  const n = smoothNormals(pos, idx);
+  for (let i = 0; i < prim.length; i++) {
+    const k = amount(prim[i]!);
+    if (!k) continue;
+    pos[i * 3] = pos[i * 3]! - n[i * 3]! * k;
+    pos[i * 3 + 1] = pos[i * 3 + 1]! - n[i * 3 + 1]! * k;
+    pos[i * 3 + 2] = pos[i * 3 + 2]! - n[i * 3 + 2]! * k;
+  }
 }

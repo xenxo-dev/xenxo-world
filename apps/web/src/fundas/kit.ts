@@ -23,8 +23,10 @@ export interface KitPart {
   tex?: string;
   thumb?: string;
   alpha?: boolean;
+  /** Máscara de lo que brilla (implantes). */
+  glow?: string;
 }
-export type PartCat = "body" | "eyes" | "lashes" | "brows" | "hair" | "beard" | "top" | "bottom" | "outfit" | "shoes" | "hat" | "glasses" | "gloves";
+export type PartCat = "body" | "eyes" | "lashes" | "brows" | "hair" | "beard" | "top" | "bottom" | "outfit" | "shoes" | "hat" | "glasses" | "gloves" | "implant";
 
 export interface Kit {
   version: number;
@@ -34,6 +36,10 @@ export interface Kit {
   bases: Record<"f" | "m", { file: string; bytes: number; index: Index }>;
   body: string[];
   face: string[];
+  /** Más ajustes del cuerpo (en `face.bin`, como los de la cara; sus valores van en `Recipe.body`). */
+  detail: string[];
+  /** Mapas de la piel en el espacio UV del cuerpo (zonas, líneas, maquillaje) y del iris. */
+  maps: { body: string; face: string; skin: string; iris: string; zones: string[] };
   faceFile: { file: string; bytes: number; index: Index };
   rig: { file: string; bytes: number; index: Index; bones: { name: string; parent: number }[] };
   parts: KitPart[];

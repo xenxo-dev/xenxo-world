@@ -6,6 +6,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { Peer } from "@xenxo/protocol";
 import { placeName, t } from "../i18n";
+import { ReportForm } from "../panel/ReportButton";
+import { FlagIcon } from "./icons";
 import { teleport } from "../net/session";
 import { world } from "../net/world-store";
 import { self } from "../world/self";
@@ -46,6 +48,7 @@ function tag(p: Peer) {
 
 export function People({ selfName, selfNo }: { selfName: string; selfNo: number | null }) {
   const [open, setOpen] = useState(false);
+  const [reporting, setReporting] = useState<{ hash: string; name: string } | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const peers = [...world.peers.values()].sort((a, b) => (a.player_no ?? 1e9) - (b.player_no ?? 1e9) || a.display_name.localeCompare(b.display_name));
   const live = world.status === "open";
@@ -106,6 +109,16 @@ export function People({ selfName, selfNo }: { selfName: string; selfNo: number 
                   </span>
                   {tag(p) && <span className="block text-xs text-cal/45">{tag(p)}</span>}
                 </span>
+                {p.avatar && (
+                  <button
+                    onClick={() => setReporting({ hash: p.avatar!.hash, name: p.display_name })}
+                    aria-label={t("people.reportLabel", { name: p.display_name })}
+                    title={t("people.report")}
+                    className="grid h-6 w-6 shrink-0 place-items-center rounded-lg text-cal/40 hover:text-cal"
+                  >
+                    <FlagIcon />
+                  </button>
+                )}
                 <button
                   onClick={() => {
                     goTo(p);
@@ -120,6 +133,12 @@ export function People({ selfName, selfNo }: { selfName: string; selfNo: number 
             ))}
           </ul>
           {peers.length === 0 && <p className="px-2 pb-1.5 pt-1 text-xs leading-relaxed text-cal/55">{t("people.empty")}</p>}
+          {reporting && (
+            <div className="px-1 pb-1 pt-2">
+              <p className="mb-1 px-1 text-xs text-cal/60">{t("people.reportLabel", { name: reporting.name })}</p>
+              <ReportForm compact targetType="avatar" targetId={reporting.hash} onClose={() => setReporting(null)} />
+            </div>
+          )}
         </div>
       )}
     </div>

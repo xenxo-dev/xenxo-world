@@ -149,3 +149,13 @@ export function SoundIcon({ on }: { on: boolean }) {
     </svg>
   );
 }
+
+/** Bandera (denunciar). */
+export function FlagIcon() {
+  return (
+    <svg aria-hidden className="h-4 w-4" {...svg}>
+      <path d="M5 21V4" />
+      <path d="M5 4.5c2.5-1.5 5-1.5 7 0s4.5 1.5 7 0v9c-2.5 1.5-5 1.5-7 0s-4.5-1.5-7 0" />
+    </svg>
+  );
+}
