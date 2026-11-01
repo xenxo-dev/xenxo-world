@@ -9,6 +9,7 @@ import { clone as cloneSkinned } from "three/examples/jsm/utils/SkeletonUtils.js
 import { VRMLoaderPlugin, VRMUtils, type VRM } from "@pixiv/three-vrm";
 import { VRMLookAtQuaternionProxy } from "@pixiv/three-vrm-animation";
 import { VrmAnimator } from "./animation";
+import type { Rig } from "./people/rig";
 import type { Motion } from "./motion";
 
 export const AVATAR_HEIGHT = 1.75;
@@ -20,6 +21,8 @@ export interface LoadedAvatar {
    * si está en el aire y el gesto en curso).
    */
   update(dt: number, motion: Motion): void;
+  /** El esqueleto (solo los VRM): golpes, miradas, parejas y caídas. */
+  rig?: Rig;
   dispose(): void;
 }
 
@@ -144,7 +147,8 @@ function fromVrm(vrm: VRM, scene: THREE.Group): LoadedAvatar {
     object,
     update: (dt, m) => {
       if (animator.ready) {
-        animator.update(dt, m.speed, m.airborne, m.emote);
+        if (m.fx) m.fx.rig = animator.rig;
+        animator.update(dt, m.speed, m.airborne, m.emote, !!m.fight, m.fx);
       } else {
         // Respaldo: paso procedural sencillo hasta que cargan los clips.
         const k = walkAmount(m.speed);
@@ -175,7 +179,9 @@ function fromVrm(vrm: VRM, scene: THREE.Group): LoadedAvatar {
       }
       vrm.update(dt);
     },
+    rig: animator.rig,
     dispose: () => {
+      animator.rig.cancelFall();
       animator.dispose();
       VRMUtils.deepDispose(vrm.scene);
     },

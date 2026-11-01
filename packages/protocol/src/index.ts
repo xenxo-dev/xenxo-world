@@ -447,10 +447,14 @@ export const HelloMsg = envelope(
 export const Emote = z.string().regex(/^[a-z_]{1,24}$/);
 export const EMOTES = [
   "dance", "wave", "sit", "talk", "cheer", "crouch", "car_in", "car_out",
-  // Gestos (§9 octies): aplaudir, señalar, llamar con la mano, reírse y encogerse de hombros.
-  "clap", "point", "beckon", "laugh", "shrug",
-  // Acciones en pareja y pelea (el cliente las pone en su pose mientras duran).
-  "high_five", "hug", "handshake", "punch", "kick", "shove", "hit_stagger", "hit_down", "get_up",
+  // Gestos (§9 octies): aplaudir, señalar, llamar con la mano, reírse, encogerse de hombros, cruzar
+  // los brazos, asentir, negar con la cabeza, hablar por teléfono y la reverencia.
+  "clap", "point", "beckon", "laugh", "shrug", "fold_arms", "nod", "shake_head", "phone", "bow",
+  // Acciones en pareja y pelea (el cliente las pone en su pose mientras duran). Los golpes seguidos
+  // del mismo tipo se combinan: punch → cross → hook, kick → roundhouse, shove → push.
+  "high_five", "hug", "handshake", "punch", "cross", "hook", "kick", "roundhouse", "shove", "push",
+  // Reacciones: en la cara, en el cuerpo, por la espalda, traspié (antiguo), en el suelo y levantarse.
+  "hit_head", "hit_body", "hit_back", "hit_stagger", "hit_down", "get_up",
 ] as const;
 
 /**

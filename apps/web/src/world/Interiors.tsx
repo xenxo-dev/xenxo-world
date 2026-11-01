@@ -17,10 +17,10 @@ import lives from "../../../realtime/src/district-interiors.json";
 import type { Ambience } from "./graphics";
 import { neonGlow } from "./materials";
 import { AvatarBody } from "./Avatars";
-import { createMotion, type Motion } from "./motion";
+import type { Motion } from "./motion";
 import { playerPos } from "./Player";
 import { floorAt, NPC_CITY, npcs } from "./collision";
-import { knockApply } from "./knock";
+import { knockApply, knockReset, npcMotion } from "./knock";
 
 interface Door {
   x: number;
@@ -166,14 +166,18 @@ export function Residents({ chunk, count }: { chunk: string; count: number }) {
   const life = d ? LIFE[d.id] : undefined;
   const people = life?.npcs ?? [];
   const n = Math.min(count, NPC_CITY);
-  const slots = useMemo<Slot[]>(() => Array.from({ length: n }, () => ({ who: -1, motion: createMotion(), group: null, bx: 0, by: 0, bz: 0, yaw: 0, knocked: false })), [n]);
+  const slots = useMemo<Slot[]>(() => Array.from({ length: n }, () => ({ who: -1, motion: npcMotion(), group: null, bx: 0, by: 0, bz: 0, yaw: 0, knocked: false })), [n]);
   const dist = useMemo(() => new Float32Array(people.length), [people]);
   const order = useMemo(() => Array.from({ length: people.length }, (_, k) => k), [people]);
   const inView = useMemo(() => new Uint8Array(life?.rooms.length ?? 0), [life]);
   const last = useRef(0);
   useEffect(() => {
     last.current = 0;
-    for (const s of slots) s.who = -1;
+    for (const s of slots) {
+      s.who = -1;
+      s.knocked = false;
+      knockReset(s.motion);
+    }
   }, [chunk, slots]);
 
   useFrame(() => {
@@ -195,8 +199,11 @@ export function Residents({ chunk, count }: { chunk: string; count: number }) {
         if (s.who < 0) continue;
         let ok = false;
         for (let k = 0; k < slots.length && k < order.length; k++) if (order[k] === s.who && dist[s.who]! < Infinity) ok = true;
-        if (!ok) s.who = -1;
-        else keep++;
+        if (!ok) {
+          s.who = -1;
+          s.knocked = false;
+          knockReset(s.motion);
+        } else keep++;
       }
       for (let k = 0, put = keep; k < order.length && put < slots.length; k++) {
         const who = order[k]!;
@@ -232,7 +239,7 @@ export function Residents({ chunk, count }: { chunk: string; count: number }) {
       g.visible = s.who >= 0;
       if (s.who < 0) continue;
       // Si le ha dado un coche, sale despedido y se levanta (knock.ts); después, a su sitio y a lo suyo.
-      const k = knockApply(NPC_CITY + e, g, s.bx, s.by, s.bz, s.yaw, s.motion) || npcs.knock[(NPC_CITY + e) * 4] !== 0;
+      const k = knockApply(NPC_CITY + e, g, s.bx, s.by, s.bz, s.yaw, s.motion);
       if (!k && s.knocked) {
         g.position.set(s.bx, s.by, s.bz);
         g.rotation.set(0, s.yaw, 0);
@@ -246,7 +253,7 @@ export function Residents({ chunk, count }: { chunk: string; count: number }) {
       e++;
     }
     npcs.extra = e;
-  });
+  }, -0.5);
   useEffect(() => () => void (npcs.extra = 0), []);
 
   if (!d || !people.length || n <= 0) return null;

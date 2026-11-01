@@ -465,11 +465,20 @@ lo que dice el cliente. Los errores van como `ERROR` con el `ref` del mensaje.
   con 0,3 m de margen por la red y menos de 1,2 m de diferencia de altura; nadie en coche. Uno cada 600 ms por sesión
   (`rate_limited`). Quien acaba de caer no recibe golpes durante 2,5 s (se ignoran sin error). El
   servidor reparte `HIT_EVENT` con la dirección (de quien golpea hacia quien recibe), la fuerza y si cae;
-  cada cliente lo dibuja (traspié, o caída con física y levantarse) y quien recibe se mueve él mismo:
-  el servidor no mueve a nadie.
+  cada cliente lo dibuja (la reacción según de dónde le viene, o una caída con física y levantarse) y
+  quien recibe se mueve él mismo: el servidor no mueve a nadie.
+- **Cómo se ve** (solo cliente; no cambia las reglas): el `HIT` se manda cuando llega el golpe en la
+  animación, no al pulsar. Los golpes seguidos del mismo tipo se combinan y la pose lleva cuál es
+  (`punch` → `cross` → `hook`, `kick` → `roundhouse`, `shove` → `push`; un cliente que no los conozca los
+  dibuja como el primero o sin gesto). Cada cliente dibuja la reacción de quien recibe (`HIT_EVENT`) sin
+  esperar a su pose, retrasada lo mismo que se dibujan las poses de los demás (así el puño se ve llegar
+  antes), y simula él mismo su caída; la pose de quien cae trae `hit_head`, `hit_body`, `hit_back`,
+  `hit_down` y `get_up` para quien no vio el golpe.
 - **Choques:** las personas son sólidas para los demás (cada cliente aparta a su jugador de las poses
   de los demás) y la gente de decorado se aparta de ellas. Con el modo pelea, un golpe sin nadie en
-  modo pelea delante puede tirar a alguien de la gente de decorado (solo en ese cliente).
+  modo pelea delante le llega a alguien de la gente de decorado (solo en ese cliente: no viaja nada):
+  el jab, el directo y los empujones los encaja; el gancho y las patadas la tiran, con la misma caída
+  con física que las personas, y se levanta y vuelve a lo suyo. A quien está en el suelo no se le da.
 
 ## 10. Códigos de error
 

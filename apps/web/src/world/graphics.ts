@@ -67,13 +67,18 @@ export interface Features {
    * líneas que caen en el shader alrededor de la cámara. Los charcos van en todos los niveles.
    */
   rain: number;
+  /**
+   * Personas que caen a la vez con física de verdad (cuerpo articulado de Rapier: modo pelea y
+   * atropellos). Las demás caen con la animación.
+   */
+  ragdolls: number;
 }
 
 export const FEATURES: Record<Tier, Features> = {
-  low: { dpr: [0.75, 1], antialias: false, pbr: false, post: false, bloom: false, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 48, flyerTris: 500, lod: "light", textures: 512, normalMaps: false, avatarFill: true, nexoCity: 0.5, pedestrians: 4, traffic: 8, residents: 3, rain: 900 },
-  medium: { dpr: [1, 1.5], antialias: true, pbr: true, post: true, bloom: true, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 96, flyerTris: 900, lod: "light", textures: 512, normalMaps: true, avatarFill: true, nexoCity: 0.75, pedestrians: 6, traffic: 14, residents: 4, rain: 1600 },
-  high: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: false, shadows: 1024, probe: 128, pointLights: true, lightPools: false, skyline: 150, flyerTris: 1800, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1, pedestrians: 10, traffic: 22, residents: 6, rain: 3200 },
-  ultra: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: true, shadows: 2048, probe: 256, pointLights: true, lightPools: false, skyline: 220, flyerTris: 2700, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1, pedestrians: 14, traffic: 30, residents: 9, rain: 4800 },
+  low: { dpr: [0.75, 1], antialias: false, pbr: false, post: false, bloom: false, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 48, flyerTris: 500, lod: "light", textures: 512, normalMaps: false, avatarFill: true, nexoCity: 0.5, pedestrians: 4, traffic: 8, residents: 3, rain: 900, ragdolls: 2 },
+  medium: { dpr: [1, 1.5], antialias: true, pbr: true, post: true, bloom: true, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 96, flyerTris: 900, lod: "light", textures: 512, normalMaps: true, avatarFill: true, nexoCity: 0.75, pedestrians: 6, traffic: 14, residents: 4, rain: 1600, ragdolls: 3 },
+  high: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: false, shadows: 1024, probe: 128, pointLights: true, lightPools: false, skyline: 150, flyerTris: 1800, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1, pedestrians: 10, traffic: 22, residents: 6, rain: 3200, ragdolls: 5 },
+  ultra: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: true, shadows: 2048, probe: 256, pointLights: true, lightPools: false, skyline: 220, flyerTris: 2700, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1, pedestrians: 14, traffic: 30, residents: 9, rain: 4800, ragdolls: 8 },
 };
 
 /* ------------------------------------------------------------------ */
@@ -161,6 +166,7 @@ function portableClamp(f: Features, xr: boolean): Features {
     residents: Math.min(f.residents, xr ? 3 : 4),
     // En las gafas, solo los charcos (las gotas cruzan la vista y marean); en el móvil, poca.
     rain: xr ? 0 : Math.min(f.rain, 900),
+    ragdolls: Math.min(f.ragdolls, xr ? 2 : 3),
     lod: f.lod,
   };
 }

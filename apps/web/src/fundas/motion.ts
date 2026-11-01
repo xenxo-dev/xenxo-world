@@ -1,8 +1,8 @@
 /**
  * La funda en movimiento, dentro del configurador. Se monta con su esqueleto en pose T (la misma que
  * se exporta: three.ts → buildSkinned), se arma un VRM en memoria (sin exportar ni volver a cargar) y
- * se anima con lo mismo que en el mundo (world/animation.ts): reposo, andar, trotar, correr, saltar y
- * los gestos. Así se ve cómo se moverá esa funda antes de guardarla.
+ * se anima con lo mismo que en el mundo (world/animation.ts): reposo, andar, trotar, correr, saltar,
+ * los gestos y la guardia con sus golpes. Así se ve cómo se moverá esa funda antes de guardarla.
  */
 import * as THREE from "three";
 import { VRM, VRMHumanoid, type VRM1Meta, type VRMHumanBones } from "@pixiv/three-vrm";
@@ -11,8 +11,8 @@ import type { Recipe } from "./recipe";
 import { buildSkinned, kitData } from "./three";
 
 /** Lo que se puede ver hacer a la funda. */
-export type Act = "idle" | "walk" | "jog" | "sprint" | "jump" | "dance" | "wave" | "clap";
-export const ACTS: Act[] = ["idle", "walk", "jog", "sprint", "jump", "dance", "wave", "clap"];
+export type Act = "idle" | "walk" | "jog" | "sprint" | "jump" | "dance" | "wave" | "clap" | "gestures" | "fight";
+export const ACTS: Act[] = ["idle", "walk", "jog", "sprint", "jump", "dance", "wave", "clap", "gestures", "fight"];
 
 /** Velocidad (m/s) de cada desplazamiento, en el sitio (como en una cinta). */
 const SPEED: Partial<Record<Act, number>> = { walk: 1.25, jog: 3.0, sprint: 5.8 };
@@ -21,6 +21,33 @@ const EMOTE: Partial<Record<Act, { name: string; every?: number }>> = {
   dance: { name: "dance" },
   wave: { name: "wave", every: 3.2 },
   clap: { name: "clap" },
+};
+/**
+ * Secuencias: varios gestos seguidos (con un respiro entre uno y otro) y, en la pelea, la guardia con
+ * sus combinaciones (jab, directo y gancho; patada frontal y circular). [gesto, desde, hasta] en s.
+ */
+const SEQ: Partial<Record<Act, { cycle: number; steps: [string, number, number][] }>> = {
+  gestures: {
+    cycle: 15.3,
+    steps: [
+      ["point", 0, 1.9],
+      ["beckon", 2.3, 4.5],
+      ["shrug", 4.9, 6.35],
+      ["laugh", 6.75, 9.35],
+      ["nod", 9.75, 12.25],
+      ["bow", 12.65, 14.5],
+    ],
+  },
+  fight: {
+    cycle: 7,
+    steps: [
+      ["punch", 0.8, 1.42],
+      ["cross", 1.42, 2.2],
+      ["hook", 2.2, 2.95],
+      ["kick", 4.2, 4.86],
+      ["roundhouse", 4.86, 5.64],
+    ],
+  },
 };
 /** Salto: ciclo de 1,6 s, en el aire de 0,15 a 0,85 s, hasta 40 cm. */
 const JUMP = { cycle: 1.6, from: 0.15, air: 0.7, height: 0.4 };
@@ -75,8 +102,13 @@ export async function buildMoving(r: Recipe): Promise<MovingFunda> {
       }
       const e = EMOTE[act];
       // Un gesto que va una vez: se suelta un momento para que vuelva a empezar.
-      const emote = e && !(e.every && t % e.every < 0.12) ? e.name : null;
-      animator.update(dt, SPEED[act] ?? 0, airborne, emote);
+      let emote = e && !(e.every && t % e.every < 0.12) ? e.name : null;
+      const seq = SEQ[act];
+      if (seq) {
+        const u = t % seq.cycle;
+        for (const [name, from, to] of seq.steps) if (u >= from && u < to) emote = name;
+      }
+      animator.update(dt, SPEED[act] ?? 0, airborne, emote, act === "fight");
       vrm.update(dt);
     },
     dispose() {

@@ -1,11 +1,12 @@
 """
-Convierte animaciones de la Universal Animation Library de Quaternius (CC0) en VRMA:
+Convierte animaciones de la Universal Animation Library de Quaternius (1 y 2, CC0) en VRMA:
 el formato estándar de animación de VRM, que sirve para CUALQUIER avatar humanoide
 (los personajes de xenxo y los VRM que suba la gente).
 
-  python3 tools/avatars/ual_to_vrma.py <UAL1_Standard.glb> [salida]
+  python3 tools/avatars/ual_to_vrma.py <UAL1_Standard.glb> <UAL2_Standard.glb> [salida]
 
 Requiere Blender 5 como módulo (pip install bpy) con la extensión «VRM format» instalada.
+Cada clip sale de la librería que lo trae (las dos usan el mismo esqueleto).
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ DEFAULT_OUT = os.path.join(ROOT, "apps", "web", "public", "anims")
 
 # Nombre en xenxo → animación de la librería. Los bucles terminan en _Loop.
 CLIPS = {
+    # Andar, correr, saltar, sentarse y gestos (UAL1).
     "idle": "Idle_Loop",
     "walk": "Walk_Loop",
     "jog": "Jog_Fwd_Loop",
@@ -37,15 +39,23 @@ CLIPS = {
     "crouch_idle": "Crouch_Idle_Loop",
     "crouch_walk": "Crouch_Fwd_Loop",
     "walk_formal": "Walk_Formal_Loop",
+    # Modo pelea (UAL1): guardia y golpes rectos, reacciones y caer redondo.
+    "punch_jab": "Punch_Jab",
+    "punch_cross": "Punch_Cross",
+    "hit_chest": "Hit_Chest",
+    "hit_head": "Hit_Head",
+    "ko_fall": "Death01",
+    # UAL2: levantarse del suelo y gestos (el gancho se hace en código: people/gestures.ts).
+    "stand_up": "LayToIdle",
+    "fold_arms": "Idle_FoldArms_Loop",
+    "shake_head": "Idle_No_Loop",
+    "nod": "Yes",
+    "phone": "Idle_TalkingPhone_Loop",
 }
 
 
-def main() -> None:
-    src = sys.argv[1]
-    out = os.path.abspath(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_OUT
-    os.makedirs(out, exist_ok=True)
-    addon_utils.enable("bl_ext.user_default.vrm", default_set=True)
-
+def export_from(src: str, out: str, done: set[str]) -> None:
+    """Importa una librería en una escena vacía y exporta los clips de CLIPS que trae."""
     bpy.ops.wm.read_factory_settings(use_empty=True)
     addon_utils.enable("bl_ext.user_default.vrm", default_set=True)
     sc = bpy.context.scene
@@ -59,15 +69,16 @@ def main() -> None:
     bpy.context.view_layer.objects.active = arm
     arm.select_set(True)
     r = bpy.ops.vrm.assign_vrm1_humanoid_human_bones_automatically(armature_object_name=arm.name)
-    print("asignación de huesos:", r)
+    print(os.path.basename(src), "asignación de huesos:", r)
 
     actions = {a.name: a for a in bpy.data.actions}
     if arm.animation_data is None:
         arm.animation_data_create()
     for name, clip in CLIPS.items():
+        if name in done:
+            continue
         act = next((a for n, a in actions.items() if n == clip or n.startswith(clip + ".") or n.endswith("|" + clip)), None)
         if act is None:
-            print("falta", clip)
             continue
         arm.animation_data.action = act
         if hasattr(arm.animation_data, "action_slot") and act.slots:
@@ -78,7 +89,22 @@ def main() -> None:
         path = os.path.join(out, f"{name}.vrma")
         res = bpy.ops.export_scene.vrma(filepath=path, armature_object_name=arm.name)
         size = os.path.getsize(path) if os.path.exists(path) else 0
+        done.add(name)
         print(f"{name:12} ← {clip:22} {f1 - f0:4d} frames  {size // 1024} KB  {res}", flush=True)
+
+
+def main() -> None:
+    args = sys.argv[1:]
+    sources = [a for a in args if a.lower().endswith(".glb")]
+    rest = [a for a in args if not a.lower().endswith(".glb")]
+    out = os.path.abspath(rest[0]) if rest else DEFAULT_OUT
+    os.makedirs(out, exist_ok=True)
+    done: set[str] = set()
+    for src in sources:
+        export_from(src, out, done)
+    for name, clip in CLIPS.items():
+        if name not in done:
+            print("falta", name, "←", clip)
 
 
 if __name__ == "__main__":

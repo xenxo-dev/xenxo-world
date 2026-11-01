@@ -1,3 +1,5 @@
+import type { PersonFx } from "./people/rig";
+
 /**
  * Estado de movimiento de un personaje, compartido entre quien lo mueve
  * (red o teclado) y quien lo dibuja. Mutable a propósito: se lee en useFrame.
@@ -11,6 +13,10 @@ export interface Motion {
   airborne: boolean;
   /** Gesto en curso ("dance", "wave", "sit"…) o null. */
   emote: string | null;
+  /** En modo pelea: guardia en reposo y puños arriba al andar. */
+  fight?: boolean;
+  /** Lo que la gente le pide a su esqueleto (golpes, parejas, caídas): people/rig.ts. */
+  fx?: PersonFx | null;
 }
 
 export function createMotion(): Motion {

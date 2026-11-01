@@ -10,7 +10,8 @@
     "build": "node ../../tools/docs/build.mjs && npm run build -w @xenxo/sdk && tsc -p tsconfig.json && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json",
-    "test:vehicle": "tsx test/vehicle.mts"
+    "test:vehicle": "tsx test/vehicle.mts",
+    "test:ragdoll": "tsx test/ragdoll.mts"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "0.19.3",

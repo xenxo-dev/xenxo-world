@@ -1,97 +1,110 @@
 /**
- * Lo que la gente le hace a tu personaje (y lo que tú le haces a la de decorado), cada frame desde
- * Player.tsx:
+ * Lo que la gente le hace a tu personaje y lo que tú haces en el modo pelea, cada frame desde
+ * Player.tsx (sin objetos nuevos por frame):
  *
- *   - un golpe flojo: traspié hacia donde te dan (`hit_stagger`);
- *   - uno fuerte: caes con física de verdad (people/tumble.ts, Rapier), te quedas un momento en el
- *     suelo (más si es fuera de combate) y te levantas (`hit_down` → `get_up`);
- *   - una acción en pareja: te acercas, miras a la otra persona y la hacéis a la vez;
- *   - correr contra la gente de decorado la hace tropezar, y en modo pelea, si no hay nadie en modo
- *     pelea a tu alcance, el golpe se lo lleva quien tengas delante (como con el coche, knock.ts).
+ *   - Golpear: cada golpe del mismo tipo seguido saca el siguiente de la combinación (jab, directo y
+ *     gancho; patada frontal y circular; empujón con las dos manos y con una). Te giras hacia quien
+ *     tengas delante en modo pelea, das el paso que falte para llegar y el golpe se manda al servidor
+ *     cuando llega el puño (no al pulsar). Sin nadie en modo pelea, se lo lleva la gente de decorado.
+ *   - Encajar: los golpes ajenos se ven con el mismo retraso que la pose de quien golpea (así el puño
+ *     llega antes de que lo notes). Uno flojo: el gesto según de dónde viene, el tronco y la cabeza
+ *     que ceden (rig.ts) y un pequeño traspié. Uno fuerte: caes con física (ragdoll.ts), te quedas un
+ *     momento en el suelo (más si es fuera de combate), te das la vuelta si caíste boca abajo y te
+ *     levantas desde la pose en que quedaste.
+ *   - En pareja: os acercáis, os miráis y las manos se encuentran (IK).
+ *   - Correr contra la gente de decorado la hace tropezar.
  *
- * Mientras dura, manda esto y no el joystick. Sin objetos nuevos por frame.
+ * Mientras dura, manda esto y no el joystick.
  */
 import * as THREE from "three";
-import { FIGHT_REACH, type FightMove, type FightStyle, type PairAction } from "@xenxo/protocol";
+import { FIGHT_REACH, type FightMove, type PairAction } from "@xenxo/protocol";
 import { people, type HitEvent, type PairEvent } from "../../net/people-store";
+import { canAttack, fightTarget, hitReady, sendHit } from "../../net/people";
 import { world } from "../../net/world-store";
+import { remoteFeet } from "./where";
 import { crowd, floorAt, NPC_CITY, npcs } from "../collision";
+import { knockBusy } from "../knock";
 import { placeBody, type Body } from "../locomotion";
 import type { Motion } from "../motion";
-import { loadTumble, tumbleSim } from "./tumble";
+import { impact, thud, whoosh } from "./fight-audio";
+import { COMBO, COMBO_RESET, fallFor, FALL_MAX, HIT_DELAY_MS, LIE, LIE_KO, lightReaction, myStrike, RISE, STRIKES, strikeOf, type Strike } from "./fight";
+import { loadRagdolls, ragdolls } from "./ragdoll";
+import { PAIR, pairTargets } from "./pair";
+import { createFx, type Lying } from "./rig";
 
-type Phase = "none" | "stagger" | "tumble" | "lie" | "rise" | "pair";
+type Phase = "none" | "react" | "fall" | "ground" | "roll" | "rise" | "clipfall" | "cliprise" | "pair";
 
-/** Lo que dura cada parte (s). */
-const STAGGER = 0.6;
-const TUMBLE_MAX = 2.2;
-const LIE = 0.9;
-const LIE_KO = 2.6;
-const RISE = 0.9;
-const PAIR: Record<PairAction, { s: number; gap: number }> = {
-  high_five: { s: 1.6, gap: 0.85 },
-  hug: { s: 2.3, gap: 0.5 },
-  handshake: { s: 1.9, gap: 0.85 },
-};
-/** Cuánto sale despedido cada estilo (m/s por unidad de fuerza) y cuánto sube. */
-const FLING: Record<FightStyle, { h: number; v: number; spin: number }> = {
-  comic: { h: 5.5, v: 3.2, spin: 3.4 },
-  pixel: { h: 6, v: 4.2, spin: 4.2 },
-  duel: { h: 4, v: 1.6, spin: 2.6 },
-  shove: { h: 4.5, v: 1.2, spin: 2.4 },
-};
-/** Velocidad con la que la gente de decorado sale (knock.ts: por encima de 2,5 cae). */
-const NPC_HIT: Record<FightMove, number> = { punch: 3, kick: 4, shove: 2 };
+/**
+ * Con qué fuerza le llega a la gente de decorado (m/s; knock.ts: por encima de 2,5 cae): el jab, el
+ * directo y los empujones los encaja; el gancho y las patadas la tiran.
+ */
+const NPC_HIT: Record<string, number> = { punch: 1.8, cross: 2.3, hook: 3.2, kick: 2.9, roundhouse: 3.8, shove: 2.3, push: 2 };
+
+/** Lo que el esqueleto de tu personaje recibe de la gente (Player lo pone en su `Motion`). */
+export const selfFx = createFx();
 
 const me = {
   phase: "none" as Phase,
   t: 0,
+  dur: 0,
   vx: 0,
   vz: 0,
   ko: false,
+  rolled: false,
   pair: "high_five" as PairAction,
-  /** Dónde está la otra persona de la pareja y hacia dónde mirar. */
-  px: 0,
-  pz: 0,
-  yaw: 0,
-  /** Al levantarse: desde dónde y con qué giro. */
-  from: new THREE.Quaternion(),
-  fromY: 0,
+  partner: "",
+  /** Cadera el frame anterior (para el golpe contra el suelo). */
+  lastY: 0,
+  lastVy: 0,
+  hit: null as HitEvent | null,
 };
-const pending: { hit: HitEvent | null; pair: PairEvent | null } = { hit: null, pair: null };
+/** El golpe que estás dando. */
+const strike = { name: "", def: null as Strike | null, t: 0, target: "", npc: -1, sent: false };
+const combo = { move: "" as FightMove | "", i: 0, last: -1e9 };
+const queue: { h: HitEvent; due: number }[] = [];
+let pendingPair: PairEvent | null = null;
+/** Sacudida de la cámara al recibir (la aplica Player). */
+export const camKick = { x: 0, y: 0, z: 0, t: 1 };
 
 people.onHit((h) => {
-  if (h.to === world.sessionId) pending.hit = h;
+  if (h.to !== world.sessionId) return;
+  // Lo que pasa a quien golpeas lo ves con el mismo retraso que su golpe.
+  queue.push({ h, due: performance.now() + (h.from === world.sessionId ? 0 : HIT_DELAY_MS) });
 });
 people.onPair((p) => {
-  if (p.a === world.sessionId || p.b === world.sessionId) pending.pair = p;
+  if (p.a === world.sessionId || p.b === world.sessionId) pendingPair = p;
 });
 
 /** Al activar el modo pelea se carga la física (así la primera caída ya la tiene). */
 export function prepareFights() {
-  void loadTumble();
+  void loadRagdolls();
 }
 
 /** ¿Está ahora el personaje en manos de la gente (sin poder andar)? */
 export function peopleBusy(): boolean {
   return me.phase !== "none";
 }
-
-const _q = new THREE.Quaternion();
-const _up = new THREE.Vector3();
-const _yawQ = new THREE.Quaternion();
-const _Y = new THREE.Vector3(0, 1, 0);
-const _p = { x: 0, y: 0, z: 0 };
-
-function latest(id: string, out: { x: number; z: number }): boolean {
-  const buf = world.poseBuffers.get(id);
-  const s = buf?.[buf.length - 1];
-  if (!s) return false;
-  out.x = s.head.p[0]!;
-  out.z = s.head.p[2]!;
-  return true;
+/** ¿Está dando un golpe? (Player no le quita el gesto). */
+export function striking(): boolean {
+  return !!strike.def;
 }
-const _o = { x: 0, z: 0 };
+
+/** Al cambiar de lugar o aparecer en otro sitio: todo vuelve a empezar. */
+export function resetPeople(motion: Motion) {
+  selfFx.rig?.cancelFall();
+  me.phase = "none";
+  me.t = 0;
+  strike.def = null;
+  queue.length = 0;
+  pendingPair = null;
+  selfFx.look.w = selfFx.reachL.w = selfFx.reachR.w = 0;
+  motion.emote = null;
+}
+
+const _o = new THREE.Vector3();
+const _n = { x: 0, y: 0, z: 0 };
+const _l: Lying = { x: 0, y: 0, z: 0, hx: 0, hz: 1, face: 0 };
+const _align = { x: 0, z: 0, yaw: 0 };
 
 export interface PeopleCtx {
   body: Body;
@@ -100,9 +113,62 @@ export interface PeopleCtx {
   avatar: THREE.Group;
 }
 
+/** Dónde se ve ahora a otra persona (sus pies). */
+function where(id: string, out: THREE.Vector3): boolean {
+  const p = remoteFeet.get(id);
+  if (!p) return false;
+  out.copy(p);
+  return true;
+}
+
+/** Hueco (collision.ts) de la persona k de la lista de gente de decorado. */
+const slotOf = (k: number) => (k < npcs.count ? k : NPC_CITY + k - npcs.count);
+
+/** La gente de decorado que tienes delante (de pie), a menos de `reach` m (o −1). */
+function npcAhead(x: number, y: number, z: number, yaw: number, reach: number, cone = 0.5): number {
+  const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+  let best = -1, bestD = reach;
+  for (let k = 0; k < crowd.count; k++) {
+    if (npcs.down[slotOf(k)]) continue;
+    crowd.at(k, _n);
+    const dx = _n.x - x, dz = _n.z - z;
+    const d = Math.hypot(dx, dz);
+    if (d > bestD || Math.abs(_n.y - y) > 1.2) continue;
+    if (d > 0.2 && (dx * fx + dz * fz) / d < cone) continue;
+    best = k;
+    bestD = d;
+  }
+  return best;
+}
+
+/**
+ * Empieza un golpe (Q, E, R o el HUD). El gesto sale siempre que el modo pelea lo permita; a quién
+ * le llega se decide al llegar el puño.
+ */
+export function startStrike(move: FightMove, c: PeopleCtx) {
+  if ((me.phase !== "none" && me.phase !== "pair") || !canAttack(move)) return;
+  const now = performance.now() / 1000;
+  if (combo.move !== move || now - combo.last > COMBO_RESET) combo.i = 0;
+  else combo.i = (combo.i + 1) % COMBO[move].length;
+  combo.move = move;
+  combo.last = now;
+  const name = COMBO[move][combo.i]!;
+  const def = STRIKES[name]!;
+  const target = fightTarget(move);
+  strike.name = name;
+  strike.def = def;
+  strike.t = 0;
+  strike.sent = false;
+  strike.target = target?.id ?? "";
+  strike.npc = target ? -1 : npcAhead(c.body.x, c.body.y, c.body.z, c.bodyYaw.current, FIGHT_REACH[move] + 0.4, 0.35);
+  c.motion.emote = name;
+  myStrike.name = name;
+  whoosh(c.body.x, c.body.z, move === "kick");
+}
+
 /**
  * Un frame. Devuelve `lock` (no hacer caso al joystick), la velocidad que quiere (`wantX/Z`) y si
- * ya ha colocado al personaje (`drawn`: en el suelo o levantándose; Player no lo toca).
+ * ya ha colocado al personaje (`drawn`: en el suelo; Player no lo toca).
  */
 export function peopleFrame(dt: number, c: PeopleCtx, out: { lock: boolean; wantX: number; wantZ: number; drawn: boolean }) {
   out.lock = false;
@@ -110,191 +176,303 @@ export function peopleFrame(dt: number, c: PeopleCtx, out: { lock: boolean; want
   out.wantZ = 0;
   out.drawn = false;
   const { body, motion } = c;
-
-  // Un golpe recibido manda sobre todo (también sobre una pareja a medias).
-  const hit = pending.hit;
-  if (hit) {
-    pending.hit = null;
-    if (me.phase !== "tumble" && me.phase !== "lie" && me.phase !== "rise") startHit(hit, c);
-  }
-  const pair = pending.pair;
-  if (pair && me.phase === "none") {
-    pending.pair = null;
-    const other = pair.a === world.sessionId ? pair.b : pair.a;
-    if (latest(other, _o)) {
-      me.phase = "pair";
-      me.t = 0;
-      me.pair = pair.kind;
-      me.px = _o.x;
-      me.pz = _o.z;
-      me.yaw = Math.atan2(-(_o.x - body.x), -(_o.z - body.z));
-    }
-  } else if (pair) pending.pair = null;
-
-  if (me.phase === "none") return;
-  // Con frames muy largos, el tiempo de las fases va al paso de la física (que no avanza más de
-  // 0,1 s por frame): si no, se saltaría la caída entera.
+  // Con frames muy largos, el tiempo va al paso de la física (que no avanza más de 0,1 s por frame).
   dt = Math.min(dt, 0.1);
+  camKick.t += dt;
+
+  // Golpes recibidos cuya hora ha llegado.
+  const now = performance.now();
+  while (queue.length && queue[0]!.due <= now) receive(queue.shift()!.h, c);
+
+  const pair = pendingPair;
+  if (pair && me.phase === "none" && !strike.def) {
+    pendingPair = null;
+    me.partner = pair.a === world.sessionId ? pair.b : pair.a;
+    me.phase = "pair";
+    me.t = 0;
+    me.pair = pair.kind;
+  } else if (pair && me.phase !== "none") pendingPair = null;
+
+  lookAround(c);
+  if (strike.def) strikeFrame(dt, c, out);
+  if (me.phase === "none") return;
   me.t += dt;
   out.lock = true;
+  out.wantX = 0;
+  out.wantZ = 0;
+  const rig = selfFx.rig;
 
   switch (me.phase) {
-    case "stagger": {
-      const k = Math.max(0, 1 - me.t / STAGGER);
-      out.wantX = me.vx * k;
-      out.wantZ = me.vz * k;
-      motion.emote = "hit_stagger";
-      if (me.t >= STAGGER) end(motion);
+    case "react": {
+      const k = Math.max(0, 1 - me.t / me.dur);
+      out.wantX = me.vx * k * k;
+      out.wantZ = me.vz * k * k;
+      if (me.t >= me.dur) end(motion);
       break;
     }
-    case "tumble": {
-      const sim = tumbleSim();
-      if (!sim) {
-        // Sin física (aún cargando o sin WASM): un traspié largo.
-        me.phase = "stagger";
+    case "fall":
+    case "ground":
+    case "roll": {
+      if (!rig?.falling) {
+        // Sin física (el avatar se ha ido): se levanta como pueda.
+        me.phase = "cliprise";
         me.t = 0;
+        motion.emote = "get_up";
         break;
       }
-      sim.step(dt);
-      placeFromSim(c);
+      placeFromDoll(c);
+      out.drawn = true;
       motion.emote = "hit_down";
       motion.speed = 0;
-      out.drawn = true;
-      const still = sim.state.speed < 0.25 && sim.state.spin < 0.5;
-      if ((still && me.t > 0.5) || me.t > TUMBLE_MAX) {
-        me.phase = "lie";
-        me.t = 0;
+      if (me.phase === "fall") {
+        // El golpe contra el suelo: la cadera deja de caer de golpe.
+        const vy = (_l.y - me.lastY) / Math.max(dt, 1e-3);
+        if (me.lastVy < -1.6 && vy > -0.4) thud(_l.x, _l.z, -me.lastVy);
+        me.lastY = _l.y;
+        me.lastVy = vy;
+        if ((rig.fallStill > 0.3 && rig.fallAge > 0.7) || rig.fallAge > FALL_MAX) {
+          me.phase = "ground";
+          me.t = 0;
+        }
+      } else if (me.phase === "ground") {
+        if (me.t >= (me.ko ? LIE_KO : LIE)) {
+          if (_l.face < -0.3 && !me.rolled) {
+            // Boca abajo: primero se da la vuelta.
+            me.phase = "roll";
+            me.t = 0;
+            me.rolled = true;
+            rig.rollOver(1);
+          } else rise(c);
+        }
+      } else if (_l.face > 0.35 || me.t > 1.3) {
+        rig.rollOver(0);
+        me.phase = "ground";
+        me.t = Math.max(0, (me.ko ? LIE_KO : LIE) - 0.35);
       }
       break;
     }
-    case "lie":
-      placeFromSim(c);
-      motion.emote = "hit_down";
-      motion.speed = 0;
-      out.drawn = true;
-      if (me.t >= (me.ko ? LIE_KO : LIE)) {
-        me.phase = "rise";
-        me.t = 0;
-        me.from.copy(c.avatar.quaternion);
-        me.fromY = c.avatar.position.y;
-        // De pie mirando hacia donde quedó la cabeza (lo natural al levantarse).
-        _up.set(0, 1, 0).applyQuaternion(me.from);
-        c.bodyYaw.current = Math.atan2(_up.x, _up.z) + Math.PI;
-      }
-      break;
-    case "rise": {
-      const k = Math.min(1, me.t / RISE);
-      const e = k * k * (3 - 2 * k);
-      _yawQ.setFromAxisAngle(_Y, c.bodyYaw.current);
-      _q.copy(me.from).slerp(_yawQ, e);
-      c.avatar.quaternion.copy(_q);
-      c.avatar.position.set(body.x, me.fromY + (body.y - me.fromY) * e, body.z);
+    case "rise":
       motion.emote = "get_up";
       motion.speed = 0;
-      out.drawn = true;
-      if (k >= 1) end(motion);
+      if (me.t >= RISE) end(motion);
       break;
-    }
-    case "pair": {
-      const spec = PAIR[me.pair];
-      // Ponerse a su distancia, mirándola, en el primer tercio de segundo.
-      const dx = me.px - body.x, dz = me.pz - body.z;
-      const d = Math.hypot(dx, dz);
-      if (me.t < 0.4 && d > spec.gap + 0.05) {
-        const step = Math.min(d - spec.gap, dt * 3);
-        _p.x = body.x + (dx / d) * step;
-        _p.z = body.z + (dz / d) * step;
-        placeBody(body, _p.x, body.y, _p.z);
-      }
-      c.bodyYaw.current = me.yaw;
-      motion.emote = me.pair;
+    case "clipfall": {
+      // Sin física: cae redondo hacia atrás con la animación y se queda en el suelo.
+      motion.emote = "hit_down";
       motion.speed = 0;
-      if (me.t >= spec.s) end(motion);
+      const k = Math.max(0, 1 - me.t / 0.5);
+      out.wantX = me.vx * k;
+      out.wantZ = me.vz * k;
+      if (me.t >= 2.2 + (me.ko ? LIE_KO : LIE)) {
+        me.phase = "cliprise";
+        me.t = 0;
+      }
       break;
     }
+    case "cliprise":
+      motion.emote = "get_up";
+      motion.speed = 0;
+      if (me.t >= RISE) end(motion);
+      break;
+    case "pair":
+      pairFrame(dt, c);
+      break;
   }
 }
 
-function startHit(h: HitEvent, c: PeopleCtx) {
+/** Golpe recibido: flojo (gesto, sacudida y traspié) o fuerte (caída con física). */
+function receive(h: HitEvent, c: PeopleCtx) {
   const { body, motion } = c;
-  const f = FLING[h.style];
+  if (me.phase === "fall" || me.phase === "ground" || me.phase === "roll" || me.phase === "rise" || me.phase === "clipfall" || me.phase === "cliprise") return;
+  // Un golpe recibido corta el tuyo y la pareja.
+  strike.def = null;
+  selfFx.reachL.w = selfFx.reachR.w = 0;
+  me.hit = h;
   me.ko = h.ko;
   me.t = 0;
-  // Mira hacia quien le dio (de espaldas a donde sale).
-  c.bodyYaw.current = Math.atan2(h.dir[0], h.dir[1]);
-  const sim = h.fall ? tumbleSim() : null;
-  if (!sim) {
-    me.phase = "stagger";
-    me.vx = h.dir[0] * (2 + 4 * h.power);
-    me.vz = h.dir[1] * (2 + 4 * h.power);
-    if (h.fall) void loadTumble();
+  me.rolled = false;
+  // Qué golpe era (lo dice la pose de quien lo dio): en la cara o en el cuerpo.
+  const s = strikeOf(latestEmote(h.from)) ?? STRIKES[h.move === "punch" ? "punch" : h.move]!;
+  const head = h.move === "punch" ? s.head : false;
+  impact(body.x, body.z, h.power, head);
+  kick(h, head);
+  const rig = selfFx.rig;
+  if (h.fall) {
+    const sim = ragdolls();
+    if (rig && sim && rig.startFall(sim, fallFor(h, head, body.vx, body.vz))) {
+      me.phase = "fall";
+      motion.emote = "hit_down";
+      rig.lying(_l);
+      me.lastY = _l.y;
+      me.lastVy = 0;
+      return;
+    }
+    if (!sim) void loadRagdolls();
+    me.phase = "clipfall";
+    // Cae de espaldas: se gira hacia quien le dio.
+    c.bodyYaw.current = Math.atan2(h.dir[0], h.dir[1]);
+    me.vx = h.dir[0] * 1.6;
+    me.vz = h.dir[1] * 1.6;
+    motion.emote = "hit_down";
     return;
   }
-  me.phase = "tumble";
-  const p = h.power;
-  sim.start(
-    body.x,
-    body.y,
-    body.z,
-    c.bodyYaw.current,
-    { x: h.dir[0] * f.h * p, y: f.v * p, z: h.dir[1] * f.h * p },
-    // Gira hacia donde sale: cae de espaldas.
-    { x: h.dir[1] * f.spin * p, y: 0, z: -h.dir[0] * f.spin * p },
-  );
-  motion.emote = "hit_down";
+  const r = lightReaction(h, c.bodyYaw.current, head);
+  me.phase = "react";
+  me.dur = r.dur;
+  me.vx = h.dir[0] * r.push;
+  me.vz = h.dir[1] * r.push;
+  motion.emote = r.emote;
+  rig?.flinch(h.dir[0], h.dir[1], h.power, head, s.twist ?? 0);
 }
 
-/** Coloca al personaje donde está la cápsula: los pies en un extremo, con su giro. */
-function placeFromSim(c: PeopleCtx) {
-  const s = tumbleSim()!.state;
-  _q.set(s.qx, s.qy, s.qz, s.qw);
-  _up.set(0, 1, 0).applyQuaternion(_q);
-  const h = 0.57 + 0.28;
-  c.avatar.position.set(s.x - _up.x * h, s.y - _up.y * h, s.z - _up.z * h);
-  c.avatar.quaternion.copy(_q);
-  // El cuerpo que se ve en la red y sigue la cámara: en el suelo, bajo la cápsula.
-  const floor = floorAt(s.x, s.z, s.y + 0.5);
-  c.body.x = s.x;
-  c.body.z = s.z;
-  c.body.y = Number.isFinite(floor) ? floor : c.body.y;
+/** La cámara acusa el golpe (poco: un par de centímetros que vuelven en un momento). */
+function kick(h: HitEvent, head: boolean) {
+  const k = (head ? 0.05 : 0.035) * (0.5 + h.power);
+  camKick.x = h.dir[0] * k;
+  camKick.z = h.dir[1] * k;
+  camKick.y = -k * 0.4;
+  camKick.t = 0;
+}
+
+function latestEmote(id: string): string | null {
+  const buf = world.poseBuffers.get(id);
+  return buf?.[buf.length - 1]?.emote ?? null;
+}
+
+/** El cuerpo que cae manda: el personaje (y la cámara, y lo que ven los demás) van con su cadera. */
+function placeFromDoll(c: PeopleCtx) {
+  const rig = selfFx.rig!;
+  rig.lying(_l);
+  const floor = floorAt(_l.x, _l.z, _l.y + 0.5);
+  const y = Number.isFinite(floor) ? floor : c.body.y;
+  c.body.x = _l.x;
+  c.body.z = _l.z;
+  c.body.y = y;
   c.body.vx = 0;
   c.body.vz = 0;
+  c.avatar.position.set(_l.x, y, _l.z);
+}
+
+/** Deja la física y se levanta desde la pose en que quedó. */
+function rise(c: PeopleCtx) {
+  const rig = selfFx.rig!;
+  if (!rig.endFall(_align)) return end(c.motion);
+  const floor = floorAt(_align.x, _align.z, c.body.y + 0.8);
+  placeBody(c.body, _align.x, Number.isFinite(floor) ? floor : c.body.y, _align.z);
+  c.bodyYaw.current = _align.yaw;
+  c.avatar.position.set(c.body.x, c.body.y, c.body.z);
+  c.avatar.rotation.set(0, _align.yaw, 0);
+  me.phase = "rise";
+  me.t = 0;
+  c.motion.emote = "get_up";
 }
 
 function end(motion: Motion) {
   me.phase = "none";
   me.t = 0;
   motion.emote = null;
+  selfFx.reachL.w = selfFx.reachR.w = 0;
+}
+
+/** El golpe que das: girarse, acercarse, y cuando llega el puño, mandarlo. */
+function strikeFrame(dt: number, c: PeopleCtx, out: { lock: boolean; wantX: number; wantZ: number; drawn: boolean }) {
+  const s = strike.def!;
+  const { body, motion } = c;
+  strike.t += dt;
+  motion.emote = strike.name;
+  let has = false;
+  if (strike.target && where(strike.target, _o)) has = true;
+  else if (strike.npc >= 0 && strike.npc < crowd.count) {
+    crowd.at(strike.npc, _n);
+    _o.set(_n.x, _n.y, _n.z);
+    has = true;
+  }
+  const windup = strike.t < s.impact;
+  if (has) {
+    const dx = _o.x - body.x, dz = _o.z - body.z;
+    const d = Math.hypot(dx, dz);
+    // Girarse hacia el objetivo antes de que llegue el golpe.
+    if (strike.t < s.impact + 0.05 && d > 0.05) {
+      const want = Math.atan2(-dx, -dz);
+      let diff = want - c.bodyYaw.current;
+      diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+      c.bodyYaw.current += THREE.MathUtils.clamp(diff, -dt * 16, dt * 16);
+    }
+    // El paso que falta para llegar (sin pasarse de su alcance).
+    if (windup && d > s.ideal + 0.04) {
+      const v = Math.min(4.5, (d - s.ideal) / Math.max(0.06, s.impact - strike.t));
+      out.wantX = (dx / d) * v;
+      out.wantZ = (dz / d) * v;
+    }
+    selfFx.look.x = _o.x;
+    selfFx.look.y = _o.y + 1.5;
+    selfFx.look.z = _o.z;
+    selfFx.look.w = 1;
+  }
+  // Mientras se arma el golpe (y en las patadas y el gancho, todo el rato) no se anda.
+  if (windup || s.plant) out.lock = true;
+  // Cuando llega el golpe (si el anterior aún está demasiado cerca para el servidor, un instante después).
+  if (!strike.sent && strike.t >= s.impact && (!strike.target || hitReady() || strike.t > s.impact + 0.25)) {
+    strike.sent = true;
+    if (strike.target && has && Math.hypot(_o.x - body.x, _o.z - body.z) <= FIGHT_REACH[s.move] + 0.3) sendHit(strike.target, s.move);
+    else if (strike.npc >= 0 && has && people.fightOn) hitNpc(strike.npc, body, strike.name, s);
+  }
+  if (strike.t >= s.dur) {
+    strike.def = null;
+    if (motion.emote === strike.name) motion.emote = null;
+  }
+}
+
+/** En modo pelea se mira a quien tengas cerca en modo pelea; si no, a nada en especial. */
+function lookAround(c: PeopleCtx) {
+  if (me.phase === "pair" || strike.def) return;
+  selfFx.look.w = 0;
+  if (!people.fightOn || me.phase !== "none") return;
+  let best = 25, found = false;
+  for (const id of people.fighters) {
+    if (!where(id, _o)) continue;
+    const d2 = (_o.x - c.body.x) ** 2 + (_o.z - c.body.z) ** 2;
+    if (d2 < best) {
+      best = d2;
+      found = true;
+      selfFx.look.x = _o.x;
+      selfFx.look.y = _o.y + 1.5;
+      selfFx.look.z = _o.z;
+    }
+  }
+  if (found) selfFx.look.w = 0.75;
+}
+
+/** Acción en pareja: ponerse a su distancia, mirarse y llevar las manos a donde se encuentran. */
+function pairFrame(dt: number, c: PeopleCtx) {
+  const spec = PAIR[me.pair];
+  const { body, motion } = c;
+  motion.emote = me.pair;
+  motion.speed = 0;
+  if (!where(me.partner, _o)) {
+    if (me.t >= spec.s) end(motion);
+    return;
+  }
+  const dx = _o.x - body.x, dz = _o.z - body.z;
+  const d = Math.hypot(dx, dz) || 1;
+  if (me.t < 0.45 && d > spec.gap + 0.04) {
+    const step = Math.min(d - spec.gap, dt * 2.6);
+    placeBody(body, body.x + (dx / d) * step, body.y, body.z + (dz / d) * step);
+  }
+  c.bodyYaw.current = Math.atan2(-dx, -dz);
+  pairTargets(me.pair, me.t, body.x, body.y, body.z, _o, selfFx);
+  if (me.t >= spec.s) end(motion);
 }
 
 /* --- La gente de decorado --- */
 
-const _n = { x: 0, y: 0, z: 0 };
-
-/** Quién de la gente de decorado tienes delante, a menos de `reach` m (o -1). */
-function npcAhead(x: number, y: number, z: number, yaw: number, reach: number): number {
-  const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
-  let best = -1, bestD = reach;
-  for (let k = 0; k < crowd.count; k++) {
-    crowd.at(k, _n);
-    const dx = _n.x - x, dz = _n.z - z;
-    const d = Math.hypot(dx, dz);
-    if (d > bestD || Math.abs(_n.y - y) > 1.2) continue;
-    if (d > 0.2 && (dx * fx + dz * fz) / d < 0.5) continue;
-    best = k;
-    bestD = d;
-  }
-  return best;
-}
-
-/** Golpe al aire o a la gente de decorado (cuando no hay nadie en modo pelea a tu alcance). */
-export function hitNpc(move: FightMove, body: Body, yaw: number) {
-  const k = npcAhead(body.x, body.y, body.z, yaw, FIGHT_REACH[move]);
-  if (k < 0) return;
+/** Golpe a la gente de decorado (cuando no hay nadie en modo pelea a tu alcance). */
+function hitNpc(k: number, body: Body, name: string, s: Strike) {
   crowd.at(k, _n);
   const dx = _n.x - body.x, dz = _n.z - body.z;
   const d = Math.hypot(dx, dz) || 1;
-  crowd.hit(k, dx / d, dz / d, NPC_HIT[move]);
+  if (d > FIGHT_REACH[s.move] + 0.3) return;
+  if (crowd.hit(k, dx / d, dz / d, NPC_HIT[name] ?? 2.5, s.head)) impact(_n.x, _n.z, 0.7, s.head);
 }
 
 /** Correr contra alguien de decorado lo hace tropezar (y a ti te frena un poco). */
@@ -304,8 +482,7 @@ export function bumpNpcs(body: Body, yaw: number) {
   const k = npcAhead(body.x, body.y, body.z, yaw, 0.75);
   if (k < 0) return;
   // Ya en el suelo o tropezando: no se le vuelve a dar.
-  const slot = k < npcs.count ? k : NPC_CITY + k - npcs.count;
-  if (npcs.knock[slot * 4]) return;
+  if (knockBusy(slotOf(k))) return;
   crowd.at(k, _n);
   const dx = _n.x - body.x, dz = _n.z - body.z;
   const d = Math.hypot(dx, dz) || 1;

@@ -41,7 +41,8 @@ export interface StaticSource {
 export interface MovingPeople {
   count: number;
   at(i: number, out: { x: number; y: number; z: number }): void;
-  hit?(i: number, nx: number, nz: number, speed: number): void;
+  /** Le da el coche; false si no cuenta (ya está en el suelo: se le pasa por encima). */
+  hit?(i: number, nx: number, nz: number, speed: number): boolean | void;
 }
 
 /** Masa de una persona (kg): lo que el coche pierde al llevársela por delante. */
@@ -348,8 +349,8 @@ export class CarSim {
       const sp = Math.hypot(lv.x, lv.z) || 1;
       const ox = nx * 0.4 + (lv.x / sp) * 0.6, oz = nz * 0.4 + (lv.z / sp) * 0.6;
       const od = Math.hypot(ox, oz) || 1;
+      if (c.hit(i, ox / od, oz / od, speed) === false) continue;
       this.lastHit[i] = this.simTime;
-      c.hit(i, ox / od, oz / od, speed);
       // Choque casi plástico: el coche le da su velocidad a la persona y pierde ese impulso.
       const j = (PERSON_MASS * CAR.mass) / (PERSON_MASS + CAR.mass) * speed;
       body.applyImpulse({ x: -nx * j, y: 0, z: -nz * j }, true);
@@ -389,80 +390,5 @@ export class CarSim {
   dispose() {
     this.despawn();
     this.world.free();
-  }
-}
-
-/**
- * Caída del modo pelea: el cuerpo de quien recibe un golpe fuerte pasa a ser un sólido de Rapier
- * (una cápsula de persona, ~70 kg) con el impulso del golpe, que rueda, choca con las paredes y se
- * para en el suelo de verdad. Luego se levanta (people/tumble.ts). Paso fijo de 1/60 s.
- */
-export class TumbleSim {
-  private world: InstanceType<R["World"]>;
-  private statics: StaticWorld;
-  private body: InstanceType<R["RigidBody"]> | null = null;
-  private acc = 0;
-  /** Centro de la cápsula, su giro y cuánto se mueve aún. */
-  readonly state = { x: 0, y: 0, z: 0, qx: 0, qy: 0, qz: 0, qw: 1, speed: 0, spin: 0 };
-  /** Medio alto del tramo recto y radio de la cápsula (m): 1,7 m en total. */
-  static readonly HALF = 0.57;
-  static readonly RADIUS = 0.28;
-
-  constructor(private R: R, source: StaticSource) {
-    this.world = new R.World({ x: 0, y: -9.81, z: 0 });
-    this.world.timestep = STEP;
-    this.statics = new StaticWorld(R, this.world, source);
-  }
-
-  /** Empieza con los pies en (x, y, z), mirando a `yaw`, con velocidad (vx, vy, vz) y giro (wx, wy, wz). */
-  start(x: number, y: number, z: number, yaw: number, v: { x: number; y: number; z: number }, w: { x: number; y: number; z: number }) {
-    const R = this.R;
-    this.statics.sync();
-    if (this.body) this.world.removeRigidBody(this.body);
-    const h = TumbleSim.HALF + TumbleSim.RADIUS;
-    this.body = this.world.createRigidBody(
-      R.RigidBodyDesc.dynamic()
-        .setTranslation(x, y + h + 0.02, z)
-        .setRotation({ x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) })
-        .setLinvel(v.x, v.y, v.z)
-        .setAngvel(w)
-        .setLinearDamping(0.15)
-        .setAngularDamping(0.8)
-        .setCcdEnabled(true),
-    );
-    this.world.createCollider(R.ColliderDesc.capsule(TumbleSim.HALF, TumbleSim.RADIUS).setMass(70).setFriction(0.9).setRestitution(0.12), this.body);
-    this.acc = 0;
-    this.read();
-  }
-
-  step(dt: number) {
-    if (!this.body) return;
-    this.acc += Math.min(dt, 0.1);
-    while (this.acc >= STEP) {
-      this.world.step();
-      this.acc -= STEP;
-    }
-    this.read();
-  }
-
-  private read() {
-    const b = this.body;
-    if (!b) return;
-    const t = b.translation(), r = b.rotation(), v = b.linvel(), a = b.angvel();
-    const s = this.state;
-    s.x = t.x;
-    s.y = t.y;
-    s.z = t.z;
-    s.qx = r.x;
-    s.qy = r.y;
-    s.qz = r.z;
-    s.qw = r.w;
-    s.speed = Math.hypot(v.x, v.y, v.z);
-    s.spin = Math.hypot(a.x, a.y, a.z);
-  }
-
-  stop() {
-    if (this.body) this.world.removeRigidBody(this.body);
-    this.body = null;
   }
 }

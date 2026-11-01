@@ -22,9 +22,9 @@ import { carForPose, carFrame, carPose, drive, dropCar, requestCar, seated } fro
 import { useDrive } from "./vehicle/drive-state";
 import { applyCarPose, CarModel, createCarHandle } from "./vehicle/CarModel";
 import { CAR, paintFor } from "./vehicle/car";
-import { bumpNpcs, hitNpc, peopleBusy, peopleFrame } from "./people/selfPeople";
-import { attack } from "../net/people";
+import { bumpNpcs, camKick, peopleBusy, peopleFrame, resetPeople, selfFx, startStrike, striking } from "./people/selfPeople";
 import { people } from "../net/people-store";
+import { UPPER_EMOTES } from "./animation";
 
 const WALK = 2.1; // m/s
 const RUN = 5.4;
@@ -33,13 +33,14 @@ const EYE = 1.6;
 const CAM_DIST = 3.4;
 const CAM_MIN = 1.3;
 const CAM_MAX = 9;
-/** Gestos que terminan solos (segundos); los demás duran hasta que te mueves. */
+/**
+ * Gestos que terminan solos (segundos); los demás duran hasta que te mueves. Los de brazos siguen
+ * al andar (UPPER_EMOTES) hasta que acaban.
+ */
 const EMOTE_SECONDS: Record<string, number> = {
-  wave: 2.6, cheer: 1.5, clap: 2.6, point: 1.9, beckon: 2.4, laugh: 2.6, shrug: 1.4,
-  punch: 0.7, kick: 0.8, shove: 0.8,
+  wave: 2.2, cheer: 1.65, clap: 2.6, point: 1.9, beckon: 2.2, laugh: 2.6, shrug: 1.45, bow: 1.85,
+  fold_arms: 8, nod: 2.5, shake_head: 2.5, phone: 12, talk: 8,
 };
-/** Gestos que no se cortan al moverse (los golpes se dan andando). */
-const WHILE_MOVING = new Set(["punch", "kick", "shove"]);
 /** Lo que devuelve la gente cada frame (people/selfPeople.ts), sin crear objetos. */
 const _pf = { lock: false, wantX: 0, wantZ: 0, drawn: false };
 // 5 Hz: el movimiento se suaviza al otro lado (interpolación). Cada pose es 1/20 de petición del plan
@@ -88,6 +89,7 @@ export function Player({ active }: { active: boolean }) {
   const look = useRef({ yaw: spawn.yaw, pitch: -0.12 });
   const spawnSeq = useRef(spawn.seq);
   const motion = useRef(createMotion()).current;
+  motion.fx ??= selfFx;
   const lastSend = useRef(0);
   const camReach = useRef(1);
   const cam3 = useRef({ dist: CAM_DIST, y: spawn.p[1] });
@@ -161,7 +163,7 @@ export function Player({ active }: { active: boolean }) {
       cam3.current.y = spawn.p[1];
       l.yaw = spawn.yaw;
       bodyYaw.current = spawn.yaw;
-      motion.emote = null;
+      resetPeople(motion);
       if (inXR) {
         placeOrigin(spawn.p[0], spawn.p[1], spawn.p[2]);
         origin.current.rotation.set(0, spawn.yaw, 0);
@@ -255,12 +257,13 @@ export function Player({ active }: { active: boolean }) {
         let wantX = (_fwd.x * input.move.y + _right.x * input.move.x) * speed;
         let wantZ = (_fwd.z * input.move.y + _right.z * input.move.x) * speed;
 
-        // Modo pelea (Q, E, R o el HUD): el gesto siempre; el golpe, a quien esté en modo pelea a tu
-        // alcance o, si no hay nadie, a la gente de decorado que tengas delante.
+        // Modo pelea (Q, E, R o el HUD): combinaciones de golpes; llegan a quien esté en modo pelea a
+        // tu alcance o, si no hay nadie, a la gente de decorado que tengas delante (selfPeople.ts).
+        motion.fight = !!people.fightOn && !!people.style;
         if (input.attack) {
           const m = input.attack;
           input.attack = null;
-          if (free && !peopleBusy() && !attack(m) && people.fightOn) hitNpc(m, body, bodyYaw.current);
+          if (free && !peopleBusy()) startStrike(m, peopleCtx);
         }
         // La gente: golpes recibidos (traspié o caída con física), acciones en pareja.
         peopleCtx.avatar = avatar.current;
@@ -313,7 +316,7 @@ export function Player({ active }: { active: boolean }) {
           emoteUntil.current = state.clock.elapsedTime + (EMOTE_SECONDS[emote] ?? Infinity);
           input.emote = null;
         }
-        if (free && !_pf.lock && motion.emote && ((amount > 0.05 && !WHILE_MOVING.has(motion.emote)) || motion.airborne || state.clock.elapsedTime > emoteUntil.current)) motion.emote = null;
+        if (free && !_pf.lock && !striking() && motion.emote && ((amount > 0.05 && !UPPER_EMOTES.has(motion.emote)) || motion.airborne || state.clock.elapsedTime > emoteUntil.current)) motion.emote = null;
 
         // La altura de la cámara sigue al cuerpo con suavidad (al subir un escalón no da un tirón).
         c3.y += (body.y - c3.y) * Math.min(1, dt * (body.grounded ? 10 : 25));
@@ -335,6 +338,13 @@ export function Player({ active }: { active: boolean }) {
           camReach.current = reach < camReach.current ? reach : camReach.current + (reach - camReach.current) * Math.min(1, dt * 3);
           cam.position.lerpVectors(_camTarget, _camWant, camReach.current);
           cam.lookAt(_camTarget);
+        }
+        // Al recibir un golpe, la cámara lo acusa un instante (people/selfPeople.ts).
+        if (camKick.t < 0.3) {
+          const k = (1 - camKick.t / 0.3) ** 2;
+          cam.position.x += camKick.x * k;
+          cam.position.y += camKick.y * k;
+          cam.position.z += camKick.z * k;
         }
         }
       } else {

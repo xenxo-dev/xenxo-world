@@ -14,9 +14,10 @@ import type { FightStyle } from "@xenxo/protocol";
 import { HIT_MS, people, REACTION_MS, usePeople } from "../../net/people-store";
 import { world } from "../../net/world-store";
 import { PEOPLE_PATHS } from "../../hud/people-icons";
-import { remoteFeet } from "../Avatars";
+import { remoteFeet } from "./where";
 import { others } from "../collision";
 import { self } from "../self";
+import { loadRagdolls, stepRagdolls } from "./ragdoll";
 import { prepareFights } from "./selfPeople";
 
 /** Color de cada icono que flota. */
@@ -174,10 +175,13 @@ export function PeopleFx() {
     for (let i = 0; i < POOL; i++) g.add(makeSprite());
     return g;
   }, []);
-  // Al activar el modo pelea se carga la física de las caídas (la primera ya la tiene lista).
+  // Al activar el modo pelea (o si hay alguien en modo pelea cerca) se carga la física de las caídas:
+  // así la primera ya la tiene lista. Si alguien cae antes, cae con la animación.
+  const anyFighter = p.fighters.size > 0;
   useEffect(() => {
-    if (p.fightOn && p.style) prepareFights();
-  }, [p.fightOn, p.style]);
+    if ((p.fightOn || anyFighter) && p.style) prepareFights();
+  }, [p.fightOn, p.style, anyFighter]);
+  useEffect(() => people.onHit((h) => void (h.fall && loadRagdolls())), []);
   useEffect(
     () => () => {
       for (const s of group.children as THREE.Sprite[]) s.material.dispose();
@@ -186,8 +190,10 @@ export function PeopleFx() {
     [group],
   );
 
-  // Antes que el jugador (prioridad −1): dónde está cada persona, para no atravesarla.
-  useFrame(() => {
+  // Antes que el jugador (prioridad −1): las caídas con física (un paso para todos) y dónde está
+  // cada persona, para no atravesarla.
+  useFrame((_, dt) => {
+    stepRagdolls(dt);
     let n = 0;
     const now = world.serverNow();
     if (!world.solo) {

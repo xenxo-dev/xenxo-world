@@ -19,6 +19,7 @@ import { createCarPose } from "./CarModel";
 import { carSound, carSoundStop } from "./audio";
 import { DISTRICT_CHUNKS, drive, driveNotice, emitDrive, SEATED, setPhase, type Phase } from "./drive-state";
 import type { StaticSource } from "./physics";
+import { loadRagdolls } from "../people/ragdoll";
 
 export { drive };
 
@@ -109,6 +110,8 @@ async function summon(x: number, y: number, z: number, look: number) {
     const { CarSim, loadRapier } = await import("./physics");
     const R = await loadRapier();
     drive.sim ??= new CarSim(R, source, crowd);
+    // La física de las caídas (la gente a la que se lleve por delante cae con ella; Rapier ya está).
+    void loadRagdolls();
     const gy = groundHeight(at[0], at[1], 0.6, y + 0.6);
     drive.sim.spawn(at[0], gy + CAR.wheelRadius - CAR.wheels[0]!.y + 0.02, at[1], at[2]);
     // Unos pasos de física para que se asiente en sus muelles antes de verlo.

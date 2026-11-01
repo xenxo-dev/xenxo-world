@@ -7,6 +7,8 @@ import { assetUrl } from "../config";
 import { t } from "../i18n";
 import { BUBBLE_MS, chat, useChatVersion, useWorldVersion, world } from "../net/world-store";
 import { people } from "../net/people-store";
+import { remoteFeet } from "./people/where";
+import { RemotePeople, type RemoteDraw } from "./people/remotePeople";
 import { walkAmount } from "./avatar-model";
 import { groundHeight } from "./collision";
 import { CustomAvatar } from "./CustomAvatar";
@@ -38,13 +40,19 @@ const _qa = new THREE.Quaternion();
 const _qb = new THREE.Quaternion();
 const _e = new THREE.Euler();
 
-/**
- * Dónde se dibuja ahora a cada persona (pies, ya interpolado): lo leen los efectos de la gente
- * (reacciones, golpes, marca del modo pelea) para salir justo encima de ella.
- */
-export const remoteFeet = new Map<string, THREE.Vector3>();
-/** Caer al suelo (gesto hit_down): cuánto se tumba (rad) y hacia dónde, si no se sabe del golpe. */
+/** Caer al suelo sin esqueleto VRM (gesto hit_down): cuánto se tumba (rad) y hacia dónde, si no se sabe del golpe. */
 const DOWN_TILT = 1.45;
+const _draw: RemoteDraw = { x: 0, y: 0, z: 0, yaw: 0, emote: null, placed: false };
+/** Tal cual llega la pose (antes de que haya nada de la gente montado). */
+function plain(x: number, y: number, z: number, yaw: number, emote: string | null): RemoteDraw {
+  _draw.x = x;
+  _draw.y = y;
+  _draw.z = z;
+  _draw.yaw = yaw;
+  _draw.emote = emote;
+  _draw.placed = false;
+  return _draw;
+}
 const _tq = new THREE.Quaternion();
 const _ty = new THREE.Quaternion();
 const _tAxis = new THREE.Vector3();
@@ -177,6 +185,18 @@ function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; n
   const body = useRef<THREE.Group>(null);
   const person = useRef<THREE.Group>(null);
   const motion = useRef(createMotion()).current;
+  // Golpes, parejas y caídas de esta persona, dibujados aquí (people/remotePeople.ts). Se crea en un
+  // efecto (con su limpieza): así no se queda nada escuchando si el componente no llega a montarse.
+  const rp = useRef<RemotePeople | null>(null);
+  useEffect(() => {
+    const r = new RemotePeople(sessionId);
+    rp.current = r;
+    motion.fx = r.fx;
+    return () => {
+      r.dispose();
+      if (rp.current === r) rp.current = null;
+    };
+  }, [sessionId, motion]);
   const last = useRef(new THREE.Vector3(NaN, 0, 0)).current;
   // Su coche (en marcha o aparcado), con su giro completo; si va dentro, sentado en él.
   const car = useRef(createCarPose()).current;
@@ -234,28 +254,33 @@ function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; n
     // quedan por encima de lo que pisa (el suelo o una caja: se puede estar de pie en un banco).
     const feet = Math.max(-0.5, _a.y - EYE_HEIGHT);
     motion.airborne = !driving && feet - groundHeight(_a.x, _a.z, 0.24, feet + 0.1) > 0.05;
-    motion.emote = s1.emote ?? null;
+    motion.fight = people.fighters.has(sessionId);
     if (driving) {
+      motion.emote = s1.emote ?? null;
       // Sentado en el asiento, pegado al coche (sin el desfase entre las dos poses).
       body.current.position.set(SEAT.x, SEAT.y, SEAT.z).applyQuaternion(car.q).add(car.p);
       body.current.quaternion.copy(car.q).multiply(_seatQ);
+      feetAt.set(_a.x, body.current.position.y, _a.z);
     } else {
-      body.current.position.set(_a.x, feet, _a.z);
       const yaw = _e.setFromQuaternion(_qa, "YXZ").y;
-      // En el suelo tras un golpe (modo pelea): se tumba hacia donde le dieron y se levanta despacio.
-      const want = s1.emote === "hit_down" ? DOWN_TILT : 0;
+      // Golpes, caídas y parejas (lo dibuja este cliente al llegar, sin esperar a su pose).
+      const d = rp.current ? rp.current.frame(dt, body.current, _a.x, feet, _a.z, yaw, s1.emote ?? null, _draw) : plain(_a.x, feet, _a.z, yaw, s1.emote ?? null);
+      motion.emote = d.emote;
+      if (!d.placed) body.current.position.set(d.x, d.y, d.z);
+      // Sin esqueleto VRM (un GLB o el muñeco): en el suelo se tumba entero hacia donde le dieron.
+      const want = !motion.fx?.rig && d.emote === "hit_down" ? DOWN_TILT : 0;
       tilt.current += (want - tilt.current) * Math.min(1, dt * (want ? 9 : 3));
       if (tilt.current > 0.01) {
         const hit = people.lastHit.get(sessionId);
-        const dx = hit?.dir[0] ?? Math.sin(yaw), dz = hit?.dir[1] ?? Math.cos(yaw);
+        const dx = hit?.dir[0] ?? Math.sin(d.yaw), dz = hit?.dir[1] ?? Math.cos(d.yaw);
         _tAxis.set(dz, 0, -dx).normalize();
         _tq.setFromAxisAngle(_tAxis, tilt.current);
-        _ty.setFromAxisAngle(_Y, yaw);
+        _ty.setFromAxisAngle(_Y, d.yaw);
         body.current.quaternion.copy(_tq).multiply(_ty);
-        body.current.position.y = Math.max(feet, groundHeight(_a.x, _a.z, 0.24, feet + 1.8));
-      } else body.current.rotation.set(0, yaw, 0);
+        body.current.position.y = Math.max(d.y, groundHeight(d.x, d.z, 0.24, d.y + 1.8));
+      } else if (!d.placed) body.current.rotation.set(0, d.yaw, 0);
+      feetAt.set(body.current.position.x, d.placed ? body.current.position.y : d.y, body.current.position.z);
     }
-    feetAt.set(_a.x, driving ? body.current.position.y : feet, _a.z);
   });
 
   return (

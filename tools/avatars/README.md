@@ -14,12 +14,14 @@ Personas realistas generadas con **MPFB** (MakeHuman para Blender) y animadas co
    `makehuman_system_assets`, `skins01`, `skins02`, `hair01`, `eyebrows01`, `eyelashes01`,
    `shirts01`, `pants01`, `shoes01`, `suits01`, `suits02` y los de materiales
    (`system_clothes_materials01`, `system_hair_materials01`).
-4. La librería de Quaternius (*Standard*, gratuita) en `.glb`.
+4. Las librerías de Quaternius (*Universal Animation Library* 1 y 2, *Standard*, gratuitas) en `.glb`:
+   de la 2 salen levantarse del suelo y los gestos de brazos cruzados, sí, no y teléfono (el gancho
+   y las patadas se hacen en código: `apps/web/src/world/people/gestures.ts`).
 
 ## Generar
 
 ```bash
-python3 tools/avatars/ual_to_vrma.py "UAL1_Standard.glb"     # → apps/web/public/anims/*.vrma
+python3 tools/avatars/ual_to_vrma.py "UAL1_Standard.glb" "UAL2_Standard.glb"   # → apps/web/public/anims/*.vrma
 python3 tools/avatars/forge_avatars.py out --preview          # personas → out/*.vrm (+ retratos)
 python3 tools/avatars/pack_avatars.py out                     # texturas WebP, presupuesto, hash
 ```

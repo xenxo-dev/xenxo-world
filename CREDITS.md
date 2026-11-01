@@ -15,7 +15,7 @@ La excepción son las texturas generadas con IA (abajo), que tienen su propia no
   los hace la propia forja (`maps.py`, `IMPLANTS`), sin recursos de fuera.
 - **Funda desde una foto**: [MediaPipe](https://ai.google.dev/edge/mediapipe) de Google (Face Landmarker y
   su motor en WebAssembly, Apache-2.0), servidos desde xenxo (`apps/web/public/fundas/vision/NOTICE.txt`).
-- **Animaciones**: [Universal Animation Library](https://quaternius.com) de Quaternius (CC0).
+- **Animaciones**: [Universal Animation Library](https://quaternius.com/packs/universalanimationlibrary.html) y [Universal Animation Library 2](https://quaternius.com/packs/universalanimationlibrary2.html) de Quaternius (CC0).
 - **Kits de ciudad** (`tools/kits/kenney/`): packs de [Kenney](https://kenney.nl) (CC0), descargados el 27-10-2026. La lista está en `tools/kits/README.md`.
 - **Coche para conducir** (`tools/models/library/vehicle_car*`): «Car Concept», de los modelos de
   muestra de glTF de Khronos ([KhronosGroup/glTF-Sample-Assets](https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/CarConcept)),

@@ -26,9 +26,10 @@ export function CustomAvatar({ url, fallback, motion, extra = false }: { url: st
     return () => {
       alive = false;
       setAvatar(null);
+      if (loaded?.rig && motion.fx?.rig === loaded.rig) motion.fx.rig = null;
       loaded?.dispose();
     };
-  }, [url, extra]);
+  }, [url, extra]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useFrame((_, dt) => avatar?.update(Math.min(dt, 0.1), motion));
 

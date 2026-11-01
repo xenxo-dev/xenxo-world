@@ -9,7 +9,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { AVATAR_PRESETS } from "../../realtime/src/avatar-presets";
-import { GameManifest, msg, PLACES } from "@xenxo/protocol";
+import { Emote, EMOTES, GameManifest, msg, PLACES } from "@xenxo/protocol";
 import { XenxoClient } from "./client";
 import { makeBoxGlb, makeCoverPng, makeVrmMannequin, withExternalImage } from "./fixtures";
 import { Api } from "./http";
@@ -105,12 +105,22 @@ await scenario("dos clientes se ven: las poses de A llegan a B", async () => {
   b.close();
 });
 
-await scenario("gestos: el emote de A llega a B con su pose; uno mal formado se descarta", async () => {
+await scenario("gestos: el emote de A llega a B con su pose (también golpes seguidos y reacciones); uno mal formado se descarta", async () => {
   const a = await XenxoClient.connect({ baseUrl, displayName: "conf-emote-a" });
   const b = await XenxoClient.connect({ baseUrl, displayName: "conf-emote-b" });
   const got = b.next("POSES", (m) => m.payload.poses.some((p) => p.session_id === a.welcome.session_id && p.emote === "dance"), 3000);
   a.pose([31, 1.6, 41], 0, "dance");
   await got;
+  // Los gestos que conocen los clientes (también los golpes seguidos y las reacciones) son emotes válidos y viajan igual.
+  const invalid = EMOTES.filter((e) => !Emote.safeParse(e).success);
+  assert(!invalid.length, `todos los gestos conocidos pasan el esquema (${invalid.join(", ")})`);
+  for (const emote of ["cross", "roundhouse", "hit_head", "fold_arms"]) {
+    // (el servidor descarta las poses que llegan a menos de 1/15 s de la anterior)
+    await new Promise((r) => setTimeout(r, 150));
+    const seen = b.next("POSES", (m) => m.payload.poses.some((p) => p.session_id === a.welcome.session_id && p.emote === emote), 3000);
+    a.pose([31, 1.6, 41], 0, emote);
+    await seen;
+  }
   // Un emote con mayúsculas o espacios no pasa el esquema: el servidor lo rechaza como bad_message.
   const bad = a.next("ERROR", (m) => m.payload.code === "bad_message", 3000);
   a.sendRaw(JSON.stringify({ ...msg("POSE", { t: Date.now(), head: { p: [31, 1.6, 41], r: [0, 0, 0, 1] } }), payload: { t: Date.now(), head: { p: [31, 1.6, 41], r: [0, 0, 0, 1] }, emote: "Bailar mucho" } }));

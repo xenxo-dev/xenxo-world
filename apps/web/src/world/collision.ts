@@ -104,10 +104,14 @@ export const npcs = {
   extra: 0,
   pos: new Float32Array(MAX_NPC * 3),
   /**
-   * Atropellos (vehicle/physics.ts): por hueco, cuándo (performance.now, ms), hacia dónde (x, z) y a
-   * qué velocidad. Lo leen CityLife e Interiors para tirar a la persona y que se levante (knock.ts).
+   * Atropellos (vehicle/physics.ts) y golpes (people/selfPeople.ts): por hueco, cuándo
+   * (performance.now, ms), hacia dónde (x, z) y a qué velocidad, y si fue en la cabeza. Es un aviso:
+   * lo recogen (y lo borran) CityLife e Interiors al colocar a la persona (knock.ts).
    */
   knock: new Float32Array(MAX_NPC * 4),
+  knockHead: new Uint8Array(MAX_NPC),
+  /** Por hueco: en el suelo (knock.ts). A quien está en el suelo no se le vuelve a dar. */
+  down: new Uint8Array(MAX_NPC),
 };
 /**
  * Las demás personas (multijugador), según su última pose: pies x, y, z. Las escribe
@@ -131,12 +135,16 @@ export const crowd = {
     out.y = npcs.pos[i * 3 + 1]!;
     out.z = npcs.pos[i * 3 + 2]!;
   },
-  hit(k: number, nx: number, nz: number, speed: number) {
+  /** Le dan a la persona k. Devuelve false si ya está en el suelo (no se le da). */
+  hit(k: number, nx: number, nz: number, speed: number, head = false): boolean {
     const i = npcAt(k);
+    if (npcs.down[i]) return false;
     npcs.knock[i * 4] = performance.now();
     npcs.knock[i * 4 + 1] = nx;
     npcs.knock[i * 4 + 2] = nz;
     npcs.knock[i * 4 + 3] = speed;
+    npcs.knockHead[i] = head ? 1 : 0;
+    return true;
   },
 };
 

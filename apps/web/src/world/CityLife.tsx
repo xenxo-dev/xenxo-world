@@ -18,11 +18,11 @@ import { assetUrl } from "../config";
 import type { Ambience, Features } from "./graphics";
 import { lightweight, paintedLights } from "./materials";
 import { AvatarBody } from "./Avatars";
-import { createMotion, type Motion } from "./motion";
+import type { Motion } from "./motion";
 import { rng } from "./NexoCity";
 import { playerBulk, playerPos } from "./Player";
 import { floorAt, NPC_CITY, npcs, others } from "./collision";
-import { knockApply, knockPaused } from "./knock";
+import { knockApply, knockPaused, knockReset, npcMotion } from "./knock";
 
 interface Loop {
   /** Esquinas en orden (x, z), a la altura `y`. */
@@ -134,7 +134,7 @@ export function Pedestrians({ chunk, count }: { chunk: string; count: number }) 
       offset: r() * 400,
     }));
   }, [id, loops]);
-  const slots = useMemo<Slot[]>(() => Array.from({ length: count }, () => ({ walker: -1, motion: createMotion(), group: null, yaw: 0 })), [count]);
+  const slots = useMemo<Slot[]>(() => Array.from({ length: count }, () => ({ walker: -1, motion: npcMotion(), group: null, yaw: 0 })), [count]);
   const last = useRef(0);
   const dist = useMemo(() => new Float32Array(walkers.length), [walkers]);
   const order = useMemo(() => Array.from({ length: walkers.length }, (_, n) => n), [walkers]);
@@ -159,7 +159,11 @@ export function Pedestrians({ chunk, count }: { chunk: string; count: number }) 
       order.sort((a, b) => dist[a]! - dist[b]!);
       const near = new Set<number>();
       for (let k = 0; k < slots.length && k < walkers.length; k++) if (dist[order[k]!]! < RANGE * RANGE) near.add(order[k]!);
-      for (const s of slots) if (s.walker >= 0 && !near.has(s.walker)) s.walker = -1;
+      for (const s of slots)
+        if (s.walker >= 0 && !near.has(s.walker)) {
+          s.walker = -1;
+          knockReset(s.motion);
+        }
       for (const s of slots) if (s.walker >= 0) near.delete(s.walker);
       for (const s of slots) {
         if (s.walker >= 0) continue;
@@ -189,6 +193,12 @@ export function Pedestrians({ chunk, count }: { chunk: string; count: number }) 
       _hx[m] = hx;
       _hz[m] = hz;
       _py[m] = l.y;
+      // Si le han dado, los demás esperan donde está de verdad (no en su sitio, que se ha quedado vacío).
+      if (knockPaused(m)) {
+        _px[m] = g.position.x;
+        _py[m] = g.position.y;
+        _pz[m] = g.position.z;
+      }
       _slot[m] = slots.indexOf(s);
       m++;
     }
@@ -233,13 +243,15 @@ export function Pedestrians({ chunk, count }: { chunk: string; count: number }) 
       if (n < NPC_CITY) {
         knockApply(n, g, px, py, pz, s.yaw, s.motion);
         npcs.pos[n * 3] = g.position.x;
-        npcs.pos[n * 3 + 1] = py;
+        npcs.pos[n * 3 + 1] = g.position.y;
         npcs.pos[n * 3 + 2] = g.position.z;
         n++;
       }
     }
     npcs.count = n;
-  });
+    // Antes que los personajes (prioridad −0,5, después de las caídas de PeopleFx): así el esqueleto
+    // de quien cae se coloca ya con su grupo donde toca este frame.
+  }, -0.5);
   // Al irse del lugar, nadie con quien chocar.
   useEffect(() => () => void (npcs.count = 0), []);
 

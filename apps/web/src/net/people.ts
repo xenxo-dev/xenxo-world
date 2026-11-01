@@ -4,7 +4,6 @@
  * cercanía, el ritmo y el consentimiento. Sin Three.js (lo usa el HUD).
  */
 import { FIGHT_REACH, msg, PAIR_RANGE, type ClientMessage, type FightMove, type PairAction, type Reaction } from "@xenxo/protocol";
-import { input } from "../world/input";
 import { self } from "../world/self";
 import { people, PEOPLE_REF } from "./people-store";
 import { net } from "./session";
@@ -87,21 +86,36 @@ export function resumeFight() {
 
 let lastAttack = 0;
 /**
- * Golpe: el gesto siempre (lo ven los demás en tu pose); si hay alguien en modo pelea delante y a
- * su alcance, se le manda al servidor. Si no, el mundo puede tirar a alguien de la gente de
- * decorado (`input.attack`, lo resuelve el jugador).
+ * ¿Se puede golpear ahora con `move`? (modo pelea activo, el estilo del lugar lo permite y no muy
+ * seguido). Si sí, cuenta como golpe dado (para el ritmo).
  */
-export function attack(move: FightMove): string | null {
-  if (!people.fightOn || !people.style) return null;
+export function canAttack(move: FightMove): boolean {
+  if (!people.fightOn || !people.style) return false;
   if (people.style === "shove" && move !== "shove") {
     people.setNotice("people.err.onlyShove");
-    return null;
+    return false;
   }
   const now = performance.now();
-  if (now - lastAttack < 650) return null;
+  if (now - lastAttack < 650) return false;
   lastAttack = now;
-  input.emote = move;
-  const who = nearestPerson(FIGHT_REACH[move], Math.PI / 3, (id) => people.fighters.has(id));
-  if (who) send("HIT", { to: who.id, move }, "hit");
-  return who?.id ?? null;
+  return true;
+}
+
+/** A quién va un golpe: quien esté en modo pelea más cerca, delante y a su alcance (con algo de margen para acercarse). */
+export function fightTarget(move: FightMove, extra = 0.6): { id: string; d: number } | null {
+  return nearestPerson(FIGHT_REACH[move] + extra, Math.PI * 0.42, (id) => people.fighters.has(id));
+}
+
+let lastHit = 0;
+/**
+ * ¿Se puede mandar ya un golpe? El servidor admite uno cada 600 ms; como cada golpe llega en un
+ * momento distinto de su animación, dos seguidos pueden quedar más juntos que al pulsar.
+ */
+export function hitReady(): boolean {
+  return performance.now() - lastHit >= 620;
+}
+/** El golpe llega: se manda al servidor (que comprueba alcance, ritmo y consentimiento). */
+export function sendHit(to: string, move: FightMove) {
+  lastHit = performance.now();
+  send("HIT", { to, move }, "hit");
 }

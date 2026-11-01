@@ -37,6 +37,11 @@ const GESTURES: Item[] = [
   { id: "beckon", icon: icon("beckon"), label: "emote.beckon", run: emote("beckon") },
   { id: "laugh", icon: icon("laugh"), label: "emote.laugh", run: emote("laugh") },
   { id: "shrug", icon: icon("shrug"), label: "emote.shrug", run: emote("shrug") },
+  { id: "fold_arms", icon: icon("fold_arms"), label: "emote.fold_arms", run: emote("fold_arms") },
+  { id: "nod", icon: icon("nod"), label: "emote.nod", run: emote("nod") },
+  { id: "shake_head", icon: icon("shake_head"), label: "emote.shake_head", run: emote("shake_head") },
+  { id: "phone", icon: icon("phone"), label: "emote.phone", run: emote("phone") },
+  { id: "bow", icon: icon("bow"), label: "emote.bow", run: emote("bow") },
 ];
 const REACTION_ITEMS: Item[] = REACTIONS.map((r: Reaction) => ({ id: r, icon: icon(r), label: `react.${r}` as Key, run: () => react(r) }));
 const PAIR_ITEMS: Item[] = PAIR_ACTIONS.map((a: PairAction) => ({ id: a, icon: icon(a), label: `pair.${a}` as Key, run: () => void offerPair(a) }));
@@ -46,9 +51,12 @@ const RADIUS = 104;
 /** Los botones de una pestaña, en anillo; en el centro, el nombre del que señalas. */
 function Ring({ items, onPick }: { items: Item[]; onPick: () => void }) {
   const [hover, setHover] = useState<Item | null>(null);
+  // Con muchos botones, el anillo crece lo justo para que no se pisen (54 px por botón).
+  const radius = Math.max(RADIUS, Math.round((items.length * 54) / (Math.PI * 2)));
+  const big = radius > RADIUS;
   return (
-    <div className="relative mx-auto h-[17rem] w-[17rem]">
-      <div className="absolute inset-[3.25rem] grid place-items-center rounded-full border border-cal/10 bg-noche-2/70 px-3 text-center text-xs text-cal/80">
+    <div className={`relative mx-auto ${big ? "h-[18.5rem] w-[18.5rem]" : "h-[17rem] w-[17rem]"}`}>
+      <div className={`absolute ${big ? "inset-[3.75rem]" : "inset-[3.25rem]"} grid place-items-center rounded-full border border-cal/10 bg-noche-2/70 px-3 text-center text-xs text-cal/80`}>
         {hover ? t(hover.label) : null}
       </div>
       {items.map((it, i) => {
@@ -66,7 +74,7 @@ function Ring({ items, onPick }: { items: Item[]; onPick: () => void }) {
               onPick();
             }}
             className={`${hudIconButton} absolute h-12 w-12 -translate-x-1/2 -translate-y-1/2 rounded-full`}
-            style={{ left: `calc(50% + ${Math.cos(a) * RADIUS}px)`, top: `calc(50% + ${Math.sin(a) * RADIUS}px)` }}
+            style={{ left: `calc(50% + ${Math.cos(a) * radius}px)`, top: `calc(50% + ${Math.sin(a) * radius}px)` }}
           >
             {it.icon}
           </button>
