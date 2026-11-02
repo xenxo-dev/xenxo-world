@@ -37,6 +37,11 @@ Haven…) tiene algo con la calidad que hace falta.
    tamaño, hace los dos niveles (texturas WebP a 1024 y 512 px) y comprueba el presupuesto.
 5. Añádelo a `CREDITS.md` (sección «Generado con IA»).
 
+Si hay que retocar lo que dio la plataforma (la estatua de Xen: la máscara oficial y la capucha
+mate), se guarda el resultado como `model.glb` y `meta.json` → `edit` dice qué se hizo; el original
+queda en el historial de git. Si el retoque trae su propia textura de emisión, `glow` la respeta y
+solo añade el contraluz de noche.
+
 ## Reglas
 
 - La plataforma tiene que dar la propiedad y el uso comercial (Higgsfield en planes de pago) o

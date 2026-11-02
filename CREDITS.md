@@ -51,5 +51,6 @@ resultados para entrenar modelos de IA, y esa restricción acompaña a estas im�
 - **Escultura de Xen** en Distrito Cero (`tools/models/generated/xen_statue/`): el modelo 3D del
   personaje oficial de xenxo.io, generado por Pencho con **Tripo** a partir de su diseño. Si viene
   del plan gratuito de Tripo, su licencia es CC BY 4.0: «Modelo generado con Tripo (tripo3d.ai)».
+  Retocado en Blender (noviembre de 2026): la máscara oficial de xenxo y la capucha mate.
 
 Herramientas: Blender, VRM Add-on for Blender, glTF-Transform, meshoptimizer, three.js, @pixiv/three-vrm.

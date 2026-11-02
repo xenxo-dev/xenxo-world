@@ -220,7 +220,9 @@ function facadeGlow(material: THREE.Material, strength: number) {
 /**
  * Los modelos generados traen sus tiras de luz pintadas en el albedo. Con el material llamado
  * `xenxo-glow`, emite solo lo saturado y claro (cian, magenta…), mucho más de noche; el resto,
- * nada. Un clon por material y ambiente; sin texturas nuevas.
+ * nada. Si el modelo ya trae su propia textura de emisión (la estatua de Xen: los ojos y el
+ * colgante), esa se respeta tal cual y solo se añade el contraluz de noche. Un clon por material
+ * y ambiente; sin texturas nuevas.
  */
 const glows = new Map<string, THREE.Material>();
 export function paintedLights(m: THREE.Material, ambience: Ambience): THREE.Material {
@@ -229,9 +231,12 @@ export function paintedLights(m: THREE.Material, ambience: Ambience): THREE.Mate
   if (out) return out;
   const c = m.clone() as THREE.MeshStandardMaterial;
   if (!c.map) return m;
-  c.emissiveMap = c.map;
-  c.emissive = new THREE.Color(1, 1, 1);
-  c.emissiveIntensity = 1;
+  const own = !!c.emissiveMap;
+  if (!own) {
+    c.emissiveMap = c.map;
+    c.emissive = new THREE.Color(1, 1, 1);
+    c.emissiveIntensity = 1;
+  }
   const strength = ambience === "night" ? 2.4 : 0.7;
   const rim = ambience === "night" ? 0.25 : 0;
   c.onBeforeCompile = (shader) => {
@@ -241,7 +246,10 @@ export function paintedLights(m: THREE.Material, ambience: Ambience): THREE.Mate
       .replace("#include <common>", "#include <common>\nuniform float uGlow;\nuniform float uRim;")
       .replace(
         "#include <emissivemap_fragment>",
-        `#ifdef USE_EMISSIVEMAP
+        `${
+          own
+            ? "#include <emissivemap_fragment>"
+            : `#ifdef USE_EMISSIVEMAP
         {
           vec3 eC = texture2D(emissiveMap, vEmissiveMapUv).rgb;
           float hi = max(eC.r, max(eC.g, eC.b));
@@ -249,12 +257,13 @@ export function paintedLights(m: THREE.Material, ambience: Ambience): THREE.Mate
           float m = smoothstep(0.28, 0.5, sat) * smoothstep(0.35, 0.65, hi);
           totalEmissiveRadiance *= eC * m * uGlow;
         }
-        #endif
+        #endif`
+        }
         // Contraluz fino (de noche): separa las siluetas oscuras del fondo oscuro.
         totalEmissiveRadiance += vec3(0.21, 0.85, 1.0) * pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 3.0) * uRim;`,
       );
   };
-  c.customProgramCacheKey = () => `xenxo-glow-${strength}-${rim}`;
+  c.customProgramCacheKey = () => `xenxo-glow-${own ? "own" : "painted"}-${strength}-${rim}`;
   glows.set(key, c);
   out = c;
   return out;
