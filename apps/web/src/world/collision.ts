@@ -5,7 +5,8 @@
  * - **Mallas** (collider@1 con `from_mesh`): la forma real del modelo de la entidad (monumentos,
  *   esculturas, atrezo), con three-mesh-bvh. Mientras el modelo no ha llegado, vale su caja.
  *   Rampas y pendientes: el suelo sale de la malla (hasta ~55°); más empinado es pared.
- * - **Gente** (los peatones de las ciudades, CityLife): cilindros que se mueven; no se atraviesan.
+ * - **Gente** (los ciudadanos de las ciudades, city/citizens.ts, y los residentes de las salas): cilindros
+ *   que se mueven; no se atraviesan.
  *
  * El jugador es un cilindro (círculo en XZ con pies y cabeza; contra mallas, una cápsula). Las
  * cajas bajas se suben; sobre las demás se camina si se llega saltando. La cámara se acerca si
@@ -93,10 +94,10 @@ export function forEachSolidMesh(cb: (id: string, positions: Float32Array, index
 /** Cuántas mallas de colisión hay (pruebas y depuración). */
 export const meshColliderCount = () => meshCols.size;
 
-/* --- Gente: la escriben CityLife (peatones) y Interiors (residentes) cada frame --- */
+/* --- Gente: la escriben CityLife (ciudadanos) e Interiors (residentes) cada frame --- */
 
 export const NPC_RADIUS = 0.3;
-/** Huecos de los peatones: [0, NPC_CITY). Los residentes van detrás: [NPC_CITY, NPC_CITY + extra). */
+/** Huecos de los ciudadanos: [0, NPC_CITY). Los residentes van detrás: [NPC_CITY, NPC_CITY + extra). */
 export const NPC_CITY = 32;
 const MAX_NPC = 64;
 export const npcs = {
@@ -122,7 +123,7 @@ export const OTHER_RADIUS = 0.3;
 const MAX_OTHERS = 48;
 export const others = { count: 0, pos: new Float32Array(MAX_OTHERS * 3), max: MAX_OTHERS };
 
-/** Índice del hueco k de la lista de gente (peatones primero, luego residentes). */
+/** Índice del hueco k de la lista de gente (ciudadanos primero, luego residentes). */
 const npcAt = (k: number) => (k < npcs.count ? k : NPC_CITY + k - npcs.count);
 /** La gente de ahora, en orden (para la física del coche). */
 export const crowd = {
@@ -188,9 +189,10 @@ function refresh() {
 
 /**
  * Empuja un círculo (centro px, pz; radio r; altura de pies y cabeza) fuera de las cajas.
- * Modifica `p` en su sitio. Dos pasadas bastan para esquinas.
+ * Modifica `p` en su sitio. Dos pasadas bastan para esquinas. Con `people` en false no cuenta la
+ * gente (la usan los ciudadanos: entre ellos y con el jugador se empujan con su masa, citizens.ts).
  */
-export function resolveCircle(p: { x: number; z: number }, r: number, feet: number, head: number) {
+export function resolveCircle(p: { x: number; z: number }, r: number, feet: number, head: number, people = true) {
   refresh();
   for (let pass = 0; pass < 2; pass++) {
     for (const b of boxes) {
@@ -231,6 +233,10 @@ export function resolveCircle(p: { x: number; z: number }, r: number, feet: numb
       const wz = -nx * b.s + nz * b.c;
       p.x += wx * push;
       p.z += wz * push;
+    }
+    if (!people) {
+      if (meshCols.size) resolveMeshes(p, r, feet, head);
+      continue;
     }
     // La gente: cilindros que no se atraviesan (el que se aparta es el jugador).
     const rr = r + NPC_RADIUS;

@@ -53,13 +53,16 @@ export interface Features {
    * instanciado y se mueve en el shader: en la Quest cabe la de «medium».
    */
   nexoCity: number;
-  /** Gente que camina por las ciudades de los distritos (personajes de serie; 0 = nadie). */
+  /**
+   * Ciudadanos que se dibujan a la vez en las ciudades de los distritos, los más cercanos (personajes
+   * de serie con su física y su vida, city/citizens.ts; 0 = nadie). Los demás siguen su día sin dibujarse.
+   */
   pedestrians: number;
   /** Coches voladores y drones por las calles de las ciudades de los distritos (instanciados). */
   traffic: number;
   /**
-   * Gente quieta de los interiores y de las calles de Distrito Cero (sentada, charlando, bailando):
-   * cuántos se dibujan a la vez, los más cercanos (los de una sala, solo con el jugador dentro).
+   * Gente de los interiores (sentada, charlando, bailando, en su sitio): cuántos se dibujan a la vez,
+   * los más cercanos, y solo con el jugador dentro de su sala.
    */
   residents: number;
   /**
@@ -75,10 +78,10 @@ export interface Features {
 }
 
 export const FEATURES: Record<Tier, Features> = {
-  low: { dpr: [0.75, 1], antialias: false, pbr: false, post: false, bloom: false, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 48, flyerTris: 500, lod: "light", textures: 512, normalMaps: false, avatarFill: true, nexoCity: 0.5, pedestrians: 4, traffic: 8, residents: 3, rain: 900, ragdolls: 2 },
-  medium: { dpr: [1, 1.5], antialias: true, pbr: true, post: true, bloom: true, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 96, flyerTris: 900, lod: "light", textures: 512, normalMaps: true, avatarFill: true, nexoCity: 0.75, pedestrians: 6, traffic: 14, residents: 4, rain: 1600, ragdolls: 3 },
-  high: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: false, shadows: 1024, probe: 128, pointLights: true, lightPools: false, skyline: 150, flyerTris: 1800, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1, pedestrians: 10, traffic: 22, residents: 6, rain: 3200, ragdolls: 5 },
-  ultra: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: true, shadows: 2048, probe: 256, pointLights: true, lightPools: false, skyline: 220, flyerTris: 2700, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1, pedestrians: 14, traffic: 30, residents: 9, rain: 4800, ragdolls: 8 },
+  low: { dpr: [0.75, 1], antialias: false, pbr: false, post: false, bloom: false, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 48, flyerTris: 500, lod: "light", textures: 512, normalMaps: false, avatarFill: true, nexoCity: 0.5, pedestrians: 3, traffic: 8, residents: 2, rain: 900, ragdolls: 2 },
+  medium: { dpr: [1, 1.5], antialias: true, pbr: true, post: true, bloom: true, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 96, flyerTris: 900, lod: "light", textures: 512, normalMaps: true, avatarFill: true, nexoCity: 0.75, pedestrians: 5, traffic: 14, residents: 3, rain: 1600, ragdolls: 3 },
+  high: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: false, shadows: 1024, probe: 128, pointLights: true, lightPools: false, skyline: 150, flyerTris: 1800, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1, pedestrians: 7, traffic: 22, residents: 4, rain: 3200, ragdolls: 5 },
+  ultra: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: true, shadows: 2048, probe: 256, pointLights: true, lightPools: false, skyline: 220, flyerTris: 2700, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1, pedestrians: 9, traffic: 30, residents: 6, rain: 4800, ragdolls: 8 },
 };
 
 /* ------------------------------------------------------------------ */
@@ -161,9 +164,9 @@ function portableClamp(f: Features, xr: boolean): Features {
     skyline: Math.min(f.skyline, 96),
     flyerTris: Math.min(f.flyerTris, xr ? 500 : 900),
     nexoCity: Math.min(f.nexoCity, 0.75),
-    pedestrians: Math.min(f.pedestrians, xr ? 4 : 6),
+    pedestrians: Math.min(f.pedestrians, xr ? 3 : 5),
     traffic: Math.min(f.traffic, 14),
-    residents: Math.min(f.residents, xr ? 3 : 4),
+    residents: Math.min(f.residents, xr ? 2 : 3),
     // En las gafas, solo los charcos (las gotas cruzan la vista y marean); en el móvil, poca.
     rain: xr ? 0 : Math.min(f.rain, 900),
     ragdolls: Math.min(f.ragdolls, xr ? 2 : 3),

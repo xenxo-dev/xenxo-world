@@ -43,6 +43,9 @@ export const EMOTE_CLIPS: Record<string, EmoteClip> = {
   car_open: { clip: "interact", once: true, hold: true },
   car_in: { clip: "sit_enter", once: true, hold: true },
   car_out: { clip: "sit_exit", once: true, hold: true },
+  // La gente de las ciudades (city/citizens.ts): jugar a una máquina y pulsar la expendedora.
+  arcade: { clip: "arcade", upper: true },
+  interact: { clip: "interact", once: true },
   // Gestos (people/gestures.ts y la librería 2).
   clap: { clip: "clap", upper: true },
   point: { clip: "point", once: true, upper: true },
@@ -141,6 +144,15 @@ const UPPER_MASK: Record<string, number> = {
 const GUARD_MASK: Record<string, number> = { ...UPPER_MASK, spine: 0.15, chest: 0.35, upperChest: 0.5, neck: 0.35, head: 0.35 };
 const isFinger = (bone: string) => /^(left|right)(Thumb|Index|Middle|Ring|Little)/.test(bone);
 
+/** Un gesto encima de la pose (Motion.gesture): su clip, si va una vez, su ritmo, cuánto lleva y su peso. */
+interface Gest {
+  clip: string | null;
+  once: boolean;
+  speed: number;
+  t: number;
+  w: number;
+}
+
 /** Una capa de arriba: el clip muestreado a mano sobre los huesos de la máscara. */
 interface Layer {
   nodes: THREE.Object3D[];
@@ -164,6 +176,10 @@ export class VrmAnimator {
   private upperW = 0;
   private guardUpperW = 0;
   private wantGuard = false;
+  /** Gesto de brazos por encima de la pose (Motion.gesture): el pedido, el que se ve y el que se apaga. */
+  private gestName: string | null = null;
+  private gest: Gest = { clip: null, once: false, speed: 1, t: 0, w: 0 };
+  private gestOut: Gest = { clip: null, once: false, speed: 1, t: 0, w: 0 };
   /** Lo que no es de clip: mirar, encajar golpes, parejas y caídas (people/rig.ts). */
   readonly rig: Rig;
   /** ¿Ya hay al menos el reposo cargado? (si no, el avatar usa su pose de respaldo). */
@@ -253,7 +269,7 @@ export class VrmAnimator {
    * está en modo pelea y `fx` lo que la gente le hace al esqueleto (golpes, parejas, caídas).
    * Los pesos se suavizan para que las transiciones no den saltos.
    */
-  update(dt: number, speed: number, airborne: boolean, emote: string | null, fight = false, fx?: PersonFx | null) {
+  update(dt: number, speed: number, airborne: boolean, emote: string | null, fight = false, fx?: PersonFx | null, gesture?: string | null) {
     const target: Record<string, number> = {};
     const known = emote ? EMOTE_CLIPS[emote] : undefined;
 
@@ -333,8 +349,48 @@ export class VrmAnimator {
     if (g) this.applyLayer("guard", g.time, this.guardUpperW);
     this.upperW += ((upper ? 1 : 0) - this.upperW) * Math.min(1, dt / (upper ? fade : 0.15));
     if (this.emoteAction && known) this.applyLayer(known.clip, this.emoteAction.time, this.upperW);
+    this.applyGesture(dt, gesture ?? null);
 
     this.rig.apply(dt, fx ?? null);
+  }
+
+  /**
+   * Un gesto de brazos encima de lo que haya (sentado, jugando, charlando): la capa de arriba de su
+   * clip, con su propio tiempo. Los que van una vez se apagan al acabar; al cambiar de gesto (o
+   * quitarlo), el anterior se apaga poco a poco mientras entra el nuevo (sin saltos).
+   */
+  private applyGesture(dt: number, gesture: string | null) {
+    const k = Math.min(1, dt / 0.18);
+    if (gesture !== this.gestName) {
+      this.gestName = gesture;
+      const def = gesture ? EMOTE_CLIPS[gesture] : undefined;
+      if (def) {
+        // El que había pasa a apagarse (si había uno a la vista).
+        if (this.gest.clip && this.gest.w > 0.02) Object.assign(this.gestOut, this.gest);
+        this.gest.clip = def.clip;
+        this.gest.once = !!def.once;
+        this.gest.speed = def.speed ?? 1;
+        this.gest.t = 0;
+        this.gest.w = 0;
+        void this.ensure(def.clip);
+      }
+    }
+    this.gestFrame(this.gestOut, dt, 0, k);
+    this.gestFrame(this.gest, dt, this.gestName ? 1 : 0, k);
+  }
+
+  private gestFrame(g: Gest, dt: number, on: number, k: number) {
+    if (!g.clip) return;
+    const clip = this.clips.get(g.clip);
+    if (!clip) return;
+    g.t += dt * g.speed;
+    const want = on && (!g.once || g.t < clip.duration - 0.15) ? 1 : 0;
+    g.w += (want - g.w) * k;
+    if (g.w < 0.001 && !want) {
+      g.clip = null;
+      return;
+    }
+    this.applyLayer(g.clip, g.once ? Math.min(g.t, clip.duration) : g.t % clip.duration, g.w);
   }
 
   dispose() {

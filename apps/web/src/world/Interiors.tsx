@@ -1,15 +1,16 @@
 /**
- * Vida de los interiores (y de las calles de Distrito Cero): puertas correderas que se abren al
- * acercarse alguien y gente quieta haciendo su vida (sentada, charlando, bailando, trabajando).
- * Todo sale de la forja (`district-interiors.json`, tools/forge/interiors.py y cero.py): dónde están
- * las salas, sus puertas y la gente. Es decorado del cliente, como los peatones: no son personas ni
+ * Vida de los interiores: puertas correderas que se abren al acercarse alguien y gente en su sitio
+ * haciendo su vida (sentada, charlando, bailando, trabajando), que se da cuenta de ti. Todo sale de
+ * la forja (`district-interiors.json`, tools/forge/interiors.py y cero.py): dónde están las salas,
+ * sus puertas y la gente. Los sitios de la gente de la calle de Distrito Cero son ahora de los
+ * ciudadanos (city/nav.ts). Es decorado del cliente, como los ciudadanos: no son personas ni
  * entidades del mundo y no viajan por la red.
  *
  * Rendimiento (Quest 3): solo se dibujan los `FEATURES.residents` más cercanos, en huecos fijos (cada
- * hueco, siempre el mismo personaje de serie); los de una sala solo cuando el jugador está dentro o en
- * su puerta. Las puertas son dos cajas por sala; nada nuevo por frame.
+ * hueco, siempre el mismo personaje de serie), y solo cuando el jugador está dentro de su sala o en su
+ * puerta. Las puertas son dos cajas por sala; nada nuevo por frame.
  */
-import { memo, useEffect, useMemo, useRef } from "react";
+import { memo, Suspense, useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import districts from "../../../realtime/src/districts.json";
@@ -21,6 +22,9 @@ import type { Motion } from "./motion";
 import { playerPos } from "./Player";
 import { floorAt, NPC_CITY, npcs } from "./collision";
 import { knockApply, knockReset, npcMotion } from "./knock";
+import { self } from "./self";
+import { REPLY } from "./city/citizens";
+import { Speech, type Speaker } from "./city/Speech";
 
 interface Door {
   x: number;
@@ -43,7 +47,7 @@ interface Resident {
   /** Hacia dónde mira, en grados (0 = +Z). */
   yaw: number;
   pose: string;
-  /** Sala donde está (-1: en la calle). */
+  /** Sala donde está (-1: en la calle; esos sitios son ahora de los ciudadanos, city/nav.ts). */
   room: number;
 }
 interface Life {
@@ -56,13 +60,11 @@ const LIFE = (lives as unknown as { districts: Record<string, Life> }).districts
 
 /** Distancia a la que se abre una puerta (m). */
 const OPEN_AT = 2.6;
-/** Más allá, nadie de la calle se dibuja. */
-const RANGE = 34;
 const REASSIGN_MS = 500;
 /** Cuánto antes de cruzar la puerta se ve ya a la gente de dentro (m). */
 const ROOM_MARGIN = 4;
 
-/** ¿Hay alguien (el jugador o un peatón) cerca de la puerta? */
+/** ¿Hay alguien (el jugador o un ciudadano) cerca de la puerta? */
 function someoneNear(x: number, y: number, z: number) {
   const dx = playerPos.x - x, dz = playerPos.z - z;
   if (dx * dx + dz * dz < OPEN_AT * OPEN_AT && Math.abs(playerPos.y - y) < 2.5) return true;
@@ -131,25 +133,36 @@ export function SlidingDoors({ chunk, ambience, bloom }: { chunk: string; ambien
 }
 
 /* ------------------------------------------------------------------ */
-/* Gente de los interiores y de la calle                                */
+/* Gente de los interiores                                              */
 /* ------------------------------------------------------------------ */
 
-interface Slot {
+interface Slot extends Speaker {
   who: number;
   motion: Motion;
   group: THREE.Group | null;
-  /** Su sitio y su giro (para volver a él si le da un coche: knock.ts). */
+  /** Su sitio y su giro (para volver a él si le dan: knock.ts). */
   bx: number;
   by: number;
   bz: number;
   yaw: number;
   knocked: boolean;
+  /** Mirándote hasta `glance`; no vuelve a mirarte antes de `glanceNext`. */
+  glance: number;
+  glanceNext: number;
+  /** Gesto pendiente de contestar y cuándo; hasta cuándo dura el que hace; hasta cuándo habla. */
+  reply: string | null;
+  replyAt: number;
+  gestUntil: number;
+  speechUntil: number;
 }
 
 const Body = memo(function Body({ slot, seed }: { slot: Slot; seed: string }) {
   return (
     <group ref={(g) => void (slot.group = g)} visible={false}>
       <AvatarBody seed={seed} motion={slot.motion} extra />
+      <Suspense fallback={null}>
+        <Speech who={slot} />
+      </Suspense>
     </group>
   );
 });
@@ -161,16 +174,48 @@ function roomInView(r: Room) {
   return playerPos.x > x0 - m && playerPos.x < x1 + m && playerPos.z > z0 - m && playerPos.z < z1 + m && playerPos.y < r.y1;
 }
 
+/** Contestan a tus gestos los que estén a menos de esto (m) y te miran si pasas a menos de esto. */
+const ANSWER_AT = 7;
+const LOOK_AT = 3.5;
+
+/**
+ * La gente de las salas (bares, club, mercado…): quieta en su sitio haciendo lo suyo, pero se da
+ * cuenta de ti: te mira si te acercas, contesta a tus gestos con los brazos (sin levantarse) y dice
+ * algo; si le das, se queja. Las calles son de los ciudadanos (city/citizens.ts).
+ */
 export function Residents({ chunk, count }: { chunk: string; count: number }) {
   const d = BY_CHUNK.get(chunk);
   const life = d ? LIFE[d.id] : undefined;
-  const people = life?.npcs ?? [];
+  const people = useMemo(() => (life?.npcs ?? []).filter((p) => p.room >= 0), [life]);
   const n = Math.min(count, NPC_CITY);
-  const slots = useMemo<Slot[]>(() => Array.from({ length: n }, () => ({ who: -1, motion: npcMotion(), group: null, bx: 0, by: 0, bz: 0, yaw: 0, knocked: false })), [n]);
+  const slots = useMemo<Slot[]>(
+    () =>
+      Array.from({ length: n }, () => ({
+        who: -1,
+        motion: npcMotion(),
+        group: null,
+        bx: 0,
+        by: 0,
+        bz: 0,
+        yaw: 0,
+        knocked: false,
+        glance: 0,
+        glanceNext: 0,
+        reply: null,
+        replyAt: 0,
+        gestUntil: 0,
+        speech: null,
+        speechUntil: 0,
+        said: 0,
+        dist: Infinity,
+      })),
+    [n],
+  );
   const dist = useMemo(() => new Float32Array(people.length), [people]);
   const order = useMemo(() => Array.from({ length: people.length }, (_, k) => k), [people]);
   const inView = useMemo(() => new Uint8Array(life?.rooms.length ?? 0), [life]);
   const last = useRef(0);
+  const lastEmote = useRef<string | null>(null);
   useEffect(() => {
     last.current = 0;
     for (const s of slots) {
@@ -180,17 +225,17 @@ export function Residents({ chunk, count }: { chunk: string; count: number }) {
     }
   }, [chunk, slots]);
 
-  useFrame(() => {
+  useFrame((state) => {
     if (!people.length || !life) return;
     const now = performance.now();
+    const clock = state.clock.elapsedTime;
     if (now - last.current > REASSIGN_MS) {
       last.current = now;
       for (let r = 0; r < life.rooms.length; r++) inView[r] = roomInView(life.rooms[r]!) ? 1 : 0;
       for (let k = 0; k < people.length; k++) {
         const p = people[k]!;
         const dx = p.x - playerPos.x, dz = p.z - playerPos.z, dy = p.y - playerPos.y;
-        const d2 = dx * dx + dz * dz + dy * dy * 4;
-        dist[k] = p.room >= 0 ? (inView[p.room] ? d2 : Infinity) : d2 < RANGE * RANGE ? d2 : Infinity;
+        dist[k] = inView[p.room] ? dx * dx + dz * dz + dy * dy * 4 : Infinity;
       }
       order.sort((a, b) => dist[a]! - dist[b]!);
       // Un hueco se queda con quien ya tenía si sigue entre los más cercanos (no se recarga nada).
@@ -202,6 +247,8 @@ export function Residents({ chunk, count }: { chunk: string; count: number }) {
         if (!ok) {
           s.who = -1;
           s.knocked = false;
+          s.speech = null;
+          s.motion.gesture = null;
           knockReset(s.motion);
         } else keep++;
       }
@@ -231,22 +278,44 @@ export function Residents({ chunk, count }: { chunk: string; count: number }) {
         }
       }
     }
-    // Dibujados y sólidos (collision.ts: detrás de los peatones).
+    // Un gesto tuyo nuevo: te contesta quien esté más cerca (y a veces otro más).
+    const emote = self.driving ? null : self.emote;
+    let answer: Slot | null = null, second: Slot | null = null;
+    if (emote !== lastEmote.current) {
+      lastEmote.current = emote;
+      if (emote && (REPLY[emote] || emote === "beckon" || emote === "dance")) {
+        let da = ANSWER_AT, db = ANSWER_AT;
+        for (const s of slots) {
+          if (s.who < 0 || s.knocked || !s.group) continue;
+          const dd = Math.hypot(s.bx - self.x, s.bz - self.z);
+          if (Math.abs(s.by - self.y) > 1.5) continue;
+          if (dd < da) (second = answer), (db = da), (answer = s), (da = dd);
+          else if (dd < db) (second = s), (db = dd);
+        }
+      }
+    }
+    // Dibujados y sólidos (collision.ts: detrás de los ciudadanos).
     let e = 0;
     for (const s of slots) {
       const g = s.group;
       if (!g) continue;
       g.visible = s.who >= 0;
       if (s.who < 0) continue;
-      // Si le ha dado un coche, sale despedido y se levanta (knock.ts); después, a su sitio y a lo suyo.
+      s.dist = Math.hypot(s.bx - self.x, s.bz - self.z, (s.by - self.y) * 2);
+      if (s.speech && clock > s.speechUntil) s.speech = null;
+      if (s.motion.gesture && clock > s.gestUntil) s.motion.gesture = null;
+      // Si le dan, lo encaja o cae y se levanta (knock.ts); después, a su sitio, a lo suyo y se queja.
       const k = knockApply(NPC_CITY + e, g, s.bx, s.by, s.bz, s.yaw, s.motion);
       if (!k && s.knocked) {
         g.position.set(s.bx, s.by, s.bz);
         g.rotation.set(0, s.yaw, 0);
         const pose = people[s.who]!.pose;
         s.motion.emote = pose === "idle" ? null : pose;
+        say(s, Math.random() < 0.5 ? "npc.ouch" : "npc.leave", clock);
+        s.glanceNext = clock + 20;
       }
       s.knocked = k;
+      if (!k) attend(s, s === answer || (s === second && Math.random() < 0.5), s === answer, emote, clock);
       npcs.pos[(NPC_CITY + e) * 3] = g.position.x;
       npcs.pos[(NPC_CITY + e) * 3 + 1] = g.position.y;
       npcs.pos[(NPC_CITY + e) * 3 + 2] = g.position.z;
@@ -264,4 +333,46 @@ export function Residents({ chunk, count }: { chunk: string; count: number }) {
       ))}
     </>
   );
+}
+
+function say(s: Slot, key: string, clock: number) {
+  s.speech = key;
+  s.speechUntil = clock + 2.6;
+  s.said++;
+}
+
+/**
+ * Lo que hace con su atención: contestar a tu gesto (si es a quien le toca), mirarte un momento si
+ * pasas por delante, o mirar a lo suyo. Sin levantarse: con los brazos y la cabeza (Motion.gesture).
+ */
+function attend(s: Slot, answers: boolean, first: boolean, emote: string | null, clock: number) {
+  const fx = s.motion.fx!;
+  if (answers && emote) {
+    const r = REPLY[emote];
+    // Llamarle con la mano: está a lo suyo; bailar: aplaude.
+    s.reply = emote === "beckon" ? "shake_head" : emote === "dance" ? "clap" : r ? (r.full ? "nod" : r.g) : null;
+    s.replyAt = clock + 0.3 + Math.random() * 0.4;
+    s.glance = s.replyAt + 2.6;
+    if (first) {
+      if (emote === "beckon") say(s, "npc.busy", clock);
+      else if (r?.say) say(s, r.say[Math.floor(Math.random() * r.say.length)]!, clock);
+    }
+  }
+  if (s.reply && clock >= s.replyAt) {
+    s.motion.gesture = s.reply;
+    s.gestUntil = clock + 2.6;
+    s.reply = null;
+  }
+  const dx = self.x - s.bx, dz = self.z - s.bz, d = Math.hypot(dx, dz);
+  const front = d > 0.1 ? (dx * -Math.sin(s.yaw) + dz * -Math.cos(s.yaw)) / d : 1;
+  if (clock > s.glanceNext && clock > s.glance && d < LOOK_AT && front > -0.1 && Math.abs(self.y - s.by) < 1.5) {
+    s.glance = clock + 1.5 + Math.random() * 1.5;
+    s.glanceNext = s.glance + 5 + Math.random() * 5;
+  }
+  if (clock < s.glance && d < ANSWER_AT + 2) {
+    fx.look.x = self.x;
+    fx.look.y = self.y + 1.55;
+    fx.look.z = self.z;
+    fx.look.w = 0.7;
+  } else fx.look.w = 0;
 }

@@ -1,5 +1,5 @@
 /**
- * La gente de decorado (peatones y residentes) cuando le dan: un coche (vehicle/physics.ts) o un
+ * La gente de decorado (ciudadanos y residentes) cuando le dan: un coche (vehicle/physics.ts) o un
  * golpe del modo pelea (people/selfPeople.ts) dejan el aviso en `npcs.knock` (collision.ts) y aquí,
  * desde CityLife e Interiors al colocar a cada persona, se convierte en lo que se ve:
  *
@@ -7,7 +7,8 @@
  *     dónde le viene, da un traspié, mira un momento a quien ha sido y vuelve a su sitio.
  *   - Uno fuerte o un atropello: cae con física (people/ragdoll.ts, la misma que las personas), se
  *     queda un momento en el suelo, se da la vuelta si quedó boca abajo, se levanta desde la pose en
- *     que quedó y vuelve andando a su sitio y a lo suyo.
+ *     que quedó y vuelve andando a su sitio y a lo suyo (los ciudadanos, `free`, siguen desde donde
+ *     han caído: city/citizens.ts).
  *   - Sin física libre (las caídas a la vez tienen tope, `FEATURES.ragdolls`, y siempre queda una para
  *     las personas) cae con la animación; sin esqueleto (el muñeco de respaldo), se inclina.
  *
@@ -67,6 +68,8 @@ interface Knock {
   lastY: number;
   lastVy: number;
   glare: number;
+  /** De la gente que anda libre (ciudadanos): al acabar no vuelve a ningún sitio, sigue desde ahí. */
+  free: boolean;
 }
 
 const states = new WeakMap<Motion, Knock>();
@@ -95,15 +98,17 @@ export function npcMotion(): Motion {
 /**
  * Si a la persona del hueco `i` le han dado (o aún se está recuperando), la coloca desde su sitio
  * de siempre (`x, y, z` y su giro `yaw`) donde toque y devuelve true mientras no puede seguir con lo
- * suyo. Si no, no toca nada y devuelve false.
+ * suyo. Si no, no toca nada y devuelve false. Con `free` (los ciudadanos, que andan por la ciudad),
+ * al levantarse no vuelve a su sitio: el grupo se queda donde acabó y desde ahí sigue con su vida.
  */
-export function knockApply(i: number, g: THREE.Object3D, x: number, y: number, z: number, yaw: number, motion: Motion): boolean {
+export function knockApply(i: number, g: THREE.Object3D, x: number, y: number, z: number, yaw: number, motion: Motion, free = false): boolean {
   const now = performance.now();
   let st = states.get(motion);
   if (npcs.knock[i * 4]) {
     const nx = npcs.knock[i * 4 + 1]!, nz = npcs.knock[i * 4 + 2]!, speed = npcs.knock[i * 4 + 3]!;
     npcs.knock[i * 4] = 0;
     if (!st) states.set(motion, (st = fresh()));
+    st.free = free;
     hit(st, g, x, y, z, yaw, motion, nx, nz, speed, npcs.knockHead[i] === 1, now);
   }
   if (!st || st.phase === "none") {
@@ -119,7 +124,7 @@ export function knockApply(i: number, g: THREE.Object3D, x: number, y: number, z
   return on;
 }
 
-/** ¿Sigue sin poder andar la persona del hueco `i`? (para que el peatón no avance mientras tanto) */
+/** ¿Sigue sin poder andar la persona del hueco `i`? (para que no avance mientras tanto) */
 export function knockPaused(i: number): boolean {
   return busy[i] === 1 || npcs.knock[i * 4] !== 0;
 }
@@ -138,7 +143,7 @@ export function knockReset(motion: Motion) {
 }
 
 function fresh(): Knock {
-  return { phase: "none", t: 0, last: 0, nx: 0, nz: 1, speed: 0, run: false, ox: 0, oy: 0, oz: 0, yaw: 0, vx: 0, vz: 0, rolled: false, lastY: 0, lastVy: 0, glare: 0 };
+  return { phase: "none", t: 0, last: 0, nx: 0, nz: 1, speed: 0, run: false, ox: 0, oy: 0, oz: 0, yaw: 0, vx: 0, vz: 0, rolled: false, lastY: 0, lastVy: 0, glare: 0, free: false };
 }
 
 /** Le acaban de dar. */
@@ -229,6 +234,7 @@ function frame(st: Knock, dt: number, g: THREE.Object3D, x: number, y: number, z
       place(g, x, y, z, st);
       if (st.t >= REACT) {
         if (motion.emote === "hit_back" || motion.emote === "hit_head" || motion.emote === "hit_body") motion.emote = null;
+        if (st.free) return finish(st, motion);
         next(st, "back");
       }
       return true;
@@ -279,6 +285,7 @@ function frame(st: Knock, dt: number, g: THREE.Object3D, x: number, y: number, z
       place(g, x, y, z, st);
       if (st.t >= RISE) {
         motion.emote = null;
+        if (st.free) return finish(st, motion);
         // Se ha caído a otra altura (de la pasarela a la calle): vuelve a su sitio sin más.
         if (Math.abs(st.oy) > STEP_MAX) st.ox = st.oy = st.oz = 0;
         next(st, "back");
@@ -308,6 +315,14 @@ function frame(st: Knock, dt: number, g: THREE.Object3D, x: number, y: number, z
 function next(st: Knock, phase: Phase) {
   st.phase = phase;
   st.t = 0;
+}
+
+/** Se acabó para quien anda libre: queda donde está (el grupo ya está colocado). */
+function finish(st: Knock, motion: Motion): false {
+  st.phase = "none";
+  motion.speed = 0;
+  if (motion.fx) motion.fx.look.w = 0;
+  return false;
 }
 
 function done(st: Knock, motion: Motion) {
@@ -375,6 +390,8 @@ function walkBack(st: Knock, dt: number, g: THREE.Object3D, x: number, y: number
 function tilt(st: Knock, g: THREE.Object3D, x: number, y: number, z: number, yaw: number, motion: Motion): boolean {
   const t = st.t, nx = st.nx, nz = st.nz, speed = st.speed;
   const fall = speed >= FALL_SPEED;
+  // Quien anda libre se queda donde ha caído (ya de pie); los demás vuelven a su sitio.
+  if (st.free && t > (fall ? TILT_UP : STUMBLE)) return finish(st, motion);
   if (t > (fall ? TILT_BACK : STUMBLE_BACK)) {
     done(st, motion);
     return false;

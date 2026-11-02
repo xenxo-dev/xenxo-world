@@ -346,7 +346,7 @@ export function carFrame(dt: number, ctx: SeqCtx): "free" | "walking" | "seated"
   return "free";
 }
 
-/** El cuerpo (cámara, portales, peatones) va donde está el personaje sentado. */
+/** El cuerpo (cámara, portales, la gente de las ciudades) va donde está el personaje sentado. */
 function follow(body: Body) {
   body.x = seated.pos.x;
   body.z = seated.pos.z;

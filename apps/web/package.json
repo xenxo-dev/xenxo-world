@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json",
     "test:vehicle": "tsx test/vehicle.mts",
-    "test:ragdoll": "tsx test/ragdoll.mts"
+    "test:ragdoll": "tsx test/ragdoll.mts",
+    "test:citizens": "tsx test/citizens.mts"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "0.19.3",

@@ -75,6 +75,14 @@ people.onPair((p) => {
   if (p.a === world.sessionId || p.b === world.sessionId) pendingPair = p;
 });
 
+/**
+ * Acción en pareja con alguien de la ciudad (city/citizens.ts): como con una persona, pero sin red
+ * (ya ha dicho que sí). `partner` es su clave en `remoteFeet` (where.ts).
+ */
+export function startLocalPair(kind: PairAction, partner: string) {
+  pendingPair = { a: partner, b: partner, kind, at: performance.now() };
+}
+
 /** Al activar el modo pelea se carga la física (así la primera caída ya la tiene). */
 export function prepareFights() {
   void loadRagdolls();

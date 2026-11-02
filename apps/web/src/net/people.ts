@@ -55,10 +55,17 @@ export function react(kind: Reaction) {
   send("REACT", { kind }, "react");
 }
 
+/**
+ * La gente de las ciudades (world/city/citizens.ts) se apunta aquí: sin nadie cerca, la propuesta
+ * va a quien tengas delante de ella (contesta en el momento). Así esto sigue sin Three.js.
+ */
+export const npcPair = { offer: null as ((kind: PairAction) => boolean) | null };
+
 /** Propone `kind` a quien tengas más cerca (delante). Devuelve false si no hay nadie. */
 export function offerPair(kind: PairAction): boolean {
   const who = nearestPerson(PAIR_RANGE, Math.PI * 0.75);
   if (!who) {
+    if (npcPair.offer?.(kind)) return true;
     people.setNotice("people.err.nobody");
     return false;
   }

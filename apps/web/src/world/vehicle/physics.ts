@@ -34,7 +34,7 @@ export interface StaticSource {
 }
 
 /**
- * Gente que se mueve (peatones y residentes): posiciones x, y (pies), z. Si el coche le da a
+ * Gente que se mueve (ciudadanos y residentes): posiciones x, y (pies), z. Si el coche le da a
  * alguien, `hit` le dice hacia dónde sale despedido (horizontal, unitario) y a qué velocidad iba el
  * coche contra él (m/s).
  */

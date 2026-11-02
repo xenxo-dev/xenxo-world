@@ -138,15 +138,18 @@ export function DefaultAvatar({ color, motion }: { color: THREE.ColorRepresentat
  */
 /** `avatar`: el suyo; sin él, uno de serie según `seed`; `null`: aún no se sabe (solo el muñeco). */
 /** `extra`: gente de decorado (peatones, residentes): sin sombra. */
-export function AvatarBody({ avatar, seed, motion, extra = false }: { avatar?: AvatarRef | null; seed: string; motion: Motion; extra?: boolean }) {
+export function AvatarBody({ avatar, seed, motion, extra = false, onLoad }: { avatar?: AvatarRef | null; seed: string; motion: Motion; extra?: boolean; onLoad?: (loaded: boolean) => void }) {
   useFrame((_, dt) => advance(motion, Math.min(dt, 0.1)));
   const fallback = <DefaultAvatar color={colorFor(seed)} motion={motion} />;
   if (avatar === null) return fallback;
   const preset = avatar ? null : presetFor(seed);
   // La gente de decorado lleva la versión ligera del avatar de serie (un tercio de los triángulos).
   const url = avatar ? assetUrl(avatar.hash) : preset ? assetUrl(extra && preset.lite ? preset.lite : preset.hash) : null;
-  return <CustomAvatar url={url} fallback={fallback} motion={motion} extra={extra} />;
+  return <CustomAvatar url={url} fallback={fallback} motion={motion} extra={extra} onLoad={onLoad} />;
 }
+
+/** Cómo se ven los bocadillos (el chat y lo que dice la gente de las ciudades, city/Speech.tsx). */
+export const BUBBLE_STYLE = { fontSize: 0.17, maxWidth: 2.4, color: "#2a211c", outlineWidth: 0.05, outlineColor: "#f6f1e7", lineHeight: 1.25 } as const;
 
 /** Bocadillo con el último mensaje del chat de esa sesión, durante unos segundos. */
 export function ChatBubble({ sessionId, self }: { sessionId?: string; self?: boolean }) {
@@ -164,17 +167,7 @@ export function ChatBubble({ sessionId, self }: { sessionId?: string; self?: boo
   const text = m.text.length > 90 ? `${m.text.slice(0, 88)}…` : m.text;
   return (
     <Billboard position={[0, 2.5, 0]}>
-      <Text
-        font={FONT_URL}
-        fontSize={0.17}
-        maxWidth={2.4}
-        textAlign="center"
-        anchorY="bottom"
-        color="#2a211c"
-        outlineWidth={0.05}
-        outlineColor="#f6f1e7"
-        lineHeight={1.25}
-      >
+      <Text font={FONT_URL} {...BUBBLE_STYLE} textAlign="center" anchorY="bottom">
         {text}
       </Text>
     </Billboard>

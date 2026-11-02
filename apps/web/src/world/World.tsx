@@ -21,7 +21,7 @@ import { NexoBackdrop } from "./NexoBackdrop";
 import { PANO_TONES } from "./nexo-tones";
 import { NexoCity } from "./NexoCity";
 import { DistrictSkyline } from "./DistrictSkyline";
-import { Pedestrians, Traffic } from "./CityLife";
+import { Citizens, Traffic } from "./CityLife";
 import { Residents, SlidingDoors } from "./Interiors";
 import { Weather } from "./Weather";
 import { ambient } from "./ambient-audio";
@@ -411,7 +411,7 @@ function Scene({ active }: { active: boolean }) {
         <Suspense fallback={null}>
           {/* Decorado: si un modelo no carga, se queda sin él (nunca tumba la escena). */}
           <SkipOnError>
-            <Pedestrians chunk={place} count={f.pedestrians} />
+            <Citizens chunk={place} count={f.pedestrians} />
           </SkipOnError>
           <SkipOnError>
             <Traffic chunk={place} count={f.traffic} features={f} ambience={ambience} />

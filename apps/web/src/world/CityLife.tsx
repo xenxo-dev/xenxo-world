@@ -1,265 +1,115 @@
 /**
- * Vida de las ciudades de los distritos: gente que camina por las calles (y por la pasarela de
- * Distrito Cero). Es decorado del cliente, como el horizonte: no son personas ni entidades del
- * mundo, no cuentan en «quién hay» y no viajan por la red.
+ * Vida de las ciudades de los distritos: su gente (city/citizens.ts: pocos, cada uno con su forma de
+ * ser y su día, que se dan cuenta de ti, te contestan y tienen física de verdad) y el tráfico de
+ * coches voladores y drones. Es decorado del cliente, como el horizonte: no son personas ni entidades
+ * del mundo, no cuentan en «quién hay» y no viajan por la red.
  *
- * Rendimiento (Quest 3): se simula una población entera con fórmulas (posición = función del
- * tiempo, sin estado por frame) y solo se dibujan los N más cercanos (`FEATURES.pedestrians`) en
- * huecos fijos (y el tráfico, instanciado: un dibujo por modelo). Cada hueco tiene siempre el mismo personaje de serie: cambiar a quién sigue no
- * vuelve a cargar nada; solo se reasigna cuando el anterior se aleja, fuera de la vista.
+ * Rendimiento (Quest 3): de la gente solo se dibujan los más cercanos (`FEATURES.pedestrians`), cada
+ * uno siempre con el mismo personaje de serie (se monta la primera vez que se le ve y se queda, oculto
+ * y sin animar, cuando se aleja); el tráfico va instanciado (un dibujo por modelo).
  */
-import { memo, useEffect, useMemo, useRef } from "react";
+import { memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { useGLTF } from "@react-three/drei";
 import districts from "../../../realtime/src/districts.json";
 import { SEED_ASSETS } from "../../../realtime/src/seed-assets";
 import { assetUrl } from "../config";
+import { world } from "../net/world-store";
+import { people } from "../net/people-store";
+import { npcPair } from "../net/people";
 import type { Ambience, Features } from "./graphics";
 import { lightweight, paintedLights } from "./materials";
 import { AvatarBody } from "./Avatars";
-import type { Motion } from "./motion";
 import { rng } from "./NexoCity";
-import { playerBulk, playerPos } from "./Player";
-import { floorAt, NPC_CITY, npcs, others } from "./collision";
-import { knockApply, knockPaused, knockReset, npcMotion } from "./knock";
+import { self } from "./self";
+import { AVATAR_PRESETS, presetFor } from "./presets";
+import { remoteFeet } from "./people/where";
+import { buildNav, districtOfChunk } from "./city/nav";
+import { castFor, CitySim, type Citizen } from "./city/citizens";
+import { cityEnv } from "./city/env";
+import { Speech } from "./city/Speech";
 
-interface Loop {
-  /** Esquinas en orden (x, z), a la altura `y`. */
-  pts: [number, number][];
-  y: number;
-  len: number;
-}
-
-interface Walker {
-  loop: number;
-  dir: 1 | -1;
-  speed: number;
-  offset: number;
-}
-
-const POPULATION = 44;
-/** Distrito Cero es la ciudad más viva: más gente y también por los pasajes. */
-const POPULATION_CERO = 84;
-/** Más allá, nadie: la niebla de noche empieza a 45 m (y cada persona cuesta como un edificio). */
-const RANGE = 42;
-const REASSIGN_MS = 600;
-/** Cada peatón va 0,45 m a la derecha de su recorrido (los que se cruzan no se pisan). */
-const LANE = 0.45;
-// Estado de un frame (objetos de módulo: nada nuevo por frame).
-const _px = new Float32Array(NPC_CITY), _pz = new Float32Array(NPC_CITY), _py = new Float32Array(NPC_CITY);
-const _hx = new Float32Array(NPC_CITY), _hz = new Float32Array(NPC_CITY);
-const _slot = new Int16Array(NPC_CITY);
-const _blocked = new Uint8Array(NPC_CITY);
-/** ¿Está (x, y, z) justo delante del peatón i (en su carril)? `r`: cuánto más abulta (un coche). */
-function ahead(i: number, x: number, y: number, z: number, r = 0) {
-  const ax = x - _px[i]!, az = z - _pz[i]!;
-  const fwd = ax * _hx[i]! + az * _hz[i]!;
-  return fwd > 0 && fwd < 1.2 + r && Math.abs(ax * _hz[i]! - az * _hx[i]!) < 0.65 + r && Math.abs(y - _py[i]!) < 1.2;
-}
-
-type City = { x0: number; z0: number; block: number; street: number };
-const CITY = (districts as unknown as { city: City }).city;
 const BY_CHUNK = new Map((districts.districts as { id: string; chunk: string }[]).map((d) => [d.chunk, d.id]));
 
-function rect(x0: number, z0: number, x1: number, z1: number, y = 0): Loop {
-  const pts: [number, number][] = [[x0, z0], [x1, z0], [x1, z1], [x0, z1]];
-  return { pts, y, len: 2 * (x1 - x0 + z1 - z0) };
-}
+/* ------------------------------------------------------------------ */
+/* La gente                                                             */
+/* ------------------------------------------------------------------ */
 
-/** Recorridos: alrededor de cada manzana (a 1 m del bordillo, ya en la calzada) y la pasarela de Cero. */
-function loopsFor(id: string): Loop[] {
-  const out: Loop[] = [];
-  const { x0, z0, block, street } = CITY;
-  for (let j = 0; j < 3; j++)
-    for (let i = 0; i < 3; i++) {
-      const bx = x0 + i * (block + street), bz = z0 + j * (block + street);
-      out.push(rect(bx - 1, bz - 1, bx + block + 1, bz + block + 1));
-    }
-  if (id === "cero") {
-    // Los cuatro pasajes de los ejes, de la plaza a la calle de fuera y vuelta (tools/forge/cero.py).
-    out.push(rect(29, -19.5, 35, 19), rect(29, 45, 35, 83.5), rect(-19.5, 29, 19, 35), rect(45, 29, 83.5, 35));
-    out.push(rect(13.5, 13.5, 50.5, 50.5, 8)); // la pasarela: siempre la última
+/** Cada ciudadano, siempre el mismo personaje de serie; los primeros ocho, todos distintos. */
+function seedFor(district: string, i: number): string {
+  const want = AVATAR_PRESETS[i % AVATAR_PRESETS.length];
+  for (let k = 0; k < 64; k++) {
+    const seed = `npc-${district}-${i}-${k}`;
+    if (presetFor(seed) === want) return seed;
   }
-  return out;
+  return `npc-${district}-${i}`;
 }
 
-const _p = { x: 0, z: 0, dx: 0, dz: 0 };
-/** Punto y sentido a `s` metros del principio de un recorrido. */
-function along(l: Loop, s: number) {
-  let d = ((s % l.len) + l.len) % l.len;
-  for (let k = 0; k < 4; k++) {
-    const a = l.pts[k]!, b = l.pts[(k + 1) % 4]!;
-    const seg = Math.abs(b[0] - a[0]) + Math.abs(b[1] - a[1]);
-    if (d <= seg) {
-      const ux = Math.sign(b[0] - a[0]), uz = Math.sign(b[1] - a[1]);
-      _p.x = a[0] + ux * d;
-      _p.z = a[1] + uz * d;
-      _p.dx = ux;
-      _p.dz = uz;
-      return _p;
-    }
-    d -= seg;
-  }
-  return _p;
-}
-
-interface Slot {
-  walker: number;
-  motion: Motion;
-  group: THREE.Group | null;
-  /** Hacia dónde mira (se gira poco a poco en las esquinas). */
-  yaw: number;
-}
-
-const Pedestrian = memo(function Pedestrian({ slot, seed }: { slot: Slot; seed: string }) {
+const CitizenView = memo(function CitizenView({ c, seed }: { c: Citizen; seed: string }) {
+  const onLoad = useCallback((ok: boolean) => void (c.ready = ok), [c]);
   return (
-    <group ref={(g) => void (slot.group = g)} visible={false}>
-      <AvatarBody seed={seed} motion={slot.motion} extra />
+    <group ref={(g) => void (c.group = g)} visible={false}>
+      <AvatarBody seed={seed} motion={c.motion} extra onLoad={onLoad} />
+      <Suspense fallback={null}>
+        <Speech who={c} />
+      </Suspense>
     </group>
   );
 });
 
-export function Pedestrians({ chunk, count }: { chunk: string; count: number }) {
-  const id = BY_CHUNK.get(chunk);
-  const loops = useMemo(() => (id ? loopsFor(id) : []), [id]);
-  const walkers = useMemo<Walker[]>(() => {
-    if (!id) return [];
-    const r = rng(id.length * 7919 + id.charCodeAt(0));
-    return Array.from({ length: id === "cero" ? POPULATION_CERO : POPULATION }, (_, n) => ({
-      // En Cero: una de cada seis personas por la pasarela (el último recorrido) y una de cada tres por los pasajes.
-      loop: id === "cero" && n % 6 === 0 ? loops.length - 1 : id === "cero" && n % 3 === 1 ? 9 + (n % 4) : Math.floor(r() * 9),
-      dir: r() < 0.5 ? 1 : -1,
-      speed: 1.05 + r() * 0.5,
-      offset: r() * 400,
-    }));
-  }, [id, loops]);
-  const slots = useMemo<Slot[]>(() => Array.from({ length: count }, () => ({ walker: -1, motion: npcMotion(), group: null, yaw: 0 })), [count]);
-  const last = useRef(0);
-  const dist = useMemo(() => new Float32Array(walkers.length), [walkers]);
-  const order = useMemo(() => Array.from({ length: walkers.length }, (_, n) => n), [walkers]);
+export function Citizens({ chunk, count }: { chunk: string; count: number }) {
+  const id = districtOfChunk(chunk);
+  const sim = useMemo(() => {
+    const nav = id ? buildNav(id) : null;
+    return nav && id ? new CitySim(nav, cityEnv, castFor(id)) : null;
+  }, [id]);
+  // Los que ya tienen su personaje montado (de esta ciudad: al cambiar de distrito se empieza de cero).
+  const [mounted, setMounted] = useState<{ sim: CitySim | null; ids: readonly number[] }>({ sim: null, ids: [] });
+  const seen = useRef(-1);
   useEffect(() => {
-    last.current = 0;
-  }, [chunk]);
+    if (!sim) return;
+    sim.attach();
+    // Para mirar desde la consola en desarrollo (como __xenxoStats).
+    if (import.meta.env.DEV) (globalThis as { __xenxoCity?: CitySim }).__xenxoCity = sim;
+    // Las acciones en pareja de la rueda, si no hay ninguna persona delante; y las peleas de la gente.
+    const offer = (kind: Parameters<CitySim["offerPair"]>[0]) => sim.offerPair(kind);
+    npcPair.offer = offer;
+    const off = people.onHit((h) => {
+      const p = h.to === world.sessionId ? self : remoteFeet.get(h.to);
+      if (p) sim.event("fight", p.x, p.z);
+    });
+    return () => {
+      off();
+      if (npcPair.offer === offer) npcPair.offer = null;
+      sim.detach();
+      seen.current = -1;
+    };
+  }, [sim]);
+  useEffect(() => {
+    if (sim) sim.drawnMax = count;
+  }, [sim, count]);
 
-  useFrame((state, dt) => {
-    if (!walkers.length) return;
-    const t = state.clock.elapsedTime;
-    const now = performance.now();
-    if (now - last.current > REASSIGN_MS) {
-      last.current = now;
-      // Los más cercanos; un hueco se queda con quien ya seguía si sigue entre ellos.
-      for (let n = 0; n < walkers.length; n++) {
-        const w = walkers[n]!;
-        const l = loops[w.loop]!;
-        const p = along(l, w.offset + w.dir * w.speed * t);
-        const dx = p.x - playerPos.x, dz = p.z - playerPos.z, dy = l.y - playerPos.y;
-        dist[n] = dx * dx + dz * dz + dy * dy * 4;
-      }
-      order.sort((a, b) => dist[a]! - dist[b]!);
-      const near = new Set<number>();
-      for (let k = 0; k < slots.length && k < walkers.length; k++) if (dist[order[k]!]! < RANGE * RANGE) near.add(order[k]!);
-      for (const s of slots)
-        if (s.walker >= 0 && !near.has(s.walker)) {
-          s.walker = -1;
-          knockReset(s.motion);
-        }
-      for (const s of slots) if (s.walker >= 0) near.delete(s.walker);
-      for (const s of slots) {
-        if (s.walker >= 0) continue;
-        const next = near.values().next();
-        if (next.done) break;
-        s.walker = next.value;
-        near.delete(next.value);
-      }
+  // Antes que los personajes (prioridad −0,5, después de las caídas de PeopleFx): así el esqueleto de
+  // quien cae se coloca ya con su grupo donde toca este frame.
+  useFrame((_, dt) => {
+    if (!sim) return;
+    sim.frame(dt);
+    if (sim.version !== seen.current) {
+      seen.current = sim.version;
+      setMounted((prev) => {
+        const ids = prev.sim === sim ? prev.ids : [];
+        const add = sim.cast.filter((c) => c.wanted && !ids.includes(c.id)).map((c) => c.id);
+        return add.length || prev.sim !== sim ? { sim, ids: [...ids, ...add] } : prev;
+      });
     }
-    // 1) Dónde va cada uno ahora (por su derecha: los que se cruzan no se atraviesan).
-    let m = 0;
-    for (const s of slots) {
-      const g = s.group;
-      if (!g) continue;
-      if (m >= NPC_CITY) break;
-      if (s.walker < 0) {
-        g.visible = false;
-        s.motion.speed = 0;
-        continue;
-      }
-      const w = walkers[s.walker]!;
-      const l = loops[w.loop]!;
-      const p = along(l, w.offset + w.dir * w.speed * t);
-      const hx = p.dx * w.dir, hz = p.dz * w.dir;
-      _px[m] = p.x - hz * LANE;
-      _pz[m] = p.z + hx * LANE;
-      _hx[m] = hx;
-      _hz[m] = hz;
-      _py[m] = l.y;
-      // Si le han dado, los demás esperan donde está de verdad (no en su sitio, que se ha quedado vacío).
-      if (knockPaused(m)) {
-        _px[m] = g.position.x;
-        _py[m] = g.position.y;
-        _pz[m] = g.position.z;
-      }
-      _slot[m] = slots.indexOf(s);
-      m++;
-    }
-    // 2) Quién espera: si el jugador u otro peatón está justo delante. Si dos se tienen delante el
-    //    uno al otro (en un cruce), espera solo uno (el de índice mayor): nadie se queda atascado.
-    for (let i = 0; i < m; i++) {
-      let b = ahead(i, playerPos.x, playerPos.y, playerPos.z, playerBulk.r - 0.3);
-      // Y a las demás personas (multijugador).
-      for (let k = 0; k < others.count && !b; k++) b = ahead(i, others.pos[k * 3]!, others.pos[k * 3 + 1]!, others.pos[k * 3 + 2]!);
-      for (let j = 0; j < m && !b; j++) {
-        if (j === i || !ahead(i, _px[j]!, _py[j]!, _pz[j]!)) continue;
-        if (!ahead(j, _px[i]!, _py[i]!, _pz[i]!) || i > j) b = true;
-      }
-      // Atropellado (knock.ts): en el suelo no avanza.
-      _blocked[i] = b || knockPaused(i) ? 1 : 0;
-    }
-    // 3) Colocarlos: el que espera descuenta su avance (sigue en su sitio).
-    let n = 0;
-    for (let i = 0; i < m; i++) {
-      const s = slots[_slot[i]!]!;
-      const g = s.group!;
-      const w = walkers[s.walker]!;
-      const l = loops[w.loop]!;
-      const blocked = _blocked[i] === 1;
-      if (blocked) w.offset -= w.dir * w.speed * dt;
-      const p = along(l, w.offset + w.dir * w.speed * t);
-      const want = Math.atan2(-p.dx * w.dir, -p.dz * w.dir);
-      if (!g.visible) s.yaw = want;
-      else {
-        const d = Math.atan2(Math.sin(want - s.yaw), Math.cos(want - s.yaw));
-        s.yaw += d * Math.min(1, dt * 6);
-      }
-      g.visible = true;
-      const px = p.x - p.dz * w.dir * LANE, pz = p.z + p.dx * w.dir * LANE;
-      // Sobre las capas del suelo (unos centímetros sobre su altura nominal): los pies no se hunden.
-      const py = floorAt(px, pz, l.y + 0.3);
-      g.position.set(px, py, pz);
-      g.rotation.set(0, s.yaw, 0);
-      s.motion.speed = blocked ? 0 : w.speed;
-      // Para las colisiones del jugador (collision.ts): no se atraviesan. Si le ha dado un coche,
-      // sale despedido (knock.ts) y cuenta donde está ahora.
-      if (n < NPC_CITY) {
-        knockApply(n, g, px, py, pz, s.yaw, s.motion);
-        npcs.pos[n * 3] = g.position.x;
-        npcs.pos[n * 3 + 1] = g.position.y;
-        npcs.pos[n * 3 + 2] = g.position.z;
-        n++;
-      }
-    }
-    npcs.count = n;
-    // Antes que los personajes (prioridad −0,5, después de las caídas de PeopleFx): así el esqueleto
-    // de quien cae se coloca ya con su grupo donde toca este frame.
   }, -0.5);
-  // Al irse del lugar, nadie con quien chocar.
-  useEffect(() => () => void (npcs.count = 0), []);
 
-  if (!id || count <= 0) return null;
+  if (!sim || !id || count <= 0 || mounted.sim !== sim) return null;
   return (
     <>
-      {slots.map((s, k) => (
-        <Pedestrian key={`${chunk}:${k}`} slot={s} seed={`npc-${id}-${k}`} />
+      {mounted.ids.map((i) => (
+        <CitizenView key={`${chunk}:${i}`} c={sim.cast[i]!} seed={seedFor(id, i)} />
       ))}
     </>
   );

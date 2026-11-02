@@ -82,16 +82,25 @@ export function requestJump(b: Body) {
 
 const _p = { x: 0, z: 0 };
 
+/** Opciones de un paso: `people` (chocar con la gente; los ciudadanos se empujan aparte) y el subpaso. */
+export interface StepOptions {
+  people?: boolean;
+  substep?: number;
+}
+let people = true;
+
 /**
  * Avanza el cuerpo `dt` segundos queriendo ir a (wantX, wantZ) m/s en el plano.
  * `bounds` limita el plano (el chunk), con un margen.
  */
-export function stepBody(b: Body, wantX: number, wantZ: number, dt: number, min: number, max: number) {
+export function stepBody(b: Body, wantX: number, wantZ: number, dt: number, min: number, max: number, o?: StepOptions) {
   b.landed = 0;
   const total = Math.min(dt, 0.1);
-  const n = Math.max(1, Math.ceil(total / SUBSTEP));
+  const n = Math.max(1, Math.ceil(total / (o?.substep ?? SUBSTEP)));
   const h = total / n;
+  people = o?.people ?? true;
   for (let i = 0; i < n; i++) substep(b, wantX, wantZ, h, min, max);
+  people = true;
 }
 
 function substep(b: Body, wantX: number, wantZ: number, h: number, min: number, max: number) {
@@ -113,7 +122,7 @@ function substep(b: Body, wantX: number, wantZ: number, h: number, min: number, 
   _p.z = b.z + b.vz * h;
   // Lo que queda por debajo de un paso no frena: se sube. Lo que empieza por encima de la cintura
   // es techo (lo frena el salto, abajo), no pared: así un dintel o un techo bajo no te escupe a un lado.
-  resolveCircle(_p, BODY_RADIUS, b.y + STEP_UP, b.y + WAIST);
+  resolveCircle(_p, BODY_RADIUS, b.y + STEP_UP, b.y + WAIST, people);
   _p.x = Math.min(max, Math.max(min, _p.x));
   _p.z = Math.min(max, Math.max(min, _p.z));
   b.x = _p.x;

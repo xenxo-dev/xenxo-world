@@ -479,6 +479,9 @@ lo que dice el cliente. Los errores van como `ERROR` con el `ref` del mensaje.
   modo pelea delante le llega a alguien de la gente de decorado (solo en ese cliente: no viaja nada):
   el jab, el directo y los empujones los encaja; el gancho y las patadas la tiran, con la misma caída
   con física que las personas, y se levanta y vuelve a lo suyo. A quien está en el suelo no se le da.
+- **La gente de las ciudades** (solo cliente): contesta a los gestos que traen las poses (`emote`) de
+  quien tenga cerca, tuyos y de los demás, y le cede el paso; nada de eso viaja (cada cliente tiene a
+  su gente) y no cambia el protocolo.
 
 ## 10. Códigos de error
 

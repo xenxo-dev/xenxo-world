@@ -198,6 +198,12 @@ export function Player({ active }: { active: boolean }) {
       }
       if (motion.emote && (vr.moved || state.clock.elapsedTime > emoteUntil.current)) motion.emote = null;
       vr.moved = false;
+      // Hacia dónde miras (para quien te tenga delante: saludos, parejas).
+      self.yaw = Math.atan2(2 * (_headQ.w * _headQ.y + _headQ.x * _headQ.z), 1 - 2 * (_headQ.y * _headQ.y + _headQ.x * _headQ.x));
+      self.vx = self.vz = self.wx = self.wz = 0;
+      self.emote = motion.emote;
+      self.driving = false;
+      self.fight = false;
     } else {
       // Mantén el origen XR donde está el jugador, para entrar en VR en el mismo sitio.
       origin.current.position.set(body.x, body.y, body.z);
@@ -274,6 +280,9 @@ export function Player({ active }: { active: boolean }) {
           wantZ = _pf.wantZ;
           input.jump = false;
         }
+        // Lo que pides (contra alguien de la ciudad, es lo que le empuja: city/citizens.ts).
+        self.wx = free ? wantX : 0;
+        self.wz = free ? wantZ : 0;
 
         if (input.jump && free) {
           requestJump(body);
@@ -372,6 +381,12 @@ export function Player({ active }: { active: boolean }) {
       self.y = body.y;
       self.z = body.z;
       self.yaw = bodyYaw.current;
+      self.vx = body.vx;
+      self.vz = body.vz;
+      self.emote = motion.emote;
+      self.driving = mode === "drive" || mode === "seated";
+      self.fight = !!motion.fight;
+      if (mode === "drive") self.wx = self.wz = 0;
       // En primera persona no se dibuja el propio cuerpo (taparía la vista); en coche, tampoco.
       avatar.current.visible = active && !view.firstPerson;
 

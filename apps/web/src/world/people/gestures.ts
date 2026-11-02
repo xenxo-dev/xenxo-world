@@ -187,6 +187,23 @@ export const GESTURES: Record<string, Def> = {
     ],
   },
 
+  /**
+   * Jugar a una máquina recreativa (la gente de las ciudades): la izquierda en la palanca, que va de
+   * un lado a otro, y la derecha pulsando botones; algo inclinado hacia la pantalla.
+   */
+  arcade: {
+    base: "idle",
+    loop: true,
+    keys: [
+      { t: 0, L: { at: [-0.06, -0.24, 0.33], pole: [0.7, -1, -0.6], twist: -60, wrist: [0, 0, -10] }, R: { at: [0.07, -0.25, 0.35], pole: [-0.7, -1, -0.6], twist: -80 }, l: "grip", r: "curl", p: { spine: [3, 0, 0], chest: [5, 0, 0], head: [3, 0, 0] } },
+      { t: 0.24, L: { at: [-0.02, -0.24, 0.33], pole: [0.7, -1, -0.6], twist: -60, wrist: [0, 0, -16] }, R: { at: [0.07, -0.27, 0.35], pole: [-0.7, -1, -0.6], twist: -80 }, l: "grip", r: "curl", p: { spine: [3, 0, 0], chest: [5, 1, 0], head: [3, 2, 0] } },
+      { t: 0.46, L: { at: [-0.05, -0.24, 0.36], pole: [0.7, -1, -0.6], twist: -60, wrist: [0, 0, -10] }, R: { at: [0.1, -0.25, 0.34], pole: [-0.7, -1, -0.6], twist: -80 }, l: "grip", r: "curl", p: { spine: [3, 0, 0], chest: [6, 0, 0], head: [4, 0, 0] } },
+      { t: 0.7, L: { at: [-0.1, -0.24, 0.33], pole: [0.7, -1, -0.6], twist: -60, wrist: [0, 0, -4] }, R: { at: [0.1, -0.27, 0.34], pole: [-0.7, -1, -0.6], twist: -80 }, l: "grip", r: "curl", p: { spine: [3, 0, 0], chest: [5, -1, 0], head: [3, -2, 0] } },
+      { t: 0.94, L: { at: [-0.06, -0.23, 0.31], pole: [0.7, -1, -0.6], twist: -60, wrist: [0, 0, -10] }, R: { at: [0.07, -0.25, 0.35], pole: [-0.7, -1, -0.6], twist: -80 }, l: "grip", r: "curl", p: { spine: [3, 0, 0], chest: [4, 0, 0], head: [2, 0, 0] } },
+      { t: 1.2, L: { at: [-0.06, -0.24, 0.33], pole: [0.7, -1, -0.6], twist: -60, wrist: [0, 0, -10] }, R: { at: [0.07, -0.25, 0.35], pole: [-0.7, -1, -0.6], twist: -80 }, l: "grip", r: "curl", p: { spine: [3, 0, 0], chest: [5, 0, 0], head: [3, 0, 0] } },
+    ],
+  },
+
   /* --- En pareja (la IK del mundo lleva después las manos hasta la otra persona) --- */
   high_five: {
     base: "idle",

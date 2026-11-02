@@ -17,6 +17,13 @@ export interface Motion {
   fight?: boolean;
   /** Lo que la gente le pide a su esqueleto (golpes, parejas, caídas): people/rig.ts. */
   fx?: PersonFx | null;
+  /**
+   * Un gesto de brazos por encima de lo que esté haciendo (saludar sentado en un banco, asentir
+   * jugando a una máquina): solo la parte de arriba del cuerpo. Lo usan los ciudadanos.
+   */
+  gesture?: string | null;
+  /** No se dibuja (lejos o fuera de la vista): el avatar no se anima. */
+  hidden?: boolean;
 }
 
 export function createMotion(): Motion {
