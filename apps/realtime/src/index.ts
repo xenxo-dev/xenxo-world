@@ -1467,6 +1467,8 @@ export default {
         // Vuelve a colocar el escaparate y las máquinas-portal (tras un despliegue que las añade).
         if (path === "/mod/showcase/sync" && req.method === "POST") {
           await syncShowcase(env, dir);
+          // También las puertas del segundo aro del nexo (por si cambió su disposición).
+          await syncCommunityGates(env, dir);
           return json({ synced: true }, 200, h);
         }
         const dr = path.match(/^\/mod\/districts\/([A-Za-z0-9_-]{4,24})\/review$/);

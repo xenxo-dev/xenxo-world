@@ -85,6 +85,15 @@ def floor(lay: dict, detail: int = 1):
         # Bearing φ (0 = norte = −Z del mundo = +Y de Blender), girando hacia el este (+X).
         p.merge(bar, Matrix.Rotation(-a, 4, "Z"))
         bar.bm.free()
+    # Y hacia cada pasarela del segundo aro (el de la comunidad), de su color, hasta el borde.
+    C = lay.get("community")
+    if C:
+        violet = mat("neon", C["color"])
+        for phi in C["bridges"]:
+            bar = Part("l")
+            bar.box((-0.03, r_in, 0.0), (0.03, R - 0.05, 0.03), violet)
+            p.merge(bar, Matrix.Rotation(-math.radians(phi), 4, "Z"))
+            bar.bm.free()
     ob = p.to_object()
     ob.name = "nexo_floor"
     finish(ob)
@@ -114,18 +123,18 @@ def beacon(lay: dict, detail: int = 1):
     return ob
 
 
-def frame(lay: dict, detail: int = 1):
+def frame_part(lay: dict, detail: int = 1, line: str | None = None) -> Part:
     """
     Marco de portal: pantalla (la portada la pinta el cliente encima), patas, filo de luz y,
-    delante, la peana del monumento. Frente hacia −Y (mira al centro una vez colocado).
+    delante, la peana del monumento. Frente hacia −Y (mira al centro una vez colocado). El filo,
+    del color `line` (cian si no se dice).
     """
     P = lay["portals"]
-    cyan = lay["colors"]["line"]
     W, H, Z0 = P["w"], P["h"], P["bottom"]
     body = mat("metal", "#161b24")
     edge = mat("metal", "#2b3445")
     screen = mat("oscuro", "#0e1624")
-    neon = mat("neon", cyan)
+    neon = mat("neon", line or lay["colors"]["line"])
     b = 0.12  # grosor del marco
     p = Part("nexo_frame")
     # Trasera y pantalla apagada
@@ -159,8 +168,72 @@ def frame(lay: dict, detail: int = 1):
     ph = P["pedestal_h"]
     p.cylinder((0, -d, 0), 0.55, ph, edge, segments=s)
     p.lathe((0, -d, 0), [(0.56, ph + 0.002), (0.47, ph + 0.002)], neon, segments=s, smooth=False)
-    ob = p.to_object()
+    return p
+
+
+def frame(lay: dict, detail: int = 1):
+    """El marco de las parcelas, suelto (los distritos lo colocan uno a uno)."""
+    ob = frame_part(lay, detail).to_object()
     ob.name = "nexo_frame"
+    finish(ob)
+    return ob
+
+
+def community_ring(lay: dict, detail: int = 1):
+    """
+    El segundo aro, el de los distritos de la comunidad (`community` en la disposición): un paseo
+    circular por fuera de las islas, con su quilla y sus filos de luz; las pasarelas que llegan a él
+    desde el borde del círculo central (entre isla e isla), con dos postes al arrancar; y los marcos
+    de puerta a `slot_ring`, mirando al centro, con su peana delante. Todo de una pieza (un dibujo
+    por material). Centrado en el centro del nexo; las colisiones las pone nexo.ts con las mismas medidas.
+    """
+    C = lay["community"]
+    col = C["color"]
+    deck = mat("panel", "#232a38")
+    body = mat("metal", "#161b24")
+    edge = mat("metal", "#2b3445")
+    hull = mat("oscuro", "#0e1624")
+    neon = mat("neon", col)
+    seg = 256 if detail else 128
+    r0, r1 = C["ring"] - C["width"] / 2, C["ring"] + C["width"] / 2
+    p = Part("nexo_community_ring")
+    # El paseo: tablero con sus cantos, un canto de metal por fuera y una quilla en V por debajo.
+    p.lathe((0, 0, 0), [(r1, -0.5), (r1, 0.0), (r0, 0.0), (r0, -0.5), (r1, -0.5)], deck, segments=seg, smooth=False)
+    p.lathe((0, 0, 0), [(r1 + 0.12, -0.55), (r1 + 0.12, 0.06), (r1 - 0.12, 0.06)], edge, segments=seg, smooth=False)
+    p.lathe((0, 0, 0), [(r0 + 0.5, -0.5), (C["ring"], -2.2), (r1 - 0.5, -0.5)], hull, segments=seg // 2, smooth=False)
+    # Filos de luz: dos en el suelo, junto a los bordes, y uno en el canto de fuera.
+    _annulus(p, r0 + 0.25, r0 + 0.33, 0.04, neon, seg)
+    _annulus(p, r1 - 0.45, r1 - 0.37, 0.04, neon, seg)
+    p.lathe((0, 0, 0), [(r1 + 0.13, -0.3), (r1 + 0.13, -0.2)], neon, segments=seg, smooth=False)
+    # Las pasarelas, del borde del círculo central al paseo (se hacen a lo largo de +Y y se giran).
+    W = lay["bridge"]["w"]
+    rail_h = lay["bridge"]["rail_h"]
+    start, end = lay["platform"] - 0.6, r0 + 0.4
+    post_r = lay["platform"] - 2.0
+    for phi in C["bridges"]:
+        bar = Part("b")
+        bar.box((-W / 2, start, -0.31), (W / 2, end, -0.01), deck)
+        for sx in (-1, 1):
+            x = sx * (W / 2 - 0.05)
+            bar.box((x - 0.04, start, -0.01), (x + 0.04, end, 0.03), neon)
+            xr = sx * W / 2
+            bar.box((xr - 0.025, start, rail_h - 0.025), (xr + 0.025, end, rail_h + 0.025), neon)
+            # Dos postes al arrancar, como los de los distritos (con su remate de luz).
+            px = sx * 2.4
+            bar.cylinder((px, post_r, 0.0), 0.16, 1.2, body, segments=16 if detail else 10)
+            bar.cylinder((px, post_r, 1.2), 0.18, 0.08, neon, segments=16 if detail else 10)
+        # Bearing φ (0 = norte = +Y de Blender), girando hacia el este (+X).
+        p.merge(bar, Matrix.Rotation(-math.radians(phi), 4, "Z"))
+        bar.bm.free()
+    # Los marcos de puerta, mirando al centro (frente hacia −Y en el marco, girado como en nexo.ts).
+    fr = frame_part(lay, detail, col)
+    for phi in C["angles"]:
+        a = math.radians(phi)
+        m = Matrix.Translation((C["slot_ring"] * math.sin(a), C["slot_ring"] * math.cos(a), 0.0)) @ Matrix.Rotation(-a, 4, "Z")
+        p.merge(fr, m)
+    fr.bm.free()
+    ob = p.to_object()
+    ob.name = "nexo_community_ring"
     finish(ob)
     return ob
 

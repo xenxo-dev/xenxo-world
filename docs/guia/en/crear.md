@@ -39,7 +39,7 @@ npm install
 npm run validate
 ```
 
-The district is described in `xenxo-district.json` with its `.glb` models. The kit checks on your machine the same things xenxo will check. Then you upload it in *Account → Your district*: it stays as a draft so you can try it, and moderation reviews it. The rules are in the template's `AGENTS.md` and in [`packages/district-kit`](../../../packages/district-kit/README.md).
+The district is described in `xenxo-district.json` with its `.glb` models. The kit checks on your machine the same things xenxo will check. Then you upload it in *Account → Your district*: it stays as a draft so you can try it, and moderation reviews it. Once approved, its gate appears on the nexus's second ring (the community one, reached by the violet walkways that leave the central circle between the islands), with your cover and your emblem. The rules are in the template's `AGENTS.md` and in [`packages/district-kit`](../../../packages/district-kit/README.md).
 
 ## Your agent on your plot
 

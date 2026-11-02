@@ -378,7 +378,10 @@ const halos = new Map<string, THREE.ShaderMaterial>();
 
 /**
  * Funda transparente un poco más gruesa que el tubo, aditiva y más intensa en el centro:
- * da el resplandor del neón sin pasadas de pantalla completa (compatible con WebXR).
+ * da el resplandor del neón sin pasadas de pantalla completa (compatible con WebXR). Engorda en
+ * metros de verdad (en el espacio de la cámara): las piezas de la forja van cuantizadas y su nodo
+ * lleva la escala (24 en el suelo del nexo, 100 en el segundo aro); engordando antes de esa escala,
+ * la funda crecía metros.
  */
 export function haloMaterial(color: THREE.Color, ambience: Ambience): THREE.ShaderMaterial {
   const key = `${color.getHexString()}|${ambience}`;
@@ -395,9 +398,10 @@ export function haloMaterial(color: THREE.Color, ambience: Ambience): THREE.Shad
         varying vec3 vN;
         varying vec3 vV;
         void main() {
-          vec3 p = position + normal * uGrow;
-          vec4 mv = modelViewMatrix * vec4(p, 1.0);
-          vN = normalize(normalMatrix * normal);
+          vec3 n = normalize(normalMatrix * normal);
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          mv.xyz += n * uGrow;
+          vN = n;
           vV = normalize(-mv.xyz);
           gl_Position = projectionMatrix * mv;
         }`,

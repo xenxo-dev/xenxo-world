@@ -39,7 +39,7 @@ npm install
 npm run validate
 ```
 
-El distrito se describe en `xenxo-district.json` con sus modelos `.glb`. El kit comprueba en tu equipo lo mismo que comprobará xenxo. Luego lo subes en *Cuenta → Tu distrito*: queda en borrador para que lo pruebes y moderación lo revisa. Las reglas están en el `AGENTS.md` de la plantilla y en [`packages/district-kit`](../../../packages/district-kit/README.md).
+El distrito se describe en `xenxo-district.json` con sus modelos `.glb`. El kit comprueba en tu equipo lo mismo que comprobará xenxo. Luego lo subes en *Cuenta → Tu distrito*: queda en borrador para que lo pruebes y moderación lo revisa. Cuando se aprueba, su puerta aparece en el segundo aro del nexo (el de la comunidad, al que llevan las pasarelas violetas que salen del círculo central entre isla e isla), con tu portada y tu emblema. Las reglas están en el `AGENTS.md` de la plantilla y en [`packages/district-kit`](../../../packages/district-kit/README.md).
 
 ## Tu agente en tu parcela
 

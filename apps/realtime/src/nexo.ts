@@ -14,12 +14,13 @@ import { SEED_ASSETS } from "./seed-assets";
  * del distrito que proyecta la puerta (una vista previa de lo que hay dentro); a un lado, un panel
  * con lo que hay dentro; y alrededor, sus agujas de neón y su decorado temático. En el nexo no hay
  * proyectos: viven en su parcela, dentro de su distrito. Los huecos libres del anillo son para
- * distritos futuros.
+ * distritos futuros. Por fuera de las islas, el segundo aro: el paseo de los distritos de la
+ * comunidad (los de los devs), con sus pasarelas y sus puertas.
  *
  * La disposición sale de nexo-layout.json (la misma que usa la forja). Sube NEXO_SEED_VERSION
  * si cambias el significado de algo; los cambios de contenido se detectan solos por la huella.
  */
-export const NEXO_SEED_VERSION = 7;
+export const NEXO_SEED_VERSION = 8;
 
 export type { Seeded } from "./places";
 
@@ -28,6 +29,10 @@ const G = L.gates;
 const E = L.emblem;
 const I = L.islands;
 const B = L.bridge;
+/** El segundo aro: el de los distritos de la comunidad (ver `community` en nexo-layout.json). */
+const C = L.community;
+const C_IN = C.ring - C.width / 2;
+const C_OUT = C.ring + C.width / 2;
 /** Hasta dónde se puede caminar en el nexo (se sale del chunk: allí no se mandan poses). */
 export const NEXO_BOUNDS = L.bounds as [number, number];
 const [CX, CZ] = L.center as [number, number];
@@ -41,14 +46,15 @@ export const NEXO_SLOTS: Slot[] = Array.from({ length: G.count }, (_, i) => {
 });
 
 /**
- * Puertas de los distritos de la comunidad (fase 3): una en cada hueco entre pasarelas, alrededor
- * del círculo central y mirando al centro. Las pone el Worker (setCommunityGates) al aprobar,
- * ocultar o borrar un distrito; por orden de aprobación.
+ * Puertas de los distritos de la comunidad: los marcos del segundo aro, a `community.slot_ring` y
+ * mirando al centro, en el orden de `community.angles` (primero los que quedan enfrente de cada
+ * pasarela). Marcos y peanas van en el modelo del aro; lo de cada distrito (portal con su portada,
+ * banda, emblema y nombre) o el cartel de «libre» lo pone el Worker (setCommunityGates) al aprobar,
+ * ocultar o borrar uno, por orden de aprobación.
  */
-export const COMMUNITY_GATE_SLOTS: Slot[] = Array.from({ length: G.count }, (_, i) => {
-  const phi = (360 * (i + 0.5)) / G.count;
+export const COMMUNITY_GATE_SLOTS: Slot[] = C.angles.map((phi, i) => {
   const a = (phi * Math.PI) / 180;
-  return { index: i, x: r3(CX + FRAME.ring * Math.sin(a)), z: r3(CZ - FRAME.ring * Math.cos(a)), facing: -phi };
+  return { index: i, x: r3(CX + C.slot_ring * Math.sin(a)), z: r3(CZ - C.slot_ring * Math.cos(a)), facing: phi === 0 ? 0 : -phi };
 });
 
 export type CommunityGate = {
@@ -59,13 +65,19 @@ export type CommunityGate = {
   emblem: { lods: { hash: string; tris: number }[]; bounds: { min: number[]; max: number[] } | null } | undefined;
 };
 
-/** Las entidades de las puertas de la comunidad (marco, portada, peana con su emblema y nombre). */
+/**
+ * Lo de cada puerta del segundo aro: la de un distrito aprobado (portal con su portada, banda,
+ * emblema en la peana y nombre) o, si el hueco está libre, su cartel. Siempre todos los huecos:
+ * así, al vaciarse uno, su cartel vuelve.
+ */
 export function communityGates(list: CommunityGate[]): Seeded[] {
-  return list.slice(0, COMMUNITY_GATE_SLOTS.length).flatMap((g, i) => {
+  return COMMUNITY_GATE_SLOTS.flatMap((slot, i) => {
     const k = `nexo_cd_${i}`;
+    const g = list[i];
+    if (!g) return freeGate(slot, k);
     return portalEntities(
-      COMMUNITY_GATE_SLOTS[i]!,
-      { frame: `${k}_frame`, pedestal: `${k}_pedestal`, portal: `${k}_portal`, band: `${k}_band`, monument: `${k}_monument`, label: `${k}_label` },
+      slot,
+      { portal: `${k}_portal`, band: `${k}_band`, monument: `${k}_monument`, label: `${k}_label` },
       {
         portal: { to: { kind: "chunk", chunk_id: g.chunk_id, spawn: DISTRICT_SPAWN, yaw: 0 }, size: [FRAME.w, FRAME.h], cover: g.cover, title: g.name.en, i18n: g.name, category: "district", color: g.color },
         title: g.name.en,
@@ -75,6 +87,19 @@ export function communityGates(list: CommunityGate[]): Seeded[] {
       },
     );
   });
+}
+
+/** Hueco libre: en la pantalla apagada del marco, «Libre: tu distrito aquí» y cómo se hace. */
+function freeGate(slot: Slot, k: string): Seeded[] {
+  const mid = FRAME.bottom + FRAME.h / 2;
+  const label = (id: string, y: number, text: { es: string; en: string }, size: number, style: string, max_distance: number): Seeded => ({
+    id,
+    components: {
+      "transform@1": { p: at(slot.x, slot.z, slot.facing, 0, r3(y), 0.12), r: yaw(slot.facing), s: [1, 1, 1], parent: null },
+      "label@1": { text: text.en, i18n: text, billboard: false, size, style, color: C.color, width: FRAME.w - 0.4, max_distance },
+    },
+  });
+  return [label(`${k}_free`, mid + 0.35, C.free, 0.26, "sign", 60), label(`${k}_hint`, mid - 0.4, C.free_hint, 0.16, "plain", 24)];
 }
 
 /** El nexo ya no tiene escaparate de proyectos (los proyectos están en sus distritos). */
@@ -170,10 +195,10 @@ export function nexoSeed(): Seeded[] {
    * Barandilla invisible en un círculo (todo flota en el vacío), con huecos donde llegan las
    * pasarelas. `gaps` son ángulos en grados (0 = norte, en el sentido de las agujas del reloj).
    */
-  const ringRail = (prefix: string, cx: number, cz: number, r: number, gaps: number[]) => {
+  const ringRail = (prefix: string, cx: number, cz: number, r: number, gaps: number[], maxDeg = 10) => {
     const half = (B.w / 2 / r) * (180 / Math.PI);
     const blocked = (deg: number) => gaps.some((g) => Math.abs(((deg - g + 540) % 360) - 180) < half);
-    // Arcos de 1° que se juntan en tramos de como mucho 10°: cada tramo, una caja.
+    // Arcos de 1° que se juntan en tramos de como mucho `maxDeg` (10°): cada tramo, una caja.
     let start: number | null = null;
     let n = 0;
     const flush = (end: number) => {
@@ -189,12 +214,12 @@ export function nexoSeed(): Seeded[] {
         continue;
       }
       if (start === null) start = deg;
-      if (deg + 1 - start >= 10) flush(deg + 1);
+      if (deg + 1 - start >= maxDeg) flush(deg + 1);
     }
     flush(360);
   };
   const usedSlots = Object.values(DISTRICT_SLOTS);
-  ringRail("nexo_edge", CX, CZ, L.platform + 0.35, usedSlots.map((sl) => (360 * sl) / G.count));
+  ringRail("nexo_edge", CX, CZ, L.platform + 0.35, [...usedSlots.map((sl) => (360 * sl) / G.count), ...C.bridges]);
 
   /* --- «xenxo» en luz, embutido en el suelo del círculo central --- */
   out.push({
@@ -203,6 +228,39 @@ export function nexoSeed(): Seeded[] {
       "transform@1": { p: [L.letters.p[0]!, 0.03, L.letters.p[1]!], r: [-0.707107, 0, 0, 0.707107], s: [1, 1, 1], parent: null },
       "label@1": { text: "xenxo", billboard: false, size: L.letters.size, style: "neon", color: L.colors.line },
     },
+  });
+
+  /* --- El segundo aro: el paseo de los distritos de la comunidad, sus pasarelas y sus marcos --- */
+  // Todo lo que se ve es una pieza de la forja (tools/forge/nexo.py → community_ring); aquí, lo que
+  // choca (con las mismas medidas) y los carteles. El suelo que se pisa es el del lugar (a 0).
+  mesh("nexo_community_ring", "nexo_community_ring", [CX, 0, CZ], yaw(0));
+  ringRail("nexo_cring_in", CX, CZ, C_IN - 0.15, C.bridges, 5);
+  ringRail("nexo_cring_out", CX, CZ, C_OUT + 0.15, [], 5);
+  C.bridges.forEach((phi, n) => {
+    const r0 = L.platform - 0.6, r1 = C_IN + 0.4;
+    const len = r1 - r0, mid = (r0 + r1) / 2;
+    const a = (phi * Math.PI) / 180;
+    const bx = r3(CX + mid * Math.sin(a)), bz = r3(CZ - mid * Math.cos(a));
+    for (const sx of [-1, 1]) {
+      const side = sx < 0 ? "l" : "r";
+      solid(`nexo_cbridge_${n}_wall_${side}`, at(bx, bz, -phi, sx * (B.w / 2 + 0.15), 1, 0), -phi, [0.15, 1, r3(len / 2)]);
+    }
+    // Al arrancar, dos postes (en el modelo) y el cartel, mirando a quien llega desde el centro.
+    const pr = L.platform - 2.0;
+    const px = CX + pr * Math.sin(a), pz = CZ - pr * Math.cos(a);
+    for (const sx of [-1, 1]) solid(`nexo_cpost_${n}_${sx < 0 ? "l" : "r"}`, at(px, pz, -phi, sx * 2.4, 0.6, 0), -phi, [0.18, 0.6, 0.18]);
+    out.push({
+      id: `nexo_csign_${n}`,
+      components: {
+        "transform@1": { p: at(px, pz, -phi, 0, 1.9, 0), r: yaw(-phi), s: [1, 1, 1], parent: null },
+        "label@1": { text: C.sign.en, i18n: C.sign, billboard: false, size: 0.45, style: "sign", color: C.color, width: 4.4 },
+      },
+    });
+  });
+  // Los marcos y sus peanas son sólidos (lo de cada puerta lo pone communityGates).
+  COMMUNITY_GATE_SLOTS.forEach((sl, i) => {
+    solid(`nexo_cframe_${i}`, at(sl.x, sl.z, sl.facing, 0, 1.7, 0.03), sl.facing, [r3(FRAME.w / 2 + 0.15), 1.7, 0.14]);
+    solid(`nexo_cped_${i}`, at(sl.x, sl.z, sl.facing, 0, 0.5, FRAME.pedestal), sl.facing, [0.42, 0.5, 0.42]);
   });
 
   /* --- Un distrito: poste en el círculo, pasarela e isla con su puerta, su holograma y su decorado --- */

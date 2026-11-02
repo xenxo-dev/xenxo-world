@@ -774,8 +774,18 @@ await scenario("distrito de la comunidad: la ficha se comprueba, queda en borrad
   assert(!stolen.ok && stolen.error === "not_your_file", "usar archivos que subió otra persona → not_your_file");
 
   const saved = await api.call<{ district: { id: string; chunk_id: string; status: string } }>("PUT", "/me/district", base);
+  let slot: string | null = null;
+  let freeWhile = 0;
   assert(saved.ok && saved.data.district.status === "draft" && /^c_1000_\d+$/.test(saved.data.district.chunk_id), "la ficha válida queda en borrador en su chunk c_1000_<n>");
   const { id, chunk_id } = saved.data.district;
+  // El nexo tiene el segundo aro (el de la comunidad), con sus huecos libres a la vista.
+  {
+    const n = await XenxoClient.connect({ baseUrl, chunkId: PLACES.nexo });
+    const ring = n.snapshot.entities.some((e) => e.entity_id === "nexo_community_ring" && !!e.components["mesh@1"]);
+    const free = n.snapshot.entities.filter((e) => /^nexo_cd_\d+_free$/.test(e.entity_id) && !!e.components["label@1"]);
+    n.close();
+    assert(ring && free.length > 0, `el nexo tiene el segundo aro con huecos libres (${free.length})`);
+  }
   // Su autor entra (y ve lo suyo y la puerta al nexo); nadie más.
   const mine = await XenxoClient.connect({ baseUrl, chunkId: chunk_id, token: api.token });
   assert(mine.snapshot.entities.some((e) => e.entity_id === `cd_${id}_piece_0` && !!e.components["mesh@1"]), "el autor ve su pieza");
@@ -806,13 +816,19 @@ await scenario("distrito de la comunidad: la ficha se comprueba, queda en borrad
     const guest = await XenxoClient.connect({ baseUrl, chunkId: chunk_id });
     assert(guest.snapshot.entities.some((e) => e.entity_id === `cd_${id}_piece_0`), "aprobado: entra cualquiera");
     guest.close();
-    // Fase 3: su puerta en el nexo, con su portada, que lleva a su chunk.
+    // Fase 3: su puerta en el segundo aro del nexo, con su portada, que lleva a su chunk; su hueco
+    // deja de estar libre.
     const nexo = await XenxoClient.connect({ baseUrl, chunkId: PLACES.nexo });
-    const door = nexo.snapshot.entities
-      .map((e) => e.components["portal@1"] as { to: { chunk_id?: string }; cover?: string; closed?: boolean } | undefined)
-      .find((p) => p?.to.chunk_id === chunk_id);
+    const doorEntity = nexo.snapshot.entities.find((e) => (e.components["portal@1"] as { to?: { chunk_id?: string } } | undefined)?.to?.chunk_id === chunk_id);
+    const door = doorEntity?.components["portal@1"] as { to: { chunk_id?: string }; cover?: string; closed?: boolean } | undefined;
+    slot = /^nexo_cd_(\d+)_portal$/.exec(doorEntity?.entity_id ?? "")?.[1] ?? null;
+    const p = (doorEntity?.components["transform@1"] as { p: number[] } | undefined)?.p ?? [32, 0, 32];
+    const dist = Math.hypot(p[0]! - 32, p[2]! - 32);
+    const stillFree = nexo.snapshot.entities.some((e) => e.entity_id === `nexo_cd_${slot}_free`);
+    freeWhile = nexo.snapshot.entities.filter((e) => /^nexo_cd_\d+_free$/.test(e.entity_id)).length;
     nexo.close();
     assert(!!door && door.cover === cover.data.hash && !door.closed, "aprobado: tiene su puerta en el nexo, con su portada");
+    assert(slot !== null && dist > 90 && dist < 110 && !stillFree, `aprobado: su puerta está en el segundo aro (a ${dist.toFixed(1)} m del centro) y su hueco ya no está libre`);
   }
   const gone = await api.call("DELETE", "/me/district");
   assert(gone.ok, "borrar el distrito");
@@ -828,6 +844,10 @@ await scenario("distrito de la comunidad: la ficha se comprueba, queda en borrad
       n.close();
     }
     assert(!still, "borrado: su puerta sale del nexo");
+    const n = await XenxoClient.connect({ baseUrl, chunkId: PLACES.nexo });
+    const freeAfter = n.snapshot.entities.filter((e) => /^nexo_cd_\d+_free$/.test(e.entity_id) && !!e.components["label@1"]).length;
+    n.close();
+    assert(freeAfter === freeWhile + 1, `borrado: queda un hueco libre más en el segundo aro (${freeWhile} → ${freeAfter})`);
   }
 });
 

@@ -40,7 +40,7 @@ import type { Env } from "./index";
 import { randomId, type Principal } from "./auth";
 import { plazaSeed, SEED_VERSION } from "./seed";
 import { billboardSlots, cabinetSlots, sandboxOf, type SandboxRect, DISTRICT_BOUNDS, districtByChunk, districtSeed, DISTRICT_SEED_VERSION, migrateParcelPose, migrateSlot, PARCEL_LAYOUT_VERSION, PARCELS, parcelIndex, parcelReserved, parcelSlot } from "./districts";
-import { nexoArrival, NEXO_BOUNDS, NEXO_SEED_VERSION, nexoSeed, SHOWCASE_SLOTS } from "./nexo";
+import { communityGates, nexoArrival, NEXO_BOUNDS, NEXO_SEED_VERSION, nexoSeed, SHOWCASE_SLOTS } from "./nexo";
 import { at, portalEntities, r3, yaw, type Seeded } from "./places";
 
 /** Pantalla de la máquina recreativa (tools/models/generated/arcade_cabinet): centro y tamaño. */
@@ -359,6 +359,9 @@ export class ChunkRoom extends DurableObject<Env> {
     if (this.chunkId === PLACES.plaza) this.applySeed("plaza", SEED_VERSION, plazaSeed());
     else if (this.chunkId === PLACES.nexo) {
       this.applySeed("nexo", NEXO_SEED_VERSION, nexoSeed());
+      // El segundo aro nace con sus carteles de «libre»; después los cambia el Worker (setCommunityGates).
+      const gates = this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM entities WHERE owner = 'community_gates'").toArray()[0]?.n ?? 0;
+      if (!gates) this.writeCommunityGates(communityGates([]));
       // Sin escaparate: si quedaba alguno de antes, fuera (los proyectos están en sus distritos).
       if (SHOWCASE_SLOTS.length === 0) {
         for (const r of this.sql.exec<{ project_id: string }>("SELECT project_id FROM showcase").toArray()) {
@@ -1450,6 +1453,10 @@ export class ChunkRoom extends DurableObject<Env> {
   async setCommunityGates(seed: Seeded[]): Promise<{ gates: number }> {
     this.ensureChunk(null);
     if (this.chunkId !== PLACES.nexo) throw new Error("solo en el nexo");
+    return this.writeCommunityGates(seed);
+  }
+
+  private writeCommunityGates(seed: Seeded[]): { gates: number } {
     const OWNER = "community_gates";
     const before = this.sql.exec<{ entity_id: string }>("SELECT entity_id FROM entities WHERE owner = ?", OWNER).toArray().map((r) => r.entity_id);
     const changes: ({ kind: "remove"; entity_id: string } | { kind: "upsert"; entity: Entity })[] = [];

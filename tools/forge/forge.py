@@ -93,6 +93,8 @@ def main() -> None:
     add("nexo_beacon", "prop", lambda d: nexo.beacon(nx, d), [(cx + far, cz, 0)])
     # El marco de las parcelas (los distritos lo usan; en el nexo ya no hay marcos de proyecto).
     add("nexo_frame", "prop", lambda d: nexo.frame(nx, d), [(cx + far, cz + 300.0, 0)])
+    # El segundo aro (distritos de la comunidad): paseo, pasarelas y marcos, de una pieza.
+    add("nexo_community_ring", "nexo", lambda d: nexo.community_ring(nx, d), [(cx + far, cz, 0)])
     gate_spots = [s for i, s in enumerate(nexo.slots(nx)) if i in nexo.used_slots(nx)]
     add("nexo_gate", "prop", lambda d: nexo.gate(nx, d), [(x + far, z, f) for x, z, f in gate_spots])
     add("nexo_island", "district", lambda d: nexo.island(nx, d), [(x + far, z, f) for x, z, f in (nexo.island_spot(nx, i) for i in nexo.used_slots(nx))])
