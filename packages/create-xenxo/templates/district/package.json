@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "validate": "xenxo-district validate"
+    "validate": "xenxo-district validate --lang {{lang}}"
   },
   "devDependencies": {
     "@xenxo/district-kit": "{{kitVersion}}"

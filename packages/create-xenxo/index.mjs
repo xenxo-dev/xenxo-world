@@ -266,6 +266,8 @@ async function district(rl) {
     "{{author}}": lang === "en" ? "Your name" : "Tu nombre",
     "{{contact}}": lang === "en" ? "you@example.com" : "tu@ejemplo.com",
     "{{kitVersion}}": KIT_VERSION,
+    // npm run validate habla el idioma elegido aquí (como npm run check en los juegos), no el del sistema.
+    "{{lang}}": lang,
   };
   for (const f of ["xenxo-district.json", "AGENTS.md", "README.md", "package.json"]) {
     const p = join(target, f);
