@@ -12,7 +12,8 @@ npm create xenxo@latest mi-distrito -- --district  # un distrito de la comunidad
 ```
 
 Necesitas **Node.js 22.12 o más nuevo**. Sin terminal interactiva (por ejemplo, si lo lanza tu IA),
-no pregunta nada: di `--2d` o `--3d` (por defecto, 3D) y la carpeta.
+no pregunta nada: di `--2d` o `--3d` (por defecto, 3D) y la carpeta. `--help` enseña todas las
+opciones (y no crea nada).
 
 Trae:
 
@@ -74,7 +75,8 @@ npm create xenxo@latest my-district -- --district --lang en # a community distri
 ```
 
 You need **Node.js 22.12 or newer**. Without an interactive terminal (for example, when your AI runs
-it) it asks nothing: pass `--2d` or `--3d` (default 3D) and the folder.
+it) it asks nothing: pass `--2d` or `--3d` (default 3D) and the folder. `--help` lists every option
+(and creates nothing).
 
 You get a minimal **2D** (canvas) or **3D** (three.js with the player's animated VRM character) game
 with **"Sign in with xenxo"** ([`@xenxo/sdk`](https://www.npmjs.com/package/@xenxo/sdk)), a **local

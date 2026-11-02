@@ -54,6 +54,21 @@ const T = {
       "  Se abre con un jugador de prueba (el simulador de xenxo, abajo a la izquierda).\n" +
       "  Pídele cambios a tu IA: lee AGENTS.md y sabe integrarse con xenxo.\n" +
       "  npm run check comprueba la ficha (public/xenxo.json). Para publicarlo: README.md.\n",
+    help:
+      "\n  xenxo · crea tu juego o tu distrito\n\n" +
+      "  Uso:\n    npm create xenxo@latest [carpeta] -- [opciones]\n\n" +
+      "  Opciones:\n" +
+      "    --2d, --3d       tipo de juego (si no lo dices, pregunta; sin terminal, 3D)\n" +
+      "    --multi          con sala multijugador en tu cuenta gratuita de Cloudflare\n" +
+      "    --solo           sin sala, sin preguntar\n" +
+      "    --district       un distrito de la comunidad, con el kit que lo comprueba\n" +
+      "    --lang es|en     idioma de los mensajes, README.md y AGENTS.md\n" +
+      "    --yes            no pregunta nada: lo que falte, por defecto\n" +
+      "    --help           esta ayuda (no crea nada)\n\n" +
+      "  Ejemplos:\n" +
+      "    npm create xenxo@latest mi-juego -- --3d\n" +
+      "    npm create xenxo@latest mi-juego -- --2d --multi\n" +
+      "    npm create xenxo@latest mi-distrito -- --district\n",
   },
   en: {
     hello: "\n  xenxo · create your game\n",
@@ -77,6 +92,21 @@ const T = {
       "  It opens with a test player (the xenxo simulator, bottom left).\n" +
       "  Ask your AI for changes: it reads AGENTS.md and knows how to work with xenxo.\n" +
       "  npm run check validates the game card (public/xenxo.json). To publish it: README.md.\n",
+    help:
+      "\n  xenxo · create your game or your district\n\n" +
+      "  Usage:\n    npm create xenxo@latest [folder] -- [options]\n\n" +
+      "  Options:\n" +
+      "    --2d, --3d       game type (asked if missing; without a terminal, 3D)\n" +
+      "    --multi          with a multiplayer room on your free Cloudflare account\n" +
+      "    --solo           no room, without asking\n" +
+      "    --district       a community district, with the kit that checks it\n" +
+      "    --lang es|en     language of the messages, README.md and AGENTS.md\n" +
+      "    --yes            asks nothing: anything missing gets its default\n" +
+      "    --help           this help (creates nothing)\n\n" +
+      "  Examples:\n" +
+      "    npm create xenxo@latest my-game -- --3d --lang en\n" +
+      "    npm create xenxo@latest my-game -- --2d --multi --lang en\n" +
+      "    npm create xenxo@latest my-district -- --district --lang en\n",
   },
 };
 
@@ -100,6 +130,8 @@ function pickLanguage(target) {
 }
 
 async function main() {
+  // La ayuda no crea nada (una IA suele probar --help antes de nada).
+  if (flag("--help") || flag("-h") || flag("--ayuda")) return console.log(t.help);
   const isDistrict = flag("--district") || flag("--distrito");
   console.log(isDistrict ? t.helloDistrict : t.hello);
   const [major, minor] = process.versions.node.split(".").map(Number);
