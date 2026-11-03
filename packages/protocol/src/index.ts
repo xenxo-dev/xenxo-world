@@ -11,6 +11,7 @@
  *   - Posiciones de entidades RELATIVAS a su chunk (evita jitter de float32).
  */
 import { z } from "zod";
+import { WEAPON_IDS } from "./weapons";
 
 export const PROTOCOL_VERSION = 0 as const;
 export const ENTITY_SCHEMA = "xenxo.entity/0" as const;
@@ -476,9 +477,25 @@ export const EMOTES = [
 export const Vehicle = z.enum(["car"]);
 export type Vehicle = z.infer<typeof Vehicle>;
 
+/**
+ * Armas (§9 octies ter, weapons.ts): `weapon` en la pose es el arma que la persona lleva en la mano
+ * (sacada). Solo vale donde hay armas, en el modo pelea y con un arma que pueda usar; si no, el
+ * servidor la quita.
+ */
+export const WeaponIdSchema = z.enum(WEAPON_IDS);
+
 export const PoseMsg = envelope(
   "POSE",
-  z.object({ t: z.number(), head: Pose, hand_l: Pose.optional(), hand_r: Pose.optional(), emote: Emote.optional(), vehicle: Vehicle.optional(), car: Pose.optional() }),
+  z.object({
+    t: z.number(),
+    head: Pose,
+    hand_l: Pose.optional(),
+    hand_r: Pose.optional(),
+    emote: Emote.optional(),
+    vehicle: Vehicle.optional(),
+    car: Pose.optional(),
+    weapon: WeaponIdSchema.optional(),
+  }),
 );
 
 export const MutationOp = z.discriminatedUnion("op", [
@@ -577,6 +594,12 @@ export const FightMsg = envelope("FIGHT", z.object({ on: z.boolean() }));
 export const HitMsg = envelope("HIT", z.object({ to: SessionRef, move: FightMove }));
 /** Tras quedar fuera de combate, volver con toda la vida (cuando el servidor lo permite: `HEALTH.down_until`). */
 export const RespawnMsg = envelope("RESPAWN", z.object({}));
+/**
+ * Un disparo (§9 octies ter): con un arma que pueda usar esta sesión (WELCOME.weapons), en el modo
+ * pelea y a su ritmo (`gapMs`). `at` es hasta dónde llega el rayo (lo dibujan los demás) y `to`, a
+ * quién le da (alguien en el modo pelea a su alcance; a la gente de la ciudad, con NPC_HIT `shot`).
+ */
+export const ShootMsg = envelope("SHOOT", z.object({ weapon: WeaponIdSchema, at: Vec3, to: SessionRef.optional() }));
 
 /*
  * La gente de las ciudades, compartida (§9 nonies): una sesión del lugar (la que elige el servidor,
@@ -618,8 +641,9 @@ export const NpcStateMsg = envelope("NPC_STATE", z.object({ t: z.number(), cast:
  */
 export const RES_MAX = 256;
 const ResIndex = z.number().int().min(0).max(RES_MAX - 1);
-/** Qué le ha dado: un golpe del modo pelea (o la barrida), el coche o correr contra él. */
-export const NPC_HIT_KINDS = ["hit", "car", "bump"] as const;
+/** Qué le ha dado: un golpe del modo pelea (o la barrida), el coche, correr contra él o un disparo (§9 octies ter). */
+export const NPC_HIT_KINDS = ["hit", "car", "bump", "shot"] as const;
+export type NpcHitKind = (typeof NPC_HIT_KINDS)[number];
 /**
  * Le has dado a un ciudadano (`npc`: el servidor se lo pasa a quien los lleva) o a alguien de una sala
  * (`res`: a quien esté cerca). Uno de los dos.
@@ -656,6 +680,7 @@ export const ClientMessage = z.discriminatedUnion("type", [
   FightMsg,
   HitMsg,
   RespawnMsg,
+  ShootMsg,
   NpcStateMsg,
   NpcHitMsg,
   NpcPairMsg,
@@ -675,6 +700,8 @@ export const AvatarPose = z.object({
   car: Pose.optional(),
   /** Tiene el modo pelea activado (lo pone el servidor; quien no lo entienda lo ignora). */
   fight: z.boolean().optional(),
+  /** El arma que lleva en la mano (§9 octies ter; ya comprobada por el servidor). */
+  weapon: WeaponIdSchema.optional(),
 });
 export type AvatarPose = z.infer<typeof AvatarPose>;
 
@@ -730,6 +757,11 @@ export const WelcomeMsg = envelope(
      * districts.json). Sin el campo, el movimiento de siempre. Un cliente que no lo entienda lo ignora.
      */
     parkour: z.boolean().optional(),
+    /**
+     * Armas (§9 octies ter): con cuáles puede disparar esta sesión aquí, en el modo pelea (la pipa y,
+     * las cuentas, las de su inventario). Sin el campo, aquí no hay armas.
+     */
+    weapons: z.array(WeaponIdSchema).optional(),
   }),
 );
 
@@ -819,6 +851,12 @@ export const RaceMsg = envelope(
     ms: z.number().int().nonnegative().optional(),
     best: z.number().int().nonnegative().optional(),
     rank: z.number().int().positive().optional(),
+    /**
+     * Botín de la meta (las carreras con cofre: `loot` del distrito; §9 octies ter): el arma que ha
+     * salido y si es nueva para esta cuenta. La guarda el distrito y la pasa a la cuenta el Worker
+     * (`POST /me/weapons/check`).
+     */
+    loot: z.object({ weapon: WeaponIdSchema, fresh: z.boolean() }).optional(),
   }),
 );
 /** Marcador (los 10 primeros): tiempo en ms en las carreras; fecha en la que se completó, en las búsquedas. */
@@ -887,6 +925,24 @@ export const HealthMsg = envelope(
   "HEALTH",
   z.object({ session_id: z.string(), hp: z.number().min(0).max(FIGHT_HP), at: z.number(), down_until: z.number().optional() }),
 );
+/**
+ * Un disparo de alguien cercano (§9 octies ter): con qué y hasta dónde (`at`, para dibujar el rayo).
+ * Si le dio a alguien en el modo pelea (`to`), cómo le llega, como en HIT_EVENT (`dir`, `power`,
+ * `fall`, `ko`). Le llega también a quien dispara (por si le dio).
+ */
+export const ShotMsg = envelope(
+  "SHOT",
+  z.object({
+    from: z.string(),
+    weapon: WeaponIdSchema,
+    at: Vec3,
+    to: z.string().optional(),
+    dir: z.tuple([z.number(), z.number()]).optional(),
+    power: z.number().min(0).max(1).optional(),
+    fall: z.boolean().optional(),
+    ko: z.boolean().optional(),
+  }),
+);
 /** Quién lleva ahora a los ciudadanos del lugar (§9 nonies); `null`, nadie. */
 export const NpcHostMsg = envelope("NPC_HOST", z.object({ session_id: z.string().nullable() }));
 /** Lo que alguien le ha hecho a un ciudadano (`npc`: solo a quien los lleva) o a alguien de una sala (`res`: a quien esté cerca). */
@@ -928,6 +984,7 @@ export const ServerMessage = z.discriminatedUnion("type", [
   PairEndMsg,
   HitEventMsg,
   HealthMsg,
+  ShotMsg,
   NpcHostMsg,
   NpcStateMsg,
   NpcHitEventMsg,
@@ -1024,3 +1081,4 @@ export const GameManifest = z
   .strict();
 export type GameManifest = z.infer<typeof GameManifest>;
 export * from "./district-kit";
+export * from "./weapons";

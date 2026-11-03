@@ -282,7 +282,8 @@ export function PeopleFx() {
     // Golpes: el destello de su estilo, que crece y se apaga.
     for (const h of people.hits) {
       const age = now - h.at;
-      if (age > HIT_MS || !feetOf(h.to, _f)) continue;
+      // Los disparos tienen su destello (ShotFx).
+      if (h.move === "shot" || age > HIT_MS || !feetOf(h.to, _f)) continue;
       const k = Math.min(1, age / (HIT_MS * 0.45));
       put(hitTexture(h.style), _f.x - h.dir[0] * 0.15, _f.y + 1.3, _f.z - h.dir[1] * 0.15, 0.45 + k * 0.75, age > HIT_MS * 0.45 ? 1 - (age - HIT_MS * 0.45) / (HIT_MS * 0.55) : 1);
     }

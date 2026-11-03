@@ -77,3 +77,49 @@ export function thud(x: number, z: number, strength: number) {
   thump(o.ctx, o.out, t, 70, 0.8 * v * k, 0.28);
   burst(o.ctx, o.out, o.noise, t, "lowpass", 420, 0.7, 0.55 * v * k, 0.3);
 }
+
+/* --- Armas (§9 octies ter): blásteres de juguete --- */
+
+let lastZap = 0;
+
+/**
+ * El disparo: un «piu» de juguete (un tono que cae deprisa, con un poco de soplo). `heavy` (0–1):
+ * las grandes, más grave, más largo y con golpe de fondo.
+ */
+export function zap(x: number, z: number, heavy: number) {
+  const o = ambient.output();
+  const v = gainAt(x, z);
+  if (!o || v < 0.02) return;
+  const t = o.ctx.currentTime;
+  // Las de ráfaga disparan muy seguido: como mucho uno cada 50 ms.
+  if (t - lastZap < 0.05) return;
+  lastZap = t;
+  const dur = 0.13 + heavy * 0.16;
+  const osc = o.ctx.createOscillator();
+  osc.type = "sawtooth";
+  osc.frequency.setValueAtTime(1900 - heavy * 950, t);
+  osc.frequency.exponentialRampToValueAtTime(240 - heavy * 120, t + dur);
+  const f = o.ctx.createBiquadFilter();
+  f.type = "lowpass";
+  f.frequency.setValueAtTime(3600, t);
+  f.frequency.exponentialRampToValueAtTime(900, t + dur);
+  const g = o.ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.2 * v, t + 0.006);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  osc.connect(f).connect(g).connect(o.out);
+  osc.start(t);
+  osc.stop(t + dur + 0.02);
+  burst(o.ctx, o.out, o.noise, t, "bandpass", 2400 - heavy * 1200, 1.1, 0.12 * v, 0.05 + heavy * 0.05);
+  if (heavy > 0.45) thump(o.ctx, o.out, t, 110, 0.55 * v * heavy, 0.16);
+}
+
+/** El rayo llega a alguien: un chasquido eléctrico corto. */
+export function zapHit(x: number, z: number, power: number) {
+  const o = ambient.output();
+  const v = gainAt(x, z);
+  if (!o || v < 0.02) return;
+  const t = o.ctx.currentTime;
+  burst(o.ctx, o.out, o.noise, t, "highpass", 2600, 0.9, (0.35 + power * 0.3) * v, 0.07);
+  thump(o.ctx, o.out, t, 180, 0.35 * v * (0.5 + power), 0.08);
+}

@@ -186,3 +186,45 @@ export function StopIcon() {
     </svg>
   );
 }
+
+/** Mira (disparar: armas de Distrito Cero). */
+export function AimIcon({ className = "h-5 w-5" }: { className?: string }) {
+  return (
+    <svg aria-hidden className={className} {...svg}>
+      <circle cx="12" cy="12" r="7" />
+      <circle cx="12" cy="12" r="1.5" />
+      <path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
+    </svg>
+  );
+}
+
+/** Dos flechas en círculo (cambiar de arma). */
+export function SwapIcon({ className = "h-5 w-5" }: { className?: string }) {
+  return (
+    <svg aria-hidden className={className} {...svg}>
+      <path d="M4 9a8 8 0 0 1 14.3-3.4M20 5v4h-4" />
+      <path d="M20 15a8 8 0 0 1-14.3 3.4M4 19v-4h4" />
+    </svg>
+  );
+}
+
+/** Cofre (el botín de los niveles para tryhards de Vertical). */
+export function ChestIcon({ className = "h-5 w-5" }: { className?: string }) {
+  return (
+    <svg aria-hidden className={className} {...svg}>
+      <path d="M3 10h18v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" />
+      <path d="M3 10V8a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v2" />
+      <path d="M10.5 10v3h3v-3" />
+    </svg>
+  );
+}
+
+/** Candado (un arma que aún no tienes). */
+export function LockIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg aria-hidden className={className} {...svg}>
+      <rect x="5" y="11" width="14" height="9" rx="1.5" />
+      <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+    </svg>
+  );
+}

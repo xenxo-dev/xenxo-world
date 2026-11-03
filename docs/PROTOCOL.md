@@ -125,7 +125,7 @@ Las medidas de los modelos de la gente las da `GET /assets/<hash>/meta`. Moverlo
 | Tipo | Payload | Notas |
 |---|---|---|
 | `HELLO` | `client_type`, `capabilities`, `display_name?`, `avatar?` | Obligatorio antes de cualquier otro. `avatar` = `{hash, format: "vrm"}` de un **avatar de serie** (invitados y agentes); cualquier otro hash se ignora, y las personas registradas llevan el de su cuenta. `capabilities.npc_host: true` = puede llevar a los ciudadanos del distrito para todos (§9 nonies) |
-| `POSE` | `t`, `head {p, r}`, `hand_l?`, `hand_r?`, `emote?` | Sin `entity_id`: el servidor sabe de quién es. Máx. 15 Hz; el exceso se descarta. `emote` = gesto en curso (`^[a-z_]{1,24}$`; hoy `dance`, `wave`, `sit`, `talk`, `cheer`, `crouch`, `clap`, `point`, `beckon`, `laugh`, `shrug`, los de pareja `high_five`, `hug`, `handshake`, los de pelea `punch`, `kick`, `shove`, `hit_stagger`, `hit_down`, `get_up`, los del coche `car_open`, `car_in`, `car_out` y, donde hay parkour, los `pk_*` de §9 octies bis). Los clientes ignoran los que no conocen. `vehicle?` = en qué va si no va a pie (hoy solo `car`: va sentada dentro de su coche; `head` sigue siendo su cabeza) y `car?` = dónde está su coche, en marcha o aparcado (`p` = su origen en el suelo, `r` = su giro completo, con la inclinación). El servidor normaliza los giros (un cuaternión nulo descarta la pose) y no reparte una mano a más de 2,5 m de la cabeza. Ver «Movimiento» más abajo. Al subir y bajar, `emote` es `car_open` (abre la puerta), `car_in` (se sienta dentro) o `car_out` (sale): con esos tres, la puerta del coche está abierta. Quien no los conozca dibuja a la persona y no el coche. El servidor solo los reparte en los distritos (en la plaza se va a pie; `vehicle` sin `car` no vale) y con `vehicle` no cuentan los puntos de carrera (`CHECKPOINT` → `forbidden`). La cabeza más de 1,6 m por encima de lo que se pisa (el suelo o la cara de arriba de un `collider@1`: se puede estar de pie en un banco) indica un salto |
+| `POSE` | `t`, `head {p, r}`, `hand_l?`, `hand_r?`, `emote?`, `vehicle?`, `car?`, `weapon?` | Sin `entity_id`: el servidor sabe de quién es. Máx. 15 Hz; el exceso se descarta. `emote` = gesto en curso (`^[a-z_]{1,24}$`; hoy `dance`, `wave`, `sit`, `talk`, `cheer`, `crouch`, `clap`, `point`, `beckon`, `laugh`, `shrug`, los de pareja `high_five`, `hug`, `handshake`, los de pelea `punch`, `kick`, `shove`, `hit_stagger`, `hit_down`, `get_up`, los del coche `car_open`, `car_in`, `car_out` y, donde hay parkour, los `pk_*` de §9 octies bis). Los clientes ignoran los que no conocen. `vehicle?` = en qué va si no va a pie (hoy solo `car`: va sentada dentro de su coche; `head` sigue siendo su cabeza) y `car?` = dónde está su coche, en marcha o aparcado (`p` = su origen en el suelo, `r` = su giro completo, con la inclinación). El servidor normaliza los giros (un cuaternión nulo descarta la pose) y no reparte una mano a más de 2,5 m de la cabeza. Ver «Movimiento» más abajo. Al subir y bajar, `emote` es `car_open` (abre la puerta), `car_in` (se sienta dentro) o `car_out` (sale): con esos tres, la puerta del coche está abierta. Quien no los conozca dibuja a la persona y no el coche. El servidor solo los reparte en los distritos (en la plaza se va a pie; `vehicle` sin `car` no vale) y con `vehicle` no cuentan los puntos de carrera (`CHECKPOINT` → `forbidden`). La cabeza más de 1,6 m por encima de lo que se pisa (el suelo o la cara de arriba de un `collider@1`: se puede estar de pie en un banco) indica un salto. `weapon?` = el arma que lleva en la mano (§9 octies ter): solo donde hay armas, en el modo pelea, a pie y una que pueda usar; si no, el servidor la quita |
 | `MUTATE_WORLD` | `idempotency_key`, `target`, `mutation` | Ver §8 |
 | `PING` | `t` | |
 | `COLLECT` | `entity_id` | Estoy en este objeto de búsqueda. Solo personas registradas. El servidor mira la última pose de la sesión (reciente y a menos del radio + 2,5 m) y responde `COLLECTED`. Tras un salto, `forbidden` con `detail.reason = "jump"` durante 15 s |
@@ -137,8 +137,9 @@ Las medidas de los modelos de la gente las da `GET /assets/<hash>/meta`. Moverlo
 | `FIGHT` | `on` | Activa o quita el modo pelea de la sesión (§9 octies) |
 | `HIT` | `to`, `move` | Golpe a otra sesión en modo pelea (§9 octies; `slide` = la barrida) |
 | `RESPAWN` | — | Fuera de combate, pasado `down_until`: volver con toda la vida (§9 octies) |
+| `SHOOT` | `weapon`, `at`, `to?` | Un disparo (§9 octies ter): con qué, hasta dónde llega el rayo y, si le da a alguien en el modo pelea, a quién |
 | `NPC_STATE` | `t`, `cast[]` | Solo quien lleva a los ciudadanos: su estado (§9 nonies) |
-| `NPC_HIT` | `npc` o `res`, `dir`, `power`, `head?`, `kind` | Le has dado a un ciudadano o a alguien de una sala (§9 nonies) |
+| `NPC_HIT` | `npc` o `res`, `dir`, `power`, `head?`, `kind` | Le has dado a un ciudadano o a alguien de una sala (§9 nonies; `kind: "shot"`, con un disparo: §9 octies ter) |
 | `NPC_PAIR` | `npc`, `kind` | Le propones a un ciudadano una acción en pareja (§9 nonies) |
 | `NPC_HOSTING` | `on` | Ofrecerse a llevar a los ciudadanos o dejar de hacerlo (§9 nonies) |
 
@@ -157,10 +158,10 @@ necesitan nada más; un agente que pruebe actividades tiene que ir andando.
 
 | Tipo | Payload |
 |---|---|
-| `WELCOME` | `session_id`, `principal`, `chunk_id`, `server_time`, `tick_hz`, `budgets`, `fight?` (estilo de pelea del lugar, §9 octies; ausente = aquí no se pelea), `parkour?` (`true` = aquí el cuerpo hace parkour, §9 octies bis) |
+| `WELCOME` | `session_id`, `principal`, `chunk_id`, `server_time`, `tick_hz`, `budgets`, `fight?` (estilo de pelea del lugar, §9 octies; ausente = aquí no se pelea), `parkour?` (`true` = aquí el cuerpo hace parkour, §9 octies bis), `weapons?` (con qué armas puede disparar esta sesión aquí, §9 octies ter; ausente = aquí no hay armas) |
 | `SNAPSHOT` | `entities[]`, `peers[]`, `poses[]`, `chat[]?` (últimos 30 mensajes) |
 | `DELTA` | `changes[]`: `{kind: "upsert", entity}` o `{kind: "remove", entity_id}` |
-| `POSES` | `t` (hora del servidor), `poses[]` (cada una con su `emote?`, su `vehicle?` y su `car?`) — lote por tick (8 Hz; los clientes envían su pose a 8 Hz como mucho y se interpolan con ~200 ms de retraso) |
+| `POSES` | `t` (hora del servidor), `poses[]` (cada una con su `emote?`, su `vehicle?`, su `car?`, su `fight?` y su `weapon?`) — lote por tick (8 Hz; los clientes envían su pose a 8 Hz como mucho y se interpolan con ~200 ms de retraso) |
 | `PEER_JOIN` / `PEER_LEAVE` | datos del peer (`session_id`, `kind`, `display_name`, `client_type`, `avatar?`, `player_no?`) / `session_id`. `player_no` es el número de jugador de una persona registrada: se asigna por orden de alta desde el 1 y no cambia; el 0 es el fundador (la cuenta de `FOUNDER_USER_ID`) |
 | `ACK` | `ref`, `entity_id`, `rev`, `replayed` |
 | `ERROR` | `ref`, `code`, `message`, `detail?` |
@@ -169,7 +170,7 @@ necesitan nada más; un agente que pruebe actividades tiene que ir andando.
 | `CHAT_REMOVED` | `id` (moderación o supresión de cuenta) |
 | `PROGRESS` | `collected` (ids), `best` (ms por salida) | Tras el SNAPSHOT, a personas registradas: lo que ya tienen en este lugar |
 | `COLLECTED` | `entity_id`, `set`, `count`, `total`, `complete`, `note?` | Un objeto recogido (con su `note`, si la tiene) |
-| `RACE` | `race`, `state` (`start` \| `cp` \| `finish` \| `reset`), `next?`, `total?`, `ms?`, `best?`, `rank?` | La carrera de esta sesión. `reset` = anulada (demasiado rápida) |
+| `RACE` | `race`, `state` (`start` \| `cp` \| `finish` \| `reset`), `next?`, `total?`, `ms?`, `best?`, `rank?`, `loot?` | La carrera de esta sesión. `reset` = anulada (demasiado rápida). `loot` = `{weapon, fresh}`: en las carreras con cofre, el arma que ha salido en la meta y si es nueva para la cuenta (§9 octies ter) |
 | `SCORES` | `entity_id`, `kind`, `period?`, `rows` (`name`, `player_no?`, `value`, `ts`) | Los 10 primeros: tiempo en ms (carreras), fecha en que se completó (búsquedas), puntos del tramo (`points`, días UTC) o piezas construidas (`builds`: `name` es el proyecto, `ts` la última) |
 | `TILES` | `entity_id`, `round`, `state` (`show` \| `won` \| `lost` \| `idle`), `lit`, `done`, `ms_left?` | Estado de un tablero de baldosas, a todo el lugar. Índice de baldosa = fila × `cols` + columna, desde la esquina noroeste |
 | `REACTION` | `session_id`, `kind` | Alguien ha reaccionado (a quien esté cerca) |
@@ -178,6 +179,7 @@ necesitan nada más; un agente que pruebe actividades tiene que ir andando.
 | `PAIR_END` | `a`, `b`, `kind`, `reason` (`declined` \| `expired` \| `far`) | A los dos |
 | `HIT_EVENT` | `from`, `to`, `move`, `style`, `dir` ([x, z], unitario), `power` (0–1), `fall`, `ko?` | Un golpe que ha llegado (a quien esté cerca). `ko` también cuando deja la vida a 0 |
 | `HEALTH` | `session_id`, `hp` (0–100), `at`, `down_until?` | La vida de alguien en el modo pelea (a esa persona y a quien esté cerca, §9 octies) |
+| `SHOT` | `from`, `weapon`, `at`, `to?`, `dir?`, `power?`, `fall?`, `ko?` | Un disparo (a quien esté cerca, también a quien dispara): hasta dónde llega (`at`) y, si le dio a alguien, cómo le llega, como en `HIT_EVENT` (§9 octies ter) |
 | `NPC_HOST` | `session_id` (o `null`) | Quién lleva a los ciudadanos del lugar (§9 nonies) |
 | `NPC_STATE` | `t`, `cast[]` | El estado de los ciudadanos, de quien los lleva (a los demás y a quien llega) |
 | `NPC_HIT_EVENT` | `from`, `npc` o `res`, `dir`, `power`, `head?`, `kind` | Un golpe a un ciudadano (a quien los lleva) o a alguien de una sala (a quien esté cerca) |
@@ -540,8 +542,9 @@ nexo, la plaza ni los distritos de la comunidad (allí no hay ciudadanos y estos
   hace tu parte (acercarte, las manos).
 - **Lo que les hacen los demás:** quien no los lleva y le da a uno (un golpe, la barrida, el coche o
   correr contra él) lo ve caer enseguida y manda `NPC_HIT {npc, dir, power, head?, kind}` (`kind`:
-  `hit`, `car` o `bump`); si su última pose está a menos de 4,5 m del ciudadano (9 m en coche) y a
-  menos de 3 m de altura, el servidor se lo pasa a quien los lleva como `NPC_HIT_EVENT` (con `from` y
+  `hit`, `car`, `bump` o `shot`, un disparo: §9 octies ter); si su última pose está a menos de 4,5 m del
+  ciudadano (9 m en coche; con un disparo, el alcance mayor de las armas más 2 m y 12 m de altura, y
+  solo donde hay armas y en el modo pelea) y a menos de 3 m de altura, el servidor se lo pasa a quien los lleva como `NPC_HIT_EVENT` (con `from` y
   la dirección normalizada); si no, `forbidden`. Proponerle chocar los cinco, un abrazo o un apretón es
   `NPC_PAIR {npc, kind}` (a menos de 4 m) → `NPC_PAIR_EVENT`; quien los lleva decide (si le tiene
   miedo o rencor a esa sesión, no) y lo dice en su estado. Seis de estos por segundo y sesión como
@@ -581,6 +584,49 @@ comprueban como en cualquier otro (`CHECKPOINT`, `COLLECT`: con la última pose 
   Cumplen la regla de `emote` (`^[a-z_]{1,24}$`): nada nuevo en el esquema.
 - Nunca en el nexo ni en la plaza (su `WELCOME` no lo lleva), ni en coche, en pareja o en el modo
   pelea. En las gafas tampoco: allí el cuerpo sigue al casco.
+
+## 9 octies ter. Armas
+
+Blásteres de neón de juguete: sin balas ni sangre, un rayo de luz que quita vida y empuja o tumba. Son
+del **modo pelea** (§9 octies: solo entre quienes lo tienen activado) y solo donde el distrito lo dice:
+`weapons` en `districts.json` (hoy, Distrito Cero). Allí `WELCOME.weapons` dice con cuáles puede
+disparar esa sesión; en los demás lugares no viene y `SHOOT` da `forbidden`. Las reglas y el catálogo
+están en `packages/protocol/src/weapons.ts` (`WEAPONS`), iguales en el servidor y en los clientes.
+
+- **Catálogo** (`WEAPON_IDS`): `pipa` (básica), `chispa` y `canon` (comunes), `rafaga` y `trueno`
+  (raras), `tormenta` (épica) y `halcon` (legendaria). Cada una con su daño, su ritmo (`gapMs`: lo menos
+  entre dos disparos), su alcance (m, entre cabezas), si es de ráfaga (`auto`: el cliente dispara
+  mientras se mantiene), si va a dos manos, cuánto empuja (`power`) y si tumba (`knock`).
+- **Quién tiene cuáles:** todo el mundo, la `pipa`. Las demás son el **inventario de las cuentas
+  registradas** (invitados y agentes, solo la pipa). El inventario va dentro de la sesión (`w` en el
+  token: el distrito lo lee sin preguntar a nadie) y sale de los **cofres** (abajo).
+- **Disparar** (`SHOOT {weapon, at, to?}`): con un arma suya (si no, `forbidden` con
+  `detail.reason: "weapon"`), en el modo pelea, a pie y sin estar fuera de combate ni en el suelo. A su
+  ritmo, con un 25 % de margen por la red (lo que llega antes se descarta sin error). `at` es hasta
+  dónde llega el rayo: el servidor lo corta en su alcance y en los límites del lugar. Si `to` es alguien
+  en el modo pelea a su alcance (con 1,5 m de margen y menos de 12 m de diferencia de altura), que no
+  está fuera de combate, ni en el suelo, ni en coche, le quita el daño del arma (la misma vida de §9
+  octies, sin la regla del duelo) y lo empuja o, con las que tumban (o a 0), lo tira. El servidor
+  reparte `SHOT {from, weapon, at, to?, dir?, power?, fall?, ko?}` a quien esté cerca (también a quien
+  dispara) y, si le dio, `HEALTH`. El cliente elige a quién apunta (quien esté delante y a la vista) y
+  corta el rayo en la primera pared; el servidor no ve las paredes.
+- **La gente de las ciudades:** a un ciudadano o a alguien de una sala le llega como un golpe
+  (`NPC_HIT` con `kind: "shot"`, §9 nonies), desde más lejos: el alcance mayor de las armas
+  (`SHOT_MAX_RANGE`) más 2 m. Solo donde hay armas y en el modo pelea (si no, `forbidden`).
+- **En la mano:** la pose lleva `weapon` mientras está sacada (el cliente la saca al disparar y la
+  guarda unos segundos después); con ella, cada cliente dibuja el arma en la mano derecha y los brazos
+  apuntando hacia donde mira (a dos manos, la izquierda en el guardamanos). El rayo de los demás sale de
+  su arma, con el mismo retraso que sus golpes.
+- **Cofres** (`loot` en `districts.json`: qué carreras del distrito tienen cofre y con qué tabla de
+  `LOOT_TABLES`; hoy los niveles 5 y 6 de Vertical, los de tryhards). Cada vez que una cuenta llega a
+  su meta, el distrito saca un arma al azar (primero la rareza, con la tabla de esa carrera; después
+  una de esa rareza), la guarda (`act_loot`: quién, qué arma, qué carrera y cuándo) y la dice en
+  `RACE` (`loot: {weapon, fresh}`; `fresh`: no la tenía). Si ya la tenía, no se suma nada.
+- **A la cuenta:** `POST /me/weapons/check` (§11) pregunta a los distritos con cofres lo que guardan
+  de esa cuenta y añade a su inventario lo que no tenía; con armas nuevas devuelve una sesión nueva que
+  las lleva (cuenta al entrar en el lugar con armas). El cliente nunca dice qué ha ganado.
+- Nunca en el nexo, la plaza ni las gafas. Lo que se guarda es el inventario de la cuenta y lo que
+  salió en cada cofre; los dos van en la exportación de datos y se borran con la cuenta.
 
 ## 10. Códigos de error
 
@@ -627,6 +673,7 @@ antes no se renuevan y, pasados 10 minutos desde que se emitieron, tampoco abren
 | `POST /me/logout-all` | persona | Cierra la sesión en todos los dispositivos (sube la versión de sesiones de la cuenta) |
 | `GET /me/badges` · `POST /me/badges/check` | persona | Insignias de las actividades del sistema (`apps/realtime/src/badges.ts`): `{ id, name, desc, color, district, earned_at }`. `check` pregunta a cada distrito lo que guarda de la cuenta (`activityOf`) y da las que cumple: responde `{ badges, new }`, como mucho una vez cada 15 s (si no, `throttled: true`). El cliente nunca dice qué ha ganado; la web lo pide tras completar una búsqueda, una carrera o una ronda del tablero |
 | `GET /scores` | público | Marcadores del sistema de los distritos abiertos para el panel: `{ districts: [{ id, name, color, boards: [{ entity_id, kind, id, period, title, rows }] }], at }`. Un minuto en la caché del borde |
+| `GET /me/weapons` · `POST /me/weapons/check` | persona | Armas (§9 octies ter): las de la cuenta (`{ weapons }`, sin la pipa). `check` pregunta a los distritos con cofres lo que les ha salido a esa cuenta (`activityOf`) y añade lo que no tenía: responde `{ weapons, new }` y, si hay armas nuevas, también una sesión nueva (`token`, `principal`, `user`) que las lleva. Como mucho una vez cada 4 s (si no, `throttled: true`). La web lo pide tras cada cofre (pasa todo lo pendiente, también lo de otras veces) |
 | `GET /me/export` · `DELETE /me` | persona | RGPD: exportar todos tus datos; borrar la cuenta y todo su contenido |
 | `GET /districts` | público | Distritos con sus 64 parcelas y quién ocupa cada una (`project_id`, `title`), su chunk, color y textos |
 | `GET /projects` · `POST /projects` · `DELETE /projects/<id>` | público / persona | Proyectos. **Requisitos para publicar** (web, agentes y el futuro servidor MCP por igual): `title` (3–60), `url` (https), `district` y `parcel` libre (de `GET /districts`), `cover_hash` (portada subida con `kind=cover`) y `mesh_hash` (monumento subido con `kind=monument` o `model`, ≤ 10.000 triángulos); `summary` es opcional. La categoría es la del distrito. Al publicar, el distrito coloca su portal en la parcela (marco, portada, banda, monumento sobre la peana y rótulo). El nexo no enseña proyectos: solo distritos. Errores: `cover_required`, `monument_required`, `bad_url`, `bad_district`, `bad_parcel`, `parcel_taken`, `monument_too_big`, `district_full` |

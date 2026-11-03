@@ -14,6 +14,7 @@ import { world } from "../net/world-store";
 import { input, onWheelKey } from "../world/input";
 import { CheerIcon, DanceIcon, hudIconButton, SitIcon, WaveIcon } from "./icons";
 import { PeopleIcon } from "./people-icons";
+import { WeaponButtons, WeaponInventory } from "./WeaponHud";
 
 const box = "rounded-xl border border-cal/10 bg-noche/80 backdrop-blur";
 
@@ -100,6 +101,7 @@ function FightTab({ touch }: { touch: boolean }) {
       <p className="text-cal/80">{t(`people.style.${p.style}` as Key)}</p>
       <p className="text-xs text-cal/60">{t("people.fight.consent")}</p>
       {!touch && <p className="meta text-xs text-cal/50">{t("people.fight.keys")}</p>}
+      <WeaponInventory touch={touch} />
     </div>
   );
 }
@@ -127,7 +129,7 @@ export function ActionWheel({ solo, touch = false }: { solo: boolean; touch?: bo
       {open &&
         createPortal(
           <div className="pointer-events-auto fixed inset-0 z-40 grid place-items-center bg-noche/35" onPointerDown={(e) => e.target === e.currentTarget && close()}>
-            <div role="dialog" aria-label={t("people.wheel")} className={`w-[min(20rem,calc(100vw-2rem))] p-3 ${box}`}>
+            <div role="dialog" aria-label={t("people.wheel")} className={`max-h-[calc(100dvh-2rem)] w-[min(20rem,calc(100vw-2rem))] overflow-y-auto p-3 ${box}`}>
               {tabs.length > 1 && (
                 <div role="tablist" className="mb-1 grid grid-cols-4 gap-1">
                   {tabs.map((id) => (
@@ -180,6 +182,7 @@ export function FightButtons({ className = "", touch = false }: { className?: st
   return (
     <div role="toolbar" aria-label={t("people.fight.toggle")} className={`relative flex gap-1.5 ${className}`}>
       <HealthBar />
+      <WeaponButtons touch={touch} />
       {moves.map((m) => (
         <button
           key={m}

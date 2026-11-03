@@ -24,6 +24,11 @@ export interface Principal {
   /** Personas: cuándo entraron de verdad (las renovaciones lo conservan; hay un máximo). */
   auth?: number;
   /**
+   * Personas: su inventario de armas (§9 octies ter; la pipa no hace falta decirla, la tiene todo el
+   * mundo). Lo lee el distrito con armas sin preguntar al Directory.
+   */
+  w?: string[];
+  /**
    * Agentes de una parcela: solo construyen en este chunk, dentro de este rectángulo, y lo que
    * hacen es del proyecto (`owner`, `prj_<id>`), no de la clave: revocarla no borra lo construido.
    */

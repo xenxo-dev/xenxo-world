@@ -1,5 +1,5 @@
 {
- "$comment": "Distritos y su plantilla (coordenadas del chunk: X este, Z sur, metros). La usan el servidor (districts.ts), la forja (tools/forge/district.py y city.py) y la web (por GET /districts). Disposición v3 (tools/forge/layout_v3.py): 256 × 256 m (`bounds`), más grande que su chunk. En el centro, la ciudad (`city`: 3 × 3 manzanas, la del medio es la plaza); alrededor, dos anillos de calles (`roads`) con 64 parcelas de 15 × 15 m mirando a ellos (N, S, E y W: fila 1 del 1 al 6, fila 2 del 7 al 16) y cuatro avenidas; al sur, la puerta del nexo. Si cambias algo, vuelve a forjar (npm run forge:districts) y sube DISTRICT_SEED_VERSION; si mueves parcelas, añade su migración (districts.ts). `rank`: su orden en el panel (1 = el más importante; los «próximamente» van siempre detrás). `fight`: su estilo de pelea (FIGHT_STYLES del protocolo). `parkour`: en él se salta, se trepa y se corre por las paredes (WELCOME.parkour, apps/web/src/world/parkour).",
+ "$comment": "Distritos y su plantilla (coordenadas del chunk: X este, Z sur, metros). La usan el servidor (districts.ts), la forja (tools/forge/district.py y city.py) y la web (por GET /districts). Disposición v3 (tools/forge/layout_v3.py): 256 × 256 m (`bounds`), más grande que su chunk. En el centro, la ciudad (`city`: 3 × 3 manzanas, la del medio es la plaza); alrededor, dos anillos de calles (`roads`) con 64 parcelas de 15 × 15 m mirando a ellos (N, S, E y W: fila 1 del 1 al 6, fila 2 del 7 al 16) y cuatro avenidas; al sur, la puerta del nexo. Si cambias algo, vuelve a forjar (npm run forge:districts) y sube DISTRICT_SEED_VERSION; si mueves parcelas, añade su migración (districts.ts). `rank`: su orden en el panel (1 = el más importante; los «próximamente» van siempre detrás). `fight`: su estilo de pelea (FIGHT_STYLES del protocolo). `parkour`: en él se salta, se trepa y se corre por las paredes (WELCOME.parkour, apps/web/src/world/parkour). `weapons`: en él hay armas en el modo pelea (WELCOME.weapons, §9 octies ter). `loot`: las carreras del distrito con cofre al llegar a la meta y su tabla de botín (LOOT_TABLES del protocolo).",
  "parcel": {
   "w": 15,
   "d": 15,
@@ -501,7 +501,7 @@
    }
   },
   {
-   "id": "cero", "rank": 1, "fight": "duel",
+   "id": "cero", "rank": 1, "fight": "duel", "weapons": true,
    "chunk": "c_-1_-1",
    "category": "other",
    "color": "#a26bff",
@@ -516,7 +516,7 @@
    }
   },
   {
-   "id": "vertical", "rank": 7, "fight": "comic", "parkour": true,
+   "id": "vertical", "rank": 7, "fight": "comic", "parkour": true, "loot": { "nivel5": "duro", "nivel6": "extremo" },
    "chunk": "c_-1_1",
    "category": "other",
    "color": "#ff7a45",

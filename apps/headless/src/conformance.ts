@@ -9,7 +9,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { AVATAR_PRESETS } from "../../realtime/src/avatar-presets";
-import { BUDGETS, Emote, EMOTES, GameManifest, LabelV1, msg, PLACES } from "@xenxo/protocol";
+import { BUDGETS, Emote, EMOTES, GameManifest, isWeaponId, LabelV1, msg, PLACES, WEAPON_IDS, WEAPONS } from "@xenxo/protocol";
 import { XenxoClient } from "./client";
 import { makeBoxGlb, makeCoverPng, makeVrmMannequin, withExternalImage } from "./fixtures";
 import { Api } from "./http";
@@ -290,11 +290,13 @@ await scenario("modo pelea con vida: cada golpe resta (lo ven ella y los de cerc
   const after = b.next("HEALTH", (m) => m.payload.session_id === B && m.payload.hp === 78, 3000);
   send(a, "HIT", { to: B, move: "slide" });
   await Promise.all([swept, after]);
-  // Ya levantado, a puñetazos hasta cero: fuera de combate hasta `down_until`.
-  await sleep(2600);
+  // Ya levantado (pasado el rato en que no se le puede dar, con margen por la red), a puñetazos hasta
+  // cero: fuera de combate hasta `down_until`. Uno de más por si alguno llega aún en ese rato (los de
+  // después de caer se ignoran).
+  await sleep(2900);
   const ko = b.next("HEALTH", (m) => m.payload.session_id === B && m.payload.hp === 0 && !!m.payload.down_until, 12_000);
   const koEv = a.next("HIT_EVENT", (m) => m.payload.to === B && m.payload.ko === true && m.payload.fall, 12_000);
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 9; i++) {
     at([41, 1.6, 120]);
     send(a, "HIT", { to: B, move: "punch" });
     await sleep(650);
@@ -316,6 +318,90 @@ await scenario("modo pelea con vida: cada golpe resta (lo ven ella y los de cerc
   a.close();
   b.close();
 }, 40_000);
+
+await scenario("armas (Distrito Cero): con el modo pelea, un invitado dispara la pipa (resta su daño, lo ven los dos y el rayo llega también a quien dispara), pero ninguna otra; a su ritmo y a su alcance; el arma en la mano va en su pose; los disparos llegan a la gente de las salas desde lejos (un golpe no); y fuera de Cero no hay armas", async () => {
+  const send = (c: XenxoClient, type: string, payload: unknown) => c.sendRaw(JSON.stringify(msg(type, payload)));
+  const chunkId = "c_-1_-1"; // Distrito Cero
+  const a = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-armas-a" });
+  const b = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-armas-b" });
+  assert(JSON.stringify(a.welcome.weapons) === JSON.stringify(["pipa"]), `un invitado, solo la pipa (${JSON.stringify(a.welcome.weapons)})`);
+  const A = a.welcome.session_id, B = b.welcome.session_id;
+  const at = (pb: [number, number, number] = [42, 1.6, 120]) => {
+    a.pose([40, 1.6, 120]);
+    b.pose(pb);
+  };
+  for (let i = 0; i < 2; i++) {
+    at();
+    await sleep(220);
+  }
+  // Sin el modo pelea, no se dispara.
+  const noFight = a.next("ERROR", (m) => /modo pelea/.test(m.payload.message), 3000);
+  send(a, "SHOOT", { weapon: "pipa", at: [42, 1.6, 120], to: B });
+  await noFight;
+  const full = a.next("HEALTH", (m) => m.payload.session_id === B && m.payload.hp === 100, 3000);
+  send(a, "FIGHT", { on: true });
+  send(b, "FIGHT", { on: true });
+  await full;
+  at();
+  await sleep(250);
+  // La pipa le da: le quita su daño; el disparo lo ven los dos (quien dispara, por si le dio).
+  const shotA = a.next("SHOT", (m) => m.payload.from === A && m.payload.to === B && m.payload.weapon === "pipa", 3000);
+  const shotB = b.next("SHOT", (m) => m.payload.from === A && m.payload.to === B && !!m.payload.dir, 3000);
+  const hurt = b.next("HEALTH", (m) => m.payload.session_id === B && m.payload.hp === 100 - WEAPONS.pipa.damage, 3000);
+  send(a, "SHOOT", { weapon: "pipa", at: [42, 1.6, 120], to: B });
+  await Promise.all([shotA, shotB, hurt]);
+  // Otra que no es suya (sin cuenta, ninguna), no.
+  const notMine = a.next("ERROR", (m) => (m.payload.detail as { reason?: string } | undefined)?.reason === "weapon", 3000);
+  send(a, "SHOOT", { weapon: "halcon", at: [42, 1.6, 120], to: B });
+  await notMine;
+  // A su ritmo: de dos seguidos, sale uno.
+  await sleep(WEAPONS.pipa.gapMs + 80);
+  let shots = 0;
+  const off = b.onMessage((m) => void (m.type === "SHOT" && m.payload.from === A && shots++));
+  send(a, "SHOOT", { weapon: "pipa", at: [42, 1.6, 120], to: B });
+  send(a, "SHOOT", { weapon: "pipa", at: [42, 1.6, 120], to: B });
+  await sleep(700);
+  off();
+  assert(shots === 1, `a su ritmo: de dos seguidos, uno (${shots})`);
+  // A su alcance: a 30 m el rayo se queda en sus 18 y no le da.
+  for (let i = 0; i < 2; i++) {
+    at([40, 1.6, 150]);
+    await sleep(220);
+  }
+  const far = b.next("SHOT", (m) => m.payload.from === A && !m.payload.to, 3000);
+  send(a, "SHOOT", { weapon: "pipa", at: [40, 1.6, 150], to: B });
+  const f = (await far).payload.at;
+  const reach = Math.hypot(f[0] - 40, f[1] - 1.6, f[2] - 120);
+  assert(reach <= WEAPONS.pipa.range + 0.01, `el rayo, hasta su alcance (${reach.toFixed(2)} m)`);
+  // El arma en la mano se ve en su pose.
+  await sleep(250);
+  const seen = b.next("POSES", (m) => m.payload.poses.some((p) => p.session_id === A && p.weapon === "pipa"), 3000);
+  a.sendRaw(msg("POSE", { t: Date.now(), head: { p: [40, 1.6, 121], r: [0, 0, 0, 1] }, weapon: "pipa" }));
+  await seen;
+  // La gente de las salas: un disparo les llega desde lejos (a los de cerca); un golpe, no.
+  const lives = JSON.parse(readFileSync(new URL("../../realtime/src/district-interiors.json", import.meta.url), "utf8")) as { districts: Record<string, { npcs?: { x: number; y: number; z: number; room: number }[] }> };
+  const res0 = lives.districts.cero!.npcs!.filter((n) => n.room >= 0)[0]!;
+  for (let i = 0; i < 2; i++) {
+    a.pose([res0.x + 20, res0.y + 1.6, res0.z]);
+    b.pose([res0.x + 1, res0.y + 1.6, res0.z]);
+    await sleep(220);
+  }
+  const resShot = b.next("NPC_HIT_EVENT", (m) => m.payload.res === 0 && m.payload.kind === "shot" && m.payload.from === A, 3000);
+  send(a, "NPC_HIT", { res: 0, dir: [-1, 0], power: 1.7, kind: "shot" });
+  await resShot;
+  const tooFar = a.next("ERROR", (m) => /lejos/.test(m.payload.message), 3000);
+  send(a, "NPC_HIT", { res: 0, dir: [-1, 0], power: 3, kind: "hit" });
+  await tooFar;
+  a.close();
+  b.close();
+  // Fuera de Distrito Cero no hay armas.
+  const c = await XenxoClient.connect({ baseUrl, chunkId: "c_-1_0", displayName: "conf-armas-c" });
+  assert(c.welcome.weapons === undefined, "en Píxel no hay armas");
+  const nope = c.next("ERROR", (m) => /no hay armas/.test(m.payload.message), 3000);
+  send(c, "SHOOT", { weapon: "pipa", at: [40, 1.6, 120] });
+  await nope;
+  c.close();
+}, 30_000);
 
 await scenario("ciudadanos compartidos: el servidor elige quién los lleva (NPC_HOST) entre quien sabe, reparte su estado a los demás y a quien llega, le pasa los golpes y las propuestas de quien está cerca (los de la gente de las salas, a los de cerca) y, si se aparta o se va, elige a otro", async () => {
   const send = (c: XenxoClient, type: string, payload: unknown) => c.sendRaw(JSON.stringify(msg(type, payload)));
@@ -1255,7 +1341,7 @@ await scenario("Ruta de las Azoteas (Vertical): parkour solo aquí (WELCOME.park
   }
 });
 
-await scenario("Niveles de Vertical: seis carreras (dos fáciles, dos medias y dos para tryhards) con su salida, sus puntos en los tejados, su meta, su cartel y su marcador de la semana; seis retos escondidos con su marcador; y el nivel 6 y los retos, hechos de verdad, dan sus insignias", async () => {
+await scenario("Niveles de Vertical: seis carreras (dos fáciles, dos medias y dos para tryhards) con su salida, sus puntos en los tejados, su meta, su cartel y su marcador de la semana; seis retos escondidos con su marcador; y el nivel 6 y los retos, hechos de verdad, dan sus insignias y un cofre (un arma al azar que pasa a la cuenta, se usa en Distrito Cero y sale en la exportación)", async () => {
   const chunkId = "c_-1_1";
   const api = new Api(baseUrl);
   await api.register(`conf niveles ${randomUUID().slice(0, 6)}`);
@@ -1320,6 +1406,9 @@ await scenario("Niveles de Vertical: seis carreras (dos fáciles, dos medias y d
   await go(head(pos(point("finish"))), 6);
   const done = await u.activity("CHECKPOINT", point("finish").entity_id);
   assert(done.type === "RACE" && done.payload.state === "finish" && (done.payload.ms ?? 0) > 0, `nivel 6: meta con su tiempo (${JSON.stringify(done.payload)})`);
+  // El cofre: un arma al azar (de las que se ganan: no la pipa), nueva para esta cuenta.
+  const loot = done.type === "RACE" ? done.payload.loot : undefined;
+  assert(!!loot && isWeaponId(loot.weapon) && loot.weapon !== "pipa" && loot.fresh, `nivel 6: su cofre (${JSON.stringify(loot)})`);
   // Los seis retos, uno tras otro.
   let last: { complete?: boolean } = {};
   for (const r of retos) {
@@ -1333,6 +1422,18 @@ await scenario("Niveles de Vertical: seis carreras (dos fáciles, dos medias y d
   const got = await api.call<{ new: { id: string }[] }>("POST", "/me/badges/check");
   const ids = got.ok ? got.data.new.map((b) => b.id) : [];
   assert(ids.includes("vertical_salto") && ids.includes("vertical_retos"), `insignias «Salto de fe» y «Tryhard» (${JSON.stringify(got)})`);
+  // El arma pasa a la cuenta (lo comprueba el servidor con el distrito) y la sesión nueva la lleva.
+  const armed = await api.call<{ weapons: string[]; new: string[]; token?: string; principal?: { w?: string[] } }>("POST", "/me/weapons/check");
+  assert(armed.ok && armed.data.new.includes(loot!.weapon) && armed.data.weapons.includes(loot!.weapon) && !!armed.data.token && !!armed.data.principal?.w?.includes(loot!.weapon), `el arma, a la cuenta (${JSON.stringify(armed)})`);
+  api.token = armed.data.token!;
+  const again = await api.call<{ new: string[] }>("POST", "/me/weapons/check");
+  assert(again.ok && again.data.new.length === 0, "comprobar otra vez no da nada nuevo");
+  const zero = await XenxoClient.connect({ baseUrl, chunkId: "c_-1_-1", token: api.token });
+  const usable = zero.welcome.weapons ?? [];
+  assert(usable.includes("pipa") && usable.includes(loot!.weapon) && usable.every((w) => (WEAPON_IDS as readonly string[]).includes(w)), `en Distrito Cero, la pipa y la suya (${JSON.stringify(usable)})`);
+  zero.close();
+  const ex = await api.call<{ user: { weapons?: string }; activities: { chunk: string; loot?: { weapon: string }[] }[] }>("GET", "/me/export");
+  assert(ex.ok && ex.data.user.weapons?.split(",").includes(loot!.weapon) && ex.data.activities.some((a) => a.loot?.some((l) => l.weapon === loot!.weapon)), "el inventario y el cofre, en la exportación");
 }, 90_000);
 
 await scenario("Plaza tablero (Píxel): el servidor enciende una figura, cuenta lo que se pisa con las poses y da un punto del día", async () => {

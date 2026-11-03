@@ -29,6 +29,7 @@ Descargados de kenney.nl el 27-10-2026. Licencia: Creative Commons Zero (CC0), c
 | `space-kit` | Space Kit | Frontera |
 | `car-kit` | Car Kit | Calles |
 | `mini-market` | Mini Market | Ágora, tiendas |
+| `blaster-kit` | Blaster Kit 2.1 (descargado el 03-11-2026) | Armas de Distrito Cero y el cofre del botín de Vertical (`tools/models/library/blasters.mjs`) |
 
 Reglas:
 - Se ha quitado `mini-arcade/gambling-machine.glb`: en xenxo no hay juego con dinero, ni de adorno.

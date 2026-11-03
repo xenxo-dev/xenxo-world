@@ -111,6 +111,8 @@ export const npcs = {
    */
   knock: new Float32Array(MAX_NPC * 4),
   knockHead: new Uint8Array(MAX_NPC),
+  /** Por hueco: el aviso es de un disparo (1: armas, §9 octies ter), no de un golpe ni del coche. */
+  knockShot: new Uint8Array(MAX_NPC),
   /** Por hueco: en el suelo (knock.ts). A quien está en el suelo no se le vuelve a dar. */
   down: new Uint8Array(MAX_NPC),
 };
@@ -136,8 +138,8 @@ export const crowd = {
     out.y = npcs.pos[i * 3 + 1]!;
     out.z = npcs.pos[i * 3 + 2]!;
   },
-  /** Le dan a la persona k. Devuelve false si ya está en el suelo (no se le da). */
-  hit(k: number, nx: number, nz: number, speed: number, head = false): boolean {
+  /** Le dan a la persona k (`shot`: con un disparo). Devuelve false si ya está en el suelo (no se le da). */
+  hit(k: number, nx: number, nz: number, speed: number, head = false, shot = false): boolean {
     const i = npcAt(k);
     if (npcs.down[i]) return false;
     npcs.knock[i * 4] = performance.now();
@@ -145,6 +147,7 @@ export const crowd = {
     npcs.knock[i * 4 + 2] = nz;
     npcs.knock[i * 4 + 3] = speed;
     npcs.knockHead[i] = head ? 1 : 0;
+    npcs.knockShot[i] = shot ? 1 : 0;
     return true;
   },
 };
@@ -475,6 +478,56 @@ export function cameraReach(tx: number, ty: number, tz: number, cx: number, cy: 
     if (inside(tx + (cx - tx) * k, ty + (cy - ty) * k, tz + (cz - tz) * k, 0.25)) return Math.max(0.15, Math.min(limit, (i - 1) / steps));
   }
   return limit;
+}
+
+/**
+ * Hasta dónde llega un rayo de (ax, ay, az) a (bx, by, bz) sin chocar con nada sólido (las armas,
+ * §9 octies ter: ver a quién se apunta y dónde acaba el disparo): fracción 0..1 del segmento. Las
+ * cajas, con su intersección exacta (las que contienen el origen no cuentan: no son una pared que
+ * se tenga delante); las mallas, con su árbol. Sin objetos nuevos.
+ */
+export function rayReach(ax: number, ay: number, az: number, bx: number, by: number, bz: number): number {
+  refresh();
+  const dx = bx - ax, dy = by - ay, dz = bz - az;
+  const len = Math.hypot(dx, dy, dz);
+  if (len < 1e-3) return 1;
+  let best = 1;
+  for (const b of boxes) {
+    // Al marco de la caja (el mismo giro que `inside`).
+    const ox = ax - b.x, oz = az - b.z, oy = ay - b.y;
+    const lox = ox * b.c - oz * b.s, loz = ox * b.s + oz * b.c;
+    const ldx = dx * b.c - dz * b.s, ldz = dx * b.s + dz * b.c;
+    let t0 = 0, t1 = best;
+    let inBox = true;
+    for (let k = 0; k < 3; k++) {
+      const o = k === 0 ? lox : k === 1 ? oy : loz;
+      const d = k === 0 ? ldx : k === 1 ? dy : ldz;
+      const h = k === 0 ? b.hx : k === 1 ? b.hy : b.hz;
+      if (Math.abs(o) > h) inBox = false;
+      if (Math.abs(d) < 1e-9) {
+        if (Math.abs(o) > h) {
+          t0 = 2;
+          break;
+        }
+        continue;
+      }
+      let ta = (-h - o) / d, tb = (h - o) / d;
+      if (ta > tb) {
+        const sw = ta;
+        ta = tb;
+        tb = sw;
+      }
+      if (ta > t0) t0 = ta;
+      if (tb < t1) t1 = tb;
+      if (t0 > t1) break;
+    }
+    if (!inBox && t0 <= t1 && t0 < best) best = t0;
+  }
+  if (meshCols.size) {
+    const d = castMeshes(ax, ay, az, dx, dy, dz, len * best, false);
+    if (d !== Infinity) best = Math.min(best, d / len);
+  }
+  return Math.max(0, best);
 }
 
 /* --- Sondas del parkour (world/parkour): paredes, bordes y huecos --- */

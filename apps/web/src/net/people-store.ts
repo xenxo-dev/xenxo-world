@@ -19,7 +19,8 @@ export interface ReactionEvent {
 export interface HitEvent {
   from: string;
   to: string;
-  move: FightMove;
+  /** El golpe (HIT_EVENT) o un disparo que le ha dado (`shot`: SHOT, net/weapons.ts). */
+  move: FightMove | "shot";
   style: FightStyle;
   dir: [number, number];
   power: number;
@@ -172,13 +173,9 @@ class PeopleStore {
         if (m.payload.a === this.me || m.payload.reason === "far") this.setNotice(`people.pair.${m.payload.reason}`);
         else this.bump();
         break;
-      case "HIT_EVENT": {
-        const ev: HitEvent = { ...m.payload, ko: !!m.payload.ko, at: now };
-        this.hits = [...this.hits.filter((h) => now - h.at < HIT_MS), ev].slice(-16);
-        this.lastHit.set(ev.to, ev);
-        for (const fn of this.hitListeners) fn(ev);
+      case "HIT_EVENT":
+        this.hit({ ...m.payload, ko: !!m.payload.ko, at: now });
         break;
-      }
       case "ERROR": {
         // ref = people-<acción>-<n>: el aviso es por acción (los textos del servidor no se traducen).
         const ref = m.payload.ref;
@@ -187,12 +184,19 @@ class PeopleStore {
         // Reaparecer se repite solo hasta que el servidor lo da por bueno (selfPeople.ts): sin aviso.
         if (action === "respawn") break;
         const reason = (m.payload.detail as { reason?: string } | undefined)?.reason;
-        this.setNotice(m.payload.code === "rate_limited" ? "people.err.slow" : reason === "dodged" ? "people.err.dodged" : `people.err.${action}`);
+        this.setNotice(m.payload.code === "rate_limited" ? "people.err.slow" : reason === "dodged" || reason === "weapon" ? `people.err.${reason}` : `people.err.${action}`);
         break;
       }
       default:
         break;
     }
+  }
+
+  /** Le ha llegado algo a alguien: un golpe (HIT_EVENT) o un disparo (SHOT, net/weapons.ts). */
+  hit(ev: HitEvent) {
+    this.hits = [...this.hits.filter((h) => ev.at - h.at < HIT_MS), ev].slice(-16);
+    this.lastHit.set(ev.to, ev);
+    for (const fn of this.hitListeners) fn(ev);
   }
 
   /** La propuesta ya contestada (o caducada) deja de verse. */

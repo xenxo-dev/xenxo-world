@@ -30,6 +30,16 @@ export interface Motion {
    */
   pk?: string | null;
   pkP?: number;
+  /**
+   * El arma que lleva en la mano (sacada; world/people/guns.ts y la pose de los demás) o null. Con
+   * ella, el avatar apunta (IK de los brazos) y se dibuja el arma en la mano (HeldWeapon).
+   */
+  weapon?: string | null;
+  /**
+   * Dónde está su mano derecha (respecto al grupo del personaje), con el arma sacada: lo escribe el
+   * avatar después de animarse (avatar-model.ts). `ok` false: sin esqueleto (el muñeco de respaldo).
+   */
+  hand?: { x: number; y: number; z: number; ok: boolean };
 }
 
 export function createMotion(): Motion {

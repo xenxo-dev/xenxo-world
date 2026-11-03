@@ -36,9 +36,17 @@ import {
   type Peer,
   type FightMove,
   type FightStyle,
+  type NpcHitKind,
   type NpcSnap,
   type PairAction,
   type Reaction,
+  isLootTable,
+  rollLoot,
+  SHOT_MAX_DY,
+  SHOT_MAX_RANGE,
+  usableWeapons,
+  WEAPONS,
+  type WeaponId,
 } from "@xenxo/protocol";
 import type { Env } from "./index";
 import { randomId, type Principal } from "./auth";
@@ -221,7 +229,7 @@ export interface ChunkDump {
   stands: { project_id: string; slot: number }[];
   chat: { id: string; ts: number; sender: string; kind: string; display_name: string; session_id: string; text: string; hidden: number }[];
   /** Actividades: lo recogido, las búsquedas completas y los mejores tiempos (activities.ts). */
-  activities?: { collected: Record<string, unknown>[]; hunts: Record<string, unknown>[]; races: Record<string, unknown>[]; points?: Record<string, unknown>[]; race_weeks?: Record<string, unknown>[] };
+  activities?: { collected: Record<string, unknown>[]; hunts: Record<string, unknown>[]; races: Record<string, unknown>[]; points?: Record<string, unknown>[]; race_weeks?: Record<string, unknown>[]; loot?: Record<string, unknown>[] };
   /** Distrito de la comunidad: lo que es (con lo del sistema que lleva). Ausente en los demás. */
   community?: string | null;
 }
@@ -265,6 +273,8 @@ export class ChunkRoom extends DurableObject<Env> {
   private reactAt = new Map<string, number>();
   private pairOffers = new Map<string, { to: string; kind: PairAction; t: number }>();
   private hitAt = new Map<string, number>();
+  /** Último disparo de cada sesión (armas, §9 octies ter). */
+  private shotAt = new Map<string, number>();
   private downUntil = new Map<string, number>();
   private duelHits = new Map<string, number[]>();
   /** Vida en el modo pelea: la que tenía en `at` (se recupera sola: hpAt) y hasta cuándo está fuera de combate. */
@@ -561,6 +571,7 @@ export class ChunkRoom extends DurableObject<Env> {
           ...this.themeHint(),
           ...(this.fightStyle ? { fight: this.fightStyle } : {}),
           ...(this.parkour ? { parkour: true } : {}),
+          ...(this.weaponsHere ? { weapons: this.weaponsOf(att) } : {}),
         }));
         // En solitario (el nexo) nadie ve a nadie: ni gente, ni poses, ni chat.
         if (this.solo) {
@@ -594,6 +605,8 @@ export class ChunkRoom extends DurableObject<Env> {
         const now = Date.now();
         if (now - (this.lastPoseAt.get(att.session_id) ?? 0) < MIN_POSE_INTERVAL_MS) return; // descarta en silencio
         const { emote, vehicle } = m.payload;
+        // El arma en la mano: donde hay armas, en el modo pelea y una que pueda usar (si no, fuera).
+        const weapon = m.payload.weapon && att.fight && this.weaponsHere && !vehicle && this.weaponsOf(att).includes(m.payload.weapon) ? m.payload.weapon : undefined;
         const headR = unitQuat(m.payload.head.r);
         if (!headR || !this.inBounds(m.payload.head.p)) return;
         this.lastPoseAt.set(att.session_id, now);
@@ -610,7 +623,7 @@ export class ChunkRoom extends DurableObject<Env> {
         const car = m.payload.car && carR ? { p: m.payload.car.p, r: carR } : undefined;
         const withCar = roads && car && this.inBounds(car.p) ? { car, ...(vehicle ? { vehicle } : {}) } : {};
         const jump = this.trackMove(ws, att, head.p, now);
-        this.poses.set(att.session_id, { session_id: att.session_id, head, ...(hand_l ? { hand_l } : {}), ...(hand_r ? { hand_r } : {}), ...(emote ? { emote } : {}), ...withCar, ...(att.fight ? { fight: true } : {}) });
+        this.poses.set(att.session_id, { session_id: att.session_id, head, ...(hand_l ? { hand_l } : {}), ...(hand_r ? { hand_r } : {}), ...(emote ? { emote } : {}), ...withCar, ...(att.fight ? { fight: true } : {}), ...(weapon ? { weapon } : {}) });
         this.dirty.add(att.session_id);
         this.scheduleTick();
         // Una pose que llega de un salto no pisa baldosas.
@@ -644,6 +657,8 @@ export class ChunkRoom extends DurableObject<Env> {
         return this.handleHit(ws, att, m.id, m.payload.to, m.payload.move);
       case "RESPAWN":
         return this.handleRespawn(ws, att, m.id);
+      case "SHOOT":
+        return this.handleShoot(ws, att, m.id, m.payload);
       case "NPC_STATE":
         return this.handleNpcState(ws, att, m.id, m.payload.cast);
       case "NPC_HIT":
@@ -676,6 +691,7 @@ export class ChunkRoom extends DurableObject<Env> {
     this.reactAt.delete(att.session_id);
     this.pairOffers.delete(att.session_id);
     this.hitAt.delete(att.session_id);
+    this.shotAt.delete(att.session_id);
     this.downUntil.delete(att.session_id);
     this.duelHits.delete(att.session_id);
     this.health.delete(att.session_id);
@@ -1333,6 +1349,7 @@ export class ChunkRoom extends DurableObject<Env> {
         races: this.sql.exec("SELECT * FROM act_race_best").toArray(),
         points: this.sql.exec("SELECT * FROM act_points").toArray(),
         race_weeks: this.sql.exec("SELECT * FROM act_race_week").toArray(),
+        loot: this.sql.exec("SELECT * FROM act_loot").toArray(),
       },
     };
   }
@@ -1351,6 +1368,7 @@ export class ChunkRoom extends DurableObject<Env> {
       one("SELECT COUNT(*) AS n, COALESCE(MAX(ts), 0) AS t FROM act_race_best"),
       one("SELECT COUNT(*) AS n, COALESCE(MAX(ts), 0) AS t FROM act_hunt_done"),
       one("SELECT COUNT(*) AS n, COALESCE(SUM(points), 0) AS p FROM act_points"),
+      one("SELECT COUNT(*) AS n, COALESCE(MAX(ts), 0) AS t FROM act_loot"),
       one("SELECT v FROM meta WHERE k = 'community'"),
     ].join("|");
   }
@@ -1391,6 +1409,10 @@ export class ChunkRoom extends DurableObject<Env> {
         this.sql.exec("DELETE FROM act_points");
         for (const r of (d.activities.points ?? []) as { board_key: string; day: string; sub: string; name: string; player_no: number | null; points: number; ts: number }[]) {
           this.sql.exec("INSERT OR IGNORE INTO act_points (board_key, day, sub, name, player_no, points, ts) VALUES (?, ?, ?, ?, ?, ?, ?)", r.board_key, r.day, r.sub, r.name, r.player_no, r.points, r.ts);
+        }
+        this.sql.exec("DELETE FROM act_loot");
+        for (const r of (d.activities.loot ?? []) as { sub: string; weapon: string; race_key: string; ts: number }[]) {
+          this.sql.exec("INSERT INTO act_loot (sub, weapon, race_key, ts) VALUES (?, ?, ?, ?)", r.sub, r.weapon, r.race_key, r.ts);
         }
       }
       if (d.community) {
@@ -1531,6 +1553,7 @@ export class ChunkRoom extends DurableObject<Env> {
       this.sql.exec("DELETE FROM act_race_best WHERE sub = ?", owner);
       this.sql.exec("DELETE FROM act_race_week WHERE sub = ?", owner);
       this.sql.exec("DELETE FROM act_points WHERE sub = ?", owner);
+      this.sql.exec("DELETE FROM act_loot WHERE sub = ?", owner);
       this.sql.exec("DELETE FROM sandbox WHERE owner = ?", owner);
       // Del registro se va quién y lo que escribió (rótulos…); de la idempotencia, sus claves.
       this.sql.exec("UPDATE events SET actor = 'deleted', data = NULL WHERE actor = ?", owner);
@@ -1642,6 +1665,7 @@ export class ChunkRoom extends DurableObject<Env> {
       best_times: this.sql.exec("SELECT race_key, ms, ts FROM act_race_best WHERE sub = ?", sub).toArray(),
       weekly_times: this.sql.exec("SELECT race_key, week, ms, ts FROM act_race_week WHERE sub = ?", sub).toArray(),
       daily_points: this.sql.exec("SELECT board_key, day, points FROM act_points WHERE sub = ?", sub).toArray(),
+      loot: this.sql.exec<{ weapon: string; race_key: string; ts: number }>("SELECT weapon, race_key, ts FROM act_loot WHERE sub = ? ORDER BY ts", sub).toArray(),
       sandbox_pieces: this.sql
         .exec<{ entity_id: string; day: string; data: string }>("SELECT s.entity_id, s.day, e.data FROM sandbox s JOIN entities e ON e.entity_id = s.entity_id WHERE s.owner = ?", sub)
         .toArray()
@@ -1790,7 +1814,26 @@ export class ChunkRoom extends DurableObject<Env> {
     this.scoreCache.clear();
     const best = Math.min(ms, prev ?? ms);
     const rank = 1 + this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM act_race_best WHERE race_key = ? AND ms < ?", key, best).one().n;
-    this.send(ws, msg("RACE", { race, state: "finish", ms, best, rank }));
+    const loot = this.rollLootFor(att, it.owner, race, key, now);
+    this.send(ws, msg("RACE", { race, state: "finish", ms, best, rank, ...(loot ? { loot } : {}) }));
+  }
+
+  /**
+   * Cofre al llegar a la meta (§9 octies ter): en las carreras del sistema con tabla de botín (`loot`
+   * del distrito: los niveles para tryhards de Vertical), un arma al azar. Se guarda aquí; el Worker
+   * la pasa a la cuenta. `fresh`: no la tenía (ni en su sesión ni en lo que ya le había salido aquí).
+   */
+  private rollLootFor(att: Attachment, owner: string, race: string, key: string, now: number): { weapon: WeaponId; fresh: boolean } | null {
+    if (owner !== "system" || this.community || !this.chunkId) return null;
+    const table = districtByChunk(this.chunkId)?.loot?.[race];
+    if (!isLootTable(table)) return null;
+    const rnd = new Uint32Array(2);
+    crypto.getRandomValues(rnd);
+    const weapon = rollLoot(table, rnd[0]! / 2 ** 32, rnd[1]! / 2 ** 32);
+    const sub = att.principal.sub;
+    const had = (att.principal.w ?? []).includes(weapon) || this.sql.exec("SELECT 1 FROM act_loot WHERE sub = ? AND weapon = ? LIMIT 1", sub, weapon).toArray().length > 0;
+    this.sql.exec("INSERT INTO act_loot (sub, weapon, race_key, ts) VALUES (?, ?, ?, ?)", sub, weapon, key, now);
+    return { weapon, fresh: !had };
   }
 
   /* ---------------------------------------------------------------- */
@@ -2203,6 +2246,17 @@ export class ChunkRoom extends DurableObject<Env> {
     return districtByChunk(this.chunkId)?.parkour === true;
   }
 
+  /** Armas (§9 octies ter): solo en los distritos del sistema que lo dicen (Distrito Cero). */
+  private get weaponsHere(): boolean {
+    if (this.solo || !this.chunkId || this.community) return false;
+    return districtByChunk(this.chunkId)?.weapons === true;
+  }
+
+  /** Con qué armas puede disparar una sesión: la pipa y, las cuentas, las de su inventario (en su sesión: `w`). */
+  private weaponsOf(att: Attachment): WeaponId[] {
+    return usableWeapons(att.principal.kind === "user" ? att.principal.w : null);
+  }
+
   /** La conexión de una sesión de este lugar (si sigue). */
   private sessionById(id: string): { ws: WebSocket; att: Attachment } | null {
     for (const ws of this.ctx.getWebSockets()) {
@@ -2292,7 +2346,8 @@ export class ChunkRoom extends DurableObject<Env> {
     // Los demás lo ven en su siguiente pose (con su marca encima).
     const pose = this.poses.get(att.session_id);
     if (pose) {
-      const { fight: _was, ...rest } = pose;
+      // Sin el modo pelea, tampoco el arma en la mano.
+      const { fight: _was, weapon: _gun, ...rest } = pose;
       this.poses.set(att.session_id, on ? { ...rest, fight: true } : rest);
       this.dirty.add(att.session_id);
       this.scheduleTick();
@@ -2383,6 +2438,66 @@ export class ChunkRoom extends DurableObject<Env> {
     this.sendHealth(att.session_id, ws);
   }
 
+  /**
+   * Un disparo (§9 octies ter): con un arma suya, en el modo pelea y a su ritmo. El rayo se reparte a
+   * quien esté cerca (también a quien dispara: por si le dio). Si le da a alguien en el modo pelea a su
+   * alcance, le quita vida como un golpe (sin la regla del duelo) y lo empuja o, con las que tumban, lo
+   * tira. A la gente de la ciudad le llega por NPC_HIT (`shot`).
+   */
+  private handleShoot(ws: WebSocket, att: Attachment, ref: string | undefined, p: { weapon: WeaponId; at: [number, number, number]; to?: string }) {
+    if (!this.weaponsHere) return this.sendError(ws, ref, "forbidden", "aquí no hay armas");
+    if (!att.fight) return this.sendError(ws, ref, "forbidden", "activa el modo pelea");
+    if (!this.weaponsOf(att).includes(p.weapon)) return this.sendError(ws, ref, "forbidden", "no tienes esa arma", { reason: "weapon" });
+    const spec = WEAPONS[p.weapon];
+    const now = Date.now();
+    // A su ritmo (con margen por la red); lo que llega antes se descarta sin más.
+    if (now - (this.shotAt.get(att.session_id) ?? 0) < spec.gapMs * 0.75) return;
+    if (this.health.get(att.session_id)?.downUntil) return this.sendError(ws, ref, "forbidden", "estás fuera de combate");
+    if ((this.downUntil.get(att.session_id) ?? 0) > now) return; // en el suelo
+    const me = this.headOf(att.session_id);
+    if (!me) return this.sendError(ws, ref, "bad_message", "manda tu pose primero");
+    if (this.poses.get(att.session_id)?.vehicle) return this.sendError(ws, ref, "forbidden", "en coche no");
+    this.shotAt.set(att.session_id, now);
+    // El rayo, como mucho hasta su alcance (y dentro del lugar).
+    const [ax, ay, az] = p.at;
+    const len = Math.hypot(ax - me[0]!, ay - me[1]!, az - me[2]!);
+    const k = len > spec.range ? spec.range / len : 1;
+    const [lo, hi] = this.bounds;
+    const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
+    const at: [number, number, number] = [
+      r3(clamp(me[0]! + (ax - me[0]!) * k, lo, hi)),
+      r3(clamp(me[1]! + (ay - me[1]!) * k, -16, 256)),
+      r3(clamp(me[2]! + (az - me[2]!) * k, lo, hi)),
+    ];
+    let hit: { to: string; dir: [number, number]; power: number; fall: boolean; ko?: true } | null = null;
+    const to = p.to;
+    if (to && to !== att.session_id) {
+      const other = this.sessionById(to);
+      const them = this.headOf(to);
+      const free = !!other?.att.fight && !this.health.get(to)?.downUntil && !((this.downUntil.get(to) ?? 0) > now) && !this.poses.get(to)?.vehicle;
+      if (free && them) {
+        const dx = them[0]! - me[0]!, dz = them[2]! - me[2]!;
+        const d = Math.hypot(dx, dz);
+        if (d <= spec.range + 1.5 && Math.abs(them[1]! - me[1]!) <= SHOT_MAX_DY) {
+          const h = this.healthOf(to, now);
+          h.hp = Math.max(0, hpAt(h.hp, h.at, now) - spec.damage);
+          h.at = now;
+          const down = h.hp <= 0;
+          if (down) {
+            h.downUntil = now + FIGHT_RESPAWN_MS;
+            this.duelHits.delete(to);
+          }
+          const fall = spec.knock || down;
+          if (fall) this.downUntil.set(to, down ? h.downUntil! : now + DOWN_IMMUNE_MS);
+          const dir: [number, number] = d > 0.05 ? [Math.round((dx / d) * 1000) / 1000, Math.round((dz / d) * 1000) / 1000] : [0, 1];
+          hit = { to, dir, power: spec.power, fall, ...(down ? { ko: true as const } : {}) };
+        }
+      }
+    }
+    this.broadcastNear(me, msg("SHOT", { from: att.session_id, weapon: p.weapon, at, ...(hit ?? {}) }));
+    if (hit) this.sendHealth(hit.to);
+  }
+
   /* ---------------------------------------------------------------- */
   /* La gente de las ciudades, compartida (§9 nonies)                    */
   /* ---------------------------------------------------------------- */
@@ -2460,16 +2575,18 @@ export class ChunkRoom extends DurableObject<Env> {
    * Le han dado a un ciudadano (`npc`) o a alguien de una sala (`res`): si quien lo dice está cerca, el
    * del ciudadano se lo pasa a quien los lleva y el de la sala, a quien esté cerca (cada uno lo dibuja).
    */
-  private handleNpcHit(ws: WebSocket, att: Attachment, ref: string | undefined, p: { npc?: number; res?: number; dir: [number, number]; power: number; head?: boolean; kind: "hit" | "car" | "bump" }) {
+  private handleNpcHit(ws: WebSocket, att: Attachment, ref: string | undefined, p: { npc?: number; res?: number; dir: [number, number]; power: number; head?: boolean; kind: NpcHitKind }) {
     if (!this.npcPlace) return;
+    const shot = p.kind === "shot";
+    if (shot && (!this.weaponsHere || !att.fight)) return this.sendError(ws, ref, "forbidden", "aquí no se dispara");
     if (p.npc !== undefined && (!this.npcHost || this.npcHost === att.session_id)) return;
     if (!this.npcEventAllowed(att.session_id)) return this.sendError(ws, ref, "rate_limited", "más despacio");
     const me = this.headOf(att.session_id);
     const at = p.npc !== undefined ? this.npcPos.get(p.npc) : residentsOf(districtByChunk(this.chunkId!)!.id)[p.res!];
     if (!me) return this.sendError(ws, ref, "bad_message", "manda tu pose primero");
     if (!at) return this.sendError(ws, ref, "bad_message", "no existe");
-    const reach = p.kind === "car" ? 9 : 4.5;
-    if (Math.hypot(at[0] - me[0]!, at[2] - me[2]!) > reach || Math.abs(at[1] - (me[1]! - 1.6)) > 3) return this.sendError(ws, ref, "forbidden", "demasiado lejos");
+    const reach = shot ? SHOT_MAX_RANGE + 2 : p.kind === "car" ? 9 : 4.5;
+    if (Math.hypot(at[0] - me[0]!, at[2] - me[2]!) > reach || Math.abs(at[1] - (me[1]! - 1.6)) > (shot ? SHOT_MAX_DY : 3)) return this.sendError(ws, ref, "forbidden", "demasiado lejos");
     const l = Math.hypot(p.dir[0], p.dir[1]) || 1;
     const ev = msg("NPC_HIT_EVENT", {
       from: att.session_id,

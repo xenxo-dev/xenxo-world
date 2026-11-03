@@ -40,6 +40,14 @@ export const input = {
   crouchPressed: false,
   /** El botón táctil de agacharse (se suma a la tecla). */
   crouchTouch: false,
+  /**
+   * Armas (world/people/guns.ts): el gatillo (Z mantenida o el botón del HUD; las de ráfaga disparan
+   * mientras se mantiene), `firePressed` (se consume) y cambiar de arma (T o el HUD; se consume).
+   */
+  fire: false,
+  firePressed: false,
+  fireTouch: false,
+  nextWeapon: false,
 };
 
 /** El HUD se entera de la tecla de la rueda de acciones sin mirar cada frame. */
@@ -85,6 +93,14 @@ function updateFromKeys() {
   input.run = keys.has("ShiftLeft") || keys.has("ShiftRight");
   input.brake = keys.has("Space");
   input.crouch = keys.has("KeyX") || input.crouchTouch;
+  input.fire = keys.has("KeyZ") || input.fireTouch;
+}
+
+/** El botón táctil de disparar: pulsado (true) o soltado. */
+export function setTouchFire(on: boolean) {
+  if (on && !input.fireTouch) input.firePressed = true;
+  input.fireTouch = on;
+  input.fire = keys.has("KeyZ") || on;
 }
 
 /** El botón táctil de agacharse: pulsado (true) o soltado. */
@@ -120,10 +136,17 @@ export function attachDesktopInput(el: HTMLElement) {
     if (e.code === "KeyG" && !e.repeat) for (const fn of wheelListeners) fn();
     if (e.code === "KeyF" && !e.repeat) void toggleFullscreen();
     if (e.code === "KeyX" && !e.repeat) input.crouchPressed = true;
+    if (e.code === "KeyZ" && !e.repeat) input.firePressed = true;
+    if (e.code === "KeyT" && !e.repeat) input.nextWeapon = true;
     updateFromKeys();
   };
   const up = (e: KeyboardEvent) => {
     keys.delete(e.code);
+    updateFromKeys();
+  };
+  // Al cambiar de ventana no llega el «soltar»: nada se queda pulsado (ni andar ni el gatillo).
+  const blur = () => {
+    keys.clear();
     updateFromKeys();
   };
 
@@ -187,6 +210,7 @@ export function attachDesktopInput(el: HTMLElement) {
 
   window.addEventListener("keydown", down);
   window.addEventListener("keyup", up);
+  window.addEventListener("blur", blur);
   el.addEventListener("pointerdown", pDown);
   el.addEventListener("wheel", wheel, { passive: false });
   window.addEventListener("pointermove", pMove);
@@ -197,6 +221,7 @@ export function attachDesktopInput(el: HTMLElement) {
     attached = false;
     window.removeEventListener("keydown", down);
     window.removeEventListener("keyup", up);
+    window.removeEventListener("blur", blur);
     el.removeEventListener("pointerdown", pDown);
     el.removeEventListener("wheel", wheel);
     window.removeEventListener("pointermove", pMove);

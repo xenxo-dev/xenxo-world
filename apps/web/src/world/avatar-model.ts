@@ -102,6 +102,7 @@ export async function loadAvatar(url: string, opts: { decor?: boolean } = {}): P
 }
 
 const _sp = new THREE.Vector3();
+const _hand = new THREE.Vector3();
 
 /* ------------------------------------------------------------------ */
 /* VRM: huesos humanoides estándar → andar procedural y parpadeo        */
@@ -140,6 +141,7 @@ function fromVrm(vrm: VRM, scene: THREE.Group, decor: boolean): LoadedAvatar {
     rLowerArm: bone("rightLowerArm"),
   };
   const hipsY = b.hips?.position.y ?? 0;
+  const handR = bone("rightHand");
 
   // Los VRM cargan en pose de T: se mide así y después se bajan los brazos
   // (pose de respaldo mientras llegan las animaciones).
@@ -196,6 +198,16 @@ function fromVrm(vrm: VRM, scene: THREE.Group, decor: boolean): LoadedAvatar {
         }
       }
       vrm.update(dt);
+      // Con el arma sacada: dónde ha quedado la mano derecha (ya con el IK), para ponerle el arma.
+      if (m.weapon && handR) {
+        handR.getWorldPosition(_hand);
+        object.worldToLocal(_hand);
+        const h = (m.hand ??= { x: 0, y: 0, z: 0, ok: false });
+        h.x = _hand.x;
+        h.y = _hand.y;
+        h.z = _hand.z;
+        h.ok = true;
+      }
       if (springs) {
         // Solo cerca de la cámara; tras un rato sin moverlos o un salto de sitio, desde el reposo.
         const range = graphics.features.springs * (decor ? 0.5 : 1);

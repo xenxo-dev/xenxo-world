@@ -17,6 +17,9 @@ La excepción son las texturas generadas con IA (abajo), que tienen su propia no
   su motor en WebAssembly, Apache-2.0), servidos desde xenxo (`apps/web/public/fundas/vision/NOTICE.txt`).
 - **Animaciones**: [Universal Animation Library](https://quaternius.com/packs/universalanimationlibrary.html) y [Universal Animation Library 2](https://quaternius.com/packs/universalanimationlibrary2.html) de Quaternius (CC0).
 - **Kits de ciudad** (`tools/kits/kenney/`): packs de [Kenney](https://kenney.nl) (CC0), descargados el 27-10-2026. La lista está en `tools/kits/README.md`.
+- **Armas de Distrito Cero y el cofre del botín** (`tools/models/library/weapon_*`, `loot_crate*` y las fichas de
+  `apps/web/public/armas/`): [Blaster Kit](https://kenney.nl/assets/blaster-kit) de Kenney (CC0), descargado el
+  03-11-2026 y preparado con `tools/models/library/blasters.mjs`.
 - **Coche para conducir** (`tools/models/library/vehicle_car*`): «Car Concept», de los modelos de
   muestra de glTF de Khronos ([KhronosGroup/glTF-Sample-Assets](https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/CarConcept)),
   © The Khronos Group, con licencia [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); hecho a

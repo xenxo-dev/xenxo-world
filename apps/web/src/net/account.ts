@@ -19,6 +19,8 @@ export interface User {
   created_at: number;
   /** Número de jugador (por orden de alta; el 0 es el fundador). */
   player_no?: number | null;
+  /** Sus armas (§9 octies ter): ids separados por comas, sin la pipa (la tiene todo el mundo). */
+  weapons?: string;
 }
 
 export interface Project {
@@ -153,6 +155,14 @@ export const authedApi = api;
 function adopt(r: { token: string; user: User; principal: { exp: number } }) {
   store({ token: r.token, user: r.user, exp: r.principal.exp });
   reconnect();
+}
+
+/**
+ * Sesión nueva con algo que solo cuenta al entrar en otro lugar (las armas: las lee el distrito con
+ * armas al llegar). Sin reconectar: la carrera, la caída o lo que esté pasando sigue.
+ */
+export function adoptQuietly(r: { token: string; user: User; principal: { exp: number } }) {
+  store({ token: r.token, user: r.user, exp: r.principal.exp });
 }
 
 /**

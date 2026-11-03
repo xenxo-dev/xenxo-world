@@ -19,6 +19,10 @@ export const ACTIVITY_SCHEMA = `
   CREATE TABLE IF NOT EXISTS act_race_week (
     race_key TEXT NOT NULL, week TEXT NOT NULL, sub TEXT NOT NULL, name TEXT NOT NULL, player_no INTEGER, ms INTEGER NOT NULL, ts INTEGER NOT NULL,
     PRIMARY KEY (race_key, week, sub));
+  -- Botín de las carreras con cofre (§9 octies ter): qué arma salió, en qué carrera y cuándo. Lo pasa
+  -- a la cuenta el Worker (POST /me/weapons/check).
+  CREATE TABLE IF NOT EXISTS act_loot (sub TEXT NOT NULL, weapon TEXT NOT NULL, race_key TEXT NOT NULL, ts INTEGER NOT NULL);
+  CREATE INDEX IF NOT EXISTS act_loot_sub ON act_loot (sub);
 `;
 
 /** Semana ISO (UTC) de un instante: «2026-W44». Los marcadores semanales empiezan el lunes. */

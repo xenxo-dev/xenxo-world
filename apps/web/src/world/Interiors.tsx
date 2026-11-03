@@ -321,7 +321,7 @@ export function Residents({ chunk, count }: { chunk: string; count: number }) {
       }
       if (npcs.knock[i * 4]) {
         if (s.injected) s.injected = false;
-        else sendResHit(s.who, npcs.knock[i * 4 + 1]!, npcs.knock[i * 4 + 2]!, npcs.knock[i * 4 + 3]!, npcs.knockHead[i] === 1, self.driving ? "car" : self.fight ? "hit" : "bump");
+        else sendResHit(s.who, npcs.knock[i * 4 + 1]!, npcs.knock[i * 4 + 2]!, npcs.knock[i * 4 + 3]!, npcs.knockHead[i] === 1, npcs.knockShot[i] ? "shot" : self.driving ? "car" : self.fight ? "hit" : "bump");
       }
       // Si le dan, lo encaja o cae y se levanta (knock.ts); después, a su sitio, a lo suyo y se queja.
       const k = knockApply(i, g, s.bx, s.by, s.bz, s.yaw, s.motion);

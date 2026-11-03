@@ -2,7 +2,7 @@ import { Suspense, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { XROrigin, useXR, useXRControllerLocomotion } from "@react-three/xr";
 import * as THREE from "three";
-import { CHUNK_SIZE, msg, type ClientMessage } from "@xenxo/protocol";
+import { CHUNK_SIZE, isWeaponId, msg, type ClientMessage } from "@xenxo/protocol";
 import { net, spawn } from "../net/session";
 import { world } from "../net/world-store";
 import type { AvatarRef } from "@xenxo/protocol";
@@ -27,6 +27,8 @@ import { cancelSlide, slideDir, slideEmote, slideP, slideStep, sliding, startSli
 import { people } from "../net/people-store";
 import { preloadParkour, UPPER_EMOTES } from "./animation";
 import { createParkour, parkourStep, resetParkour } from "./parkour/moves";
+import { gun, gunFrame, resetGun, SELF_GUN } from "./people/guns";
+import { HeldWeapon } from "./people/HeldWeapon";
 
 const WALK = 2.1; // m/s
 const RUN = 5.4;
@@ -66,6 +68,8 @@ const _headQ = new THREE.Quaternion();
 const _euler = new THREE.Euler(0, 0, 0, "YXZ");
 const _lastP = new THREE.Vector3(Infinity, 0, 0);
 const _lastQ = new THREE.Quaternion();
+/** El arma que se vio en la última pose enviada (cambiarla también es moverse). */
+let lastWeapon: string | null = null;
 const _yawE = new THREE.Euler();
 const _carQ = new THREE.Quaternion();
 const _seat = new THREE.Vector3();
@@ -117,6 +121,7 @@ export function Player({ active }: { active: boolean }) {
   const lastPhase = useRef("none");
   const seqCtx = useRef({ body, motion, bodyYaw }).current;
   const peopleCtx = useRef({ body, motion, bodyYaw, avatar: null as unknown as THREE.Group }).current;
+  const gunCtx = useRef({ body, motion, bodyYaw, look: look.current }).current;
 
   /**
    * Cámara al volante: sigue al coche por detrás y se pone detrás de él cuando se mueve (parado, se
@@ -179,6 +184,7 @@ export function Player({ active }: { active: boolean }) {
       resetPeople(motion);
       resetParkour(pk, body);
       cancelSlide();
+      resetGun(motion);
       if (inXR) {
         placeOrigin(spawn.p[0], spawn.p[1], spawn.p[2]);
         origin.current.rotation.set(0, spawn.yaw, 0);
@@ -213,6 +219,8 @@ export function Player({ active }: { active: boolean }) {
       }
       if (motion.emote && (vr.moved || state.clock.elapsedTime > emoteUntil.current)) motion.emote = null;
       vr.moved = false;
+      // En las gafas no hay armas.
+      if (gun.drawn) resetGun(motion);
       // Hacia dónde miras (para quien te tenga delante: saludos, parejas).
       self.yaw = Math.atan2(2 * (_headQ.w * _headQ.y + _headQ.x * _headQ.z), 1 - 2 * (_headQ.y * _headQ.y + _headQ.x * _headQ.x));
       self.vx = self.vz = self.wx = self.wz = 0;
@@ -300,6 +308,10 @@ export function Player({ active }: { active: boolean }) {
         // salir del modo pelea lo cortan.
         if (!motion.fight || !free || _pf.lock) cancelSlide();
         else if (input.crouchPressed && !striking() && !peopleBusy() && startSlide(body)) motion.emote = null;
+        // Armas (Distrito Cero, en el modo pelea): disparar con Z o el botón, cambiar con T
+        // (people/guns.ts). Sacada, las manos apuntan y el cuerpo mira hacia donde apuntas.
+        gunCtx.look = l;
+        gunFrame(dt, gunCtx, free && !_pf.lock && !sliding());
         // Lo que pides (contra alguien de la ciudad, es lo que le empuja: city/citizens.ts).
         self.wx = free ? wantX : 0;
         self.wz = free ? wantZ : 0;
@@ -387,7 +399,12 @@ export function Player({ active }: { active: boolean }) {
           d = Math.atan2(Math.sin(d), Math.cos(d));
           bodyYaw.current += d * Math.min(1, dt * 16);
         } else if (fp) bodyYaw.current = l.yaw;
-        else if (amount > 0.05) {
+        else if (gun.drawn) {
+          // Con el arma sacada, de cara a donde apuntas (aunque se ande hacia otro lado).
+          let d = gun.yaw - bodyYaw.current;
+          d = Math.atan2(Math.sin(d), Math.cos(d));
+          bodyYaw.current += d * Math.min(1, dt * 14);
+        } else if (amount > 0.05) {
           const want = Math.atan2(-wantX, -wantZ);
           let d = want - bodyYaw.current;
           d = Math.atan2(Math.sin(d), Math.cos(d));
@@ -491,18 +508,21 @@ export function Player({ active }: { active: boolean }) {
     if (now - lastSend.current < SEND_EVERY_MS) return;
     // Lo que se ve de la persona: el parkour que esté haciendo, o su gesto.
     const shown = motion.pk ?? motion.emote;
-    const moved = _headP.distanceToSquared(_lastP) > 1e-4 || _headQ.angleTo(_lastQ) > 0.01 || shown !== lastEmote.current || drive.phase !== lastPhase.current;
+    const held = motion.weapon ?? null;
+    const moved = _headP.distanceToSquared(_lastP) > 1e-4 || _headQ.angleTo(_lastQ) > 0.01 || shown !== lastEmote.current || drive.phase !== lastPhase.current || held !== lastWeapon;
     if (!moved && now - lastSend.current < HEARTBEAT_MS) return;
     lastSend.current = now;
     _lastP.copy(_headP);
     _lastQ.copy(_headQ);
     lastEmote.current = shown;
     lastPhase.current = drive.phase;
+    lastWeapon = held;
     net.send(
       msg("POSE", {
         t: world.serverNow(),
         head: { p: [_headP.x, _headP.y, _headP.z], r: [_headQ.x, _headQ.y, _headQ.z, _headQ.w] },
         ...(shown ? { emote: shown } : {}),
+        ...(held && isWeaponId(held) ? { weapon: held } : {}),
         ...carForPose(),
       }) as ClientMessage,
     );
@@ -518,6 +538,7 @@ export function Player({ active }: { active: boolean }) {
       )}
       <group ref={avatar}>
         <AvatarBody avatar={myAvatar} seed={world.sessionId ?? "local"} motion={motion} />
+        <HeldWeapon motion={motion} who={SELF_GUN} />
         <Suspense fallback={null}>
           <ChatBubble self />
         </Suspense>

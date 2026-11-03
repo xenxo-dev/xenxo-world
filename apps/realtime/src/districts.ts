@@ -56,6 +56,10 @@ export interface District {
   fight?: string;
   /** Parkour: el personaje salta vallas, trepa y corre por las paredes (WELCOME.parkour). */
   parkour?: boolean;
+  /** Armas en el modo pelea (WELCOME.weapons; §9 octies ter). */
+  weapons?: boolean;
+  /** Carreras con cofre al llegar a la meta: su tabla de botín (LOOT_TABLES del protocolo), por id de carrera. */
+  loot?: Record<string, string>;
   /** Próximamente: su isla está en el nexo con la puerta cerrada; solo entra moderación y no se publica en él. */
   soon?: boolean;
 }

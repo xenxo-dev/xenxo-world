@@ -1,0 +1,15 @@
+{
+  "name": "weapon_canon",
+  "platform": "Kenney",
+  "source": "Blaster Kit 2.1 (blaster-c.glb), https://kenney.nl/assets/blaster-kit; preparado con blasters.mjs: el cañón hacia +Z, a su tamaño y con la empuñadura en el origen.",
+  "license": "CC0-1.0",
+  "attribution": "Kenney (kenney.nl), CC0",
+  "date": "2026-11-03",
+  "keep_origin": true,
+  "lod1_ratio": 0.75,
+  "lod1_error": 0.002,
+  "tex": [
+    256,
+    128
+  ]
+}

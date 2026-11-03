@@ -1,5 +1,5 @@
 import { ASSET_BUDGETS } from "@xenxo/assets";
-import { checkDistrict, ChunkId, describeDistrictProblem, DistrictSubmission, PARCEL_BUDGETS, PLACES } from "@xenxo/protocol";
+import { checkDistrict, ChunkId, describeDistrictProblem, DistrictSubmission, isWeaponId, PARCEL_BUDGETS, PLACES, WEAPON_DEFAULT } from "@xenxo/protocol";
 import { communityContent, communitySystem, isCommunityChunk, submissionFiles, type ModelInfo } from "./community";
 import { SEED_ASSETS } from "./seed-assets";
 import { assetMeta, assetKey, forgetAssets, handleGet, handleUpload } from "./assets";
@@ -809,6 +809,9 @@ async function userToken(u: UserRow, env: Env, authAt = Date.now()) {
     avatar: u.avatar_hash ? { hash: u.avatar_hash, format: u.avatar_format ?? "glb" } : await defaultAvatarFor(u.id),
     ...(u.player_no != null ? { no: u.player_no } : {}),
   };
+  // Su inventario de armas (§9 octies ter): lo lee el distrito con armas sin preguntar a nadie.
+  const w = (u.weapons ?? "").split(",").filter((x) => isWeaponId(x) && x !== WEAPON_DEFAULT);
+  if (w.length) p.w = w;
   return { token: await signToken(p, env.TOKEN_SECRET), principal: p, user: u };
 }
 
@@ -1256,6 +1259,23 @@ export default {
           await purgeCard(req.url, r.data.player_no);
           return json(r.data, 200, h);
         }
+        // Armas (§9 octies ter): las que tiene, y pasar a la cuenta lo que le ha salido en los cofres
+        // (lo guardan los distritos con botín; nunca lo dice el cliente). Con armas nuevas, sesión nueva
+        // (las lleva dentro: `w`).
+        if (path === "/me/weapons" && req.method === "GET") return json({ weapons: await dir.weaponsOf(uid) }, 200, h);
+        if (path === "/me/weapons/check" && req.method === "POST") {
+          if (!(await dir.sessionOk(uid, principal!.sv ?? 0))) throw new Error("session_expired");
+          if (!(await dir.weaponCheckAllowed(uid))) return json({ weapons: await dir.weaponsOf(uid), new: [], throttled: true }, 200, h);
+          const found: string[] = [];
+          for (const d of DISTRICTS.filter((x) => x.loot)) {
+            const a = await chunk(env, d.chunk).activityOf(`usr_${uid}`).catch(() => null);
+            for (const l of a?.loot ?? []) found.push(l.weapon);
+          }
+          const r = await dir.grantWeapons(uid, found);
+          if (!r.ok) return failure(r, h);
+          if (!r.data.fresh.length) return json({ weapons: r.data.weapons, new: [] }, 200, h);
+          return json({ ...(await reissue(principal!, r.data.user, env)), weapons: r.data.weapons, new: r.data.fresh }, 200, h);
+        }
         // Insignias: las que tiene, y comprobar si ha ganado alguna (lo dicen los distritos, no el cliente).
         if (path === "/me/badges" && req.method === "GET") return json({ badges: await dir.badgesOf(uid) }, 200, h);
         if (path === "/me/badges/check" && req.method === "POST") {
@@ -1284,7 +1304,7 @@ export default {
           const activities = [];
           for (const c of places.filter((c) => c !== PLACES.nexo)) {
             const a = await chunk(env, c).activityOf(`usr_${uid}`);
-            if (a.collected.length || a.hunts_completed.length || a.best_times.length || a.daily_points.length || a.sandbox_pieces.length) activities.push(a);
+            if (a.collected.length || a.hunts_completed.length || a.best_times.length || a.daily_points.length || a.sandbox_pieces.length || a.loot.length) activities.push(a);
           }
           return json({ ...r.data, chat_messages: chat, activities }, 200, {
             ...h,

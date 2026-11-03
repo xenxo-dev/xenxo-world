@@ -12,6 +12,7 @@ import { People } from "./hud/People";
 import { PortalCard, TravelToast } from "./hud/PortalCard";
 import { Unavailable } from "./hud/Unavailable";
 import { ActivityHud } from "./hud/ActivityHud";
+import { LootCard } from "./hud/WeaponHud";
 import { SandboxTools } from "./hud/SandboxTools";
 import { errorText, placeName, t, useLang } from "./i18n";
 import { setGuestName as setSessionGuestName, startSession, travel } from "./net/session";
@@ -226,6 +227,7 @@ export function App() {
           <TravelToast />
           <Unavailable />
           <ActivityHud />
+          <LootCard />
           <SandboxTools />
           {/* Primera persona y gestos en una fila; en táctil, por encima del botón de saltar (o del
               joystick, si va a la derecha). */}

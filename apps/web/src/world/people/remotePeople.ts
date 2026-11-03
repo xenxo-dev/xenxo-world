@@ -18,7 +18,7 @@ import { people, type HitEvent } from "../../net/people-store";
 import { world } from "../../net/world-store";
 import { floorAt } from "../collision";
 import { self } from "../self";
-import { fallFor, FALL_MAX, HIT_DELAY_MS, LIE, LIE_KO, lightReaction, myStrike, parkourFallFor, RISE, STRIKES, strikeOf } from "./fight";
+import { fallFor, FALL_MAX, HIT_DELAY_MS, LIE, LIE_KO, lightReaction, myStrike, parkourFallFor, RISE, STRIKES, strikeOf, type Strike } from "./fight";
 import { impact, thud } from "./fight-audio";
 import { loadRagdolls, ragdolls } from "./ragdoll";
 import { createFx, type Lying, type PersonFx } from "./rig";
@@ -244,12 +244,15 @@ export class RemotePeople {
     this.t = 0;
     this.pair = null;
     this.fx.reachL.w = this.fx.reachR.w = 0;
-    // Qué golpe era (su gesto): en la cara o en el cuerpo.
-    const buf = world.poseBuffers.get(h.from);
-    const attacker = h.from === world.sessionId ? STRIKES[myStrike.name] : strikeOf(buf?.[buf.length - 1]?.emote);
-    const s = attacker ?? STRIKES[h.move === "punch" ? "punch" : h.move]!;
-    const head = h.move === "punch" ? s.head : false;
-    impact(x, z, h.power, head);
+    // Qué golpe era (su gesto): en la cara o en el cuerpo. Un disparo, en el cuerpo (suena en ShotFx).
+    let s: Strike | null = null;
+    if (h.move !== "shot") {
+      const buf = world.poseBuffers.get(h.from);
+      const attacker = h.from === world.sessionId ? STRIKES[myStrike.name] : strikeOf(buf?.[buf.length - 1]?.emote);
+      s = attacker ?? STRIKES[h.move === "punch" ? "punch" : h.move]!;
+    }
+    const head = h.move === "punch" && !!s?.head;
+    if (s) impact(x, z, h.power, head);
     this.quiet = 1.6;
     const rig = this.fx.rig;
     if (h.fall) {
@@ -273,7 +276,7 @@ export class RemotePeople {
     this.dur = r.dur;
     this.emote = r.emote;
     this.startCorr(h.dir[0] * r.push, h.dir[1] * r.push, r.dur, x, z);
-    rig?.flinch(h.dir[0], h.dir[1], h.power, head, s.twist ?? 0);
+    rig?.flinch(h.dir[0], h.dir[1], h.power, head, s?.twist ?? 0);
   }
 
   /** Su caída del parkour, vista desde aquí: hacia donde corría (o de espaldas, contra la pared). */

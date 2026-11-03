@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { CONTROL_PX, useControls } from "../controls";
 import { t } from "../i18n";
 import { useWorldVersion, world } from "../net/world-store";
-import { input, setTouchCrouch } from "./input";
-import { CrouchIcon, JumpIcon } from "../hud/icons";
+import { usePeople } from "../net/people-store";
+import { useWeapons } from "../net/weapons";
+import { input, setTouchCrouch, setTouchFire } from "./input";
+import { AimIcon, CrouchIcon, JumpIcon } from "../hud/icons";
 
 const bottom = "bottom-[max(1.5rem,env(safe-area-inset-bottom))]";
 
@@ -11,13 +13,17 @@ const bottom = "bottom-[max(1.5rem,env(safe-area-inset-bottom))]";
  * Controles táctiles: joystick para moverse y botón de saltar en el otro pulgar. Cada uno sigue
  * su propio dedo (eventos de puntero, no clics), así que se puede saltar mientras se camina.
  * Donde hay parkour (Vertical), al lado del de saltar va el de agacharse (mantenido: deslizarse,
- * soltarse colgado y rodar al caer). Lado, tamaño y opacidad se cambian en Personalizar → Controles.
+ * soltarse colgado y rodar al caer); donde hay armas (Distrito Cero) y con el modo pelea, el de
+ * disparar (mantenido, en las de ráfaga). Lado, tamaño y opacidad se cambian en Personalizar → Controles.
  */
 export function TouchJoystick() {
   const c = useControls();
   const px = CONTROL_PX[c.size];
   useWorldVersion();
   const parkour = world.parkour && c.jumpButton;
+  const w = useWeapons();
+  const people = usePeople();
+  const armed = !!w.here && people.fightOn && !!people.style;
   const base = useRef<HTMLDivElement>(null);
   const pointer = useRef<number | null>(null);
   const [knob, setKnob] = useState({ x: 0, y: 0 });
@@ -69,6 +75,7 @@ export function TouchJoystick() {
         />
       </div>
       {parkour && <CrouchButton size={Math.round(px.jump * 0.78)} offset={24 + px.jump + 14} bottomGap={Math.round(px.jump * 0.11)} left={left} opacity={c.opacity} />}
+      {armed && !parkour && <FireButton size={Math.round(px.jump * 0.9)} offset={24 + px.jump + 14} bottomGap={Math.round(px.jump * 0.05)} left={left} opacity={c.opacity} />}
       {c.jumpButton && (
         <button
           type="button"
@@ -93,6 +100,40 @@ export function TouchJoystick() {
         </button>
       )}
     </>
+  );
+}
+
+/** Disparar mientras se mantiene (armas, world/people/guns.ts): junto al de saltar, hacia el centro. */
+function FireButton({ size, offset, bottomGap, left, opacity }: { size: number; offset: number; bottomGap: number; left: boolean; opacity: number }) {
+  const [down, setDown] = useState(false);
+  const release = () => {
+    setTouchFire(false);
+    setDown(false);
+  };
+  useEffect(() => () => setTouchFire(false), []);
+  return (
+    <button
+      type="button"
+      title={t("weapons.fire")}
+      aria-label={t("weapons.fire")}
+      aria-pressed={down}
+      style={{ width: size, height: size, opacity, [left ? "right" : "left"]: offset, marginBottom: bottomGap }}
+      className={`pointer-events-auto absolute ${bottom} grid touch-none select-none place-items-center rounded-full border border-rosa/60 text-rosa backdrop-blur-sm transition-transform ${down ? "scale-90 bg-rosa/40" : "bg-rosa/15"}`}
+      onPointerDown={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.currentTarget.setPointerCapture(e.pointerId);
+        setTouchFire(true);
+        setDown(true);
+      }}
+      onPointerUp={release}
+      onPointerCancel={release}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      <span aria-hidden className="grid h-[48%] w-[48%] place-items-center [&>svg]:h-full [&>svg]:w-full">
+        <AimIcon />
+      </span>
+    </button>
   );
 }
 

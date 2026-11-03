@@ -29,7 +29,7 @@ import {
   b64url, CODE_TTL_MS, ACCESS_TOKEN_TTL_MS, ID_TOKEN_TTL_S, MAX_CLIENTS_PER_USER, MAX_REDIRECTS, parseScopes, REQUEST_TTL_MS,
   sha256b64url, signJwt, validChallenge, validClientName, validNonce, validRedirectUri, validState, validVerifier, withParams,
 } from "./oidc";
-import { type ProjectCategory } from "@xenxo/protocol";
+import { type ProjectCategory, WEAPON_DEFAULT, WEAPON_IDS, type WeaponId } from "@xenxo/protocol";
 import { DISTRICTS, districtById, PARCELS, parcelIndex, parcelRect, RENAMED_PARCELS } from "./districts";
 import { gameInfo, manifestAvatar, slugFrom, validSlug, type GameInfo } from "./games";
 import { COMMUNITY_SCHEMA, communityChunk, MAX_DISTRICT_SAVES_PER_DAY, submissionFiles, type CommunityStatus, type ResolvedPortal } from "./community";
@@ -127,6 +127,8 @@ export type UserRow = {
   player_no: number | null;
   /** Versión de las sesiones (auth.ts → Principal.sv). */
   session_epoch?: number;
+  /** Inventario de armas (§9 octies ter): ids separados por comas, sin la pipa (la tiene todo el mundo). */
+  weapons?: string;
 };
 
 export type PublicProject = {
@@ -320,6 +322,8 @@ export class Directory extends DurableObject<Env> {
     // Migración: versión de las sesiones. Subirla («cerrar sesión en todos los dispositivos») deja
     // sin valor todas las sesiones anteriores de la cuenta.
     if (!ucols.includes("session_epoch")) this.sql.exec("ALTER TABLE users ADD COLUMN session_epoch INTEGER NOT NULL DEFAULT 0");
+    // Migración: inventario de armas (§9 octies ter; lo llenan los cofres de Vertical).
+    if (!ucols.includes("weapons")) this.sql.exec("ALTER TABLE users ADD COLUMN weapons TEXT NOT NULL DEFAULT ''");
     // Los avatares de serie se vuelven a forjar de vez en cuando (avatar-presets-renamed.json, lo escribe
     // tools/avatars/pack_avatars.py): quien llevaba uno pasa al mismo personaje, el nuevo.
     for (const [from, to] of Object.entries(renamedPresets as Record<string, string>)) {
@@ -755,7 +759,7 @@ export class Directory extends DurableObject<Env> {
   user(id: string): UserRow | null {
     return (
       this.sql
-        .exec<UserRow>("SELECT id, display_name, avatar_hash, avatar_format, created_at, player_no, session_epoch FROM users WHERE id = ?", id)
+        .exec<UserRow>("SELECT id, display_name, avatar_hash, avatar_format, created_at, player_no, session_epoch, weapons FROM users WHERE id = ?", id)
         .toArray()[0] ?? null
     );
   }
@@ -964,6 +968,38 @@ export class Directory extends DurableObject<Env> {
       if (this.sql.exec("INSERT OR IGNORE INTO badges (user_id, badge_id, earned_at) VALUES (?, ?, ?)", id, b, now).rowsWritten > 0) fresh.push(b);
     }
     return fresh.map((b) => badgeInfo(b, now)).filter((x) => x !== null);
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Armas (§9 octies ter)                                              */
+  /* ---------------------------------------------------------------- */
+
+  /** Las armas de la cuenta (sin la pipa), en el orden del catálogo. */
+  weaponsOf(id: string): WeaponId[] {
+    const raw = this.sql.exec<{ w: string }>("SELECT weapons AS w FROM users WHERE id = ?", id).toArray()[0]?.w ?? "";
+    return WEAPON_IDS.filter((w) => w !== WEAPON_DEFAULT && raw.split(",").includes(w));
+  }
+
+  /** ¿Puede comprobar ya su botín? (una vez cada 4 s por cuenta: cada comprobación pregunta al distrito). */
+  weaponCheckAllowed(id: string): boolean {
+    const now = Date.now();
+    if (now - (this.weaponChecks.get(id) ?? 0) < 4_000) return false;
+    this.weaponChecks.set(id, now);
+    if (this.weaponChecks.size > 5_000) this.weaponChecks.clear();
+    return true;
+  }
+  private weaponChecks = new Map<string, number>();
+
+  /** Añade a su inventario las armas que le han salido (ya comprobadas por el Worker). Devuelve las nuevas. */
+  grantWeapons(id: string, ids: string[]): Result<{ user: UserRow; weapons: WeaponId[]; fresh: WeaponId[] }> {
+    if (!this.user(id)) return fail(404, "not_found", "la cuenta no existe");
+    const had = this.weaponsOf(id);
+    const fresh = WEAPON_IDS.filter((w) => w !== WEAPON_DEFAULT && ids.includes(w) && !had.includes(w));
+    if (fresh.length) {
+      const all = WEAPON_IDS.filter((w) => had.includes(w) || fresh.includes(w));
+      this.sql.exec("UPDATE users SET weapons = ? WHERE id = ?", all.join(","), id);
+    }
+    return ok({ user: this.user(id)!, weapons: this.weaponsOf(id), fresh });
   }
 
   /** Derecho de acceso y portabilidad (RGPD arts. 15 y 20). */

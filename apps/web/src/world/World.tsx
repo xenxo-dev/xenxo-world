@@ -30,6 +30,8 @@ import districtsLayout from "../../../realtime/src/districts.json";
 const DISTRICT_IDS = new Map((districtsLayout.districts as { id: string; chunk: string }[]).map((d) => [d.chunk, d.id]));
 import { Activities } from "./Activities";
 import { PeopleFx } from "./people/PeopleFx";
+import { ShotFx } from "./people/ShotFx";
+import { LootChests } from "./LootChests";
 import { VRTeleport } from "./xr/VRTeleport";
 import skyDay from "./sky-day.json";
 import { splashActive, splashDone, splashProgress } from "../splash";
@@ -433,10 +435,12 @@ function Scene({ active }: { active: boolean }) {
         <Entities features={f} ambience={ambience} />
         <Portals features={f} active={active} />
         {!inNexo && <Activities />}
+        {!inNexo && <LootChests />}
         <Avatars />
       </Suspense>
       <Player active={active} />
       {!inNexo && <PeopleFx />}
+      {!inNexo && !inPlaza && <ShotFx />}
       {g.inXR && <VRTeleport />}
       <InputBinder active={active} />
       <PhotoTaker />

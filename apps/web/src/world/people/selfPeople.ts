@@ -423,10 +423,11 @@ function receive(h: HitEvent, c: PeopleCtx) {
   me.t = 0;
   me.rolled = false;
   me.fallEmote = "";
-  // Qué golpe era (lo dice la pose de quien lo dio): en la cara o en el cuerpo.
-  const s = strikeOf(latestEmote(h.from)) ?? STRIKES[h.move === "punch" ? "punch" : h.move]!;
-  const head = h.move === "punch" ? s.head : false;
-  impact(body.x, body.z, h.power, head);
+  // Qué golpe era (lo dice la pose de quien lo dio): en la cara o en el cuerpo. Un disparo, en el
+  // cuerpo (suena en ShotFx).
+  const s = h.move === "shot" ? null : (strikeOf(latestEmote(h.from)) ?? STRIKES[h.move === "punch" ? "punch" : h.move]!);
+  const head = h.move === "punch" && !!s?.head;
+  if (s) impact(body.x, body.z, h.power, head);
   kick(h, head);
   const rig = selfFx.rig;
   if (h.fall) {
@@ -454,7 +455,7 @@ function receive(h: HitEvent, c: PeopleCtx) {
   me.vx = h.dir[0] * r.push;
   me.vz = h.dir[1] * r.push;
   motion.emote = r.emote;
-  rig?.flinch(h.dir[0], h.dir[1], h.power, head, s.twist ?? 0);
+  rig?.flinch(h.dir[0], h.dir[1], h.power, head, s?.twist ?? 0);
 }
 
 /** La cámara acusa el golpe (poco: un par de centímetros que vuelven en un momento). */

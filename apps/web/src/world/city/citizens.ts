@@ -29,7 +29,7 @@
  * frame (solo al decidir un camino nuevo).
  */
 import * as THREE from "three";
-import { PAIR_RANGE, type NpcSnap, type PairAction } from "@xenxo/protocol";
+import { PAIR_RANGE, type NpcHitKind, type NpcSnap, type PairAction } from "@xenxo/protocol";
 import { createMotion, type Motion } from "../motion";
 import { createFx } from "../people/rig";
 import { PAIR, pairTargets } from "../people/pair";
@@ -94,7 +94,7 @@ export interface NpcEvent {
   dir: [number, number];
   power: number;
   head: boolean;
-  hit: "hit" | "car" | "bump";
+  hit: NpcHitKind;
   pair: PairAction;
 }
 
@@ -115,7 +115,7 @@ export interface CityLink {
   nextEvent(): NpcEvent | null;
   /** Los estados que han llegado, del más viejo al más nuevo. */
   states(): readonly NpcStateIn[];
-  hit(npc: number, dx: number, dz: number, power: number, head: boolean, kind: "hit" | "car" | "bump"): void;
+  hit(npc: number, dx: number, dz: number, power: number, head: boolean, kind: NpcHitKind): void;
   pair(npc: number, kind: PairAction): void;
 }
 
@@ -137,7 +137,7 @@ export interface CityEnv {
   /** Tu parte de una acción en pareja con un ciudadano (selfPeople.startLocalPair). */
   pair(kind: PairAction, key: string): void;
   /** Los huecos de la gente (collision.ts → npcs): dónde están y los golpes que les llegan. */
-  npcs: { count: number; pos: Float32Array; knock: Float32Array; knockHead?: Uint8Array };
+  npcs: { count: number; pos: Float32Array; knock: Float32Array; knockHead?: Uint8Array; knockShot?: Uint8Array };
   /** La red: sin ella, cada cliente los suyos. */
   link?: CityLink;
 }
@@ -201,7 +201,7 @@ const SPEECH_OK = /^npc\.[a-z_]{1,24}$/;
 
 type Doing = "travel" | "stay" | "chat" | "respond" | "follow" | "watch" | "flee" | "dodge" | "pair" | "down";
 /** Qué le ha dado: corrías contra él, un golpe del modo pelea o el coche. */
-type HitKind = "" | "bump" | "hit" | "car";
+type HitKind = "" | NpcHitKind;
 
 export interface Citizen {
   id: number;
@@ -2103,13 +2103,13 @@ export class CitySim {
       if (npcs.knock[i * 4]) {
         // Un golpe nuevo: de qué (el coche si conduces, un golpe en modo pelea o que corrías contra él)
         // y de quién (lo de los demás llega con lo suyo: remoteEvent).
-        const kind: HitKind = me.driving ? "car" : me.fight ? "hit" : "bump";
+        const kind: HitKind = npcs.knockShot?.[i] ? "shot" : me.driving ? "car" : me.fight ? "hit" : "bump";
         if (watching) {
           // Viéndolos como llegan: el de la red ya está contado; el tuyo se ve ya y se le cuenta a quien los lleva.
           if (c.injected) c.injected = false;
           else {
             c.localHitAt = this.clock;
-            this.link!.hit(c.id, npcs.knock[i * 4 + 1]!, npcs.knock[i * 4 + 2]!, npcs.knock[i * 4 + 3]!, (npcs.knockHead?.[i] ?? 0) === 1, kind as "hit" | "car" | "bump");
+            this.link!.hit(c.id, npcs.knock[i * 4 + 1]!, npcs.knock[i * 4 + 2]!, npcs.knock[i * 4 + 3]!, (npcs.knockHead?.[i] ?? 0) === 1, kind as NpcHitKind);
           }
         } else {
           c.hitKind = c.pendingKind || kind;
@@ -2179,7 +2179,8 @@ export class CitySim {
       c.who = by;
       c.glance = this.clock + 2;
     } else {
-      c.fear = Math.min(1, c.fear + (kind === "car" ? 0.6 : 0.4) + (1 - c.bold) * 0.4);
+      // Un coche o un disparo asustan más que un golpe.
+      c.fear = Math.min(1, c.fear + (kind === "car" ? 0.6 : kind === "shot" ? 0.55 : 0.4) + (1 - c.bold) * 0.4);
       c.grudge = this.clock + (kind === "car" ? GRUDGE * 1.4 : GRUDGE);
       c.grudgeWho = by;
       this.say(c, kind === "car" ? "npc.crazy" : this.r() < 0.5 ? "npc.ouch" : "npc.leave");

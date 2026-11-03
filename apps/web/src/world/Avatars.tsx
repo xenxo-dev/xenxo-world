@@ -18,6 +18,9 @@ import { advance, createMotion, smoothSpeed, type Motion } from "./motion";
 import { HANG_DROP, HANG_IN, HANG_OFF } from "./parkour/moves";
 import { presetFor } from "./presets";
 import { applyCarPose, CarModel, createCarHandle, createCarPose } from "./vehicle/CarModel";
+import { aimHands } from "./people/arms";
+import { HeldWeapon } from "./people/HeldWeapon";
+import { isWeaponId } from "@xenxo/protocol";
 import { CAR, driverRoot, paintFor } from "./vehicle/car";
 
 /** Gestos con la puerta del coche abierta (subir y bajar). */
@@ -204,6 +207,8 @@ function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; n
   const pkTilt = useRef({ lean: 0, pitch: 0 }).current;
   /** Parkour, colgado: el borde (reconstruido con las reglas del parkour), las manos y el dibujo. */
   const pkHang = useRef({ x: 0, y: 0, z: 0, fx: 0, fz: 1, t: 0, on: false, hands: false, sh: 0, off: 0, lift: 0 }).current;
+  /** Con el arma sacada, las manos apuntan (§9 octies ter): para soltarlas una sola vez. */
+  const gunHands = useRef(false);
   const feetAt = useRef(new THREE.Vector3()).current;
   useEffect(() => {
     remoteFeet.set(sessionId, feetAt);
@@ -262,6 +267,7 @@ function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; n
     motion.fight = people.fighters.has(sessionId);
     if (driving) {
       motion.emote = s1.emote ?? null;
+      motion.weapon = null;
       // Sentado en el asiento, pegado al coche (sin el desfase entre las dos poses).
       body.current.position.set(SEAT.x, SEAT.y, SEAT.z).applyQuaternion(car.q).add(car.p);
       body.current.quaternion.copy(car.q).multiply(_seatQ);
@@ -309,6 +315,16 @@ function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; n
         fxr.reachL.w = fxr.reachR.w = 0;
         pkHang.hands = false;
       }
+      // Con el arma sacada (su pose lo dice): las manos apuntan hacia donde mira (people/arms.ts).
+      const held = !d.placed && !pkHang.on && isWeaponId(s1.weapon) ? s1.weapon : null;
+      motion.weapon = held;
+      if (fxr && held) {
+        aimHands(fxr, d.x, d.y, d.z, d.yaw, held);
+        gunHands.current = true;
+      } else if (fxr && gunHands.current) {
+        fxr.reachL.w = fxr.reachR.w = 0;
+        gunHands.current = false;
+      }
       const inW = hangE ? 1 : pkHang.on ? Math.max(0, 1 - Math.max(0, pkHang.t - 0.44) / 0.5) : 0;
       pkHang.off += (inW - pkHang.off) * Math.min(1, dt * 12);
       const rigR = fxr?.rig;
@@ -342,6 +358,7 @@ function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; n
         <group ref={person}>
           <AvatarBody avatar={avatar} seed={sessionId} motion={motion} />
         </group>
+        <HeldWeapon motion={motion} who={sessionId} />
         <Suspense fallback={null}>
           <Billboard position={[0, 2.15, 0]}>
             <Text font={FONT_URL} fontSize={0.22} color="#ffffff" outlineWidth={0.02} outlineColor="#000000">

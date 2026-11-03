@@ -8,7 +8,7 @@
  * contarle a quien los lleva y lo que se manda. La ciudad (world/city/citizens.ts) lo usa por
  * `npcLink`; la gente de las salas (world/Interiors.tsx), por `resHits` y `sendResHit`.
  */
-import { msg, type ClientMessage, type NpcSnap, type PairAction } from "@xenxo/protocol";
+import { msg, type ClientMessage, type NpcHitKind, type NpcSnap, type PairAction } from "@xenxo/protocol";
 import type { CityLink, NpcEvent, NpcStateIn } from "../world/city/citizens";
 import { net } from "./session";
 import { NPC_REF, world } from "./world-store";
@@ -87,7 +87,7 @@ if (typeof document !== "undefined") {
 }
 
 /** Le has dado a alguien de una sala (lo ven caer los de cerca). */
-export function sendResHit(res: number, dx: number, dz: number, power: number, head: boolean, kind: "hit" | "car" | "bump") {
+export function sendResHit(res: number, dx: number, dz: number, power: number, head: boolean, kind: NpcHitKind) {
   if (world.status !== "open" || world.solo) return;
   send("NPC_HIT", { res, dir: [round(dx), round(dz)], power: round(Math.min(30, power)), ...(head ? { head: true } : {}), kind });
 }
@@ -108,7 +108,7 @@ export const npcLink: CityLink = {
   },
   nextEvent: () => npc.events.shift() ?? null,
   states: () => npc.states,
-  hit(i: number, dx: number, dz: number, power: number, head: boolean, kind: "hit" | "car" | "bump") {
+  hit(i: number, dx: number, dz: number, power: number, head: boolean, kind: NpcHitKind) {
     send("NPC_HIT", { npc: i, dir: [round(dx), round(dz)], power: round(Math.min(30, power)), ...(head ? { head: true } : {}), kind });
   },
   pair(i: number, kind: PairAction) {

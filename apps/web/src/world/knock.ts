@@ -108,6 +108,7 @@ export function knockApply(i: number, g: THREE.Object3D, x: number, y: number, z
   if (npcs.knock[i * 4]) {
     const nx = npcs.knock[i * 4 + 1]!, nz = npcs.knock[i * 4 + 2]!, speed = npcs.knock[i * 4 + 3]!;
     npcs.knock[i * 4] = 0;
+    npcs.knockShot[i] = 0;
     if (!st) states.set(motion, (st = fresh()));
     st.free = free;
     hit(st, g, x, y, z, yaw, motion, nx, nz, speed, npcs.knockHead[i] === 1, now);
