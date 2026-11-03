@@ -15,7 +15,7 @@ export function CustomAvatar({ url, fallback, motion, extra = false, onLoad }: {
     if (!url) return;
     let alive = true;
     let loaded: LoadedAvatar | null = null;
-    loadAvatar(url)
+    loadAvatar(url, { decor: extra })
       .then((a) => {
         if (alive) {
           if (extra) withoutShadows(a.object);
@@ -35,7 +35,7 @@ export function CustomAvatar({ url, fallback, motion, extra = false, onLoad }: {
   }, [url, extra]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sin dibujar (gente lejos o fuera de la vista), sin animar: es lo que más cuesta de cada persona.
-  useFrame((_, dt) => void (motion.hidden || avatar?.update(Math.min(dt, 0.1), motion)));
+  useFrame((state, dt) => void (motion.hidden || avatar?.update(Math.min(dt, 0.1), motion, state.camera.position)));
 
   if (!url || !avatar) return <>{fallback}</>;
   return <primitive object={avatar.object} />;

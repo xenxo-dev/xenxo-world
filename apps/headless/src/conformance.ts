@@ -9,7 +9,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { AVATAR_PRESETS } from "../../realtime/src/avatar-presets";
-import { Emote, EMOTES, GameManifest, msg, PLACES } from "@xenxo/protocol";
+import { BUDGETS, Emote, EMOTES, GameManifest, msg, PLACES } from "@xenxo/protocol";
 import { XenxoClient } from "./client";
 import { makeBoxGlb, makeCoverPng, makeVrmMannequin, withExternalImage } from "./fixtures";
 import { Api } from "./http";
@@ -1069,7 +1069,7 @@ await scenario("Circuito Neón (Arcade): carrera del sistema con salida, 11 punt
   c.close();
 });
 
-await scenario("Ruta de las Azoteas (Vertical): parkour solo aquí (WELCOME.parkour); carrera con salida, 7 puntos y meta, 8 banderines en alto, sus marcadores, y los gestos pk_* llegan a los demás", async () => {
+await scenario("Ruta de las Azoteas (Vertical): parkour solo aquí (WELCOME.parkour); carrera con salida, 7 puntos y meta, 8 banderines en alto, sus marcadores, las farolas del Patio (sin pasarse de las luces del chunk), y los gestos pk_* (también las caídas) llegan a los demás", async () => {
   const chunkId = "c_-1_1";
   const a = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-pk-a" });
   assert(a.welcome.parkour === true, "en Vertical, WELCOME.parkour");
@@ -1083,11 +1083,15 @@ await scenario("Ruta de las Azoteas (Vertical): parkour solo aquí (WELCOME.park
   assert(flags.every((e) => (e.components["transform@1"] as { p: number[] }).p[1]! >= 3.5), "los banderines van en alto");
   const boards = sys.filter((e) => e.components["scoreboard@1"]).map((e) => (e.components["scoreboard@1"] as { id: string }).id);
   assert(boards.includes("azoteas") && boards.includes("banderines"), "marcador de la ruta y de los banderines");
+  // Las farolas del Patio encienden su luz de noche; con las del distrito, sin pasar del tope del chunk.
+  const lights = sys.filter((e) => e.components["light@1"]);
+  const night = lights.filter((e) => (e.components["light@1"] as { when?: string }).when === "night");
+  assert(night.length >= 4 && lights.length <= BUDGETS.maxLightsPerChunk, `farolas de noche y luces del chunk (${night.length}/${lights.length} de ${BUDGETS.maxLightsPerChunk})`);
   // Lo que hace el parkour viaja en la pose, como cualquier gesto.
   const b = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-pk-b" });
   b.pose([30, 1.6, 30], 0);
   await sleep(300);
-  for (const emote of ["pk_wallrun_l", "pk_hang", "pk_roll"]) {
+  for (const emote of ["pk_wallrun_l", "pk_hang", "pk_roll", "pk_fall", "pk_crash"]) {
     await sleep(150);
     const seen = b.next("POSES", (m) => m.payload.poses.some((p) => p.session_id === a.welcome.session_id && p.emote === emote), 3000);
     a.pose([31, 1.6, 31], 0, emote);

@@ -59,6 +59,10 @@ const HANG_HI = 2.3;
 const SOFT_LANDING = 8.6;
 /** De más alto que esto (≈ 10 m) ni rodando. */
 const ROLL_MAX = 17.5;
+/** Sin rodar, de más alto que esto (≈ 5 m) las piernas no aguantan: se cae de verdad (people/selfPeople). */
+const FALL_LANDING = 12.2;
+/** Corriendo de frente contra una pared alta sin saltar, a partir de esta velocidad: el golpe y al suelo. */
+const CRASH_SPEED = 5.2;
 
 export type PkMove = "none" | "vault" | "mantle" | "hang" | "climb" | "wallrun" | "wallup" | "slide" | "slideup" | "crouch" | "roll" | "land";
 
@@ -142,6 +146,16 @@ export interface Parkour {
   shim: number;
   /** Rebotes en paredes desde la última vez que se pisó suelo (o se colgó): como mucho MAX_KICKS. */
   kicks: number;
+  /**
+   * Una caída de verdad que empieza (la hace la gente, people/selfPeople: el cuerpo con física y
+   * levantarse): aterrizar de muy alto sin rodar ("land", con la velocidad que llevaba en fallX/Z) o
+   * estrellarse corriendo contra una pared ("crash", con su normal). Quien la lee la borra.
+   */
+  fall: "" | "land" | "crash";
+  fallX: number;
+  fallZ: number;
+  /** La velocidad del golpe (m/s). */
+  fallV: number;
 }
 
 export function createParkour(): Parkour {
@@ -153,12 +167,14 @@ export function createParkour(): Parkour {
     hand: { lx: 0, ly: 0, lz: 0, rx: 0, ry: 0, rz: 0, w: 0 },
     emote: null, balance: false,
     wallNx: 0, wallNz: 0, wallD: 0, wallUsed: false, airFx: 0, rollAge: Infinity, noGrab: 0, push: 0, shim: 0, kicks: 0,
+    fall: "", fallX: 0, fallZ: 0, fallV: 0,
   };
 }
 
 /** Vuelve a nada (al aparecer en otro sitio, al subir al coche…): de pie, sin movimiento. */
 export function resetParkour(pk: Parkour, b: Body) {
   pk.move = "none";
+  pk.fall = "";
   pk.t = pk.p = 0;
   pk.yaw = NaN;
   pk.lean = pk.pitch = pk.ox = pk.oz = 0;
@@ -665,6 +681,19 @@ function free(pk: Parkour, b: Body, inp: ParkourInput, dt: number, min: number, 
       if (tryWallUp(pk, b, dx, dz, into, true)) return consumeJump();
       requestJump(b);
       consumeJump();
+    } else if (speed >= CRASH_SPEED && toward > 0.7) {
+      // Corriendo de frente contra una pared alta, sin saltar: se la come (la velocidad de antes del
+      // choque, que el paso de la física se quedaría al pararle).
+      const ux = b.vx / speed;
+      const uz = b.vz / speed;
+      if (probeWall(b.x, b.y + 1.25, b.z, ux, uz, R + speed * dt + 0.06) && -(wallHit.nx * ux + wallHit.nz * uz) > 0.9) {
+        pk.fall = "crash";
+        pk.fallX = wallHit.nx;
+        pk.fallZ = wallHit.nz;
+        pk.fallV = speed;
+        b.vx = b.vz = 0;
+        return;
+      }
     }
     pk.balance = speed < 4.5 && onBeam(b, dx, dz);
   } else {
@@ -715,6 +744,16 @@ function land(pk: Parkour, b: Body, inp: ParkourInput) {
     pk.speed = Math.max(speed, 3.2);
     pk.yaw = Math.atan2(-dir.x, -dir.z);
     b.h = 1.0;
+    return;
+  }
+  // De muy alto, o sin rodar desde bastante alto: las piernas no aguantan y se cae de verdad.
+  if (v > FALL_LANDING) {
+    b.stun = 0;
+    pk.fall = "land";
+    pk.fallX = b.vx;
+    pk.fallZ = b.vz;
+    pk.fallV = v;
+    pk.move = "none";
     return;
   }
   // Sin rodar: el golpe (más largo cuanto más alto).

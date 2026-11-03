@@ -27,7 +27,7 @@ import { knockBusy } from "../knock";
 import { placeBody, type Body } from "../locomotion";
 import type { Motion } from "../motion";
 import { impact, thud, whoosh } from "./fight-audio";
-import { COMBO, COMBO_RESET, fallFor, FALL_MAX, HIT_DELAY_MS, LIE, LIE_KO, lightReaction, myStrike, RISE, STRIKES, strikeOf, type Strike } from "./fight";
+import { COMBO, COMBO_RESET, fallFor, FALL_MAX, HIT_DELAY_MS, LIE, LIE_KO, lightReaction, myStrike, parkourFallFor, RISE, STRIKES, strikeOf, type Strike } from "./fight";
 import { loadRagdolls, ragdolls } from "./ragdoll";
 import { PAIR, pairTargets } from "./pair";
 import { createFx, type Lying } from "./rig";
@@ -57,7 +57,22 @@ const me = {
   lastY: 0,
   lastVy: 0,
   hit: null as HitEvent | null,
+  /** Lo que ven los demás al empezar una caída del parkour (pk_fall, pk_crash): luego, hit_down. */
+  fallEmote: "",
 };
+/** Una caída del parkour que empieza en el próximo frame (world/parkour: Player la pasa aquí). */
+const pkFall = { kind: "" as "" | "land" | "crash", x: 0, z: 0, v: 0 };
+
+/**
+ * El parkour pide una caída de verdad: aterrizar de muy alto sin rodar (`x, z` = la velocidad que
+ * llevaba) o estrellarse corriendo (`x, z` = la normal de la pared). `v`: la velocidad del golpe.
+ */
+export function parkourFall(kind: "land" | "crash", x: number, z: number, v: number) {
+  pkFall.kind = kind;
+  pkFall.x = x;
+  pkFall.z = z;
+  pkFall.v = v;
+}
 /** El golpe que estás dando. */
 const strike = { name: "", def: null as Strike | null, t: 0, target: "", npc: -1, sent: false };
 const combo = { move: "" as FightMove | "", i: 0, last: -1e9 };
@@ -107,6 +122,8 @@ export function resetPeople(motion: Motion) {
   pendingPair = null;
   selfFx.look.w = selfFx.reachL.w = selfFx.reachR.w = 0;
   motion.emote = null;
+  me.fallEmote = "";
+  pkFall.kind = "";
 }
 
 const _o = new THREE.Vector3();
@@ -203,6 +220,10 @@ export function peopleFrame(dt: number, c: PeopleCtx, out: { lock: boolean; want
 
   lookAround(c);
   if (strike.def) strikeFrame(dt, c, out);
+  if (pkFall.kind) {
+    if (me.phase === "none") startParkourFall(c);
+    pkFall.kind = "";
+  }
   if (me.phase === "none") return;
   me.t += dt;
   out.lock = true;
@@ -230,7 +251,8 @@ export function peopleFrame(dt: number, c: PeopleCtx, out: { lock: boolean; want
       }
       placeFromDoll(c);
       out.drawn = true;
-      motion.emote = "hit_down";
+      // Al empezar una caída del parkour, los demás ven cuál (la hacen con su propia física).
+      motion.emote = me.fallEmote && me.t < 0.6 ? me.fallEmote : "hit_down";
       motion.speed = 0;
       if (me.phase === "fall") {
         // El golpe contra el suelo: la cadera deja de caer de golpe.
@@ -288,6 +310,54 @@ export function peopleFrame(dt: number, c: PeopleCtx, out: { lock: boolean; want
   }
 }
 
+/** Caída del parkour: el cuerpo con física desde como iba (o, sin física aún, la de la animación). */
+function startParkourFall(c: PeopleCtx) {
+  const { body, motion } = c;
+  strike.def = null;
+  selfFx.reachL.w = selfFx.reachR.w = 0;
+  me.hit = null;
+  me.ko = false;
+  me.t = 0;
+  me.rolled = false;
+  let dx = pkFall.x, dz = pkFall.z, vx = 0, vz = 0;
+  if (pkFall.kind === "land") {
+    vx = pkFall.x;
+    vz = pkFall.z;
+    const h = Math.hypot(vx, vz);
+    if (h > 1) {
+      dx = vx / h;
+      dz = vz / h;
+    } else {
+      // Casi parado: se va de culo (hacia atrás de donde mira).
+      dx = Math.sin(c.bodyYaw.current);
+      dz = Math.cos(c.bodyYaw.current);
+    }
+  }
+  thud(body.x, body.z, pkFall.v);
+  camKick.x = dx * 0.05;
+  camKick.z = dz * 0.05;
+  camKick.y = -0.08;
+  camKick.t = 0;
+  me.fallEmote = pkFall.kind === "crash" ? "pk_crash" : "pk_fall";
+  const rig = selfFx.rig;
+  const sim = ragdolls();
+  if (rig && sim && rig.startFall(sim, parkourFallFor(pkFall.kind as "land" | "crash", dx, dz, pkFall.v, vx, vz))) {
+    me.phase = "fall";
+    motion.emote = me.fallEmote;
+    rig.lying(_l);
+    me.lastY = _l.y;
+    me.lastVy = 0;
+    return;
+  }
+  if (!sim) void loadRagdolls();
+  // Sin física (aún): la animación de caer de espaldas, girado hacia donde va a caer.
+  me.phase = "clipfall";
+  c.bodyYaw.current = Math.atan2(dx, dz);
+  me.vx = dx * 1.2;
+  me.vz = dz * 1.2;
+  motion.emote = "hit_down";
+}
+
 /** Golpe recibido: flojo (gesto, sacudida y traspié) o fuerte (caída con física). */
 function receive(h: HitEvent, c: PeopleCtx) {
   const { body, motion } = c;
@@ -299,6 +369,7 @@ function receive(h: HitEvent, c: PeopleCtx) {
   me.ko = h.ko;
   me.t = 0;
   me.rolled = false;
+  me.fallEmote = "";
   // Qué golpe era (lo dice la pose de quien lo dio): en la cara o en el cuerpo.
   const s = strikeOf(latestEmote(h.from)) ?? STRIKES[h.move === "punch" ? "punch" : h.move]!;
   const head = h.move === "punch" ? s.head : false;
@@ -378,6 +449,7 @@ function rise(c: PeopleCtx) {
 function end(motion: Motion) {
   me.phase = "none";
   me.t = 0;
+  me.fallEmote = "";
   motion.emote = null;
   selfFx.reachL.w = selfFx.reachR.w = 0;
 }

@@ -12,14 +12,20 @@ plataforma de llegada.
 
 Todo sale de `plan()`, puro y determinista: el modelo (`build`) y las colisiones (`colliders`) usan
 las mismas cajas. `course()` da los puntos de la ruta y los banderines (la búsqueda) para la ficha de
-actividades.
+actividades. Las torres de alrededor van en su propio modelo (`towers_object`, la pieza
+`vertical_towers`, que el servidor pone como atrezo): así la ruta y el Patio caben con su detalle en
+el presupuesto de un modelo. Materiales de verdad: chapa ondulada, óxido, hormigón y hormigón pintado
+(tools/materials/fetch.py). Las farolas del Patio salen de `lights` en district-activities.json, la
+misma lista con la que el servidor pone su luz (light@1).
 
 Coordenadas del chunk (X este, Z sur, Y arriba); el modelo va centrado en el chunk (Blender:
 x = X − 32, y = −(Z − 32), z arriba), como el resto de la ciudad (city.py).
 """
 from __future__ import annotations
 
+import json
 import math
+import os
 import random
 
 from mathutils import Matrix
@@ -213,6 +219,20 @@ CROSS = ["cantilever", "plank", "beam", "cantilever", "plank", "beam", "plank"]
 PLAZA = (20.5, 20.5, 43.5, 43.5)
 START = {"deck": (28.5, 20.5, 35.5, 23.3), "y": roof(1)}
 FINISH = {"deck": (20.5, 30.6, 23.5, 33.4), "y": roof(1)}
+RAIL = 1.05    # barandillas de las plataformas
+LAMP_H = 4.3   # farolas del Patio: altura del poste
+
+ACTIVITIES = os.path.join(os.path.dirname(__file__), "..", "..", "apps", "realtime", "src", "district-activities.json")
+
+
+def _activities() -> dict:
+    with open(ACTIVITIES, encoding="utf-8") as f:
+        return json.load(f).get("vertical", {})
+
+
+def lamps() -> list[dict]:
+    """Farolas del Patio: la misma lista con la que el servidor pone sus luces (light@1)."""
+    return _activities().get("lights", [])
 
 
 def _exit(b: Block, kind: str) -> tuple[float, float, float, float]:
@@ -291,7 +311,7 @@ def _patio(pl: Plan, marks: list) -> None:
     """El Patio: la torre de salida con su escalera de cajas, las estaciones y la plataforma de llegada."""
     x0, z0, x1, z1 = START["deck"]
     y = START["y"]
-    pl.add("deck", x0, z0, x1, z1, y - 0.2, y)
+    pl.add("deck", x0, z0, x1, z1, y - 0.2, y, exit="N")
     for (px, pz) in ((x0 + 0.15, z0 + 0.15), (x1 - 0.15, z0 + 0.15), (x0 + 0.15, z1 - 0.15), (x1 - 0.15, z1 - 0.15)):
         pl.add("post", px - 0.15, pz - 0.15, px + 0.15, pz + 0.15, 0, y - 0.2)
     # Escalera de cajas hacia el oeste: cada una 1,2 m más alta (se sube de una en una).
@@ -301,7 +321,7 @@ def _patio(pl: Plan, marks: list) -> None:
     marks.append(("start", ((x0 + x1) / 2, (z0 + z1) / 2), y))
     # Llegada: plataforma al oeste (desde el último cruce) y salto a la plaza.
     fx0, fz0, fx1, fz1 = FINISH["deck"]
-    pl.add("deck", fx0, fz0, fx1, fz1, FINISH["y"] - 0.2, FINISH["y"])
+    pl.add("deck", fx0, fz0, fx1, fz1, FINISH["y"] - 0.2, FINISH["y"], exit="E")
     for (px, pz) in ((fx0 + 0.15, fz0 + 0.15), (fx1 - 0.15, fz0 + 0.15), (fx0 + 0.15, fz1 - 0.15), (fx1 - 0.15, fz1 - 0.15)):
         pl.add("post", px - 0.15, pz - 0.15, px + 0.15, pz + 0.15, 0, FINISH["y"] - 0.2)
     marks.append(("finish", (26.5, 32.0), 0.0))
@@ -323,10 +343,24 @@ def _patio(pl: Plan, marks: list) -> None:
         pl.add("post", x - 0.08, 39.92, x + 0.08, 40.08, 0, 0.86)
     # 5) Pared para correr por ella (12 m) y chimenea (dos paredes a 1,6 m).
     # La chimenea del Patio: tan alta como las de las esquinas (el banderín no se alcanza desde abajo).
-    pl.add("wall", 24.4, 24.0, 25.0, 27.5, 0, roof(1), station="chimney")
-    pl.add("wall", 26.6, 24.0, 27.2, 27.5, 0, roof(1))
+    pl.add("wall", 24.4, 24.0, 25.0, 27.5, 0, roof(1), station="chimney", inner="+x")
+    pl.add("wall", 26.6, 24.0, 27.2, 27.5, 0, roof(1), station="chimney", inner="-x")
     marks.append(("flag", (24.7, 25.75), roof(1)))
     pl.add("wall", 20.6, 35.0, 21.1, 40.6, 0, 4.0, station="wallrun")
+    # La torre de salida es de acero: cruces en los lados cortos (cierran por debajo: las cajas
+    # tapan el oeste) y barandilla donde no se entra ni se sale (sur y este). En la llegada, a los
+    # lados por los que no se llega (por el oeste, el tablón) ni se salta a la plaza (este).
+    for x in (x0 + 0.15, x1 - 0.15):
+        pl.add("brace", x - 0.04, z0 + 0.3, x + 0.04, z1 - 0.3, 0, y - 0.2)
+    pl.add("rail", x0, z1 - 0.06, x1, z1, y, y + RAIL)
+    pl.add("rail", x1 - 0.06, z0, x1, z1 - 0.06, y, y + RAIL)
+    pl.add("rail", x0, z0 + 1.45, x0 + 0.06, z1 - 0.06, y, y + RAIL)  # al oeste, menos por donde llegan las cajas
+    for z in (fz0, fz1 - 0.06):
+        pl.add("rail", fx0, z, fx1, z + 0.06, FINISH["y"], FINISH["y"] + RAIL)
+    # Farolas (las luces van en district-activities.json, como datos: el servidor pone su light@1).
+    for lt in lamps():
+        x, _y, z = lt["p"]
+        pl.add("lamp", x - 0.1, z - 0.1, x + 0.1, z + 0.1, 0, LAMP_H)
 
 
 def _towers(pl: Plan, rnd: random.Random) -> None:
@@ -352,8 +386,12 @@ def _towers(pl: Plan, rnd: random.Random) -> None:
             if not pl.free(cx0 - 0.6, cz0 - 0.6, cx1 + 0.6, cz1 + 0.6, 0, roof(top) + 0.5):
                 continue
             b = Block(pl, i, j, "E", rnd)
+            n0 = len(pl.items)
             b.stack(cu - (TL / 2 if along_x else HALF), cv - (HALF if along_x else TL / 2), cu + (TL / 2 if along_x else HALF), cv + (HALF if along_x else TL / 2), top, route=False)
-            pl.items[-1]["tower"] = True
+            # Las torres van en su propio modelo (towers_object); la de arriba lleva lo de la azotea.
+            for it in pl.items[n0:]:
+                it["tower"] = True
+            pl.items[n0]["top"] = True
             placed += 1
 
 
@@ -395,9 +433,64 @@ def _box(p: Part, x0, z0, x1, z1, y0, y1, m, skip=()):
     p.box((x0 - C, -(z1 - C), y0), (x1 - C, -(z0 - C), y1), m, skip=skip)
 
 
+def _bl(x: float, z: float, y: float) -> tuple[float, float, float]:
+    """Punto del chunk (X, Z y la altura) en el modelo (Blender: x = X − 32, y = −(Z − 32), z arriba)."""
+    return (x - C, -(z - C), y)
+
+
+def _face(p: Part, pts: list, m, toward: tuple[float, float, float]) -> None:
+    """Cara plana (puntos del modelo) que mira hacia `toward`: se le da la vuelta si hace falta."""
+    n = [0.0, 0.0, 0.0]
+    for i in range(len(pts)):
+        a, b = pts[i], pts[(i + 1) % len(pts)]
+        n[0] += (a[1] - b[1]) * (a[2] + b[2])
+        n[1] += (a[2] - b[2]) * (a[0] + b[0])
+        n[2] += (a[0] - b[0]) * (a[1] + b[1])
+    if n[0] * toward[0] + n[1] * toward[1] + n[2] * toward[2] < 0:
+        pts = list(reversed(pts))
+    p.poly(pts, m)
+
+
+def _catenary(p: Part, a, b, sag: float, wire, bulb=None, every: float = 1.0, n: int = 8) -> None:
+    """Cable colgado entre dos puntos del chunk (X, Y, Z) con su comba y, si lleva, sus bombillas."""
+    ax, ay, az = a
+    bx, by, bz = b
+
+    def at(t: float, drop: float = 0.0):
+        return _bl(ax + (bx - ax) * t, az + (bz - az) * t, ay + (by - ay) * t - sag * 4 * t * (1 - t) - drop)
+
+    p.tube([at(k / n) for k in range(n + 1)], 0.012, wire, segments=3)
+    if bulb is not None:
+        m = max(2, int(math.dist(a, b) / every))
+        for k in range(1, m):
+            p.sphere(at(k / m, 0.07), 0.055, bulb, subdiv=0)
+
+
 # Dos tonos de caravana: la carrocería (crema o pastel) y su banda baja.
-SHELLS = ["#e3d3b4", "#d6dccb", "#e8cfb2", "#c9d6dc", "#dcc6d0", "#e6dca8", "#cfdccb", "#e2c4a8", "#d3cfe0", "#ece2cc"]
-BANDS = ["#2f5f95", "#2f7d6a", "#b5523b", "#c88a2a", "#6a4c8c", "#2e3f5c", "#9a3a3a", "#4e7a3a", "#1f7f8f", "#c25a7a"]
+# (Pocos tonos: cada material es una llamada de dibujo más en las gafas.)
+SHELLS = ["#e3d3b4", "#d6dccb", "#e8cfb2", "#c9d6dc", "#dcc6d0", "#e6dca8"]
+BANDS = ["#2f5f95", "#2f7d6a", "#b5523b", "#c88a2a", "#6a4c8c", "#9a3a3a"]
+TRIM = "#f2efe6"          # filete, puerta y marcos de las ventanas
+# Lo viejo: chasis, vigas, pilares y riostras de acero con óxido; y algunas bandas que el óxido ya se come.
+RUST = "#3b3632"
+STEEL = "#6a625a"
+RUSTY_BANDS = ["#7a4a32", "#4f5f78"]
+# El Patio: hormigón, muros pintados con su mural, chapa y el amarillo de los bordes.
+CONCRETE = "#c2bdb3"
+CONCRETE_DARK = "#8f8a80"
+TEAL = "#3f9c93"
+CORAL = "#e0715a"
+YELLOW = "#f2c230"
+GALV = "#c9ced6"          # acero galvanizado (barandillas y farolas)
+SHEET = "#5f8fa8"         # la chapa de la pared de correr
+AWNINGS = ["#c8553d", "#2f7d6a", "#d9a441"]
+CLOTHES = ["#d94f4f", "#f2e6c9"]
+SIGN = "#4fe3ff"           # pantallas de los rótulos (el marco, del color del distrito)
+DARK = "#3a3f4a"           # postes, cables y antenas
+PALE = "#e4e6ea"           # parabólicas y casetas
+GREY = "#c8ccd4"           # aparatos del aire, claraboyas y depósitos
+BULB = "#ffd27a"           # bombillas y faroles
+LATH = "#6a4f33"           # listones de tablones y cajas
 
 
 def _profile(L: float, H: float, yb: float, r: float, seg: int) -> list[tuple[float, float]]:
@@ -416,9 +509,12 @@ def _profile(L: float, H: float, yb: float, r: float, seg: int) -> list[tuple[fl
 
 def _trailer(p: Part, it: dict, rnd: random.Random, detail: int, color: str) -> None:
     """
-    Una caravana de las de antes: carrocería de chapa crema o pastel con las esquinas de arriba
-    redondeadas, banda de color abajo y una fina del color del distrito, ventanas (de noche, unas
-    encendidas), la puerta con su ventanuco, el ventanal del morro y, a veces, algo en el techo.
+    Una caravana de las de antes: carrocería de chapa ondulada crema o pastel con las esquinas de arriba
+    redondeadas, banda de color abajo (en las viejas, comida por el óxido) con un filete claro, chasis
+    oxidado, ventanas con su marco (de noche, unas encendidas), la puerta con su ventanuco y el ventanal
+    del morro. Las de la ruta llevan un filo de luz en los bordes del techo y el amarillo de dónde se
+    salta; las de las torres y las del suelo, a veces, un toldo, el aparato del aire o un rótulo; la de
+    arriba de cada torre, su azotea (depósito, tendedero, huerto o antenas).
     """
     x0, z0, x1, z1, y0, y1 = it["x0"], it["z0"], it["x1"], it["z1"], it["y0"], it["y1"]
     along_x = (x1 - x0) >= (z1 - z0)
@@ -427,49 +523,99 @@ def _trailer(p: Part, it: dict, rnd: random.Random, detail: int, color: str) -> 
     H = y1 - y0
     # Todo lo que se sortea, primero y siempre igual: los dos niveles de detalle salen iguales.
     flip = rnd.random() < 0.5  # el morro hacia un lado o el otro
-    shell = mat("chapa", rnd.choice(SHELLS))
-    band = mat("chapa", rnd.choice(BANDS))
-    glass = mat("ventana", rnd.choice(["#2c3a4a", "#33404d", "#283544"]))
+    shell_tint = rnd.choice(SHELLS)
+    band_tint = rnd.choice(BANDS)
+    rusty = rnd.random() < 0.3
+    rusty_tint = rnd.choice(RUSTY_BANDS)
     door_side = -1 if rnd.random() < 0.5 else 1
     r = rnd.random()
     antenna = 1.6 + rnd.random()
+    extra = rnd.random()
+    pick = rnd.randrange(12)
+    if not detail:
+        # El nivel ligero (gafas y móviles; nunca se ve junto al otro): menos tonos y sin óxido en las
+        # bandas, que cada material es una llamada de dibujo más.
+        shell_tint = SHELLS[SHELLS.index(shell_tint) % 3]
+        band_tint = BANDS[BANDS.index(band_tint) % 3]
+        rusty = False
+    shell = mat("chapa", shell_tint)
+    glass = mat("ventana", "#2c3a4a")
+    band = mat("oxido", rusty_tint) if rusty else mat("chapa", band_tint)
+    trim = mat("chapa", TRIM)
+    route = bool(it.get("route"))
     q = Part("caravana")
-    dark = mat("metal", "#2b2f38")
     yb = 0.14
     # En local: largo en Y (0..L), ancho en X (−W/2..W/2), alto en Z; se coloca después.
-    q.box((-W / 2 + 0.3, 0.3, 0), (W / 2 - 0.3, L - 0.3, yb), dark, skip=("-z",))
+    q.box((-W / 2 + 0.3, 0.3, 0), (W / 2 - 0.3, L - 0.3, yb), mat("oxido", RUST), skip=("-z",))
     q.prism(_profile(L, H, yb, 0.55 if detail else 0.32, 3 if detail else 1), -W / 2, W / 2, shell)
     # Dos tonos: la parte de abajo del color de la banda, con un filete claro encima.
     q.box((-W / 2 - 0.015, 0.1, yb + 0.02), (W / 2 + 0.015, L - 0.1, yb + 0.95), band, skip=("-z",))
-    q.box((-W / 2 - 0.02, 0.06, yb + 0.95), (W / 2 + 0.02, L - 0.06, yb + 1.02), mat("chapa", "#f6f4ee"), skip=("-z",))
-    # Ventanas (cristal sobre la chapa: solo sus caras de fuera), la puerta y el ventanal del morro.
+    q.box((-W / 2 - 0.02, 0.06, yb + 0.95), (W / 2 + 0.02, L - 0.06, yb + 1.02), trim, skip=("-z",))
+    # La puerta (con su ventanuco) a un lado; las ventanas, con su marco claro, donde no la tapen.
+    dy = L - 1.3 if L > 4 else L / 2
     n = 2 if L > 5 else 1
+    thin = () if detail else ("+y", "-y")
+    wins = []
     for sx in (-1, 1):
         inner = "+x" if sx < 0 else "-x"
         for k in range(n):
             c = (k + 1) * L / (n + 1) + (0.4 if k == 0 else -0.4)
+            if sx == door_side and abs(c - dy) < 1.15:
+                continue
+            wins.append((sx, c))
             xa = -W / 2 - 0.02 if sx < 0 else W / 2
-            q.box((xa, c - 0.6, yb + 1.34), (xa + 0.02, c + 0.6, yb + 1.96), glass, skip=(inner, "+z", "-z"))
+            # En el nivel ligero, de los cantos de 2 cm (cristal, puerta, ventanal) solo su cara de fuera.
+            q.box((xa, c - 0.6, yb + 1.34), (xa + 0.02, c + 0.6, yb + 1.96), glass, skip=(inner, "+z", "-z") + thin)
+            if detail:  # el marco: una placa clara algo mayor entre la chapa y el cristal (su cara de fuera)
+                xf = -W / 2 - 0.011 if sx < 0 else W / 2
+                q.box((xf, c - 0.68, yb + 1.27), (xf + 0.011, c + 0.68, yb + 2.03), trim, skip=(inner, "+z", "-z", "+y", "-y"))
     sx = door_side
     xa = -W / 2 - 0.022 if sx < 0 else W / 2 + 0.002
-    dy = L - 1.3 if L > 4 else L / 2
-    q.box((xa, dy - 0.38, yb + 0.06), (xa + 0.02, dy + 0.38, yb + 2.05), mat("chapa", "#f2efe6"), skip=("+x" if sx < 0 else "-x", "+z", "-z"))
+    q.box((xa, dy - 0.38, yb + 0.06), (xa + 0.02, dy + 0.38, yb + 2.05), trim, skip=("+x" if sx < 0 else "-x", "+z", "-z") + thin)
     if detail:
         q.box((xa - 0.004 if sx < 0 else xa + 0.004, dy - 0.18, yb + 1.45), (xa + 0.016 if sx < 0 else xa + 0.024, dy + 0.18, yb + 1.85), glass, skip=("+x" if sx < 0 else "-x",))
-    q.box((-W / 2 + 0.45, -0.025, yb + 1.3), (W / 2 - 0.45, 0.0, yb + 1.85), glass, skip=("+y", "+z", "-z"))
+    q.box((-W / 2 + 0.45, -0.025, yb + 1.3), (W / 2 - 0.45, 0.0, yb + 1.85), glass, skip=("+y", "+z", "-z") + (() if detail else ("+x", "-x")))
     if detail:
-        q.box((-W / 2 + 0.15, -0.02, yb + 0.6), (-W / 2 + 0.35, 0.0, yb + 0.72), mat("farol", "#ffb766"), skip=("+y",))
-        # En el techo, a veces: claraboya, máquina del aire o antena (nunca en lo que se pisa de la ruta).
-        if not it.get("route"):
-            if r < 0.25:
-                q.box((-0.45, L * 0.5 - 0.35, H), (0.45, L * 0.5 + 0.35, H + 0.5), mat("metal", "#c8ccd4"))
-            elif r < 0.4:
-                q.cylinder((0.6, L * 0.3, H), 0.03, antenna, mat("hierro", "#4a4f5c"), segments=4)
-                q.lathe((0.6, L * 0.3, H + 1.0), [(0.02, 0.0), (0.32, 0.12), (0.36, 0.14)], mat("chapa", "#e4e6ea"), segments=10)
-            elif r < 0.55:
-                q.box((-W / 2 + 0.25, 0.8, H), (W / 2 - 0.25, L - 0.8, H + 0.06), mat("chapa", "#1d2c4a"))
-        elif r < 0.5:
-            q.box((-0.35, L * 0.25 - 0.3, H - 0.02), (0.35, L * 0.25 + 0.3, H + 0.08), mat("chapa", "#d9dde2"))
+        q.box((-W / 2 + 0.15, -0.02, yb + 0.6), (-W / 2 + 0.35, 0.0, yb + 0.72), mat("farol", BULB), skip=("+y",))
+    if route:
+        # Un filo de luz en los dos bordes del techo (de noche se ve por dónde va la ruta) y el
+        # amarillo de los extremos, de donde se salta.
+        rc = 0.6
+        for sx in (-1, 1):
+            xe = -W / 2 - 0.015 if sx < 0 else W / 2
+            q.box((xe, rc, H - 0.07), (xe + 0.015, L - rc, H - 0.02), mat("neon", color), skip=("+x" if sx < 0 else "-x", "+y", "-y"))
+        for (a, b) in ((rc, rc + 0.3), (L - rc - 0.3, L - rc)):
+            q.box((-W / 2 + 0.06, a, H), (W / 2 - 0.06, b, H + 0.008), mat("pintado", YELLOW), skip=("-z",))
+        if detail:  # juntas de la chapa del techo
+            seam = mat("metal", GALV)
+            k = rc + 1.25
+            while k < L - rc - 0.9:
+                q.box((-W / 2 + 0.05, k - 0.025, H), (W / 2 - 0.05, k + 0.025, H + 0.012), seam, skip=("-z",))
+                k += 1.25
+    elif detail and (it.get("tower") or it.get("level", 0) == 0):
+        # La vida de fuera de la ruta: toldo sobre la puerta, el aparato del aire bajo una ventana o,
+        # en lo alto de las torres, un rótulo de neón en la trasera.
+        if extra < 0.3:
+            _awning(q, W, dy, yb, door_side, mat("toldo", AWNINGS[pick % len(AWNINGS)]))
+        elif extra < 0.5 and wins:
+            ws, wc = wins[pick % len(wins)]
+            xs, xo = ws * W / 2, ws * (W / 2 + 0.42)
+            q.box((min(xs, xo), wc - 0.32, yb + 0.95), (max(xs, xo), wc + 0.32, yb + 1.33), mat("metal", GREY), skip=("+x" if ws < 0 else "-x",))
+            xg = xo + ws * 0.004
+            q.box((min(xo, xg), wc - 0.26, yb + 1.0), (max(xo, xg), wc + 0.26, yb + 1.28), mat("metal", "#2b2f38"), skip=("+x" if ws < 0 else "-x",))
+        elif extra < 0.62 and it.get("level", 0) >= 2:
+            _sign(q, L, W, H, yb, color)
+    if it.get("top"):
+        _roof_life(q, L, W, H, pick, detail)
+    elif detail and not route:
+        # En el techo, a veces: claraboya, antena con su parabólica o placas solares.
+        if r < 0.25:
+            q.box((-0.45, L * 0.5 - 0.35, H), (0.45, L * 0.5 + 0.35, H + 0.5), mat("metal", GREY))
+        elif r < 0.4:
+            q.cylinder((0.6, L * 0.3, H), 0.03, antenna, mat("hierro", DARK), segments=4)
+            q.lathe((0.6, L * 0.3, H + 1.0), [(0.02, 0.0), (0.32, 0.12), (0.36, 0.14)], mat("chapa", PALE), segments=10)
+        elif r < 0.55:
+            q.box((-W / 2 + 0.25, 0.8, H), (W / 2 - 0.25, L - 0.8, H + 0.06), mat("chapa", "#1d2c4a"))
     # Colocar: el largo (Y local) a lo largo de X o de Z del mundo; el morro a un lado u otro.
     cx, cz = (x0 + x1) / 2, (z0 + z1) / 2
     rot = (-math.pi / 2 if along_x else 0.0) + (math.pi if flip else 0.0)
@@ -478,8 +624,69 @@ def _trailer(p: Part, it: dict, rnd: random.Random, detail: int, color: str) -> 
     q.bm.free()
 
 
+def _awning(q: Part, W: float, y: float, yb: float, side: int, m) -> None:
+    """Toldo sobre la puerta: empinado (sus rayas van hacia abajo), con su faldón."""
+    xw, xo = side * (W / 2 + 0.01), side * (W / 2 + 0.6)
+    zt, zb = yb + 2.35, yb + 1.62
+    ya, yz = y - 0.95, y + 0.95
+    out = (side * 1.0, 0.0, 0.8)
+    top = [(xw, ya, zt), (xw, yz, zt), (xo, yz, zb), (xo, ya, zb)]
+    _face(q, top, m, out)
+    _face(q, [(x, yy, z - 0.015) for (x, yy, z) in top], m, (-out[0], 0.0, -out[2]))
+    q.box((min(xo, xo + side * 0.02), ya, zb - 0.2), (max(xo, xo + side * 0.02), yz, zb), m, skip=("+z",))
+
+
+def _sign(q: Part, L: float, W: float, H: float, yb: float, color: str) -> None:
+    """Rótulo de la trasera: pantalla viva (sin letras) con su marco de neón del color del distrito."""
+    hw, z0, z1 = 0.75, yb + 1.05, yb + 1.75
+    q.box((-hw, L + 0.03, z0), (hw, L + 0.05, z1), mat("pantalla", SIGN), skip=("-y", "+z", "-z", "+x", "-x"))
+    neon = mat("neon", color)
+    e = 0.05
+    for (a0, b0, a1, b1) in ((-hw - e, z1, hw + e, z1 + e), (-hw - e, z0 - e, hw + e, z0), (-hw - e, z0, -hw, z1), (hw, z0, hw + e, z1)):
+        q.box((a0, L + 0.02, b0), (a1, L + 0.08, b1), neon, skip=("-y",))
+
+
+def _roof_life(q: Part, L: float, W: float, H: float, pick: int, detail: int) -> None:
+    """La azotea de arriba de cada torre: depósito de agua, tendedero, huerto en cajones o antenas."""
+    kind = pick % 4
+    seg = 10 if detail else 6
+    if kind == 0:  # depósito de agua en su base de acero
+        tank = mat("metal", GREY)
+        legs = mat("oxido", STEEL)
+        cy = L * 0.3
+        for (lx, ly) in ((-0.45, cy - 0.45), (0.45, cy - 0.45), (-0.45, cy + 0.45), (0.45, cy + 0.45)):
+            q.box((lx - 0.04, ly - 0.04, H), (lx + 0.04, ly + 0.04, H + 0.6), legs, skip=("-z", "+z"))
+        q.box((-0.55, cy - 0.55, H + 0.6), (0.55, cy + 0.55, H + 0.68), legs)
+        q.cylinder((0, cy, H + 0.68), 0.62, 1.25, tank, segments=seg, caps=(False, False))
+        q.lathe((0, cy, H + 1.93), [(0.62, 0.0), (0.32, 0.2), (0.05, 0.28)], tank, segments=seg, close_top=True)
+    elif kind == 1:  # tendedero con la ropa
+        pole = mat("hierro", DARK)
+        for y in (1.0, L - 1.0):
+            q.cylinder((0, y, H), 0.03, 1.75, pole, segments=4)
+        if detail:
+            pts = [(0.0, 1.0 + (L - 2.0) * t, H + 1.7 - 0.25 * 4 * t * (1 - t)) for t in (k / 6 for k in range(7))]
+            q.tube(pts, 0.008, pole, segments=3)
+            for k in range(4):
+                t = (k + 0.8) / 4.6
+                y, z = 1.0 + (L - 2.0) * t, H + 1.7 - 0.25 * 4 * t * (1 - t)
+                q.box((-0.006, y - 0.24, z - 0.62), (0.006, y + 0.24, z), mat("tela", CLOTHES[(pick + k) % len(CLOTHES)]), skip=("+z", "-z"))
+    elif kind == 2:  # huerto en cajones
+        wood = mat("madera", "#8a6a48")
+        leaf = mat("hoja", "#5d8f45")
+        for y in (1.3, L / 2, L - 1.3):
+            q.box((-0.5, y - 0.4, H), (0.5, y + 0.4, H + 0.42), wood, skip=("-z",))
+            q.sphere((0, y, H + 0.62), 0.5, leaf, subdiv=1 if detail else 0, squash=0.65)
+    else:  # caseta, antenas y parabólica
+        q.box((-0.6, L - 1.9, H), (0.6, L - 0.7, H + 1.0), mat("chapa", PALE), skip=("-z",))
+        pole = mat("hierro", DARK)
+        q.cylinder((0.5, 1.0, H), 0.03, 2.4, pole, segments=4)
+        q.cylinder((-0.5, 1.6, H), 0.03, 1.8, pole, segments=4)
+        q.lathe((0.0, L * 0.45, H + 0.6), [(0.02, 0.0), (0.42, 0.14), (0.46, 0.16)], mat("chapa", PALE), segments=seg)
+        q.cylinder((0.0, L * 0.45, H), 0.04, 0.6, pole, segments=4)
+
+
 def _plank(p: Part, it: dict, detail: int) -> None:
-    """Tablón: tablas de madera con su canto (y, en los largos, unas cuerdas de banderitas)."""
+    """Tablón: tablas de madera con su canto."""
     _box(p, it["x0"], it["z0"], it["x1"], it["z1"], it["y0"], it["y1"], mat("madera", "#8a6a48"))
     if detail:
         along_x = (it["x1"] - it["x0"]) > (it["z1"] - it["z0"])
@@ -487,25 +694,25 @@ def _plank(p: Part, it: dict, detail: int) -> None:
         k = 0.0
         while k < L:
             if along_x:
-                _box(p, it["x0"] + k, it["z0"] - 0.02, it["x0"] + k + 0.06, it["z1"] + 0.02, it["y1"] - 0.01, it["y1"] + 0.005, mat("madera", "#5e4630"))
+                _box(p, it["x0"] + k, it["z0"] - 0.02, it["x0"] + k + 0.06, it["z1"] + 0.02, it["y1"] - 0.01, it["y1"] + 0.005, mat("madera", LATH))
             else:
-                _box(p, it["x0"] - 0.02, it["z0"] + k, it["x1"] + 0.02, it["z0"] + k + 0.06, it["y1"] - 0.01, it["y1"] + 0.005, mat("madera", "#5e4630"))
+                _box(p, it["x0"] - 0.02, it["z0"] + k, it["x1"] + 0.02, it["z0"] + k + 0.06, it["y1"] - 0.01, it["y1"] + 0.005, mat("madera", LATH))
             k += 1.1
 
 
 def _beam(p: Part, it: dict) -> None:
-    """Viga en I de acero: alas arriba y abajo y el alma."""
-    m = mat("hierro", "#3d4452")
+    """Viga en I de acero viejo; la del Patio (equilibrio), con el ala de arriba pintada de amarillo."""
+    m = mat("oxido", STEEL)
     x0, z0, x1, z1, y0, y1 = it["x0"], it["z0"], it["x1"], it["z1"], it["y0"], it["y1"]
     along_x = (x1 - x0) > (z1 - z0)
-    _box(p, x0, z0, x1, z1, y1 - 0.06, y1, m)
+    _box(p, x0, z0, x1, z1, y1 - 0.06, y1, mat("pintado", YELLOW) if it.get("station") else m)
     _box(p, x0, z0, x1, z1, y0, y0 + 0.06, m)
     if along_x:
         c = (z0 + z1) / 2
-        _box(p, x0, c - 0.03, x1, c + 0.03, y0 + 0.06, y1 - 0.06, m)
+        _box(p, x0, c - 0.03, x1, c + 0.03, y0 + 0.06, y1 - 0.06, m, skip=("+z", "-z"))
     else:
         c = (x0 + x1) / 2
-        _box(p, c - 0.03, z0, c + 0.03, z1, y0 + 0.06, y1 - 0.06, m)
+        _box(p, c - 0.03, z0, c + 0.03, z1, y0 + 0.06, y1 - 0.06, m, skip=("+z", "-z"))
 
 
 def _pipe(p: Part, it: dict, detail: int) -> None:
@@ -520,11 +727,79 @@ def _pipe(p: Part, it: dict, detail: int) -> None:
         p.tube([((x0 + x1) / 2 - C, -(z0 - C), yc), ((x0 + x1) / 2 - C, -(z1 - C), yc)], r, m, segments=10 if detail else 6)
 
 
+def _column(p: Part, it: dict) -> None:
+    """Pilar de acero en H (los de las plataformas), con su placa en el suelo."""
+    x0, z0, x1, z1, y0, y1 = it["x0"], it["z0"], it["x1"], it["z1"], it["y0"], it["y1"]
+    m = mat("oxido", STEEL)
+    t = 0.025
+    _box(p, x0, z0, x1, z0 + t, y0, y1, m, skip=("-z", "+z"))
+    _box(p, x0, z1 - t, x1, z1, y0, y1, m, skip=("-z", "+z"))
+    cx = (x0 + x1) / 2
+    _box(p, cx - t / 2, z0 + t, cx + t / 2, z1 - t, y0, y1, m, skip=("-z", "+z", "-y", "+y"))
+    _box(p, x0 - 0.05, z0 - 0.05, x1 + 0.05, z1 + 0.05, y0, y0 + 0.025, m, skip=("-z",))
+
+
+def _brace(p: Part, it: dict, detail: int) -> None:
+    """Cruz de San Andrés entre dos pilares (su caja cierra el lado: no se pasa por en medio)."""
+    x0, z0, x1, z1, y0, y1 = it["x0"], it["z0"], it["x1"], it["z1"], it["y0"], it["y1"]
+    m = mat("oxido", STEEL)
+    if (x1 - x0) < (z1 - z0):
+        xc = (x0 + x1) / 2
+        a0, a1, b0, b1 = _bl(xc, z0, y0 + 0.3), _bl(xc, z1, y1 - 0.3), _bl(xc, z1, y0 + 0.3), _bl(xc, z0, y1 - 0.3)
+        ties = [(_bl(xc, z0, y), _bl(xc, z1, y)) for y in (y0 + 0.3, y1 - 0.3)]
+    else:
+        zc = (z0 + z1) / 2
+        a0, a1, b0, b1 = _bl(x0, zc, y0 + 0.3), _bl(x1, zc, y1 - 0.3), _bl(x1, zc, y0 + 0.3), _bl(x0, zc, y1 - 0.3)
+        ties = [(_bl(x0, zc, y), _bl(x1, zc, y)) for y in (y0 + 0.3, y1 - 0.3)]
+    p.tube([a0, a1], 0.035, m, segments=4)
+    p.tube([b0, b1], 0.035, m, segments=4)
+    if detail:
+        for (u, v) in ties:
+            p.tube([u, v], 0.035, m, segments=4)
+
+
+def _rail(p: Part, it: dict, detail: int) -> None:
+    """Barandilla de acero pintado: postes, pasamanos, una barra en medio y el rodapié amarillo."""
+    x0, z0, x1, z1, y0, y1 = it["x0"], it["z0"], it["x1"], it["z1"], it["y0"], it["y1"]
+    m = mat("pintado", GALV)
+    seg = 6 if detail else 4
+    along_x = (x1 - x0) > (z1 - z0)
+    L = (x1 - x0) if along_x else (z1 - z0)
+
+    def at(s: float, y: float):
+        return _bl(x0 + s, (z0 + z1) / 2, y) if along_x else _bl((x0 + x1) / 2, z0 + s, y)
+
+    n = max(1, round(L / 1.2))
+    for k in range(n + 1):
+        s = 0.04 + (L - 0.08) * k / n
+        p.cylinder(at(s, y0), 0.022, y1 - y0 - 0.03, m, segments=seg)
+    p.tube([at(0.0, y1 - 0.03), at(L, y1 - 0.03)], 0.03, m, segments=seg)
+    if detail:
+        p.tube([at(0.0, y0 + 0.5), at(L, y0 + 0.5)], 0.016, m, segments=4)
+        if along_x:
+            _box(p, x0, (z0 + z1) / 2 - 0.01, x1, (z0 + z1) / 2 + 0.01, y0, y0 + 0.1, mat("pintado", YELLOW))
+        else:
+            _box(p, (x0 + x1) / 2 - 0.01, z0, (x0 + x1) / 2 + 0.01, z1, y0, y0 + 0.1, mat("pintado", YELLOW))
+
+
+def _deck(p: Part, it: dict, color: str) -> None:
+    """Plataforma de chapa con su perfil de acero alrededor, el filo de luz y el amarillo de por dónde se sale."""
+    x0, z0, x1, z1, y0, y1 = it["x0"], it["z0"], it["x1"], it["z1"], it["y0"], it["y1"]
+    _box(p, x0, z0, x1, z1, y0, y1, mat("metal", "#3a3f4a"))
+    _box(p, x0 - 0.02, z0 - 0.02, x1 + 0.02, z1 + 0.02, y0 + 0.06, y1, mat("oxido", STEEL), skip=("+z", "-z"))
+    _box(p, x0 - 0.02, z0 - 0.02, x1 + 0.02, z1 + 0.02, y0, y0 + 0.06, mat("neon", color), skip=("+z", "-z"))
+    paint = mat("pintado", YELLOW)
+    if it.get("exit") == "N":
+        _box(p, x0, z0, x1, z0 + 0.18, y1, y1 + 0.006, paint, skip=("-z",))
+    elif it.get("exit") == "E":
+        _box(p, x1 - 0.18, z0, x1, z1, y1, y1 + 0.006, paint, skip=("-z",))
+
+
 def _crate(p: Part, it: dict, detail: int) -> None:
-    """Pila de cajas de madera: una caja cada 1,2 m, con sus listones."""
+    """Pila de cajas de madera: una caja cada 1,2 m, con sus listones y sus esquineras."""
     x0, z0, x1, z1, y0, y1 = it["x0"], it["z0"], it["x1"], it["z1"], it["y0"], it["y1"]
     wood = mat("madera", "#b0844e")
-    lath = mat("madera", "#7a5a34")
+    lath = mat("madera", LATH)
     y = y0
     while y < y1 - 0.01:
         h = min(1.2, y1 - y)
@@ -532,33 +807,82 @@ def _crate(p: Part, it: dict, detail: int) -> None:
         if detail:
             _box(p, x0 - 0.03, z0 - 0.03, x1 + 0.03, z1 + 0.03, y + h - 0.1, y + h, lath, skip=("+z", "-z"))
             _box(p, x0 - 0.03, z0 - 0.03, x1 + 0.03, z1 + 0.03, y, y + 0.1, lath, skip=("+z", "-z"))
+            for (cx, cz) in ((x0, z0), (x1, z0), (x0, z1), (x1, z1)):
+                _box(p, cx - 0.04, cz - 0.04, cx + 0.04, cz + 0.04, y + 0.1, y + h - 0.1, lath, skip=("+z", "-z"))
         y += h
 
 
 def _wall(p: Part, it: dict, color: str, detail: int) -> None:
-    """Muros del Patio: hormigón con la franja de su estación y el canto pintado (se ve de dónde agarrarse)."""
+    """
+    Muros del Patio, con el canto de acero naranja (se ve de dónde agarrarse) y su zócalo: hormigón
+    (vallas y chimenea, con las marcas amarillas de por dónde se sube rebotando), muros pintados con un
+    mural (colgarse y subir por la pared) y la pared de chapa con sus pilares (correr por ella).
+    """
     x0, z0, x1, z1, y0, y1 = it["x0"], it["z0"], it["x1"], it["z1"], it["y0"], it["y1"]
-    _box(p, x0, z0, x1, z1, y0, y1 - 0.08, mat("panel", "#8d939c"))
-    _box(p, x0 - 0.01, z0 - 0.01, x1 + 0.01, z1 + 0.01, y1 - 0.08, y1, mat("metal", ORANGE))
+    st = it.get("station")
+    cap = mat("pintado", ORANGE)
+    if st == "wallrun":
+        steel = mat("oxido", STEEL)
+        # Pilares a ras de la caja (de por donde se corre no sobresale nada) y la chapa, metida 3 cm.
+        for cz in (z0, (z0 + z1) / 2 - 0.1, z1 - 0.2):
+            _box(p, x0, cz, x1, cz + 0.2, y0, y1 - 0.07, steel, skip=("-z",))
+        _box(p, x0 + 0.03, z0 + 0.2, x1 - 0.03, z1 - 0.2, y0, y1 - 0.07, mat("chapa", SHEET), skip=("-z", "+y", "-y"))
+    else:
+        body = mat("pintado", TEAL if st == "hang" else CORAL) if st in ("hang", "wallup") else mat("hormigon", CONCRETE)
+        _box(p, x0, z0, x1, z1, y0, y1 - 0.07, body, skip=("-z",))
+        _box(p, x0 - 0.01, z0 - 0.01, x1 + 0.01, z1 + 0.01, y0, y0 + 0.14, mat("hormigon", CONCRETE_DARK), skip=("-z", "+z"))
+    _box(p, x0 - 0.012, z0 - 0.012, x1 + 0.012, z1 + 0.012, y1 - 0.07, y1, cap)
+    if st in ("hang", "wallup"):
+        # Mural en la cara de donde se llega (norte): tres franjas en diagonal.
+        h0, h1 = y0 + 0.35, y1 - 0.35
+        run = (h1 - h0) * (1.0 if st == "hang" else -0.6)
+        cols = (YELLOW, TRIM, CORAL) if st == "hang" else (TEAL, YELLOW, TRIM)
+        zf = z0 - 0.006
+        for k, tint in enumerate(cols):
+            a = x0 + 0.45 + 0.75 * k if run > 0 else x1 - 0.45 - 0.45 - 0.9 * k
+            pts = [_bl(a, zf, h0), _bl(a + 0.45, zf, h0), _bl(a + 0.45 + run, zf, h1), _bl(a + run, zf, h1)]
+            _face(p, pts, mat("pintado", tint), (0.0, 1.0, 0.0))
+    if st == "chimney":
+        # Marcas amarillas en la cara de dentro: por aquí se sube, de una pared a la otra.
+        xi = x1 if it.get("inner") == "+x" else x0
+        sgn = 1 if it.get("inner") == "+x" else -1
+        for h in (1.0, 2.0, 3.0, 4.0, 5.0):
+            _box(p, min(xi, xi + sgn * 0.008), z0 + 0.2, max(xi, xi + sgn * 0.008), z1 - 0.2, h, h + 0.12, mat("pintado", YELLOW), skip=("-x" if sgn > 0 else "+x",))
     if detail and y1 > 2:
         _box(p, x0 - 0.02, z0 - 0.02, x1 + 0.02, z1 + 0.02, 0.9, 1.0, mat("neon", color), skip=("+z", "-z"))
 
 
+def _lamp(p: Part, x: float, z: float, detail: int) -> None:
+    """Farola del Patio: poste pintado con su base, y arriba una campana oscura con la bombilla dentro."""
+    seg = 8 if detail else 5
+    dark = mat("hierro", DARK)
+    p.cylinder(_bl(x, z, 0), 0.11, 0.4, dark, segments=seg)
+    p.cylinder(_bl(x, z, 0.4), 0.06, LAMP_H - 0.4, mat("pintado", GALV), segments=seg, radius_top=0.045, caps=(False, False))
+    ring = seg * 2 if detail else seg + 1
+    p.lathe(_bl(x, z, LAMP_H - 0.34), [(0.3, 0.0), (0.29, 0.04), (0.2, 0.2), (0.07, 0.32), (0.05, 0.36)], dark, segments=ring, close_top=True)
+    p.lathe(_bl(x, z, LAMP_H - 0.3), [(0.0, 0.0), (0.13, 0.04), (0.15, 0.12), (0.06, 0.2)], mat("farol", BULB), segments=ring, smooth=True)
+
+
+def _festoon(p: Part) -> None:
+    """Guirnalda de bombillas de farola a farola alrededor del Patio (de noche)."""
+    pts = [lt["p"] for lt in lamps()]
+    if len(pts) < 2:
+        return
+    wire = mat("hierro", DARK)
+    bulb = mat("farol", BULB)
+    for a, b in zip(pts, pts[1:] + pts[:1]):
+        ya = yb = LAMP_H - 0.3
+        _catenary(p, (a[0], ya, a[2]), (b[0], yb, b[2]), 0.6, wire, bulb, every=0.9, n=10)
+
+
 def _boards(p: Part, color: str, detail: int) -> None:
     """Respaldo de los marcadores de district-activities.json (los pinta el cliente delante) y sus postes."""
-    import json
-    import os
-    path = os.path.join(os.path.dirname(__file__), "..", "..", "apps", "realtime", "src", "district-activities.json")
-    with open(path, encoding="utf-8") as f:
-        boards = json.load(f).get("vertical", {}).get("boards", [])
-    back = mat("metal", "#1b1f2e")
+    back = mat("metal", "#3a3f4a")
     edge = mat("neon", color)
-    for b in boards:
+    for b in _activities().get("boards", []):
         x, y, z = b["p"]
         w, h = b["size"]
         a = math.radians(b["yaw"])
-        # Mira hacia (sin, cos) en (X, Z): el respaldo va detrás, hacia el lado contrario.
-        fx, fz = math.sin(a), math.cos(a)
         q = Part("board")
         # El título va encima del panel: el respaldo lo tapa también (de espaldas no se lee al revés).
         top = h / 2 + 0.95
@@ -577,23 +901,23 @@ def _boards(p: Part, color: str, detail: int) -> None:
 
 
 def build(p: Part, color: str, detail: int) -> None:
+    """La ruta y el Patio, con sus farolas (las torres de alrededor van aparte: towers_object)."""
     _boards(p, color, detail)
     pl, _marks = plan()
     rnd = random.Random(42)
-    deck = mat("metal", "#3a3f4a")
-    post = mat("hierro", "#4a4f5c")
     for it in pl.items:
+        if it.get("tower"):
+            continue
         k = it["kind"]
         if k == "trailer":
             _trailer(p, it, rnd, detail, color)
             if it.get("cantilever") and detail:
                 # Riostra diagonal bajo el voladizo.
                 x0, z0, x1, z1, y0 = it["x0"], it["z0"], it["x1"], it["z1"], it["y0"]
-                along_x = (x1 - x0) > (z1 - z0)
-                if along_x:
-                    p.tube([(x0 - C, -((z0 + z1) / 2 - C), y0 - 1.6), (x1 - C, -((z0 + z1) / 2 - C), y0)], 0.07, post, segments=4)
+                if (x1 - x0) > (z1 - z0):
+                    p.tube([_bl(x0, (z0 + z1) / 2, y0 - 1.6), _bl(x1, (z0 + z1) / 2, y0)], 0.07, mat("oxido", STEEL), segments=4)
                 else:
-                    p.tube([((x0 + x1) / 2 - C, -(z0 - C), y0 - 1.6), ((x0 + x1) / 2 - C, -(z1 - C), y0)], 0.07, post, segments=4)
+                    p.tube([_bl((x0 + x1) / 2, z0, y0 - 1.6), _bl((x0 + x1) / 2, z1, y0)], 0.07, mat("oxido", STEEL), segments=4)
         elif k == "plank":
             _plank(p, it, detail)
         elif k == "beam":
@@ -601,47 +925,104 @@ def build(p: Part, color: str, detail: int) -> None:
         elif k == "pipe":
             _pipe(p, it, detail)
         elif k == "post":
-            _box(p, it["x0"], it["z0"], it["x1"], it["z1"], it["y0"], it["y1"], post)
+            if it["y1"] - it["y0"] > 3:
+                _column(p, it)
+            else:
+                _box(p, it["x0"], it["z0"], it["x1"], it["z1"], it["y0"], it["y1"], mat("oxido", STEEL), skip=("-z",))
         elif k == "deck":
-            _box(p, it["x0"], it["z0"], it["x1"], it["z1"], it["y0"], it["y1"], deck)
-            _box(p, it["x0"] - 0.02, it["z0"] - 0.02, it["x1"] + 0.02, it["z1"] + 0.02, it["y0"], it["y0"] + 0.06, mat("neon", color), skip=("+z", "-z"))
+            _deck(p, it, color)
         elif k == "crate":
             _crate(p, it, detail)
         elif k == "ac":
-            _box(p, it["x0"], it["z0"], it["x1"], it["z1"], it["y0"], it["y1"], mat("metal", "#c8ccd4"))
+            _box(p, it["x0"], it["z0"], it["x1"], it["z1"], it["y0"], it["y1"], mat("metal", GREY))
             if detail:
                 cx, cz = (it["x0"] + it["x1"]) / 2, (it["z0"] + it["z1"]) / 2
                 p.cylinder((cx - C, -(cz - C), it["y1"]), 0.26, 0.03, mat("metal", "#2b2f38"), segments=10)
         elif k == "wall":
             _wall(p, it, color, detail)
+        elif k == "brace":
+            _brace(p, it, detail)
+        elif k == "rail":
+            _rail(p, it, detail)
+        elif k == "lamp":
+            _lamp(p, (it["x0"] + it["x1"]) / 2, (it["z0"] + it["z1"]) / 2, detail)
+    _festoon(p)
+
+
+def _cables(p: Part, pl: Plan, rnd: random.Random) -> None:
+    """Cables de torre a torre (con su vecina más cercana), y en la mitad, bombillas."""
+    tops = [it for it in pl.items if it.get("top")]
+    wire = mat("hierro", DARK)
+    bulb = mat("farol", BULB)
+    solid = [it for it in pl.items if it["kind"] == "trailer"]
+
+    def centre(it):
+        return (it["x0"] + it["x1"]) / 2, (it["z0"] + it["z1"]) / 2
+
+    def exit_point(it, dx, dz):
+        cx, cz = centre(it)
+        hx, hz = (it["x1"] - it["x0"]) / 2, (it["z1"] - it["z0"]) / 2
+        t = min(hx / abs(dx) if dx else 1e9, hz / abs(dz) if dz else 1e9)
+        return cx + dx * (t + 0.02), cz + dz * (t + 0.02)
+
+    done = set()
+    for a in tops:
+        ax, az = centre(a)
+        near = sorted((math.hypot(centre(b)[0] - ax, centre(b)[1] - az), n) for n, b in enumerate(tops) if b is not a)
+        lit = rnd.random() < 0.5
+        for d, n in near[:2]:
+            b = tops[n]
+            key = tuple(sorted((id(a), id(b))))
+            if key in done or not (6.0 < d < 24.0):
+                continue
+            done.add(key)
+            bx, bz = centre(b)
+            dx, dz = (bx - ax) / d, (bz - az) / d
+            pa, pb = exit_point(a, dx, dz), exit_point(b, -dx, -dz)
+            ya, yb = a["y1"] - 0.35, b["y1"] - 0.35
+            sag = 0.25 + 0.05 * d
+            # Que no atraviese ninguna caravana por el camino.
+            clear = True
+            for k in range(1, 12):
+                t = k / 12
+                x, z = pa[0] + (pb[0] - pa[0]) * t, pa[1] + (pb[1] - pa[1]) * t
+                y = ya + (yb - ya) * t - sag * 4 * t * (1 - t)
+                for it in solid:
+                    if it is a or it is b:
+                        continue
+                    if it["x0"] - 0.1 < x < it["x1"] + 0.1 and it["z0"] - 0.1 < z < it["z1"] + 0.1 and it["y0"] - 0.1 < y < it["y1"] + 0.1:
+                        clear = False
+                        break
+                if not clear:
+                    break
+            if clear:
+                _catenary(p, (pa[0], ya, pa[1]), (pb[0], yb, pb[1]), sag, wire, bulb if lit else None, every=1.1)
+
+
+def towers_object(color: str, detail: int):
+    """
+    Las torres de caravanas de alrededor (decorado y retos libres), en su propio modelo: con su azotea,
+    sus cables de una a otra y, en la mitad de los cables, bombillas. Sus colisiones van con las de la
+    ciudad (colliders()); el servidor las pone con el atrezo de district-activities.json.
+    """
+    p = Part("vertical_towers")
+    pl, _marks = plan()
+    rnd = random.Random(4242)
+    for it in pl.items:
+        if it.get("tower"):
+            _trailer(p, it, rnd, detail, color)
     if detail:
-        _lights(p, pl, rnd, color)
-
-
-def _lights(p: Part, pl: Plan, rnd: random.Random, color: str) -> None:
-    """Guirnaldas de bombillas entre caravanas de la ruta (de noche se ve el camino)."""
-    bulb = mat("farol", "#ffd27a")
-    wire = mat("hierro", "#2b2f38")
-    route = [it for it in pl.items if it["kind"] == "trailer" and it.get("route")]
-    for a, b in zip(route, route[1:]):
-        ax, az = (a["x0"] + a["x1"]) / 2, (a["z0"] + a["z1"]) / 2
-        bx, bz = (b["x0"] + b["x1"]) / 2, (b["z0"] + b["z1"]) / 2
-        d = math.hypot(bx - ax, bz - az)
-        if d > 14 or d < 3:
-            continue
-        ya, yb = a["y1"] + 2.6, b["y1"] + 2.6
-        p.tube([(ax - C, -(az - C), ya), (bx - C, -(bz - C), yb)], 0.012, wire, segments=3)
-        n = int(d // 1.2)
-        for k in range(1, n):
-            t = k / n
-            sag = math.sin(t * math.pi) * 0.45
-            p.sphere((ax + (bx - ax) * t - C, -(az + (bz - az) * t - C), ya + (yb - ya) * t - sag), 0.06, bulb, subdiv=0)
+        _cables(p, pl, random.Random(77))
+    ob = p.to_object()
+    ob.name = "vertical_towers"
+    finish(ob)
+    return ob
 
 
 def flag_object(detail: int):
     """El banderín de la búsqueda de Vertical: mástil corto con su peana y un banderín triangular que brilla."""
     p = Part("vertical_flag")
-    pole = mat("hierro", "#2b2f38")
+    pole = mat("hierro", DARK)
     p.cylinder((0, 0, 0), 0.03, 1.1, pole, segments=6 if detail else 4)
     p.cylinder((0, 0, 0), 0.16, 0.05, pole, segments=10 if detail else 6)
     # Perfil (y, z) extruido a lo largo de X: el triángulo sale del mástil hacia +Y.

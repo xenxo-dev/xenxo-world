@@ -18,7 +18,7 @@ import { people, type HitEvent } from "../../net/people-store";
 import { world } from "../../net/world-store";
 import { floorAt } from "../collision";
 import { self } from "../self";
-import { fallFor, FALL_MAX, HIT_DELAY_MS, LIE, LIE_KO, lightReaction, myStrike, RISE, STRIKES, strikeOf } from "./fight";
+import { fallFor, FALL_MAX, HIT_DELAY_MS, LIE, LIE_KO, lightReaction, myStrike, parkourFallFor, RISE, STRIKES, strikeOf } from "./fight";
 import { impact, thud } from "./fight-audio";
 import { loadRagdolls, ragdolls } from "./ragdoll";
 import { createFx, type Lying, type PersonFx } from "./rig";
@@ -26,7 +26,7 @@ import { PAIR, pairTargets } from "./pair";
 import { remoteFeet } from "./where";
 
 type Phase = "none" | "react" | "fall" | "ground" | "roll" | "rise" | "clipfall" | "cliprise";
-const REACTIONS = new Set(["hit_head", "hit_body", "hit_back", "hit_stagger", "hit_down", "get_up"]);
+const REACTIONS = new Set(["hit_head", "hit_body", "hit_back", "hit_stagger", "hit_down", "get_up", "pk_fall", "pk_crash"]);
 
 /** Cómo dibujar a la persona este frame. */
 export interface RemoteDraw {
@@ -112,6 +112,11 @@ export class RemotePeople {
     out.emote = netEmote && this.quiet > 0 && REACTIONS.has(netEmote) ? null : netEmote;
     this.look(x, y, z);
     this.pairFrame(dt, x, y, z, netEmote);
+    // Una caída del parkour (aterrizar de muy alto o estrellarse corriendo): su cuerpo cae aquí con
+    // la misma física, desde como iba.
+    if ((netEmote === "pk_fall" || netEmote === "pk_crash") && (this.phase === "none" || this.phase === "react") && this.quiet <= 0) {
+      this.parkourFall(netEmote === "pk_crash" ? "crash" : "land", x, z, yaw);
+    }
 
     // El traspié adelantado: lo que se predijo menos lo que ya ha llegado por la red.
     if (this.corr >= 0) {
@@ -246,6 +251,36 @@ export class RemotePeople {
     this.emote = r.emote;
     this.startCorr(h.dir[0] * r.push, h.dir[1] * r.push, r.dur, x, z);
     rig?.flinch(h.dir[0], h.dir[1], h.power, head, s.twist ?? 0);
+  }
+
+  /** Su caída del parkour, vista desde aquí: hacia donde corría (o de espaldas, contra la pared). */
+  private parkourFall(kind: "land" | "crash", x: number, z: number, yaw: number) {
+    this.ko = false;
+    this.rolled = false;
+    this.t = 0;
+    this.pair = null;
+    this.fx.reachL.w = this.fx.reachR.w = 0;
+    // Hacia delante es (−sen, −cos) del giro; contra una pared rebota hacia atrás.
+    let dx = Math.sin(yaw), dz = Math.cos(yaw);
+    const h = Math.hypot(this.velX, this.velZ);
+    if (kind === "land" && h > 1) {
+      dx = this.velX / h;
+      dz = this.velZ / h;
+    }
+    thud(x, z, kind === "crash" ? 6 : 12);
+    this.quiet = 2.2 + LIE + RISE;
+    const rig = this.fx.rig;
+    const sim = ragdolls();
+    if (rig && sim && rig.startFall(sim, parkourFallFor(kind, dx, dz, kind === "crash" ? h : 12, this.velX, this.velZ))) {
+      this.phase = "fall";
+      rig.lying(_l);
+      this.lastY = _l.y;
+      this.lastVy = 0;
+      this.corr = -1;
+      return;
+    }
+    if (!sim) void loadRagdolls();
+    this.phase = "clipfall";
   }
 
   private startCorr(vx: number, vz: number, dur: number, x: number, z: number) {

@@ -75,13 +75,18 @@ export interface Features {
    * atropellos). Las demás caen con la animación.
    */
   ragdolls: number;
+  /**
+   * Pelo y ropa con física (huesos con muelles, springs.ts): hasta qué distancia de la cámara se
+   * mueven (m; la gente de decorado, la mitad; 0 = nadie). Más lejos se quedan como en reposo.
+   */
+  springs: number;
 }
 
 export const FEATURES: Record<Tier, Features> = {
-  low: { dpr: [0.75, 1], antialias: false, pbr: false, post: false, bloom: false, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 48, flyerTris: 500, lod: "light", textures: 512, normalMaps: false, avatarFill: true, nexoCity: 0.5, pedestrians: 3, traffic: 8, residents: 2, rain: 900, ragdolls: 2 },
-  medium: { dpr: [1, 1.5], antialias: true, pbr: true, post: true, bloom: true, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 96, flyerTris: 900, lod: "light", textures: 512, normalMaps: true, avatarFill: true, nexoCity: 0.75, pedestrians: 5, traffic: 14, residents: 3, rain: 1600, ragdolls: 3 },
-  high: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: false, shadows: 1024, probe: 128, pointLights: true, lightPools: false, skyline: 150, flyerTris: 1800, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1, pedestrians: 7, traffic: 22, residents: 4, rain: 3200, ragdolls: 5 },
-  ultra: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: true, shadows: 2048, probe: 256, pointLights: true, lightPools: false, skyline: 220, flyerTris: 2700, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1, pedestrians: 9, traffic: 30, residents: 6, rain: 4800, ragdolls: 8 },
+  low: { dpr: [0.75, 1], antialias: false, pbr: false, post: false, bloom: false, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 48, flyerTris: 500, lod: "light", textures: 512, normalMaps: false, avatarFill: true, nexoCity: 0.5, pedestrians: 3, traffic: 8, residents: 2, rain: 900, ragdolls: 2, springs: 5 },
+  medium: { dpr: [1, 1.5], antialias: true, pbr: true, post: true, bloom: true, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 96, flyerTris: 900, lod: "light", textures: 512, normalMaps: true, avatarFill: true, nexoCity: 0.75, pedestrians: 5, traffic: 14, residents: 3, rain: 1600, ragdolls: 3, springs: 12 },
+  high: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: false, shadows: 1024, probe: 128, pointLights: true, lightPools: false, skyline: 150, flyerTris: 1800, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1, pedestrians: 7, traffic: 22, residents: 4, rain: 3200, ragdolls: 5, springs: 25 },
+  ultra: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: true, shadows: 2048, probe: 256, pointLights: true, lightPools: false, skyline: 220, flyerTris: 2700, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1, pedestrians: 9, traffic: 30, residents: 6, rain: 4800, ragdolls: 8, springs: 40 },
 };
 
 /* ------------------------------------------------------------------ */
@@ -170,6 +175,8 @@ function portableClamp(f: Features, xr: boolean): Features {
     // En las gafas, solo los charcos (las gotas cruzan la vista y marean); en el móvil, poca.
     rain: xr ? 0 : Math.min(f.rain, 900),
     ragdolls: Math.min(f.ragdolls, xr ? 2 : 3),
+    // En las gafas, el pelo y la ropa de quien tienes cerca; en el móvil, algo más.
+    springs: Math.min(f.springs, xr ? 6 : 10),
     lod: f.lod,
   };
 }

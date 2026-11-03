@@ -458,6 +458,8 @@ export const EMOTES = [
   // Parkour (§9 octies bis, solo donde WELCOME.parkour): lo que se está haciendo, mientras dura.
   "pk_vault", "pk_mantle", "pk_hang", "pk_shimmy_l", "pk_shimmy_r", "pk_climb", "pk_wallrun_l", "pk_wallrun_r",
   "pk_wallup", "pk_walljump", "pk_slide", "pk_slideup", "pk_crouch", "pk_roll", "pk_land", "pk_balance",
+  // Caídas de verdad del parkour: aterrizar de muy alto sin rodar y estrellarse corriendo (luego, hit_down y get_up).
+  "pk_fall", "pk_crash",
 ] as const;
 
 /**

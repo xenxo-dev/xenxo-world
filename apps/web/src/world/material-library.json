@@ -93,5 +93,25 @@
   "tile": 3.0,
   "source": "ambientCG · Facade017 (CC0)",
   "asset": "Facade017"
+ },
+ "chapa": {
+  "tile": 2.0,
+  "source": "Poly Haven · Painted Metal Shutter (CC0)",
+  "asset": "painted_metal_shutter"
+ },
+ "oxido": {
+  "tile": 1.0,
+  "source": "Poly Haven · Rusty Metal 02 (CC0)",
+  "asset": "rusty_metal_02"
+ },
+ "hormigon": {
+  "tile": 2.5,
+  "source": "Poly Haven · Brushed Concrete  (CC0)",
+  "asset": "brushed_concrete"
+ },
+ "pintado": {
+  "tile": 2.0,
+  "source": "Poly Haven · Painted Concrete (CC0)",
+  "asset": "painted_concrete"
  }
 }

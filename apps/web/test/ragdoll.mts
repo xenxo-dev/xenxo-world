@@ -11,7 +11,7 @@ import { loadRapier, type SolidBox, type StaticSource } from "../src/world/vehic
 import { RagdollWorld } from "../src/world/people/ragdoll-sim.ts";
 import type { Q4, RagdollHandle, RagdollJoint, RagdollPart, RagdollSpec, V3 } from "../src/world/people/ragdoll.ts";
 import { JOINT_LIMITS, type FallSpec } from "../src/world/people/rig.ts";
-import { npcFallFor } from "../src/world/people/fight.ts";
+import { npcFallFor, parkourFallFor } from "../src/world/people/fight.ts";
 
 const boxes: SolidBox[] = [];
 const box = (x: number, y: number, z: number, hx: number, hy: number, hz: number) => boxes.push({ x, y, z, hx, hy, hz, c: 1, s: 0 });
@@ -305,6 +305,38 @@ const lowest = (d: RagdollHandle) => Math.min(...Array.from({ length: 12 }, (_, 
     check(launched === 0, "atropellos: ninguno sale lanzado del suelo");
     check(broken <= 1, "atropellos: acaban con las articulaciones en su recorrido");
     check(far === 0, "atropellos: ninguno sale disparado a más de 13 m");
+  }
+  // Las caídas del parkour (world/parkour → people/selfPeople): aterrizar de alto sin rodar, corriendo
+  // y parado, y estrellarse corriendo contra la pared (la de x = 20, delante en −Z). Todos miran a −Z
+  // (hacia donde corren); parado, cae hacia atrás (+Z), como en el juego.
+  {
+    const cases: [string, number, number, "land" | "crash", [number, number], number, [number, number], [number, number]][] = [
+      ["aterriza de 6 m corriendo", 40, 0, "land", [0, -1], 12.7, [0, -6], [0.2, 4]],
+      ["aterriza de 6 m casi parado", 50, 0, "land", [0, 1], 12.7, [0, -0.5], [-0.2, 2]],
+      ["aterriza de 12 m corriendo", 60, 0, "land", [0, -1], 19, [0, -6], [0.2, 5]],
+      ["se estrella contra la pared a 6 m/s", 20, 0, "crash", [0, 1], 6, [0, -6], [0.2, 3]],
+    ];
+    for (const [name, x, z, kind, dir, v, vel, [lo, hi]] of cases) {
+      const s = fromFall(x, z, parkourFallFor(kind, dir[0], dir[1], v, vel[0], vel[1]), Math.PI);
+      const d = sim.spawn(s)!;
+      let low = 9, end = 0, launch = 0, n = 0, minZ = 9;
+      run(5, () => {
+        n++;
+        low = Math.min(low, lowest(d));
+        if (n > 4 * 60) end = Math.max(end, maxGap(d, s));
+        if (n > 2.5 * 60) launch = Math.max(launch, d.pos[1]!);
+        for (let i = 0; i < 12; i++) minZ = Math.min(minZ, d.pos[i * 3 + 2]!);
+      });
+      const hips = at(d, 0);
+      const moved = (hips[0] - x) * dir[0] + (hips[2] - z) * dir[1];
+      console.log(`${name}: cadera a ${r2(moved)} m hacia donde cae (altura ${r2(hips[1])}), quieto ${r2(d.still)} s`);
+      check(hips[1] < 0.4, `${name}: acaba en el suelo`);
+      check(moved > lo && moved < hi, `${name}: cae hacia donde toca, sin salir despedido (${lo}–${hi} m)`);
+      check(low > -0.06 && launch < 0.6, `${name}: ni atraviesa el suelo ni sale lanzado`);
+      check(end < 0.02 && d.still > 0.3, `${name}: acaba entero y quieto`);
+      if (kind === "crash") check(minZ > -1.15, `${name}: no atraviesa la pared`);
+      d.remove();
+    }
   }
 }
 

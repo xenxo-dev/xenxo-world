@@ -146,6 +146,45 @@ export function fallFor(h: HitEvent, head: boolean, vx: number, vz: number): Fal
   };
 }
 
+/**
+ * Caídas del parkour (world/parkour): aterrizar de muy alto sin rodar ("land": los pies se paran en
+ * seco, las piernas no aguantan y el tronco sigue hacia donde iba) o estrellarse corriendo contra una
+ * pared ("crash": rebota y cae de espaldas). `dx, dz`: hacia dónde cae (unitario: la carrera, hacia
+ * atrás si iba despacio, o la normal de la pared); `speed`, la del golpe (m/s); `vx, vz`, la que
+ * llevaba. Los mismos cuerpos y la misma física que los golpes.
+ */
+export function parkourFallFor(kind: "land" | "crash", dx: number, dz: number, speed: number, vx: number, vz: number): FallSpec {
+  if (kind === "crash") {
+    const horiz = 1.1 + Math.min(2.2, speed * 0.3);
+    const kick = 70 * 0.25 * horiz;
+    return {
+      vel: [dx * horiz * 0.45, 0.2, dz * horiz * 0.45],
+      impulses: [
+        { part: PART.head, vec: [dx * kick * 0.35, 70 * 0.25 * 0.15, dz * kick * 0.35], top: true },
+        { part: PART.thorax, vec: [dx * kick * 0.65, 0, dz * kick * 0.65] },
+      ],
+      tone: 0.5,
+      toneMin: 0.03,
+      toneTau: 0.3,
+      bounce: 0.05,
+    };
+  }
+  const run = Math.min(1, Math.hypot(vx, vz) / 4);
+  const kick = 70 * 0.25 * (0.7 + Math.min(1.2, speed * 0.05));
+  return {
+    vel: [vx * 0.6, 0, vz * 0.6],
+    impulses: [
+      { part: PART.thorax, vec: [dx * kick * (0.35 + 0.45 * run), -kick * 0.3, dz * kick * (0.35 + 0.45 * run)] },
+      { part: PART.lLowerLeg, vec: [-dx * kick * 0.22 * run, 0, -dz * kick * 0.22 * run] },
+      { part: PART.rLowerLeg, vec: [-dx * kick * 0.22 * run, 0, -dz * kick * 0.22 * run] },
+    ],
+    tone: 0.3,
+    toneMin: 0.02,
+    toneTau: 0.22,
+    bounce: 0.03,
+  };
+}
+
 /** A partir de esta velocidad (m/s), a la gente de decorado se la ha llevado un coche (no un golpe). */
 export const RUN_OVER = 4.5;
 

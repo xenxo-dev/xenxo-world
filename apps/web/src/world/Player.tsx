@@ -22,7 +22,7 @@ import { carForPose, carFrame, carPose, drive, dropCar, requestCar, seated } fro
 import { useDrive } from "./vehicle/drive-state";
 import { applyCarPose, CarModel, createCarHandle } from "./vehicle/CarModel";
 import { CAR, paintFor } from "./vehicle/car";
-import { bumpNpcs, camKick, peopleBusy, peopleFrame, resetPeople, selfFx, startStrike, striking } from "./people/selfPeople";
+import { bumpNpcs, camKick, parkourFall, peopleBusy, peopleFrame, prepareFights, resetPeople, selfFx, startStrike, striking } from "./people/selfPeople";
 import { people } from "../net/people-store";
 import { preloadParkour, UPPER_EMOTES } from "./animation";
 import { createParkour, parkourStep, resetParkour } from "./parkour/moves";
@@ -69,6 +69,8 @@ const _yawE = new THREE.Euler();
 const _carQ = new THREE.Quaternion();
 const _seat = new THREE.Vector3();
 const _pkIn = { wantX: 0, wantZ: 0, jump: false, crouch: false, crouchPressed: false, yaw: 0 };
+/** Lo del parkour (clips y física de las caídas) ya está pedido. */
+let pkReady = false;
 /** Ojos de quien conduce, respecto al origen del coche. */
 const DRIVER_EYE = new THREE.Vector3(CAR.eye.x, CAR.eye.y, CAR.eye.z);
 /** Bulto del jugador para los peatones que le ceden el paso (radio, m): mayor en coche. */
@@ -298,7 +300,12 @@ export function Player({ active }: { active: boolean }) {
         // Parkour (Vertical): saltar, trepar, colgarse, correr por las paredes, deslizarse y rodar, con
         // los mismos botones (parkour/moves.ts). Nunca en el modo pelea ni en pareja.
         const parkour = world.parkour && free && !_pf.lock && !motion.fight;
-        if (world.parkour) preloadParkour();
+        if (world.parkour && !pkReady) {
+          // Los clips del parkour y la física de las caídas, antes del primer salto.
+          pkReady = true;
+          preloadParkour();
+          prepareFights();
+        }
         if (!parkour && pk.move !== "none") resetParkour(pk, body);
         if (input.jump && free && !parkour) {
           requestJump(body);
@@ -319,6 +326,11 @@ export function Player({ active }: { active: boolean }) {
             _pkIn.yaw = bodyYaw.current;
             if (input.jump) motion.emote = null;
             parkourStep(pk, body, _pkIn, dt, world.walk[0], world.walk[1]);
+            // Una caída de verdad (de muy alto sin rodar, o contra una pared corriendo): la gente.
+            if (pk.fall) {
+              parkourFall(pk.fall, pk.fallX, pk.fallZ, pk.fallV);
+              pk.fall = "";
+            }
           } else stepBody(body, wantX, wantZ, dt, world.walk[0], world.walk[1]);
         }
         input.jump = false;

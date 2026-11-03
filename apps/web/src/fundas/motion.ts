@@ -7,6 +7,7 @@
 import * as THREE from "three";
 import { VRM, VRMHumanoid, type VRM1Meta, type VRMHumanBones } from "@pixiv/three-vrm";
 import { VrmAnimator } from "../world/animation";
+import { addSprings, springBodyOf } from "../world/springs";
 import type { Recipe } from "./recipe";
 import { buildSkinned, kitData } from "./three";
 
@@ -79,6 +80,14 @@ export async function buildMoving(r: Recipe): Promise<MovingFunda> {
     m.boundingSphere = sphere;
     m.geometry.boundingSphere = sphere.clone();
   }
+  // Pelo y ropa con muelles, como en el mundo (world/springs.ts).
+  const body = springBodyOf(vrm);
+  let springs: ReturnType<typeof addSprings> = null;
+  try {
+    springs = body ? addSprings(root, body) : null;
+  } catch (e) {
+    console.warn("[xenxo] sin física en el pelo y la ropa", e);
+  }
   const animator = new VrmAnimator(vrm);
   let t = 0;
   let last: Act | null = null;
@@ -110,6 +119,7 @@ export async function buildMoving(r: Recipe): Promise<MovingFunda> {
       }
       animator.update(dt, SPEED[act] ?? 0, airborne, emote, act === "fight");
       vrm.update(dt);
+      springs?.update(dt);
     },
     dispose() {
       animator.dispose();

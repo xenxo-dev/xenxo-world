@@ -271,18 +271,62 @@ scene([[0, 2, 0, 3, 2, 3]]);
   check(rolled, "agachándose justo antes de tocar el suelo, rueda");
 }
 
+// 10 bis) Caídas de verdad (las hace people/selfPeople con física; aquí, que se pidan cuando toca):
+//         sin rodar desde 6 m, sí; corriendo desde 6 m, rueda; desde 12 m, ni corriendo.
+scene([
+  [0, 3, 0, 3, 3, 3],
+  [30, 6, 0, 3, 6, 3],
+]);
+{
+  let fell = "";
+  simulate([0, 6, -2.9], 0, 2.2, (t, run, i) => {
+    if (t < 0.4) go(i, 0, -1, 1.2);
+    else i.wantX = i.wantZ = 0;
+    if (run.pk.fall) fell = run.pk.fall;
+  });
+  check(fell === "land", "dejándose caer de 6 m sin rodar: al suelo de verdad");
+  let rolled6 = false, fell6 = "";
+  simulate([0, 6, -1], 0, 2.2, (_t, run, i) => {
+    go(i, 0, -1, RUN);
+    if (run.pk.move === "roll") rolled6 = true;
+    if (run.pk.fall) fell6 = run.pk.fall;
+  });
+  check(rolled6 && !fell6, "de 6 m corriendo: rueda (sin caerse)");
+  let fell12 = "";
+  simulate([30, 12, -1], 0, 2.6, (_t, run, i) => {
+    go(i, 0, -1, RUN);
+    if (run.pk.fall) fell12 = run.pk.fall;
+  });
+  check(fell12 === "land", "de 12 m, ni corriendo: al suelo de verdad");
+}
+
 // 11) Lo que no debe pasar: corriendo junto a un murete paralelo no lo salta; andando al lado de
-//     un banco, no sube; contra una pared lisa sin saltar, nada.
+//     un banco, no sube; contra una pared lisa sin saltar, se la come (corriendo) o se para (andando).
 scene([
   [1.6, 0.5, -10, 0.2, 0.5, 10],
   [-2, 0.45, -3, 0.8, 0.45, 0.3],
   [0, 5, -14, 6, 5, 0.5],
 ]);
 {
-  const r = simulate([0, 0, 0], 0, 2.4, (_t, _r, i) => go(i, 0, -1, RUN));
-  console.log(`sin querer: [${moves(r)}] x=${r2(r.b.x)} z=${r2(r.b.z)}`);
+  let crash = "";
+  let nz = 0;
+  const r = simulate([0, 0, 0], 0, 2.4, (_t, run, i) => {
+    go(i, 0, -1, RUN);
+    if (run.pk.fall && !crash) {
+      crash = run.pk.fall;
+      nz = run.pk.fallZ;
+    }
+  });
+  console.log(`sin querer: [${moves(r)}] x=${r2(r.b.x)} z=${r2(r.b.z)} choque=${crash || "no"}`);
   check(!r.moves.has("vault") && !r.moves.has("mantle") && !r.moves.has("wallup") && !r.moves.has("wallrun"), "nada salta solo sin tocarlo");
   check(r.b.z > -13.5 && !r.stuck, "la pared del fondo le para");
+  check(crash === "crash" && nz > 0.9, "corriendo de frente contra la pared sin saltar: se la come (rebota hacia atrás)");
+  let walkCrash = "";
+  simulate([0, 0, -10], 0, 2.4, (_t, run, i) => {
+    go(i, 0, -1, WALK);
+    if (run.pk.fall) walkCrash = run.pk.fall;
+  });
+  check(!walkCrash, "andando contra la pared: solo se para");
 }
 
 // 12) Viga estrecha (20 cm): equilibrio.

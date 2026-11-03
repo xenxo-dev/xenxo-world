@@ -119,6 +119,9 @@ def main() -> None:
             add("cero_fragment", "prop", cero.fragment_object, [(ox + 32.0, -540.0, 0)])
         if dd["id"] == "vertical":  # el banderín de Vertical (se recoge: collectible@1)
             add("vertical_flag", "prop", vertical.flag_object, [(ox + 32.0, -540.0, 0)])
+            # Las torres de caravanas, aparte de la ciudad (cada modelo con su presupuesto); se hornean
+            # en su sitio, con la ruta y el Patio haciéndoles sombra (y al revés).
+            add("vertical_towers", "district", lambda d, dd=dd: vertical.towers_object(dd["color"], d), [(ox + 32.0, 32.0, 0)])
     # Las colisiones de las ciudades de los distritos (las mismas cajas que sus edificios).
     city.write_colliders(dl, dl["districts"])
     # La plaza también tiene su isla en el nexo, con su decorado mediterráneo.

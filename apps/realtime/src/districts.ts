@@ -1,4 +1,4 @@
-import { PLACES, type Components } from "@xenxo/protocol";
+import { BUDGETS, PLACES, type Components } from "@xenxo/protocol";
 import districtsLayout from "./districts.json";
 import { at, FRAME, r3, yaw, type Seeded, type Slot, type V3 } from "./places";
 import { PORTAL_ZONE_DEPTH } from "@xenxo/protocol";
@@ -23,6 +23,8 @@ interface DistrictActivities {
   /** Anuncios de fachada (Distrito Cero): centro, giro y medida; los llena el Worker (syncBillboards). */
   billboards?: { p: V3; yaw: number; size: [number, number] }[];
   sandbox?: SandboxRect;
+  /** Farolas propias (el Patio de Vertical): su luz (light@1, de noche); el poste lo forja la ciudad. */
+  lights?: { p: V3; color: string; intensity: number; range: number }[];
 }
 
 /**
@@ -342,6 +344,16 @@ export function districtSeed(d: District, toNexo: { p: V3; yaw: number }): Seede
       },
     });
   }
+  // Las farolas del distrito (district-activities.json), de noche; sin pasarse de las luces de un chunk.
+  (acts?.lights ?? []).slice(0, Math.max(0, BUDGETS.maxLightsPerChunk - lights.length)).forEach((lt, n) => {
+    out.push({
+      id: `${d.id}_lamp_${n + 1}`,
+      components: {
+        "transform@1": { p: lt.p, r: [0, 0, 0, 1], s: [1, 1, 1], parent: null },
+        "light@1": { type: "point", color: lt.color, intensity: lt.intensity, range: lt.range, when: "night" },
+      },
+    });
+  });
   return out;
 }
 

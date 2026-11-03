@@ -13,7 +13,8 @@
     "test:vehicle": "tsx test/vehicle.mts",
     "test:ragdoll": "tsx test/ragdoll.mts",
     "test:citizens": "tsx test/citizens.mts",
-    "test:parkour": "esbuild test/parkour.mts --bundle --platform=node --format=esm --define:import.meta.env={} --log-level=warning --outfile=node_modules/.cache/xenxo/parkour.mjs && node node_modules/.cache/xenxo/parkour.mjs"
+    "test:parkour": "esbuild test/parkour.mts --bundle --platform=node --format=esm --define:import.meta.env={} --log-level=warning --outfile=node_modules/.cache/xenxo/parkour.mjs && node node_modules/.cache/xenxo/parkour.mjs",
+    "test:springs": "tsx test/springs.mts"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "0.19.3",

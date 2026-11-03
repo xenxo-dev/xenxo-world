@@ -70,7 +70,10 @@ LIBRARY = {
     "tierra": (1.0, 0.0),
     "tela": (0.9, 0.0),
     "oscuro": (1.0, 0.0),      # huecos profundos (interior de campanario, etc.)
-    "chapa": (0.42, 0.0),      # chapa pintada, algo satinada (las caravanas de Vertical): color sin textura
+    "chapa": (0.45, 0.0),      # chapa ondulada pintada, algo satinada (las caravanas de Vertical)
+    "oxido": (0.6, 0.2),       # chapa pintada con manchas de óxido (chasis, vigas, bandas viejas)
+    "hormigon": (0.85, 0.0),   # hormigón cepillado (muros del Patio de Vertical)
+    "pintado": (0.8, 0.0),     # hormigón pintado y desconchado (murales, marcas en el suelo)
 }
 
 MATS: dict[str, bpy.types.Material] = {}

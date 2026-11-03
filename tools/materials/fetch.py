@@ -58,6 +58,11 @@ LIBRARY = {
     "panel": ("acg:MetalPlates004", "tint", 0.0),  # paneles de metal grandes (suelos del nexo y los distritos)
     "scifi": ("acg:MetalPlates015A", "tint", 0.0),  # rejilla octogonal (parcelas)
     "fachada": ("acg:Facade017", "color", 1.0),  # rascacielos de oficinas con ventanas encendidas (agujas de las islas del nexo)
+    # Vertical: chapa de caravana (acanalada fina, pintada), óxido, hormigón y hormigón pintado gastado.
+    "chapa": ("painted_metal_shutter", "tint", 0.0),
+    "oxido": ("rusty_metal_02", "tint", 0.55),
+    "hormigon": ("brushed_concrete", "tint", 0.12),
+    "pintado": ("painted_concrete", "tint", 0.1),
 }
 SIZES = (512, 1024)
 # Tamaño de repetición (m) cuando el real no sirve: las rayas del toldo miden 25 cm.

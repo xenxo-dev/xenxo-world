@@ -1861,6 +1861,64 @@
           "en": "PENNANTS"
         }
       }
+    ],
+    "props": [
+      {
+        "piece": "vertical_towers",
+        "p": [
+          32,
+          0,
+          32
+        ],
+        "yaw": 0,
+        "half": [
+          0,
+          0,
+          0
+        ]
+      }
+    ],
+    "lights": [
+      {
+        "p": [
+          28.6,
+          4.1,
+          28.0
+        ],
+        "color": "#ffd08a",
+        "intensity": 2.2,
+        "range": 9
+      },
+      {
+        "p": [
+          36.6,
+          4.1,
+          26.2
+        ],
+        "color": "#ffd08a",
+        "intensity": 2.2,
+        "range": 9
+      },
+      {
+        "p": [
+          37.4,
+          4.1,
+          38.3
+        ],
+        "color": "#ffd08a",
+        "intensity": 2.2,
+        "range": 9
+      },
+      {
+        "p": [
+          27.6,
+          4.1,
+          37.6
+        ],
+        "color": "#ffd08a",
+        "intensity": 2.2,
+        "range": 9
+      }
     ]
   }
 }

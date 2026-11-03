@@ -497,9 +497,14 @@ comprueban como en cualquier otro (`CHECKPOINT`, `COLLECT`: con la última pose 
   3,8 m, correr por una pared y rebotar en ella (como mucho tres rebotes seguidos: así se sube entre
   dos paredes juntas), deslizarse corriendo por debajo de algo, ir agachado y rodar al caer de alto (sin
   rodar, un aterrizaje fuerte deja un momento sin moverse). En una viga estrecha, los brazos se abren.
+- **Caídas de verdad:** aterrizar sin rodar desde unos 5 m (o desde más de unos 10 m, aunque se ruede)
+  o estrellarse corriendo de frente contra una pared alta sin saltar tira al suelo: el cuerpo cae con la
+  física de las caídas de §9 octies y se levanta. La pose lleva primero `pk_fall` (aterrizaje) o
+  `pk_crash` (pared) y después `hit_down` y `get_up`; quien ve `pk_fall`/`pk_crash` hace caer a esa
+  persona con su propia física, hacia donde corría (o de espaldas, contra la pared). Nada viaja aparte.
 - **Cómo lo ven los demás:** la pose lleva el movimiento en `emote`: `pk_vault`, `pk_mantle`,
   `pk_climb`, `pk_hang`, `pk_shimmy_l`, `pk_shimmy_r`, `pk_wallup`, `pk_wallrun_l`, `pk_wallrun_r`,
-  `pk_walljump`, `pk_slide`, `pk_slideup`, `pk_crouch`, `pk_roll`, `pk_land` y `pk_balance`. Cada
+  `pk_walljump`, `pk_slide`, `pk_slideup`, `pk_crouch`, `pk_roll`, `pk_land`, `pk_balance`, `pk_fall` y `pk_crash`. Cada
   cliente lo dibuja con su propio reloj desde que lo ve (los de una vez, con su duración típica) y la
   cabeza de la pose dice dónde está. Un cliente que no los conozca dibuja a la persona como siempre.
   Cumplen la regla de `emote` (`^[a-z_]{1,24}$`): nada nuevo en el esquema.
@@ -587,14 +592,14 @@ Un GLB puede nombrar sus materiales `xenxo:<biblioteca>.<tinte>` (p. ej. `xenxo:
 
 | Biblioteca | Qué es |
 |---|---|
-| `cal`, `estuco`, `piedra`, `losa`, `adoquin`, `teja`, `azulejo`, `madera`, `persiana`, `hierro`, `metal`, `toldo`, `tela`, `corteza`, `tierra`, `hoja`, `panel`, `scifi` | Superficies con textura real. Las UV del primer canal van **en metros** |
+| `cal`, `estuco`, `piedra`, `losa`, `adoquin`, `teja`, `azulejo`, `madera`, `persiana`, `hierro`, `metal`, `toldo`, `tela`, `corteza`, `tierra`, `hoja`, `panel`, `scifi`, `chapa`, `oxido`, `hormigon`, `pintado` | Superficies con textura real. Las UV del primer canal van **en metros** (`chapa`: chapa ondulada pintada; `oxido`: chapa pintada con óxido; `hormigon`: hormigón cepillado; `pintado`: hormigón pintado y desconchado) |
 | `neon` | Tubo de neón: brilla, mucho más de noche |
 | `farol` | Cristal de farolas y esferas de reloj: luz cálida de noche |
 | `ventana` | Vidrio: refleja de día; de noche se encienden unas sí y otras no |
 | `fachada` | Fachada de rascacielos con textura real (UV en metros): de noche se encienden sus ventanas |
 | `agua` | Superficie animada |
 | `pantalla` | Pantalla o anuncio vivo: bloques de luz que se mueven en el color del tinte, sin letras |
-| `oscuro`, `fruta`, `flor`, `chapa` | Colores sin textura (`chapa`: chapa pintada, algo satinada; las caravanas de Vertical) |
+| `oscuro`, `fruta`, `flor` | Colores sin textura |
 
 Un material llamado `xenxo-glow` (modelos generados con IA) hace brillar las luces pintadas en su textura (lo saturado y claro), más de noche.
 

@@ -11,6 +11,8 @@ import { VRMLookAtQuaternionProxy } from "@pixiv/three-vrm-animation";
 import { VrmAnimator } from "./animation";
 import type { Rig } from "./people/rig";
 import type { Motion } from "./motion";
+import { graphics } from "./graphics";
+import { addSprings, springBodyOf } from "./springs";
 
 export const AVATAR_HEIGHT = 1.75;
 
@@ -18,9 +20,10 @@ export interface LoadedAvatar {
   object: THREE.Object3D;
   /**
    * Llamar en cada frame con el estado de movimiento (velocidad, fase del paso,
-   * si está en el aire y el gesto en curso).
+   * si está en el aire y el gesto en curso). `view`: dónde está la cámara (el pelo y la ropa con
+   * física solo se mueven cerca; sin ella, siempre).
    */
-  update(dt: number, motion: Motion): void;
+  update(dt: number, motion: Motion, view?: THREE.Vector3): void;
   /** El esqueleto (solo los VRM): golpes, miradas, parejas y caídas. */
   rig?: Rig;
   dispose(): void;
@@ -91,19 +94,34 @@ export function withoutShadows(root: THREE.Object3D) {
   });
 }
 
-export async function loadAvatar(url: string): Promise<LoadedAvatar> {
+/** `decor`: gente de decorado (ciudadanos, residentes): su pelo y su ropa, solo de más cerca. */
+export async function loadAvatar(url: string, opts: { decor?: boolean } = {}): Promise<LoadedAvatar> {
   const gltf = await getLoader().loadAsync(url);
   const vrm = gltf.userData.vrm as VRM | undefined;
-  return vrm ? fromVrm(vrm, gltf.scene) : fromGltf(gltf.scene, gltf.animations);
+  return vrm ? fromVrm(vrm, gltf.scene, !!opts.decor) : fromGltf(gltf.scene, gltf.animations);
 }
+
+const _sp = new THREE.Vector3();
 
 /* ------------------------------------------------------------------ */
 /* VRM: huesos humanoides estándar → andar procedural y parpadeo        */
 /* ------------------------------------------------------------------ */
 
-function fromVrm(vrm: VRM, scene: THREE.Group): LoadedAvatar {
+function fromVrm(vrm: VRM, scene: THREE.Group, decor: boolean): LoadedAvatar {
   VRMUtils.removeUnnecessaryVertices(scene);
   VRMUtils.combineSkeletons(scene);
+  // Pelo y ropa con muelles (springs.ts), si el archivo no trae los suyos.
+  const own = (vrm.springBoneManager?.joints.size ?? 0) > 0;
+  const sb = own ? null : springBodyOf(vrm);
+  let springs: ReturnType<typeof addSprings> = null;
+  try {
+    springs = sb ? addSprings(vrm.scene, sb) : null;
+  } catch (e) {
+    console.warn("[xenxo] sin física en el pelo y la ropa", e);
+  }
+  /** Tiempo sin moverlos y dónde estaba el personaje la última vez (para volver al reposo tras un salto). */
+  let springIdle = 1;
+  const springAt = new THREE.Vector3(NaN, 0, 0);
   VRMUtils.rotateVRM0(vrm); // los VRM 0.x miran hacia el otro lado
   tune(vrm.scene);
 
@@ -145,7 +163,7 @@ function fromVrm(vrm: VRM, scene: THREE.Group): LoadedAvatar {
 
   return {
     object,
-    update: (dt, m) => {
+    update: (dt, m, view) => {
       if (animator.ready) {
         if (m.fx) m.fx.rig = animator.rig;
         animator.update(dt, m.speed, m.airborne, m.pk ?? m.emote, !!m.fight, m.fx, m.gesture, m.pk ? m.pkP : undefined);
@@ -178,6 +196,18 @@ function fromVrm(vrm: VRM, scene: THREE.Group): LoadedAvatar {
         }
       }
       vrm.update(dt);
+      if (springs) {
+        // Solo cerca de la cámara; tras un rato sin moverlos o un salto de sitio, desde el reposo.
+        const range = graphics.features.springs * (decor ? 0.5 : 1);
+        object.getWorldPosition(_sp);
+        const on = range > 0 && (!view || _sp.distanceToSquared(view) < range * range);
+        if (on) {
+          if (springIdle > 0.5 || !(springAt.distanceToSquared(_sp) < 9)) springs.reset();
+          springs.update(dt);
+          springIdle = 0;
+        } else springIdle += dt;
+        springAt.copy(_sp);
+      }
     },
     rig: animator.rig,
     dispose: () => {
