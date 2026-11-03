@@ -3,8 +3,8 @@
  * haciendo su vida (sentada, charlando, bailando, trabajando), que se da cuenta de ti. Todo sale de
  * la forja (`district-interiors.json`, tools/forge/interiors.py y cero.py): dónde están las salas,
  * sus puertas y la gente. Los sitios de la gente de la calle de Distrito Cero son ahora de los
- * ciudadanos (city/nav.ts). Es decorado del cliente, como los ciudadanos: no son personas ni
- * entidades del mundo y no viajan por la red.
+ * ciudadanos (city/nav.ts). No son personas ni entidades del mundo: están en el mismo sitio para
+ * todos (salen de la forja) y lo que se les hace se reparte a los de cerca (§9 nonies, `res`).
  *
  * Rendimiento (Quest 3): solo se dibujan los `FEATURES.residents` más cercanos, en huecos fijos (cada
  * hueco, siempre el mismo personaje de serie), y solo cuando el jugador está dentro de su sala o en su

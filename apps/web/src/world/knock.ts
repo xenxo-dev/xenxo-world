@@ -12,8 +12,9 @@
  *   - Sin física libre (las caídas a la vez tienen tope, `FEATURES.ragdolls`, y siempre queda una para
  *     las personas) cae con la animación; sin esqueleto (el muñeco de respaldo), se inclina.
  *
- * Sin violencia ni sangre. Nada viaja por la red: cada cliente tira a su gente de decorado. Sin
- * objetos nuevos por frame.
+ * Sin violencia ni sangre. Cada cliente hace caer con su física a quien tiene dibujado; el golpe llega
+ * a los demás por la red (§9 nonies: los ciudadanos, por quien los lleva; los de las salas, a los de
+ * cerca) y cada uno lo hace caer con la suya. Sin objetos nuevos por frame.
  */
 import * as THREE from "three";
 import { floorAt, npcs } from "./collision";
