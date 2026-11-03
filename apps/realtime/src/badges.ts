@@ -79,6 +79,30 @@ export const BADGES: Badge[] = [
     desc: { es: "Encontró los 8 banderines de Vertical.", en: "Found all 8 pennants in Vertical." },
     color: "#ffb347",
   },
+  {
+    id: "vertical_aguja",
+    district: "vertical",
+    rule: { kind: "race", key: "system:nivel5" },
+    name: { es: "La Aguja", en: "The Needle" },
+    desc: { es: "Subió la Aguja, el nivel 5 de Vertical.", en: "Climbed the Needle, level 5 in Vertical." },
+    color: "#ff5a7a",
+  },
+  {
+    id: "vertical_salto",
+    district: "vertical",
+    rule: { kind: "race", key: "system:nivel6" },
+    name: { es: "Salto de fe", en: "Leap of Faith" },
+    desc: { es: "Terminó Salto de fe, el nivel 6 de Vertical.", en: "Finished Leap of Faith, level 6 in Vertical." },
+    color: "#c45aff",
+  },
+  {
+    id: "vertical_retos",
+    district: "vertical",
+    rule: { kind: "hunt", key: "system:retos" },
+    name: { es: "Tryhard", en: "Tryhard" },
+    desc: { es: "Encontró los 6 retos escondidos de Vertical.", en: "Found the 6 hidden challenges in Vertical." },
+    color: "#ff9f1a",
+  },
 ];
 
 /** Lo que un distrito guarda de una cuenta (ChunkRoom.activityOf), lo justo para las reglas. */

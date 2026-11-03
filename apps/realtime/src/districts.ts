@@ -13,7 +13,7 @@ import lives from "./district-interiors.json";
 interface DistrictActivities {
   hunts?: { id: string; piece: string; radius: number; items: { p: V3; note?: Record<string, string>; piece?: string }[] }[];
   tiles?: { id: string; p: V3; cols: number; rows: number; size: number }[];
-  boards?: { kind: "race" | "hunt" | "points" | "builds"; id: string; period?: "all" | "week" | "day"; p: V3; yaw: number; size: [number, number]; title?: { es: string; en: string }; title_y?: number }[];
+  boards?: { kind: "race" | "hunt" | "points" | "builds"; id: string; period?: "all" | "week" | "day"; p: V3; yaw: number; size: [number, number]; title?: { es: string; en: string }; title_y?: number; title_size?: number }[];
   /** `mesh_collider`: se choca con la forma del modelo (collider@1.from_mesh; `half` es la caja de reserva). */
   props?: { piece: string; p: V3; yaw: number; half: V3; mesh_collider?: boolean }[];
   labels?: { text: { es: string; en: string }; p: V3; yaw: number; size: number; flat?: boolean; style?: string; width?: number; max_distance?: number }[];
@@ -252,7 +252,7 @@ export function districtSeed(d: District, toNexo: { p: V3; yaw: number }): Seede
         "scoreboard@1": { kind: b.kind, id: b.id, size: b.size, ...(b.period ? { period: b.period } : {}) },
       } as Components,
     });
-    if (b.title) label(`${bid}_title`, [b.p[0], r3(b.p[1] + (b.title_y ?? b.size[1] / 2 + 0.7)), b.p[2]], yaw(b.yaw), b.title.en, b.title, 0.55);
+    if (b.title) label(`${bid}_title`, [b.p[0], r3(b.p[1] + (b.title_y ?? b.size[1] / 2 + 0.7)), b.p[2]], yaw(b.yaw), b.title.en, b.title, b.title_size ?? 0.55);
   }
 
   /* --- Atrezo modelado (los modelos generados de seed-assets), con su caja --- */

@@ -390,6 +390,7 @@ STAIR_RUN = 2.3      # m: medio largo de un tramo
 STAIR_END = 3.6      # m: del centro al borde de fuera de los descansillos
 STEPS = 8            # peldaños por tramo (medio piso: 1,35 m)
 LIFT = (FRAME + 0.35, FRAME + 2.25, 0.95)  # montacargas, al oeste: de dónde a dónde (en X) y medio ancho
+LIFT_GAP = 0.6       # m: medio hueco de la barandilla del mirador delante del montacargas
 # Las cuatro posiciones de la espiral: (dirección del lado, a lo largo de X).
 SIDES = (("N", True), ("E", False), ("S", True), ("W", False))
 # Dónde: manzana, centro en su marco (u = x, v = z), fase de la espiral (qué posición lleva el piso 0) y
@@ -483,7 +484,9 @@ def _pilas(pl: Plan, rnd: random.Random) -> list[dict]:
     p_walks = _catwalks(pl, pilas)
     for p in pilas:
         p["walks"] = [w for w in p_walks if p["id"] in (w["a"], w["b"])]
-    pl.pilas = pilas
+    _viga(pl, pilas)
+    ag = _aguja(pl, rnd)
+    pl.pilas = pilas + [ag]
     return pilas
 
 
@@ -529,7 +532,9 @@ def _gran(pl: Plan, g: dict) -> None:
     t = 0.06
     pl.add("rail", cx - a, cz - a, cx + a, cz - a + t, y, y + RAIL, **kw)
     pl.add("rail", cx - a, cz + a - t, cx + a, cz + a, y, y + RAIL, **kw)
-    pl.add("rail", cx - a, cz - a + t, cx - a + t, cz + a - t, y, y + RAIL, **kw)
+    # Al oeste, con hueco delante del montacargas: detrás está su pared (no se cae nadie) y, encima, un reto.
+    pl.add("rail", cx - a, cz - a + t, cx - a + t, cz - LIFT_GAP, y, y + RAIL, **kw)
+    pl.add("rail", cx - a, cz + LIFT_GAP, cx - a + t, cz + a - t, y, y + RAIL, **kw)
     pl.add("rail", cx + a - t, cz - STAIR_RUN + 0.1, cx + a, cz + a - t, y, y + RAIL, **kw)
     # El hueco (x de -0,95 a 0,4; z de 0,95 a 3,4): barandilla al norte, al este y al sur.
     pl.add("rail", cx - INNER, cz + INNER, cx + HOLE, cz + INNER + t, y, y + RAIL, **kw)
@@ -602,7 +607,7 @@ def _catwalks(pl: Plan, pilas: list[dict]) -> list[dict]:
         free = (box[0] + 0.05, box[1] + inset, box[2] - 0.05, box[3] - inset) if along_z else (box[0] + inset, box[1] + 0.05, box[2] - inset, box[3] - 0.05)
         if not pl.free(*free, y - 0.6, y + 2.6):
             raise ValueError(f"la pasarela {ia}-{ib} pisa algo")
-        pl.add("catwalk", *box, y - 0.1, y, along="z" if along_z else "x", **kw)
+        pl.add("catwalk", *box, y - 0.1, y, along="z" if along_z else "x", pair=[ia, ib], **kw)
         t = 0.05
         if along_z:
             pl.add("rail", c - w, z0, c - w + t, z1, y, y + RAIL, **kw)
@@ -612,6 +617,311 @@ def _catwalks(pl: Plan, pilas: list[dict]) -> list[dict]:
             pl.add("rail", x0, c + w - t, x1, c + w, y, y + RAIL, **kw)
         out.append({"a": ia, "b": ib, "k": k, "along_z": along_z})
     return out
+
+
+# --------------------------------------------------------------------------------------
+# La Aguja y la viga
+# --------------------------------------------------------------------------------------
+# La Aguja (nivel 5), enfrente de la plaza: una pila en espiral como las otras, pero cada caravana va
+# sobre una cuna de acero de 0,9 m: cada piso son 3,6 m y desde parado no se llega al borde. Hay que
+# correr hacia la pared y subir por ella. Arriba, el pináculo: un último muro de 3,8 m (un reto).
+AGUJA = {"cx": 32.0, "cz": 61.4, "top": 6, "phase": 0}
+AG_CRADLE = 0.9
+AG_LV = LV + AG_CRADLE   # 3,6 m por piso
+SPIRE = (1.2, 3.8)       # pináculo: lado y alto
+# La viga: de lo alto de la pila del oeste de la Gran Pila (la 2) a su caravana del piso 10, a la misma
+# altura, por el lado del montacargas (sin tocarlo): 20 cm de ancho y 30 m de vacío. Un reto.
+VIGA = {"from": 2, "to": 0, "floor": 10, "z": 0.0, "half": 0.1}
+
+
+def ag_roof(k: int) -> float:
+    """Tejado de la caravana del piso k de la Aguja."""
+    return (k + 1) * AG_LV
+
+
+def aguja() -> dict:
+    """La Aguja como una pila más (para la espiral, el andamio y los cables)."""
+    p = {"id": 100, "i": 1, "j": 2, "cx": AGUJA["cx"], "cz": AGUJA["cz"], "top": AGUJA["top"], "phase": AGUJA["phase"], "gran": False, "aguja": True}
+    p["model"] = _pila_model(p["cx"], p["cz"])
+    p["h"] = ag_roof(p["top"]) + 0.35
+    p["walks"] = []
+    return p
+
+
+def _aguja(pl: Plan, rnd: random.Random) -> dict:
+    """La Aguja: cuna y caravana por piso (en espiral), sus pilares y el pináculo."""
+    a = aguja()
+    bx, bz = _inner(a["i"], a["j"])
+    x0, z0, x1, z1 = _footprint(a)
+    if x0 < bx - 0.01 or z0 < bz - 0.01 or x1 > bx + S + 0.01 or z1 > bz + S + 0.01:
+        raise ValueError("la Aguja se sale de su manzana")
+    if not pl.free(x0, z0, x1, z1, 0, ag_roof(a["top"]) + SPIRE[1] + 1, margin=0.1):
+        raise ValueError("la Aguja pisa algo de la ruta")
+    kw = {"tower": True, "pila": a["id"], "model": a["model"], "aguja": True}
+    for k in range(a["top"], -1, -1):
+        s = side_of(a, k)
+        x0, z0, x1, z1 = side_box(a, s)
+        y = k * AG_LV
+        pl.add("cradle", x0, z0, x1, z1, y, y + AG_CRADLE, side=s, **kw)
+        it = pl.add("trailer", x0, z0, x1, z1, y + AG_CRADLE, ag_roof(k), tint=rnd.choice(TINTS), level=k, side=s, **kw)
+        if k == a["top"]:
+            it["top"] = True
+            it["mirador"] = True  # sin azotea: ahí está el pináculo
+    for sx in (-1, 1):
+        for sz in (-1, 1):
+            x, z = a["cx"] + sx * FRAME, a["cz"] + sz * FRAME
+            pl.add("column", x - COL, z - COL, x + COL, z + COL, 0, a["h"], **kw)
+    # El pináculo, en el extremo de la última caravana más lejos de por donde se llega (la de debajo).
+    x0, z0, x1, z1 = side_box(a, side_of(a, a["top"]))
+    px0, pz0, px1, pz1 = side_box(a, side_of(a, a["top"] - 1))
+    w, h = SPIRE
+    if (x1 - x0) > (z1 - z0):  # a lo largo de X: el pináculo, en el extremo de X lejos de la de debajo
+        far_x0 = (px0 + px1) / 2 > (x0 + x1) / 2
+        sx0 = x0 if far_x0 else x1 - w
+        sz0 = (z0 + z1) / 2 - w / 2
+        a["spire"] = (sx0, sz0, sx0 + w, sz0 + w)
+    else:
+        far_z0 = (pz0 + pz1) / 2 > (z0 + z1) / 2
+        sz0 = z0 if far_z0 else z1 - w
+        sx0 = (x0 + x1) / 2 - w / 2
+        a["spire"] = (sx0, sz0, sx0 + w, sz0 + w)
+    y = ag_roof(a["top"])
+    pl.add("spire", *a["spire"], y, y + h, **kw)
+    return a
+
+
+def _viga(pl: Plan, pilas: list[dict]) -> None:
+    """La viga: de la pila 2 (su tejado de arriba) a la Gran Pila (su piso 10), a la misma altura."""
+    a, g = pilas[VIGA["from"]], pilas[VIGA["to"]]
+    fa = {it["level"]: it for it in pl.items if it["kind"] == "trailer" and it.get("pila") == a["id"]}
+    fg = {it["level"]: it for it in pl.items if it["kind"] == "trailer" and it.get("pila") == g["id"]}
+    ta, tg = fa[a["top"]], fg[VIGA["floor"]]
+    if abs(ta["y1"] - tg["y1"]) > 0.01:
+        raise ValueError("la viga no va a nivel")
+    y = ta["y1"]
+    z = VIGA["z"]
+    if not (ta["z0"] < z < ta["z1"] and tg["z0"] < z < tg["z1"]):
+        raise ValueError("la viga no llega a los dos tejados")
+    x0, x1 = ta["x1"], tg["x0"]
+    if not pl.free(x0 + 0.05, z - 0.3, x1 - 0.05, z + 0.3, y - 0.5, y + 2.2):
+        raise ValueError("la viga pisa algo")
+    pl.add("beam", x0 - 0.3, z - VIGA["half"], x1 + 0.3, z + VIGA["half"], y - 0.36, y, tower=True, model=g["model"], viga=True, station="viga")
+    # Por donde pasa la viga, sin cruces en los andamios (se pasaría por en medio).
+    a.setdefault("no_brace", {})[("x", 1)] = {a["top"]}
+    g.setdefault("no_brace", {})[("x", -1)] = {VIGA["floor"], VIGA["floor"] + 1}
+
+
+# --------------------------------------------------------------------------------------
+# Los niveles (carreras) y los retos (búsqueda): sus puntos salen del plano
+# --------------------------------------------------------------------------------------
+# Seis niveles, todos abiertos: dos fáciles, dos medios y dos para tryhards. Cada uno con su salida,
+# sus puntos (en el centro del trozo de tejado que queda libre en cada piso), su meta, su cartel y su
+# marcador de la semana. Y seis retos escondidos, sin reloj: una búsqueda más (y su insignia).
+GRADES = {
+    "facil": {"es": "FÁCIL", "en": "EASY"},
+    "medio": {"es": "MEDIO", "en": "MEDIUM"},
+    "tryhard": {"es": "TRYHARD", "en": "TRYHARD"},
+}
+LEVELS = [
+    {"id": "nivel1", "grade": "facil", "name": {"es": "Primeros pisos", "en": "First Floors"},
+     "text": {"es": "Cuatro caravanas de esta pila. Salta hacia el borde, cuélgate y sube; luego, a la de encima, dando la vuelta.",
+              "en": "Four trailers up this stack. Jump for the edge, hang and climb; then on to the next one, going round."}},
+    {"id": "nivel2", "grade": "facil", "name": {"es": "La pasarela", "en": "The Catwalk"},
+     "text": {"es": "Seis pisos arriba, cruza la pasarela y llega al tejado de la otra pila.",
+              "en": "Six floors up, cross the catwalk and reach the other stack's roof."}},
+    {"id": "nivel3", "grade": "medio", "name": {"es": "El caracol", "en": "The Snail"},
+     "text": {"es": "Catorce pisos de una vez, hasta lo más alto. Si te caes, desde abajo.",
+              "en": "Fourteen floors in one go, all the way up. Fall, and it's back to the bottom."}},
+    {"id": "nivel4", "grade": "medio", "name": {"es": "La fila del sur", "en": "The South Row"},
+     "text": {"es": "De pila en pila por tres pasarelas, cada una a su altura: a veces hay que subir y a veces, dejarse caer.",
+              "en": "Stack to stack over three catwalks, each at its own height: sometimes you climb, sometimes you drop."}},
+    {"id": "nivel5", "grade": "tryhard", "name": {"es": "La Aguja", "en": "The Needle"},
+     "text": {"es": "Cada piso, 3,6 m: desde parado no llegas al borde.",
+              "en": "Every floor is 3.6 m: from a standstill you won't reach the edge."}},
+    {"id": "nivel6", "grade": "tryhard", "name": {"es": "Salto de fe", "en": "Leap of Faith"},
+     "text": {"es": "Del mirador a lo alto de la pila del oeste, de tejado en tejado y de pila en pila: salta… y cae rodando.",
+              "en": "From the lookout to the top of the west stack, roof to roof and stack to stack: jump… and land rolling."}},
+]
+RETOS = [
+    {"name": {"es": "BAJO LA ESCALERA", "en": "UNDER THE STAIRS"},
+     "note": {"es": "Aquí abajo no mira nadie: por eso lo escondimos aquí.", "en": "Nobody looks down here: that's why we hid it here."}},
+    {"name": {"es": "SOBRE LA CALLE", "en": "ABOVE THE STREET"},
+     "note": {"es": "En la pasarela más alta, a 27 m. Los coches, ahí abajo.", "en": "On the highest catwalk, 27 m up. The cars, way down there."}},
+    {"name": {"es": "LO MÁS ALTO DEL SUROESTE", "en": "TOP OF THE SOUTHWEST"},
+     "note": {"es": "Catorce pisos. Desde aquí se ven todas las Pilas.", "en": "Fourteen floors. From up here you can see every Stack."}},
+    {"name": {"es": "EL MONTACARGAS", "en": "THE LIFT"},
+     "note": {"es": "Más alto que el mirador: 46 m. Por encima ya no hay nada.", "en": "Higher than the lookout: 46 m. There's nothing above this."}},
+    {"name": {"es": "LA VIGA", "en": "THE BEAM"},
+     "note": {"es": "Veinte centímetros de acero y treinta metros de vacío. No mires abajo.", "en": "Twenty centimetres of steel and thirty metres of nothing. Don't look down."}},
+    {"name": {"es": "LA CIMA DE LA AGUJA", "en": "TOP OF THE NEEDLE"},
+     "note": {"es": "El último muro, el más alto. Solo los tryhards de verdad llegan aquí.", "en": "The last wall, the highest. Only real tryhards make it here."}},
+]
+CP_R = 1.0           # radio de los puntos de los niveles (en el tejado)
+MAX_LABEL = 140      # BUDGETS.maxLabelChars (label@1)
+MAX_NOTE = 240       # ActivityNote (lo que cuenta un reto al recogerlo)
+
+
+def _floors_of(pl: Plan, pid: int) -> dict[int, dict]:
+    return {it["level"]: it for it in pl.items if it["kind"] == "trailer" and it.get("pila") == pid}
+
+
+def exposed(pl: Plan, pid: int, k: int) -> tuple[float, float, float, float]:
+    """El trozo de tejado del piso k de una pila que no tapa la caravana de encima."""
+    fl = _floors_of(pl, pid)
+    a = fl[k]
+    if k + 1 not in fl:
+        return a["x0"], a["z0"], a["x1"], a["z1"]
+    b = fl[k + 1]
+    parts = []
+    if b["x0"] > a["x0"] + 0.01:
+        parts.append((a["x0"], a["z0"], min(b["x0"], a["x1"]), a["z1"]))
+    if b["x1"] < a["x1"] - 0.01:
+        parts.append((max(b["x1"], a["x0"]), a["z0"], a["x1"], a["z1"]))
+    if b["z0"] > a["z0"] + 0.01:
+        parts.append((a["x0"], a["z0"], a["x1"], min(b["z0"], a["z1"])))
+    if b["z1"] < a["z1"] - 0.01:
+        parts.append((a["x0"], max(b["z1"], a["z0"]), a["x1"], a["z1"]))
+    return max(parts, key=lambda r: (r[2] - r[0]) * (r[3] - r[1]))
+
+
+def roof_point(pl: Plan, pid: int, k: int, up: float = 0.0) -> list[float]:
+    """Centro del tejado libre del piso k (y su altura)."""
+    x0, z0, x1, z1 = exposed(pl, pid, k)
+    y = _floors_of(pl, pid)[k]["y1"]
+    return [round((x0 + x1) / 2, 2), round(y + up, 2), round((z0 + z1) / 2, 2)]
+
+
+def street_start(pl: Plan, p: dict) -> tuple[list[float], tuple[float, float]]:
+    """Salida al pie de una pila: fuera de su lado largo de fuera, donde no tiene encima la de arriba; y hacia fuera."""
+    fl = _floors_of(pl, p["id"])
+    a, b = fl[0], fl[1]
+    if (a["x1"] - a["x0"]) > (a["z1"] - a["z0"]):
+        free = (a["x0"], b["x0"]) if b["x0"] > a["x0"] + 0.1 else (b["x1"], a["x1"])
+        out = -1 if abs(a["z0"] - p["cz"]) > abs(a["z1"] - p["cz"]) else 1
+        z = (a["z0"] if out < 0 else a["z1"]) + out * 1.3
+        return [round((free[0] + free[1]) / 2, 2), 0.0, round(z, 2)], (0.0, float(out))
+    free = (a["z0"], b["z0"]) if b["z0"] > a["z0"] + 0.1 else (b["z1"], a["z1"])
+    out = -1 if abs(a["x0"] - p["cx"]) > abs(a["x1"] - p["cx"]) else 1
+    x = (a["x0"] if out < 0 else a["x1"]) + out * 1.3
+    return [round(x, 2), 0.0, round((free[0] + free[1]) / 2, 2)], (float(out), 0.0)
+
+
+def _walk_mid(pl: Plan, ia: int, ib: int, up: float = 0.0) -> list[float]:
+    it = next(it for it in pl.items if it["kind"] == "catwalk" and it.get("pair") == [ia, ib])
+    return [round((it["x0"] + it["x1"]) / 2, 2), round(it["y1"] + up, 2), round((it["z0"] + it["z1"]) / 2, 2)]
+
+
+def levels() -> dict:
+    """Los niveles (salida, puntos y meta), los retos, sus carteles y sus marcadores, del plano."""
+    pl, _marks = plan()
+    P = {p["id"]: p for p in pl.pilas}
+    g, ag = P[0], P[100]
+    races = []
+
+    def place(start, out, block):
+        """
+        El marcador (de pie) y el cartel de un nivel, a los lados de su salida (sin estorbar la carrera
+        hacia la pared), donde no haya nada y sin salirse de su manzana y su acera (en la calzada, los
+        coches lo atravesarían).
+        """
+        ox, oz = out
+        rx, rz = oz, -ox
+        yaw = round(math.degrees(math.atan2(ox, oz)))
+        bx, bz = _inner(*block)
+        spots = []
+        for side in (1, -1):
+            for lat in (3.2, 4.4, 5.6):
+                for fwd in (0.8, 0.0, 2.0):
+                    x, z = start[0] + side * rx * lat + ox * fwd, start[2] + side * rz * lat + oz * fwd
+                    hx, hz = (1.35, 0.25) if abs(ox) < 0.5 else (0.25, 1.35)
+                    inside = bx - 1.3 < x - hx and x + hx < bx + S + 1.3 and bz - 1.3 < z - hz and z + hz < bz + S + 1.3
+                    if inside and pl.free(x - hx, z - hz, x + hx, z + hz, start[1], start[1] + 4.0, margin=0.3):
+                        spots.append((side, [round(x, 2), round(start[1] + 2.0, 2), round(z, 2)]))
+        if not spots:
+            raise ValueError(f"no hay sitio para el marcador de la salida {start}")
+        board = spots[0][1]
+        # El cartel, al otro lado si cabe; si no, flotando por encima de la salida, hacia fuera.
+        other = [pt for sd, pt in spots if sd != spots[0][0]]
+        sign = other[0] if other else [round(start[0] + ox * 1.6, 2), 0.0, round(start[2] + oz * 1.6, 2)]
+        return {"p": board, "yaw": yaw}, {"p": [sign[0], round(start[1] + (2.3 if other else 3.1), 2), sign[2]], "yaw": yaw}
+
+    def race(lid, start, cps, finish, out, board=None, block=None):
+        b, sg = place(start, out, block) if board is None else board
+        races.append({"id": lid, "start": start, "cps": cps, "finish": finish, "out": out, "board": b, "sign": sg})
+
+    s, out = street_start(pl, P[5])
+    race("nivel1", s, [roof_point(pl, 5, k) for k in (0, 1, 2)], roof_point(pl, 5, 3), out, block=(P[5]["i"], P[5]["j"]))
+    s, out = street_start(pl, P[1])
+    race("nivel2", s, [roof_point(pl, 1, 2), roof_point(pl, 1, 5), _walk_mid(pl, 1, 2)], roof_point(pl, 2, 5), out, block=(P[1]["i"], P[1]["j"]))
+    s, out = street_start(pl, P[4])
+    race("nivel3", s, [roof_point(pl, 4, k) for k in (3, 7, 11)], roof_point(pl, 4, P[4]["top"]), out, block=(P[4]["i"], P[4]["j"]))
+    s, out = street_start(pl, P[14])
+    race("nivel4", s, [roof_point(pl, 14, 6), roof_point(pl, 16, 8), roof_point(pl, 17, 6)], roof_point(pl, 19, 6), out, block=(P[14]["i"], P[14]["j"]))
+    s, out = street_start(pl, ag)
+    race("nivel5", s, [roof_point(pl, 100, k) for k in (1, 3, 5)], roof_point(pl, 100, ag["top"]), out, block=(ag["i"], ag["j"]))
+    # Del mirador, bajando de tejado en tejado por la Gran Pila hasta su piso 9; de un salto, a la pila 3
+    # (su piso 8, uno más abajo); por su pasarela a la pila 1; arriba del todo y, de otro salto (dos pisos
+    # más abajo: rodando), a lo alto de la pila 2.
+    # Su salida está arriba: el marcador, al pie de la escalera de la Gran Pila (mirando a la calle), y el
+    # cartel, en el mirador.
+    xb = g["cx"] + STAIR_IN + 2 * STAIR_W
+    race("nivel6", [round(g["cx"] + 1.6, 2), MIRADOR, round(g["cz"] - 2.2, 2)],
+         [roof_point(pl, 3, 8), _walk_mid(pl, 1, 3), roof_point(pl, 1, P[1]["top"])], roof_point(pl, 2, P[2]["top"]), (1.0, 0.0),
+         board=({"p": [round(xb + 1.4, 2), 2.0, round(g["cz"] + 0.5, 2)], "yaw": 90},
+                {"p": [round(g["cx"] + 1.6, 2), round(MIRADOR + 2.3, 2), round(g["cz"] - 0.6, 2)], "yaw": 90}))
+    # Los retos.
+    xa = g["cx"] + STAIR_IN
+    viga = next(it for it in pl.items if it.get("viga"))
+    sp = ag["spire"]
+    retos = [
+        [round(xa + 1.5, 2), 0.6, round(g["cz"] - STAIR_RUN - 0.65, 2)],
+        _walk_mid(pl, 4, 6, 0.6),
+        roof_point(pl, 13, P[13]["top"], 0.6),
+        [round(g["cx"] - (LIFT[0] + LIFT[1]) / 2, 2), round(MIRADOR + 2.6 + 0.6, 2), round(g["cz"], 2)],
+        [round((viga["x0"] + viga["x1"]) / 2, 2), round(viga["y1"] + 0.6, 2), round((viga["z0"] + viga["z1"]) / 2, 2)],
+        [round((sp[0] + sp[2]) / 2, 2), round(ag_roof(ag["top"]) + SPIRE[1] + 0.6, 2), round((sp[1] + sp[3]) / 2, 2)],
+    ]
+    return {"races": races, "retos": retos}
+
+
+def write_levels(path: str) -> None:
+    """
+    Escribe los niveles y los retos en la ficha de actividades de Vertical (district-activities.json):
+    las carreras `nivel1`..`nivel6` (las demás se quedan), la búsqueda `retos`, sus marcadores (uno por
+    nivel, de la semana, al lado de su salida, y el de los retos en el Patio) y sus carteles.
+    """
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    v = data["vertical"]
+    lv = levels()
+    ids = {L["id"] for L in LEVELS}
+    v["races"] = [r for r in v.get("races", []) if r["id"] not in ids]
+    v["hunts"] = [h for h in v.get("hunts", []) if h["id"] != "retos"]
+    v["boards"] = [b for b in v.get("boards", []) if b["id"] not in ids and b["id"] != "retos"]
+    v["labels"] = [lb for lb in v.get("labels", []) if not lb.get("level")]
+    for n, (L, r) in enumerate(zip(LEVELS, lv["races"])):
+        v["races"].append({"id": L["id"], "radius": CP_R, "start": {"p": r["start"], "radius": 1.6}, "cps": r["cps"], "finish": {"p": r["finish"], "radius": CP_R}})
+        grade = GRADES[L["grade"]]
+        title = {k: f"NIVEL {n + 1} · {grade['es']}" if k == "es" else f"LEVEL {n + 1} · {grade['en']}" for k in ("es", "en")}
+        # Al lado de la salida (sin estorbar la carrera hacia la pared), mirando afuera: el marcador a un
+        # lado y el cartel, al otro.
+        v["boards"].append({"kind": "race", "id": L["id"], "period": "week", "p": r["board"]["p"], "yaw": r["board"]["yaw"], "size": [2.4, 1.8],
+                            "title": title, "title_size": 0.3, "title_y": 1.35, "stand": True})
+        sign = {k: f"{title[k]}\n{L['name'][k].upper()}\n{L['text'][k]}" for k in ("es", "en")}
+        # label@1 no admite más de 140 caracteres (BUDGETS.maxLabelChars): uno más largo, el cliente no lo dibuja.
+        if any(len(t) > MAX_LABEL for t in sign.values()):
+            raise ValueError(f"el cartel de {L['id']} pasa de {MAX_LABEL} caracteres")
+        v["labels"].append({"text": sign, "p": r["sign"]["p"], "yaw": r["sign"]["yaw"], "size": 0.15, "width": 3.2, "style": "sign", "max_distance": 16, "level": L["id"]})
+    for R in RETOS:
+        if any(len(R["name"][k]) + len(R["note"][k]) + 14 > MAX_NOTE for k in ("es", "en")):
+            raise ValueError(f"el texto del reto {R['name']['es']} pasa de {MAX_NOTE} caracteres")
+    v["hunts"].append({"id": "retos", "piece": "vertical_reto", "radius": 1.0,
+                       "items": [{"p": p, "note": {k: f"RETO {n + 1} · {R['name'][k]}\n{R['note'][k]}" if k == "es" else f"CHALLENGE {n + 1} · {R['name'][k]}\n{R['note'][k]}" for k in ("es", "en")}}
+                                 for n, (R, p) in enumerate(zip(RETOS, lv["retos"]))]})
+    # El marcador de los retos, en el muro del Patio, al lado de los banderines (mirando a la Aguja).
+    v["boards"].append({"kind": "hunt", "id": "retos", "p": [26.9, 1.75, 43.56], "yaw": 0, "size": [2.2, 1.6], "title": {"es": "RETOS", "en": "CHALLENGES"}})
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
 
 
 # --------------------------------------------------------------------------------------
@@ -626,7 +936,28 @@ def colliders() -> list[list[float]]:
             continue
         x0, z0, x1, z1, y0, y1 = it["x0"], it["z0"], it["x1"], it["z1"], it["y0"], it["y1"]
         out.append([round((x0 + x1) / 2, 3), round((y0 + y1) / 2, 3), round((z0 + z1) / 2, 3), round((x1 - x0) / 2, 3), round((y1 - y0) / 2, 3), round((z1 - z0) / 2, 3)])
+    # Los marcadores de pie de los niveles (los escribe write_levels): del suelo a lo alto de su respaldo,
+    # que va detrás del panel.
+    for b in _activities().get("boards", []):
+        if not b.get("stand"):
+            continue
+        x, y, z = b["p"]
+        w, h = b["size"]
+        top = y + _board_top(b)
+        a = math.radians(b["yaw"])
+        fx, fz = round(math.sin(a)), round(math.cos(a))
+        cx, cz = x - fx * 0.12, z - fz * 0.12
+        hw, hd = w / 2 + 0.15, 0.1
+        hx, hz = (hd, hw) if fx else (hw, hd)
+        out.append([round(cx, 3), round(top / 2, 3), round(cz, 3), round(hx, 3), round(top / 2, 3), round(hz, 3)])
     return out
+
+
+def _board_top(b: dict) -> float:
+    """Lo alto del respaldo de un marcador sobre su centro: tapa también su título por detrás."""
+    if b.get("stand") and "title_y" in b:
+        return b["title_y"] + b.get("title_size", 0.55) + 0.2
+    return b["size"][1] / 2 + 0.95
 
 
 def course() -> dict:
@@ -1111,15 +1442,19 @@ def _boards(p: Part, color: str, detail: int) -> None:
         a = math.radians(b["yaw"])
         q = Part("board")
         # El título va encima del panel: el respaldo lo tapa también (de espaldas no se lee al revés).
-        top = h / 2 + 0.95
+        top = _board_top(b)
         q.box((-w / 2 - 0.15, 0.04, -h / 2 - 0.15), (w / 2 + 0.15, 0.2, top), back)
         if detail:
             q.box((-w / 2 - 0.2, 0.0, top - 0.05), (w / 2 + 0.2, 0.06, top + 0.05), edge)
             q.box((-w / 2 - 0.2, 0.0, -h / 2 - 0.2), (w / 2 + 0.2, 0.06, -h / 2 - 0.1), edge)
-        # El de encima de la torre de salida, con postes hasta su plataforma; los demás van en un muro.
+        # El de encima de la torre de salida, con postes hasta su plataforma; los de los niveles, de pie
+        # (dos postes hasta el suelo); los demás van en un muro.
         if abs(x - 32) < 4 and abs(z - 21.9) < 3:
             for sx in (-1, 1):
                 q.box((sx * (w / 2 - 0.3) - 0.08, 0.06, START["y"] - y), (sx * (w / 2 - 0.3) + 0.08, 0.2, -h / 2 - 0.15), back)
+        elif b.get("stand"):
+            for sx in (-1, 1):
+                q.box((sx * (w / 2 - 0.25) - 0.07, 0.06, -y), (sx * (w / 2 - 0.25) + 0.07, 0.2, -h / 2 - 0.15), back)
         # Local: ancho en X, la cara hacia −Y (= +Z del mundo con giro 0); se gira con el marcador.
         m = Matrix.Translation((x - C, -(z - C), y)) @ Matrix.Rotation(a, 4, "Z")
         p.merge(q, m)
@@ -1200,18 +1535,19 @@ def _frame(p: Part, g: dict, items: list, detail: int) -> None:
     cx, cz, top = g["cx"], g["cz"], g["top"]
     steel = mat("oxido", STEEL)
     F = FRAME
+    lv = AG_LV if g.get("aguja") else LV
     for it in items:
         if it["kind"] == "column" and it.get("pila") == g["id"]:
             _column(p, it)
     for k in range(1, top + 2):
-        y = k * LV
+        y = k * lv
         if detail or k % 2 == 0 or k == top + 1:
             b0, b1 = y - 0.2, y - 0.02
             _beam_box(p, cx - F, cz - F - 0.05, cx + F, cz - F + 0.05, b0, b1, steel)
             _beam_box(p, cx - F, cz + F - 0.05, cx + F, cz + F + 0.05, b0, b1, steel)
             _beam_box(p, cx - F - 0.05, cz - F, cx - F + 0.05, cz + F, b0, b1, steel)
             _beam_box(p, cx + F - 0.05, cz - F, cx + F + 0.05, cz + F, b0, b1, steel)
-        if k <= top:
+        if k <= top and not g.get("aguja"):
             # El extremo de la caravana del piso k que no se apoya en la de debajo, de lado a lado.
             e = EDGE - 0.15
             s = side_of(g, k)
@@ -1234,11 +1570,12 @@ def _frame(p: Part, g: dict, items: list, detail: int) -> None:
         faces = [f for f in (("x", -1), ("x", 1)) if f not in used]
         if len(faces) < 2:
             faces = [f for f in (("z", -1), ("z", 1)) if f not in used] if not ({("z", -1), ("z", 1)} & used) else faces
+    skip = g.get("no_brace", {})
     for (axis, sg) in faces:
         for k in range(top + 1):
-            if not detail and k % 2:
+            if (not detail and k % 2) or k in skip.get((axis, sg), ()):
                 continue
-            ya, yb = k * LV + 0.12, (k + 1) * LV - 0.28
+            ya, yb = k * lv + 0.12, (k + 1) * lv - 0.28
             if axis == "x":
                 x = cx + sg * (F + 0.02)
                 ends = ((_bl(x, cz - F, ya), _bl(x, cz + F, yb)), (_bl(x, cz + F, ya), _bl(x, cz - F, yb)))
@@ -1252,7 +1589,7 @@ def _frame(p: Part, g: dict, items: list, detail: int) -> None:
     for n, k in enumerate(range(2, top + 1, 3)):
         sx, sz = corners[(n + g["id"]) % 4]
         x, z = cx + sx * (F + COL + 0.12), cz + sz * (F + COL + 0.12)
-        y = k * LV + 2.1
+        y = k * lv + 2.1
         _box(p, min(x, cx + sx * (F + COL)), z - 0.02, max(x, cx + sx * (F + COL)), z + 0.02, y + 0.06, y + 0.1, steel)
         p.sphere(_bl(x, z, y), 0.08, mat("farol", BULB), subdiv=0)
         if detail:
@@ -1349,6 +1686,72 @@ def _lift(p: Part, it: dict, detail: int) -> None:
         _cage(p, x0 + 0.16, z0 + 0.16, x1 - 0.16, z1 - 0.16, cy, cy + 2.45, detail)
 
 
+def _cradle(p: Part, it: dict, detail: int) -> None:
+    """
+    Cuna de acero de la Aguja (0,9 m bajo cada caravana): largueros en H a lo largo, travesaños, una
+    chapa de fondo y, en los cantos de arriba, la franja amarilla y negra de por dónde se sube.
+    """
+    x0, z0, x1, z1, y0, y1 = it["x0"], it["z0"], it["x1"], it["z1"], it["y0"], it["y1"]
+    steel = mat("oxido", STEEL)
+    along_x = (x1 - x0) >= (z1 - z0)
+    # La chapa de fondo, un poco metida (los perfiles van por fuera, a ras de la caja que choca).
+    _box(p, x0 + 0.06, z0 + 0.06, x1 - 0.06, z1 - 0.06, y0, y1 - 0.12, mat("metal", "#2b2f38"), skip=("+z",))
+    # Largueros arriba y abajo, por los dos lados largos.
+    for (ya, yb) in ((y0, y0 + 0.16), (y1 - 0.16, y1)):
+        if along_x:
+            _beam_box(p, x0, z0, x1, z0 + 0.12, ya, yb, steel)
+            _beam_box(p, x0, z1 - 0.12, x1, z1, ya, yb, steel)
+        else:
+            _beam_box(p, x0, z0, x0 + 0.12, z1, ya, yb, steel)
+            _beam_box(p, x1 - 0.12, z0, x1, z1, ya, yb, steel)
+    # Montantes cada metro y pico y, en detalle, cruces entre ellos.
+    L = (x1 - x0) if along_x else (z1 - z0)
+    n = 5
+    for kk in range(n + 1):
+        u = (x0 if along_x else z0) + 0.06 + (L - 0.12) * kk / n
+        for side in (0, 1):
+            if along_x:
+                zz = z0 if side == 0 else z1 - 0.12
+                _box(p, u - 0.06, zz, u + 0.06, zz + 0.12, y0 + 0.16, y1 - 0.16, steel, skip=("+z", "-z"))
+            else:
+                xx = x0 if side == 0 else x1 - 0.12
+                _box(p, xx, u - 0.06, xx + 0.12, u + 0.06, y0 + 0.16, y1 - 0.16, steel, skip=("+z", "-z"))
+    if detail:
+        for kk in range(n):
+            ua = (x0 if along_x else z0) + 0.06 + (L - 0.12) * kk / n
+            ub = (x0 if along_x else z0) + 0.06 + (L - 0.12) * (kk + 1) / n
+            for side in (0, 1):
+                if along_x:
+                    zz = z0 - 0.01 if side == 0 else z1 + 0.01
+                    a0, b0 = (_bl(ua, zz, y0 + 0.16), _bl(ub, zz, y1 - 0.16)) if kk % 2 == 0 else (_bl(ua, zz, y1 - 0.16), _bl(ub, zz, y0 + 0.16))
+                else:
+                    xx = x0 - 0.01 if side == 0 else x1 + 0.01
+                    a0, b0 = (_bl(xx, ua, y0 + 0.16), _bl(xx, ub, y1 - 0.16)) if kk % 2 == 0 else (_bl(xx, ua, y1 - 0.16), _bl(xx, ub, y0 + 0.16))
+                p.tube([a0, b0], 0.03, steel, segments=4)
+    # Franja de aviso en el canto de arriba (amarillo y negro, a tramos).
+    stripes = 12 if detail else 6
+    for kk in range(stripes):
+        tint = YELLOW if kk % 2 == 0 else "#1d1f24"
+        ua = (x0 if along_x else z0) + L * kk / stripes
+        ub = (x0 if along_x else z0) + L * (kk + 1) / stripes
+        if along_x:
+            _box(p, ua, z0 - 0.012, ub, z1 + 0.012, y1 - 0.1, y1 - 0.02, mat("pintado", tint), skip=("+z", "-z"))
+        else:
+            _box(p, x0 - 0.012, ua, x1 + 0.012, ub, y1 - 0.1, y1 - 0.02, mat("pintado", tint), skip=("+z", "-z"))
+
+
+def _spire(p: Part, it: dict, color: str, detail: int) -> None:
+    """El pináculo de la Aguja: un bloque de chapa pintada con su canto naranja y una baliza encima."""
+    x0, z0, x1, z1, y0, y1 = it["x0"], it["z0"], it["x1"], it["z1"], it["y0"], it["y1"]
+    _box(p, x0, z0, x1, z1, y0, y1 - 0.07, mat("chapa", SHEET), skip=("-z",))
+    _box(p, x0 - 0.012, z0 - 0.012, x1 + 0.012, z1 + 0.012, y1 - 0.07, y1, mat("pintado", ORANGE))
+    _box(p, x0 - 0.01, z0 - 0.01, x1 + 0.01, z1 + 0.01, y0 + 1.8, y0 + 1.9, mat("neon", color), skip=("+z", "-z"))
+    if detail:  # franjas de aviso abajo
+        for kk in range(4):
+            yy = y0 + 0.2 + kk * 0.3
+            _box(p, x0 - 0.008, z0 - 0.008, x1 + 0.008, z1 + 0.008, yy, yy + 0.12, mat("pintado", YELLOW if kk % 2 == 0 else "#1d1f24"), skip=("+z", "-z"))
+
+
 def _mast(p: Part, g: dict, color: str, detail: int) -> None:
     """Mástil del mirador: en la esquina del suroeste, con su banderín y una baliza que brilla."""
     x, z = g["cx"] - FRAME + 0.35, g["cz"] + FRAME - 0.35
@@ -1369,11 +1772,12 @@ def _pila_cables(p: Part, mine: list[dict], pilas: list[dict], solid: list[dict]
     wire = mat("hierro", DARK)
     bulb = mat("farol", BULB)
     ids = {g["id"] for g in mine}
+    by_id = {g["id"]: g for g in pilas}
     done = set()
     for a in pilas:
         near = sorted((math.hypot(b["cx"] - a["cx"], b["cz"] - a["cz"]), b["id"]) for b in pilas if b is not a)
         for d, bid in near[:2]:
-            b = pilas[bid]
+            b = by_id[bid]
             key = (min(a["id"], b["id"]), max(a["id"], b["id"]))
             lit = rnd.random() < 0.6
             if key in done or key[0] not in ids or not (8.0 < d < 34.0):
@@ -1425,6 +1829,12 @@ def towers_object(color: str, detail: int, model: str = "a"):
             _catwalk(p, it, detail)
         elif k == "lift":
             _lift(p, it, detail)
+        elif k == "cradle":
+            _cradle(p, it, detail)
+        elif k == "spire":
+            _spire(p, it, color, detail)
+        elif k == "beam":
+            _beam(p, it)
     for g in mine:
         _frame(p, g, items, detail)
         if g["gran"]:
@@ -1551,6 +1961,25 @@ def stairs_object(color: str, detail: int):
             _box(p, x - 0.06, z - 0.06, x + 0.06, z + 0.06, 0, top, steel, skip=("-z",))
     ob = p.to_object()
     ob.name = "vertical_stairs"
+    finish(ob)
+    return ob
+
+
+def reto_object(detail: int):
+    """
+    El reto de Vertical (se recoge: collectible@1): un rombo de luz naranja, de pie, con un aro alrededor
+    y una peana corta. Distinto del banderín: lo que cuesta de verdad.
+    """
+    p = Part("vertical_reto")
+    glow = mat("neon", ORANGE)
+    seg = 8 if detail else 4
+    p.lathe((0, 0, 0.25), [(0.0, 0.0), (0.28, 0.42), (0.0, 0.84)], glow, segments=seg, smooth=False)
+    ring = [(0.5, 0.0), (0.56, 0.0), (0.56, 0.05), (0.5, 0.05)]
+    p.lathe((0, 0, 0.64), ring + [ring[0]], mat("neon", "#ffd27a"), segments=16 if detail else 8, smooth=False)
+    p.cylinder((0, 0, 0), 0.16, 0.06, mat("hierro", DARK), segments=10 if detail else 6)
+    p.cylinder((0, 0, 0.06), 0.03, 0.22, mat("hierro", DARK), segments=6 if detail else 4)
+    ob = p.to_object()
+    ob.name = "vertical_reto"
     finish(ob)
     return ob
 

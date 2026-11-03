@@ -9,6 +9,7 @@
  *   npm run test:parkour -w @xenxo/web
  */
 import type { Entity } from "@xenxo/protocol";
+import activities from "../../realtime/src/district-activities.json";
 import cities from "../../realtime/src/district-cities.json";
 import { world } from "../src/net/world-store";
 import { createBody, placeBody, type Body } from "../src/world/locomotion";
@@ -435,6 +436,318 @@ scene([[0, 1, -5, 0.1, 1, 6]]);
   console.log(`pilas: ${pilas.length} (la más alta, de ${tallest} pisos); subidas hasta arriba: ${done}`);
   check(pilas.length >= 15 && tallest >= 16, "las Pilas, y la más alta de 16 pisos (la Gran Pila)");
   check(done === pilas.length, "en todas, de la calle a lo más alto, colgándose de cada tejado");
+}
+
+// 14) Los niveles y los retos de Vertical (district-activities.json), jugados por un bot con las cajas
+//     de verdad: en cada uno, por orden, la salida, cada punto, la meta (como el cliente: dentro del
+//     círculo, y a menos de 4 m + radio de alto). Escalar en espiral, subir corriendo por paredes de
+//     3,6 m (la Aguja), dejarse caer de tejado en tejado, saltos entre pilas cayendo rodando (Salto de
+//     fe), la viga, el montacargas y el pináculo.
+{
+  type V3 = [number, number, number];
+  type R = { x0: number; x1: number; z0: number; z1: number; y0: number; y1: number };
+  const V = (activities as unknown as Record<string, { races: { id: string; start: { p: V3; radius: number }; cps: V3[]; finish: { p: V3; radius: number } }[]; hunts: { id: string; radius: number; items: { p: V3 }[] }[] }>).vertical!;
+  const list = (cities.cities as Record<string, number[][]>).vertical!;
+  scene(list.map(([x, y, z, hx, hy, hz]) => [x!, y!, z!, hx!, hy!, hz!] as B));
+  const rects: R[] = list.map(([x, y, z, hx, hy, hz]) => ({ x0: x! - hx!, x1: x! + hx!, z0: z! - hz!, z1: z! + hz!, y0: y! - hy!, y1: y! + hy! }));
+  const isTrailer = (r: R) => {
+    const a = Math.max(r.x1 - r.x0, r.z1 - r.z0), b = Math.min(r.x1 - r.x0, r.z1 - r.z0);
+    return Math.abs(r.y1 - r.y0 - 2.7) < 0.02 && Math.abs(a - 6.8) < 0.02 && Math.abs(b - 2.45) < 0.02;
+  };
+  const mid = (a: number, b: number) => (a + b) / 2;
+  /** Las caravanas de la pila con centro (cx, cz), por pisos (de abajo arriba). */
+  const pila = (cx: number, cz: number) =>
+    rects.filter((r) => isTrailer(r) && Math.abs(mid(r.x0, r.x1) - cx) < 2.5 && Math.abs(mid(r.z0, r.z1) - cz) < 2.5).sort((a, b) => a.y0 - b.y0);
+  const races = new Map(V.races.map((r) => [r.id, r]));
+
+  type Step =
+    | { go: [number, number]; speed?: number; until?: (b: Body) => boolean }
+    | { hang: [number, number] }
+    | { wallup: [number, number]; wall: number }
+    | { leap: [number, number]; edge: number; lead?: number }
+    | { drop: [number, number] }
+    | { visit: V3; r: number };
+  /** Delante de la pared de `b` que corta el tejado de `a` (a medio metro), y hacia dónde. */
+  const wallOf = (a: R, b: R, back = 0.5): { at: [number, number]; dir: [number, number]; wall: number } => {
+    const oz = mid(Math.max(a.z0, b.z0), Math.min(a.z1, b.z1)), ox = mid(Math.max(a.x0, b.x0), Math.min(a.x1, b.x1));
+    if (b.x0 > a.x0 + 0.1 && b.x0 < a.x1 - 0.1) return { at: [b.x0 - back, oz], dir: [1, 0], wall: b.x0 };
+    if (b.x1 > a.x0 + 0.1 && b.x1 < a.x1 - 0.1) return { at: [b.x1 + back, oz], dir: [-1, 0], wall: b.x1 };
+    if (b.z0 > a.z0 + 0.1 && b.z0 < a.z1 - 0.1) return { at: [ox, b.z0 - back], dir: [0, 1], wall: b.z0 };
+    return { at: [ox, b.z1 + back], dir: [0, -1], wall: b.z1 };
+  };
+  /** Desde la calle hasta el piso `to` de una pila (colgándose de cada tejado), pasando por `visits`. */
+  const climb = (fl: R[], from: number, to: number, visits: Map<number, V3> = new Map(), wall = false): Step[] => {
+    const out: Step[] = [];
+    const cx = fl.reduce((s, r) => s + mid(r.x0, r.x1), 0) / fl.length, cz = fl.reduce((s, r) => s + mid(r.z0, r.z1), 0) / fl.length;
+    for (let k = from; k < to; k++) {
+      if (k < 0) {
+        // De la calle a la primera, por su lado largo de fuera.
+        const [a, b] = [fl[0]!, fl[1]!];
+        const back = wall ? 4.5 : 0.5;
+        let at: [number, number], dir: [number, number], w: number;
+        if (a.x1 - a.x0 > a.z1 - a.z0) {
+          const free = b.x0 > a.x0 + 0.1 ? [a.x0, b.x0] : [b.x1, a.x1];
+          const o = Math.abs(a.z0 - cz) > Math.abs(a.z1 - cz) ? -1 : 1;
+          w = o < 0 ? a.z0 : a.z1;
+          at = [mid(free[0]!, free[1]!), w + o * back];
+          dir = [0, -o];
+        } else {
+          const free = b.z0 > a.z0 + 0.1 ? [a.z0, b.z0] : [b.z1, a.z1];
+          const o = Math.abs(a.x0 - cx) > Math.abs(a.x1 - cx) ? -1 : 1;
+          w = o < 0 ? a.x0 : a.x1;
+          at = [w + o * back, mid(free[0]!, free[1]!)];
+          dir = [-o, 0];
+        }
+        out.push({ go: at }, wall ? { wallup: dir, wall: w } : { hang: dir });
+      } else {
+        const t = wallOf(fl[k]!, fl[k + 1]!, wall ? 3.0 : 0.5);
+        out.push({ go: t.at }, wall ? { wallup: t.dir, wall: t.wall } : { hang: t.dir });
+      }
+      const v = visits.get(k + 1);
+      if (v) out.push({ visit: v, r: 1.0 }, { go: [v[0], v[2]] });
+    }
+    return out;
+  };
+  const visitAll = (pts: V3[]) => new Map(pts.map((p) => [Math.round(p[1] / 2.7) - 1, p] as const));
+  const RUNV = 6.0, WALKV = 2.1;
+
+  /** Juega una lista de pasos; dice hasta dónde llegó y qué puntos pisó (por orden). */
+  const play = (at: V3, steps: Step[], targets: { p: V3; r: number }[], secs = 400) => {
+    const b = createBody(...at);
+    placeBody(b, ...at);
+    const pk = createParkour();
+    resetParkour(pk, b);
+    const inp: ParkourInput = { wantX: 0, wantZ: 0, jump: false, crouch: false, crouchPressed: false, yaw: 0 };
+    let i = 0, t = 0, t0 = 0, stage = "", got = 0, fail = "", falls = 0;
+    const dt = 1 / 60;
+    while (t < secs && i < steps.length && !fail) {
+      inp.jump = false;
+      inp.crouchPressed = false;
+      inp.wantX = inp.wantZ = 0;
+      const st = steps[i]!;
+      if ("go" in st) {
+        const dx = st.go[0] - b.x, dz = st.go[1] - b.z, d = Math.hypot(dx, dz);
+        if (d < 0.12 && b.grounded && b.stun <= 0) i++;
+        else if (b.stun <= 0) go(inp, dx, dz, Math.min(st.speed ?? WALKV, d * 3 + 0.3));
+      } else if ("visit" in st) {
+        const [x, y, z] = st.visit;
+        if (Math.hypot(b.x - x, b.z - z) <= st.r && Math.abs(b.y - y) <= 4 + st.r) i++;
+        else go(inp, x - b.x, z - b.z, Math.min(WALKV, Math.hypot(x - b.x, z - b.z) * 3 + 0.3));
+      } else if ("hang" in st) {
+        if (stage === "") (stage = "settle"), (t0 = t);
+        if (stage === "settle" && t - t0 > 0.3) (stage = "jump"), (t0 = t);
+        if (stage === "jump") {
+          go(inp, st.hang[0], st.hang[1], 0.5);
+          if (t - t0 < 0.03) inp.jump = true;
+          if (pk.move === "hang") (stage = "hanging"), (t0 = t);
+          else if (t - t0 > 1.5) fail = `paso ${i}: no se cuelga (y=${r2(b.y)})`;
+        } else if (stage === "hanging") {
+          if (t - t0 > 0.35 && t - t0 < 0.38) inp.jump = true;
+          if (b.grounded && pk.move !== "climb" && pk.move !== "hang" && t - t0 > 0.5) (i++, (stage = ""));
+          else if (t - t0 > 3) fail = `paso ${i}: colgado, no sube (y=${r2(b.y)})`;
+        }
+      } else if ("wallup" in st) {
+        // Corriendo hacia la pared y, a un paso de ella, el salto: sube por la pared, se cuelga y trepa.
+        const [dx, dz] = st.wallup;
+        const toWall = dx !== 0 ? (st.wall - b.x) * dx : (st.wall - b.z) * dz;
+        if (stage === "") (stage = "run"), (t0 = t);
+        if (stage === "run") {
+          go(inp, dx, dz, RUNV);
+          if (toWall < 1.0) (inp.jump = true), (stage = "up"), (t0 = t);
+          else if (t - t0 > 4) fail = `paso ${i}: no llega corriendo a la pared`;
+        } else if (stage === "up") {
+          if (t - t0 < 0.25) go(inp, dx, dz, RUNV);
+          if (pk.move === "hang") (stage = "hanging"), (t0 = t);
+          else if (b.grounded && t - t0 > 0.6 && pk.move !== "wallup" && pk.move !== "climb") fail = `paso ${i}: no sube por la pared (y=${r2(b.y)} ${pk.move})`;
+          else if (t - t0 > 3) fail = `paso ${i}: por la pared, no se cuelga`;
+        } else if (stage === "hanging") {
+          if (t - t0 > 0.35 && t - t0 < 0.38) inp.jump = true;
+          if (b.grounded && pk.move !== "climb" && pk.move !== "hang" && t - t0 > 0.5) (i++, (stage = ""));
+          else if (t - t0 > 3) fail = `paso ${i}: colgado, no sube (y=${r2(b.y)})`;
+        }
+      } else if ("drop" in st) {
+        // Dejarse caer: un paso despacio hacia el borde y, ya en el aire, nada (cae recto, sin agarrarse).
+        if (stage === "") (stage = "edge"), (t0 = t);
+        if (stage === "edge") {
+          go(inp, st.drop[0], st.drop[1], 0.8);
+          if (!b.grounded) (stage = "air"), (t0 = t);
+          else if (t - t0 > 3) fail = `paso ${i}: no llega al borde`;
+        } else if (stage === "air" && b.grounded && b.stun <= 0 && t - t0 > 0.2) (i++, (stage = ""));
+        else if (t - t0 > 4) fail = `paso ${i}: la caída no acaba`;
+      } else if ("leap" in st) {
+        // Corriendo hacia el borde y, al llegar, el salto; sin soltar la carrera hasta caer.
+        const [dx, dz] = st.leap;
+        const toEdge = dx !== 0 ? (st.edge - b.x) * dx : (st.edge - b.z) * dz;
+        if (stage === "") (stage = "run"), (t0 = t);
+        go(inp, dx, dz, RUNV);
+        if (stage === "run" && toEdge < (st.lead ?? 0.35)) (inp.jump = true), (stage = "air"), (t0 = t);
+        else if (stage === "air" && t - t0 > 0.2 && b.grounded && pk.move !== "roll") (i++, (stage = ""));
+        else if (t - t0 > 5) fail = `paso ${i}: el salto no acaba`;
+      }
+      parkourStep(pk, b, inp, dt, -150, 150);
+      if (process.env.TRACE && Math.round(t * 60) % 30 === 0) console.log(`    t=${r2(t)} paso ${i} ${stage} (${r2(b.x)}, ${r2(b.y)}, ${r2(b.z)}) ${pk.move} suelo=${b.grounded} golpe=${r2(b.stun)}`);
+      if (pk.fall) falls++;
+      if (pk.fall && !fail) fail = `paso ${i}: se cae de verdad (${pk.fall}, y=${r2(b.y)})`;
+      // Los puntos, como el cliente: por orden, dentro del círculo.
+      const tg = targets[got];
+      if (tg && Math.hypot(b.x - tg.p[0], b.z - tg.p[2]) <= tg.r && Math.abs(b.y - tg.p[1]) <= 4 + tg.r) got++;
+      t += dt;
+    }
+    return { got, total: targets.length, fail: fail || (i < steps.length ? `se acabó el tiempo en el paso ${i}` : ""), y: b.y, t, falls };
+  };
+  const targetsOf = (id: string) => {
+    const rc = races.get(id)!;
+    return [{ p: rc.start.p, r: rc.start.radius }, ...rc.cps.map((p) => ({ p, r: 1.0 })), { p: rc.finish.p, r: rc.finish.radius }];
+  };
+  const report = (what: string, r: ReturnType<typeof play>) => {
+    console.log(`  ${what}: ${r.got}/${r.total} en ${r2(r.t)} s ${r.fail}`);
+    return r.got === r.total && !r.fail;
+  };
+  let ok = 0;
+  // Nivel 1: los cuatro primeros pisos de la pila 5.
+  {
+    const rc = races.get("nivel1")!;
+    const fl = pila(24.5, -1.2);
+    const st: Step[] = [{ go: [rc.start.p[0], rc.start.p[2]] }, ...climb(fl, -1, 3, visitAll([...rc.cps, rc.finish.p]))];
+    if (report("nivel 1 (primeros pisos)", play(rc.start.p, st, targetsOf("nivel1")))) ok++;
+  }
+  // Nivel 2: seis pisos de la pila 1, la pasarela y el tejado de la pila 2.
+  {
+    const rc = races.get("nivel2")!;
+    const fl = pila(-12.5, -12.5);
+    const cw = rc.cps[2]!;
+    const st: Step[] = [
+      { go: [rc.start.p[0], rc.start.p[2]] },
+      ...climb(fl, -1, 5, visitAll(rc.cps.slice(0, 2))),
+      { go: [cw[0], fl[5]!.z1 - 0.6] },
+      { visit: cw, r: 1.0 },
+      { go: [cw[0], cw[2]] },
+      { go: [cw[0], rc.finish.p[2]] },
+      { visit: rc.finish.p, r: 1.0 },
+    ];
+    if (report("nivel 2 (la pasarela)", play(rc.start.p, st, targetsOf("nivel2")))) ok++;
+  }
+  // Nivel 3: la pila 4 entera.
+  {
+    const rc = races.get("nivel3")!;
+    const fl = pila(37.0, -12.5);
+    const st: Step[] = [{ go: [rc.start.p[0], rc.start.p[2]] }, ...climb(fl, -1, fl.length - 1, visitAll([...rc.cps, rc.finish.p]))];
+    if (report("nivel 3 (el caracol)", play(rc.start.p, st, targetsOf("nivel3")))) ok++;
+  }
+  // Nivel 4: la fila del sur (pilas 14, 16, 17 y 19), por sus pasarelas: subiendo y dejándose caer.
+  {
+    const rc = races.get("nivel4")!;
+    const f14 = pila(-1.0, 76.5), f16 = pila(26.1, 76.5), f17 = pila(37.9, 76.5);
+    const [c1, c2, c3] = rc.cps as [V3, V3, V3];
+    const e17 = f17[6]!, s17 = f17[7]!;
+    const st: Step[] = [
+      { go: [rc.start.p[0], rc.start.p[2]] },
+      ...climb(f14, -1, 6),
+      { visit: c1, r: 1.0 },
+      { go: [c1[0], 76.5] },
+      // Por la pasarela hasta el tejado de la pila 16 (su piso 6) y dos pisos más.
+      { go: [f16[6]!.x0 + 0.8, 76.5] },
+      ...climb(f16, 6, 8),
+      { visit: c2, r: 1.0 },
+      { go: [c2[0], 76.5] },
+      { go: [f17[8]!.x0 + 1.2, 76.5] },
+      // Abajo, de dos en dos metros y pico: a la del sur (7) y a la del este (6).
+      { go: [s17.x0 + 3.6, 78.2] },
+      { go: [e17.x0 + 1.2, 74.6] },
+      { visit: c3, r: 1.0 },
+      { go: [c3[0], 76.5] },
+      { go: [rc.finish.p[0], 76.5] },
+      { visit: rc.finish.p, r: 1.0 },
+    ];
+    if (report("nivel 4 (la fila del sur)", play(rc.start.p, st, targetsOf("nivel4")))) ok++;
+  }
+  // Nivel 5: la Aguja (pisos de 3,6 m: subir corriendo por la pared).
+  const ag = rects.filter((r) => isTrailer(r) && Math.abs(mid(r.x0, r.x1) - 32) < 2.5 && Math.abs(mid(r.z0, r.z1) - 61.4) < 2.5).sort((a, b) => a.y0 - b.y0);
+  {
+    const rc = races.get("nivel5")!;
+    const vis = new Map(rc.cps.map((p) => [Math.round(p[1] / 3.6) - 1, p] as const));
+    vis.set(Math.round(rc.finish.p[1] / 3.6) - 1, rc.finish.p);
+    const st: Step[] = [{ go: [rc.start.p[0], rc.start.p[2]] }, ...climb(ag, -1, ag.length - 1, vis, true)];
+    if (report("nivel 5 (la Aguja)", play(rc.start.p, st, targetsOf("nivel5")))) ok++;
+  }
+  // Nivel 6: Salto de fe. Del mirador, al hueco y, de tejado en tejado, Gran Pila abajo hasta la
+  // caravana del este del piso 9; de un salto a la pila 3 (un piso más abajo); por la pasarela a la
+  // pila 1; arriba del todo; y de otro salto (dos pisos más abajo, rodando) a lo alto de la pila 2.
+  {
+    const rc = races.get("nivel6")!;
+    const g = pila(-1.9, -2.5), p1 = pila(-12.5, -12.5);
+    const [c1, c2, c3] = rc.cps as [V3, V3, V3];
+    const [w15, s14, e13, n12, w11, s10, e9] = [g[15]!, g[14]!, g[13]!, g[12]!, g[11]!, g[10]!, g[9]!];
+    const st: Step[] = [
+      { go: [mid(w15.x0, w15.x1), rc.start.p[2]] },
+      { go: [mid(w15.x0, w15.x1), mid(s14.z0, s14.z1)] },
+      { go: [w15.x1 - 0.45, mid(s14.z0, s14.z1)] },
+      { drop: [1, 0] },                                             // al hueco: a la del sur (14)
+      { go: [e13.x0 + 1.2, s14.z0 + 0.45] },
+      { drop: [0, -1] },                                            // a la del este (13)
+      { go: [e13.x0 + 0.45, n12.z0 + 1.2] },
+      { drop: [-1, 0] },                                            // a la del norte (12)
+      { go: [w11.x0 + 1.2, n12.z1 - 0.45] },
+      { drop: [0, 1] },                                             // a la del oeste (11)
+      { go: [w11.x1 - 0.45, s10.z0 + 1.2] },
+      { drop: [1, 0] },                                             // a la del sur (10)
+      { go: [e9.x0 + 0.55, s10.z0 + 0.45] },
+      { drop: [0, -1] },                                            // a la del este (9)
+      { go: [e9.x0 + 0.55, s10.z0 - 0.45] },                        // al fondo, para coger carrerilla
+      { leap: [0, -1], edge: e9.z0 },                               // salto a la pila 3 (piso 8)
+      { visit: c1, r: 1.0 },
+      { go: [c1[0], -12.5] },
+      { visit: c2, r: 1.0 },
+      { go: [p1[8]!.x1 - 1.0, -12.5] },                             // por la pasarela, a la pila 1
+      ...climb(p1, 8, 12),
+      { visit: c3, r: 1.0 },
+      { go: [c3[0], p1[12]!.z0 + 0.6] },
+      { leap: [0, 1], edge: p1[12]!.z1, lead: 2.2 },                // y el último salto (antes del borde: si no, se pasa)
+      { visit: rc.finish.p, r: 1.0 },
+    ];
+    if (report("nivel 6 (salto de fe)", play(rc.start.p, st, targetsOf("nivel6")))) ok++;
+  }
+  check(ok === 6, "los seis niveles, de la salida a la meta pasando por cada punto");
+
+  // Los retos.
+  const retos = V.hunts.find((h) => h.id === "retos")!.items.map((it) => it.p);
+  let found = 0;
+  const reto = (n: number, at: V3, st: Step[]) => {
+    const r = play(at, [...st, { visit: retos[n]!, r: 1.0 }], [{ p: retos[n]!, r: 1.0 }]);
+    if (report(`reto ${n + 1}`, r)) found++;
+  };
+  // 1) Bajo la escalera de la Gran Pila (la escalera choca con su malla: aquí, el hueco de debajo).
+  reto(0, [retos[0]![0], 0, retos[0]![2] - 3], []);
+  // 2) Sobre la calle: la pila 4 hasta su piso 9 y la pasarela.
+  {
+    const fl = pila(37.0, -12.5);
+    reto(1, [35.78, 0, -17.2], [...climb(fl, -1, 9), { go: [fl[9]!.x1 - 0.8, -12.5] }]);
+  }
+  // 3) Lo más alto de la pila 13.
+  {
+    const fl = pila(-12.5, 62.7);
+    const s = fl[0]!;
+    reto(2, [s.x0 - 0.6, 0, mid(s.z0, s.z1)], climb(fl, -1, fl.length - 1));
+  }
+  // 4) El montacargas: del mirador, por el hueco de la barandilla.
+  {
+    const g = pila(-1.9, -2.5);
+    reto(3, [-1.0, 43.25, -2.5], [{ go: [g[15]!.x0 + 0.1, -2.5] }, { hang: [-1, 0] }]);
+  }
+  // 5) La viga: de lo alto de la pila 2, por la viga.
+  reto(4, [-10.32, 29.75, -1.2], [{ go: [-10.0, 0.0] }]);
+  // 6) La cima de la Aguja: subirla y, arriba, el pináculo (otra pared, corriendo).
+  {
+    const rc = races.get("nivel5")!;
+    const top = ag[ag.length - 1]!;
+    const along = top.x1 - top.x0 > top.z1 - top.z0;
+    const towardX = retos[5]![0] < mid(top.x0, top.x1) ? -1 : 1;
+    const spireFace = towardX < 0 ? retos[5]![0] + 0.6 : retos[5]![0] - 0.6;
+    const st: Step[] = [{ go: [rc.start.p[0], rc.start.p[2]] }, ...climb(ag, -1, ag.length - 1, new Map(), true)];
+    if (along) st.push({ go: [spireFace - towardX * 4.2, retos[5]![2]] }, { wallup: [towardX, 0], wall: spireFace });
+    reto(5, rc.start.p, st);
+  }
+  check(found === 6, "los seis retos se alcanzan");
 }
 
 if (fails) {

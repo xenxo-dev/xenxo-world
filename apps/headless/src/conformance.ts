@@ -9,7 +9,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { AVATAR_PRESETS } from "../../realtime/src/avatar-presets";
-import { BUDGETS, Emote, EMOTES, GameManifest, msg, PLACES } from "@xenxo/protocol";
+import { BUDGETS, Emote, EMOTES, GameManifest, LabelV1, msg, PLACES } from "@xenxo/protocol";
 import { XenxoClient } from "./client";
 import { makeBoxGlb, makeCoverPng, makeVrmMannequin, withExternalImage } from "./fixtures";
 import { Api } from "./http";
@@ -1112,6 +1112,86 @@ await scenario("Ruta de las Azoteas (Vertical): parkour solo aquí (WELCOME.park
     c.close();
   }
 });
+
+await scenario("Niveles de Vertical: seis carreras (dos fáciles, dos medias y dos para tryhards) con su salida, sus puntos en los tejados, su meta, su cartel y su marcador de la semana; seis retos escondidos con su marcador; y el nivel 6 y los retos, hechos de verdad, dan sus insignias", async () => {
+  const chunkId = "c_-1_1";
+  const api = new Api(baseUrl);
+  await api.register(`conf niveles ${randomUUID().slice(0, 6)}`);
+  const u = await XenxoClient.connect({ baseUrl, chunkId, token: api.token });
+  const sys = u.snapshot.entities.filter((e) => e.owner === "system");
+  type E = (typeof sys)[number];
+  const pos = (e: E) => (e.components["transform@1"] as { p: [number, number, number] }).p;
+  const cpOf = (e: E) => e.components["checkpoint@1"] as { race: string; role: string; order: number } | undefined;
+  const boards = sys.flatMap((e) => {
+    const b = e.components["scoreboard@1"] as { kind: string; id: string; period?: string } | undefined;
+    return b ? [b] : [];
+  });
+  const texts = sys.map((e) => (e.components["label@1"] as { i18n?: Record<string, string> } | undefined)?.i18n);
+  const grades: Record<string, number> = {};
+  for (let n = 1; n <= 6; n++) {
+    const id = `nivel${n}`;
+    const pts = sys.filter((e) => cpOf(e)?.race === id);
+    const roles = (r: string) => pts.filter((e) => cpOf(e)!.role === r).length;
+    assert(roles("start") === 1 && roles("finish") === 1 && roles("cp") >= 3, `${id}: salida, puntos y meta (${roles("start")}/${roles("cp")}/${roles("finish")})`);
+    // Los puntos van en alto (en los tejados): desde la calle no se pasa por ninguno.
+    assert(pts.filter((e) => cpOf(e)!.role !== "start").every((e) => pos(e)[1] >= 2.5), `${id}: sus puntos y su meta, en los tejados`);
+    assert(boards.some((b) => b.kind === "race" && b.id === id && b.period === "week"), `${id}: su marcador de la semana`);
+    const sign = texts.find((t) => t?.es?.startsWith(`NIVEL ${n} · `) && t.es.includes("\n") && t.en?.startsWith(`LEVEL ${n} · `));
+    assert(!!sign, `${id}: su cartel, en ES y EN`);
+    const g = sign!.es!.split("\n")[0]!.split(" · ")[1]!;
+    grades[g] = (grades[g] ?? 0) + 1;
+  }
+  assert(grades["FÁCIL"] === 2 && grades["MEDIO"] === 2 && grades["TRYHARD"] === 2, `dos fáciles, dos medios y dos tryhard (${JSON.stringify(grades)})`);
+  // Todos los rótulos del lugar valen como label@1 (uno que no, por ejemplo de más de 140 letras, el
+  // cliente no lo dibuja).
+  const bad = sys.filter((e) => e.components["label@1"] && !LabelV1.safeParse(e.components["label@1"]).success).map((e) => e.entity_id);
+  assert(bad.length === 0, `rótulos que no valen como label@1: ${bad.join(", ")}`);
+  const retos = sys.filter((e) => (e.components["collectible@1"] as { set?: string } | undefined)?.set === "retos");
+  const note = (e: E) => (e.components["collectible@1"] as { note?: Record<string, string> }).note;
+  assert(retos.length === 6 && retos.every((e) => note(e)?.es && note(e)?.en), `seis retos, cada uno con su texto en ES y EN (${retos.length})`);
+  assert(boards.some((b) => b.kind === "hunt" && b.id === "retos"), "con su marcador");
+
+  // El nivel 6, de verdad: del mirador a lo alto de la pila del oeste, por sus puntos y a un ritmo
+  // posible (las poses, cada 200 ms, sin subir ni bajar de golpe más de lo que se puede).
+  const head = (p: [number, number, number]): [number, number, number] => [p[0], p[1] + 1.6, p[2]];
+  const point = (role: string, order = 0) => sys.find((e) => cpOf(e)?.race === "nivel6" && cpOf(e)!.role === role && (role !== "cp" || cpOf(e)!.order === order))!;
+  let here = head(pos(point("start")));
+  u.pose(here);
+  await sleep(260);
+  const go = async (to: [number, number, number], speed: number) => {
+    const d = Math.hypot(to[0] - here[0], to[2] - here[2]);
+    const n = Math.max(1, Math.ceil(d / (speed * 0.2)), Math.ceil(Math.abs(to[1] - here[1]) / 5));
+    for (let i = 1; i <= n; i++) {
+      const k = i / n;
+      u.pose([here[0] + (to[0] - here[0]) * k, here[1] + (to[1] - here[1]) * k, here[2] + (to[2] - here[2]) * k]);
+      await sleep(200);
+    }
+    here = to;
+  };
+  const s = await u.activity("CHECKPOINT", point("start").entity_id);
+  assert(s.type === "RACE" && s.payload.state === "start" && s.payload.total === 3, `la salida del nivel 6, en el mirador (${JSON.stringify(s.payload)})`);
+  for (let k = 1; k <= 3; k++) {
+    await go(head(pos(point("cp", k))), 6);
+    const r = await u.activity("CHECKPOINT", point("cp", k).entity_id);
+    assert(r.type === "RACE" && r.payload.state === "cp", `nivel 6, punto ${k} (${JSON.stringify(r.payload)})`);
+  }
+  await go(head(pos(point("finish"))), 6);
+  const done = await u.activity("CHECKPOINT", point("finish").entity_id);
+  assert(done.type === "RACE" && done.payload.state === "finish" && (done.payload.ms ?? 0) > 0, `nivel 6: meta con su tiempo (${JSON.stringify(done.payload)})`);
+  // Los seis retos, uno tras otro.
+  let last: { complete?: boolean } = {};
+  for (const r of retos) {
+    await go([pos(r)[0], pos(r)[1] + 1, pos(r)[2]], 30);
+    const c = await u.activity("COLLECT", r.entity_id);
+    assert(c.type === "COLLECTED", `el reto ${r.entity_id} (${JSON.stringify(c.payload)})`);
+    last = c.payload;
+  }
+  assert(last.complete === true, "los seis retos completan la búsqueda");
+  u.close();
+  const got = await api.call<{ new: { id: string }[] }>("POST", "/me/badges/check");
+  const ids = got.ok ? got.data.new.map((b) => b.id) : [];
+  assert(ids.includes("vertical_salto") && ids.includes("vertical_retos"), `insignias «Salto de fe» y «Tryhard» (${JSON.stringify(got)})`);
+}, 90_000);
 
 await scenario("Plaza tablero (Píxel): el servidor enciende una figura, cuenta lo que se pisa con las poses y da un punto del día", async () => {
   const chunkId = "c_-1_0";

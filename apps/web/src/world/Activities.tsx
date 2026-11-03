@@ -132,16 +132,18 @@ function Checkpoints({ zones }: { zones: Zone[] }) {
   const a = useActivity();
   const run = a.race;
   const cps = zones.filter((z) => z.kind === "checkpoint");
-  // Durante una carrera se resalta el punto que toca (o la meta); sin carrera, las salidas.
+  // Sin carrera se ven solo las salidas (en Vertical hay siete carreras: con todos sus puntos, las
+  // Pilas se llenarían de columnas de luz); durante una, solo los de la tuya, con el que toca (o la
+  // meta) más brillante y tu salida, por si quieres empezar otra vez.
+  const shown = run ? cps.filter((z) => z.race === run.race) : cps.filter((z) => z.role === "start");
   const hot = (z: Zone) => {
-    if (!run) return z.role === "start";
-    if (z.race !== run.race) return false;
+    if (!run) return true;
     if (run.next > run.total) return z.role === "finish";
     return z.role === "cp" && z.order === cpOrder(cps, run.race, run.next);
   };
   return (
     <>
-      {cps.map((z) => (
+      {shown.map((z) => (
         <CheckpointMark key={z.id} zone={z} hot={hot(z)} />
       ))}
     </>

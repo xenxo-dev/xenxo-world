@@ -1590,6 +1590,228 @@
           ],
           "radius": 2.5
         }
+      },
+      {
+        "id": "nivel1",
+        "radius": 1.0,
+        "start": {
+          "p": [
+            25.73,
+            0.0,
+            3.5
+          ],
+          "radius": 1.6
+        },
+        "cps": [
+          [
+            25.73,
+            2.7,
+            0.98
+          ],
+          [
+            22.33,
+            5.4,
+            0.03
+          ],
+          [
+            23.27,
+            8.1,
+            -3.38
+          ]
+        ],
+        "finish": {
+          "p": [
+            26.67,
+            10.8,
+            -2.42
+          ],
+          "radius": 1.0
+        }
+      },
+      {
+        "id": "nivel2",
+        "radius": 1.0,
+        "start": {
+          "p": [
+            -7.8,
+            0.0,
+            -13.73
+          ],
+          "radius": 1.6
+        },
+        "cps": [
+          [
+            -14.68,
+            8.1,
+            -11.27
+          ],
+          [
+            -11.27,
+            16.2,
+            -10.32
+          ],
+          [
+            -12.5,
+            16.2,
+            -7.25
+          ]
+        ],
+        "finish": {
+          "p": [
+            -13.73,
+            16.2,
+            -4.18
+          ],
+          "radius": 1.0
+        }
+      },
+      {
+        "id": "nivel3",
+        "radius": 1.0,
+        "start": {
+          "p": [
+            35.78,
+            0.0,
+            -17.2
+          ],
+          "radius": 1.6
+        },
+        "cps": [
+          [
+            34.83,
+            10.8,
+            -11.27
+          ],
+          [
+            34.83,
+            21.6,
+            -11.27
+          ],
+          [
+            34.83,
+            32.4,
+            -11.27
+          ]
+        ],
+        "finish": {
+          "p": [
+            39.17,
+            37.8,
+            -12.5
+          ],
+          "radius": 1.0
+        }
+      },
+      {
+        "id": "nivel4",
+        "radius": 1.0,
+        "start": {
+          "p": [
+            -5.7,
+            0.0,
+            77.72
+          ],
+          "radius": 1.6
+        },
+        "cps": [
+          [
+            1.18,
+            18.9,
+            75.28
+          ],
+          [
+            28.27,
+            24.3,
+            75.28
+          ],
+          [
+            40.08,
+            18.9,
+            75.28
+          ]
+        ],
+        "finish": {
+          "p": [
+            61.33,
+            18.9,
+            77.72
+          ],
+          "radius": 1.0
+        }
+      },
+      {
+        "id": "nivel5",
+        "radius": 1.0,
+        "start": {
+          "p": [
+            30.78,
+            0.0,
+            56.7
+          ],
+          "radius": 1.6
+        },
+        "cps": [
+          [
+            34.17,
+            7.2,
+            60.17
+          ],
+          [
+            29.83,
+            14.4,
+            62.62
+          ],
+          [
+            34.17,
+            21.6,
+            60.17
+          ]
+        ],
+        "finish": {
+          "p": [
+            32.0,
+            25.2,
+            63.58
+          ],
+          "radius": 1.0
+        }
+      },
+      {
+        "id": "nivel6",
+        "radius": 1.0,
+        "start": {
+          "p": [
+            -0.3,
+            43.2,
+            -4.7
+          ],
+          "radius": 1.6
+        },
+        "cps": [
+          [
+            -1.18,
+            24.3,
+            -11.27
+          ],
+          [
+            -5.75,
+            24.3,
+            -12.5
+          ],
+          [
+            -10.32,
+            35.1,
+            -12.5
+          ]
+        ],
+        "finish": {
+          "p": [
+            -10.32,
+            29.7,
+            -2.0
+          ],
+          "radius": 1.0
+        }
       }
     ],
     "hunts": [
@@ -1653,6 +1875,79 @@
               8.1,
               30.7
             ]
+          }
+        ]
+      },
+      {
+        "id": "retos",
+        "piece": "vertical_reto",
+        "radius": 1.0,
+        "items": [
+          {
+            "p": [
+              3.45,
+              0.6,
+              -5.45
+            ],
+            "note": {
+              "es": "RETO 1 · BAJO LA ESCALERA\nAquí abajo no mira nadie: por eso lo escondimos aquí.",
+              "en": "CHALLENGE 1 · UNDER THE STAIRS\nNobody looks down here: that's why we hid it here."
+            }
+          },
+          {
+            "p": [
+              50.25,
+              27.6,
+              -12.5
+            ],
+            "note": {
+              "es": "RETO 2 · SOBRE LA CALLE\nEn la pasarela más alta, a 27 m. Los coches, ahí abajo.",
+              "en": "CHALLENGE 2 · ABOVE THE STREET\nOn the highest catwalk, 27 m up. The cars, way down there."
+            }
+          },
+          {
+            "p": [
+              -12.5,
+              38.4,
+              60.52
+            ],
+            "note": {
+              "es": "RETO 3 · LO MÁS ALTO DEL SUROESTE\nCatorce pisos. Desde aquí se ven todas las Pilas.",
+              "en": "CHALLENGE 3 · TOP OF THE SOUTHWEST\nFourteen floors. From up here you can see every Stack."
+            }
+          },
+          {
+            "p": [
+              -6.9,
+              46.4,
+              -2.5
+            ],
+            "note": {
+              "es": "RETO 4 · EL MONTACARGAS\nMás alto que el mirador: 46 m. Por encima ya no hay nada.",
+              "en": "CHALLENGE 4 · THE LIFT\nHigher than the lookout: 46 m. There's nothing above this."
+            }
+          },
+          {
+            "p": [
+              -7.2,
+              30.3,
+              0.0
+            ],
+            "note": {
+              "es": "RETO 5 · LA VIGA\nVeinte centímetros de acero y treinta metros de vacío. No mires abajo.",
+              "en": "CHALLENGE 5 · THE BEAM\nTwenty centimetres of steel and thirty metres of nothing. Don't look down."
+            }
+          },
+          {
+            "p": [
+              29.2,
+              29.6,
+              63.58
+            ],
+            "note": {
+              "es": "RETO 6 · LA CIMA DE LA AGUJA\nEl último muro, el más alto. Solo los tryhards de verdad llegan aquí.",
+              "en": "CHALLENGE 6 · TOP OF THE NEEDLE\nThe last wall, the highest. Only real tryhards make it here."
+            }
           }
         ]
       }
@@ -1833,6 +2128,108 @@
         "width": 3.4,
         "style": "sign",
         "max_distance": 14
+      },
+      {
+        "text": {
+          "es": "NIVEL 1 · FÁCIL\nPRIMEROS PISOS\nCuatro caravanas de esta pila. Salta hacia el borde, cuélgate y sube; luego, a la de encima, dando la vuelta.",
+          "en": "LEVEL 1 · EASY\nFIRST FLOORS\nFour trailers up this stack. Jump for the edge, hang and climb; then on to the next one, going round."
+        },
+        "p": [
+          25.73,
+          3.1,
+          5.1
+        ],
+        "yaw": 0,
+        "size": 0.15,
+        "width": 3.2,
+        "style": "sign",
+        "max_distance": 16,
+        "level": "nivel1"
+      },
+      {
+        "text": {
+          "es": "NIVEL 2 · FÁCIL\nLA PASARELA\nSeis pisos arriba, cruza la pasarela y llega al tejado de la otra pila.",
+          "en": "LEVEL 2 · EASY\nTHE CATWALK\nSix floors up, cross the catwalk and reach the other stack's roof."
+        },
+        "p": [
+          -6.2,
+          3.1,
+          -13.73
+        ],
+        "yaw": 90,
+        "size": 0.15,
+        "width": 3.2,
+        "style": "sign",
+        "max_distance": 16,
+        "level": "nivel2"
+      },
+      {
+        "text": {
+          "es": "NIVEL 3 · MEDIO\nEL CARACOL\nCatorce pisos de una vez, hasta lo más alto. Si te caes, desde abajo.",
+          "en": "LEVEL 3 · MEDIUM\nTHE SNAIL\nFourteen floors in one go, all the way up. Fall, and it's back to the bottom."
+        },
+        "p": [
+          38.98,
+          2.3,
+          -17.2
+        ],
+        "yaw": 180,
+        "size": 0.15,
+        "width": 3.2,
+        "style": "sign",
+        "max_distance": 16,
+        "level": "nivel3"
+      },
+      {
+        "text": {
+          "es": "NIVEL 4 · MEDIO\nLA FILA DEL SUR\nDe pila en pila por tres pasarelas, cada una a su altura: a veces hay que subir y a veces, dejarse caer.",
+          "en": "LEVEL 4 · MEDIUM\nTHE SOUTH ROW\nStack to stack over three catwalks, each at its own height: sometimes you climb, sometimes you drop."
+        },
+        "p": [
+          -7.3,
+          3.1,
+          77.72
+        ],
+        "yaw": -90,
+        "size": 0.15,
+        "width": 3.2,
+        "style": "sign",
+        "max_distance": 16,
+        "level": "nivel4"
+      },
+      {
+        "text": {
+          "es": "NIVEL 5 · TRYHARD\nLA AGUJA\nCada piso, 3,6 m: desde parado no llegas al borde.",
+          "en": "LEVEL 5 · TRYHARD\nTHE NEEDLE\nEvery floor is 3.6 m: from a standstill you won't reach the edge."
+        },
+        "p": [
+          33.98,
+          2.3,
+          56.7
+        ],
+        "yaw": 180,
+        "size": 0.15,
+        "width": 3.2,
+        "style": "sign",
+        "max_distance": 16,
+        "level": "nivel5"
+      },
+      {
+        "text": {
+          "es": "NIVEL 6 · TRYHARD\nSALTO DE FE\nDel mirador a lo alto de la pila del oeste, de tejado en tejado y de pila en pila: salta… y cae rodando.",
+          "en": "LEVEL 6 · TRYHARD\nLEAP OF FAITH\nFrom the lookout to the top of the west stack, roof to roof and stack to stack: jump… and land rolling."
+        },
+        "p": [
+          -0.3,
+          45.5,
+          -3.1
+        ],
+        "yaw": 90,
+        "size": 0.15,
+        "width": 3.2,
+        "style": "sign",
+        "max_distance": 16,
+        "level": "nivel6"
       }
     ],
     "boards": [
@@ -1891,6 +2288,156 @@
         "title": {
           "es": "BANDERINES",
           "en": "PENNANTS"
+        }
+      },
+      {
+        "kind": "race",
+        "id": "nivel1",
+        "period": "week",
+        "p": [
+          22.53,
+          2.0,
+          4.3
+        ],
+        "yaw": 0,
+        "size": [
+          2.4,
+          1.8
+        ],
+        "title": {
+          "es": "NIVEL 1 · FÁCIL",
+          "en": "LEVEL 1 · EASY"
+        },
+        "title_size": 0.3,
+        "title_y": 1.35,
+        "stand": true
+      },
+      {
+        "kind": "race",
+        "id": "nivel2",
+        "period": "week",
+        "p": [
+          -7.0,
+          2.0,
+          -10.53
+        ],
+        "yaw": 90,
+        "size": [
+          2.4,
+          1.8
+        ],
+        "title": {
+          "es": "NIVEL 2 · FÁCIL",
+          "en": "LEVEL 2 · EASY"
+        },
+        "title_size": 0.3,
+        "title_y": 1.35,
+        "stand": true
+      },
+      {
+        "kind": "race",
+        "id": "nivel3",
+        "period": "week",
+        "p": [
+          32.58,
+          2.0,
+          -17.2
+        ],
+        "yaw": 180,
+        "size": [
+          2.4,
+          1.8
+        ],
+        "title": {
+          "es": "NIVEL 3 · MEDIO",
+          "en": "LEVEL 3 · MEDIUM"
+        },
+        "title_size": 0.3,
+        "title_y": 1.35,
+        "stand": true
+      },
+      {
+        "kind": "race",
+        "id": "nivel4",
+        "period": "week",
+        "p": [
+          -6.5,
+          2.0,
+          74.52
+        ],
+        "yaw": -90,
+        "size": [
+          2.4,
+          1.8
+        ],
+        "title": {
+          "es": "NIVEL 4 · MEDIO",
+          "en": "LEVEL 4 · MEDIUM"
+        },
+        "title_size": 0.3,
+        "title_y": 1.35,
+        "stand": true
+      },
+      {
+        "kind": "race",
+        "id": "nivel5",
+        "period": "week",
+        "p": [
+          27.58,
+          2.0,
+          56.7
+        ],
+        "yaw": 180,
+        "size": [
+          2.4,
+          1.8
+        ],
+        "title": {
+          "es": "NIVEL 5 · TRYHARD",
+          "en": "LEVEL 5 · TRYHARD"
+        },
+        "title_size": 0.3,
+        "title_y": 1.35,
+        "stand": true
+      },
+      {
+        "kind": "race",
+        "id": "nivel6",
+        "period": "week",
+        "p": [
+          5.35,
+          2.0,
+          -2.0
+        ],
+        "yaw": 90,
+        "size": [
+          2.4,
+          1.8
+        ],
+        "title": {
+          "es": "NIVEL 6 · TRYHARD",
+          "en": "LEVEL 6 · TRYHARD"
+        },
+        "title_size": 0.3,
+        "title_y": 1.35,
+        "stand": true
+      },
+      {
+        "kind": "hunt",
+        "id": "retos",
+        "p": [
+          26.9,
+          1.75,
+          43.56
+        ],
+        "yaw": 0,
+        "size": [
+          2.2,
+          1.6
+        ],
+        "title": {
+          "es": "RETOS",
+          "en": "CHALLENGES"
         }
       }
     ],
