@@ -12,7 +12,8 @@
     "typecheck": "tsc -p tsconfig.json",
     "test:vehicle": "tsx test/vehicle.mts",
     "test:ragdoll": "tsx test/ragdoll.mts",
-    "test:citizens": "tsx test/citizens.mts"
+    "test:citizens": "tsx test/citizens.mts",
+    "test:parkour": "esbuild test/parkour.mts --bundle --platform=node --format=esm --define:import.meta.env={} --log-level=warning --outfile=node_modules/.cache/xenxo/parkour.mjs && node node_modules/.cache/xenxo/parkour.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "0.19.3",
@@ -45,6 +46,7 @@
     "@types/react-dom": "^19.1.0",
     "@types/three": "^0.186.0",
     "@vitejs/plugin-react": "^6.1.0",
+    "esbuild": "^0.28.2",
     "tailwindcss": "^4.3.0",
     "vite": "^8.3.0"
   }

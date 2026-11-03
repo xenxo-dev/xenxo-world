@@ -330,6 +330,8 @@ const _hit = new THREE.Vector3();
 const _ta = new THREE.Vector3();
 let _best = Infinity;
 let _far = Infinity;
+/** Normal de la cara del mejor corte (la usan las sondas de pared del parkour). */
+const _hitN = new THREE.Vector3();
 /** Solo caras que miran hacia arriba (suelo caminable: hasta ~55°). */
 let _upOnly = false;
 const WALKABLE = 0.57;
@@ -340,11 +342,10 @@ const rayCast = {
     if (!_ray.intersectTriangle(tri.a, tri.b, tri.c, false, _hit)) return;
     const d = _hit.distanceTo(_ray.origin);
     if (d > _far || d >= _best) return;
-    if (_upOnly) {
-      tri.getNormal(_n);
-      if (Math.abs(_n.y) < WALKABLE) return;
-    }
+    tri.getNormal(_n);
+    if (_upOnly && Math.abs(_n.y) < WALKABLE) return;
     _best = d;
+    _hitN.copy(_n);
   },
 };
 
@@ -474,6 +475,106 @@ export function cameraReach(tx: number, ty: number, tz: number, cx: number, cy: 
     if (inside(tx + (cx - tx) * k, ty + (cy - ty) * k, tz + (cz - tz) * k, 0.25)) return Math.max(0.15, Math.min(limit, (i - 1) / steps));
   }
   return limit;
+}
+
+/* --- Sondas del parkour (world/parkour): paredes, bordes y huecos --- */
+
+/** Resultado de `probeWall` (objeto reutilizado): distancia y normal horizontal de la cara. */
+export const wallHit = { d: 0, nx: 0, nz: 0 };
+
+/**
+ * Primera pared que corta un rayo horizontal desde (ox, oy, oz) hacia (dx, dz) (normalizado), hasta
+ * `far` metros: las cajas cuya altura incluye `oy` y las caras casi verticales de las mallas. Deja en
+ * `wallHit` la distancia y la normal de la cara (hacia quien mira). Las cajas en las que ya está el
+ * origen (en planta) no cuentan: no son una pared que se tenga delante.
+ */
+export function probeWall(ox: number, oy: number, oz: number, dx: number, dz: number, far: number): boolean {
+  refresh();
+  let best = far;
+  let bnx = 0;
+  let bnz = 0;
+  for (const b of boxes) {
+    if (oy < b.y - b.hy || oy > b.y + b.hy) continue;
+    // Al espacio de la caja (como en resolveCircle): el origen y la dirección.
+    const px = ox - b.x;
+    const pz = oz - b.z;
+    const lx = px * b.c - pz * b.s;
+    const lz = px * b.s + pz * b.c;
+    const ldx = dx * b.c - dz * b.s;
+    const ldz = dx * b.s + dz * b.c;
+    if (Math.abs(lx) < b.hx && Math.abs(lz) < b.hz) continue;
+    let tmin = -Infinity;
+    let tmax = Infinity;
+    let axis = 0;
+    if (Math.abs(ldx) < 1e-9) {
+      if (Math.abs(lx) > b.hx) continue;
+    } else {
+      const t1 = (-b.hx - lx) / ldx;
+      const t2 = (b.hx - lx) / ldx;
+      const lo = Math.min(t1, t2);
+      if (lo > tmin) {
+        tmin = lo;
+        axis = 1;
+      }
+      tmax = Math.min(tmax, Math.max(t1, t2));
+    }
+    if (Math.abs(ldz) < 1e-9) {
+      if (Math.abs(lz) > b.hz) continue;
+    } else {
+      const t1 = (-b.hz - lz) / ldz;
+      const t2 = (b.hz - lz) / ldz;
+      const lo = Math.min(t1, t2);
+      if (lo > tmin) {
+        tmin = lo;
+        axis = 2;
+      }
+      tmax = Math.min(tmax, Math.max(t1, t2));
+    }
+    if (tmin > tmax || tmin < 0 || tmin >= best) continue;
+    best = tmin;
+    // La cara por la que entra (contra el rayo), de vuelta al mundo.
+    const nlx = axis === 1 ? -Math.sign(ldx) : 0;
+    const nlz = axis === 2 ? -Math.sign(ldz) : 0;
+    bnx = nlx * b.c + nlz * b.s;
+    bnz = -nlx * b.s + nlz * b.c;
+  }
+  if (meshCols.size) {
+    const d = castMeshes(ox, oy, oz, dx, 0, dz, best, false);
+    if (d < best && Math.abs(_hitN.y) < 0.6) {
+      let nx = _hitN.x;
+      let nz = _hitN.z;
+      const len = Math.hypot(nx, nz) || 1;
+      nx /= len;
+      nz /= len;
+      if (nx * dx + nz * dz > 0) {
+        nx = -nx;
+        nz = -nz;
+      }
+      best = d;
+      bnx = nx;
+      bnz = nz;
+    }
+  }
+  if (best >= far) return false;
+  wallHit.d = best;
+  wallHit.nx = bnx;
+  wallHit.nz = bnz;
+  return true;
+}
+
+/**
+ * ¿Hay algo sólido en la columna vertical de (x, z), entre y0 e y1 (con radio `r` en planta)? Cajas
+ * que la cortan y mallas (un rayo hacia arriba). Para saber si cabe el cuerpo encima de un borde o al
+ * otro lado de una valla.
+ */
+export function solidColumn(x: number, z: number, y0: number, y1: number, r = 0): boolean {
+  refresh();
+  const r2 = r * r;
+  for (const b of boxes) {
+    if (b.y + b.hy <= y0 || b.y - b.hy >= y1) continue;
+    if (planDist2(b, x, z) <= r2) return true;
+  }
+  return meshCols.size > 0 && castMeshes(x, y0, z, 0, 1, 0, y1 - y0, false) !== Infinity;
 }
 
 /** Cuánto por delante del centro de un asiento van los pies de quien se sienta (tools/forge/interiors.py). */

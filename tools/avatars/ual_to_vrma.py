@@ -51,6 +51,15 @@ CLIPS = {
     "shake_head": "Idle_No_Loop",
     "nod": "Yes",
     "phone": "Idle_TalkingPhone_Loop",
+    # Parkour de Vertical (world/parkour): subir un borde (con su desplazamiento), deslizarse, la
+    # voltereta al caer y el salto ágil (lo demás se hace en código, people/gestures.ts).
+    "climb_up": "ClimbUp_1m_RM",
+    "slide_start": "Slide_Start",
+    "slide_loop": "Slide_Loop",
+    "slide_exit": "Slide_Exit",
+    "roll": "Roll",
+    "ninja_loop": "NinjaJump_Idle_Loop",
+    "ninja_land": "NinjaJump_Land",
 }
 
 

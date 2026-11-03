@@ -24,6 +24,12 @@ export interface Motion {
   gesture?: string | null;
   /** No se dibuja (lejos o fuera de la vista): el avatar no se anima. */
   hidden?: boolean;
+  /**
+   * Parkour en curso ("pk_vault", "pk_hang"…: world/parkour/moves.ts) o null. Manda sobre el gesto.
+   * `pkP`: su progreso (0..1) en los guionados, si se sabe (el propio jugador); si no, el reloj.
+   */
+  pk?: string | null;
+  pkP?: number;
 }
 
 export function createMotion(): Motion {

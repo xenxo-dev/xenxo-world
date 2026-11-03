@@ -461,6 +461,13 @@ export class Rig {
   /* Cada frame                                                         */
   /* ---------------------------------------------------------------- */
 
+  /**
+   * Lo que les faltó a las manos para llegar a lo pedido (m en vertical; negativo si sobra): el parkour
+   * sube el dibujo eso al colgarse, porque no sabe lo que miden los brazos de cada avatar.
+   */
+  reachLift = 0;
+  private liftNeed = [0, 0];
+
   apply(dt: number, fx: PersonFx | null) {
     if (this.doll) {
       if (!this.doll.alive) this.doll = null;
@@ -471,11 +478,14 @@ export class Rig {
     }
     if (this.blend >= 0) this.applyBlend(dt);
     this.applySprings(dt);
+    this.liftNeed[0] = this.liftNeed[1] = -Infinity;
     if (fx) {
       this.applyLook(dt, fx.look);
       this.applyReach(dt, 0, fx.reachL);
       this.applyReach(dt, 1, fx.reachR);
     }
+    const need = Math.max(this.liftNeed[0]!, this.liftNeed[1]!);
+    this.reachLift = Number.isFinite(need) ? need : 0;
   }
 
   private applySprings(dt: number) {
@@ -530,6 +540,11 @@ export class Rig {
     lower.getWorldPosition(_E);
     hand.getWorldPosition(_W);
     const la = _S.distanceTo(_E), lb = _E.distanceTo(_W);
+    if (w > 0.5) {
+      const hx = Math.hypot(t.x - _S.x, t.z - _S.z);
+      const reach = (la + lb) * 0.97;
+      this.liftNeed[side] = t.y - _S.y - (hx < reach ? Math.sqrt(reach * reach - hx * hx) : 0);
+    }
     _D.set(t.x, t.y, t.z).sub(_S);
     let dist = _D.length();
     const max = (la + lb) * 0.995;

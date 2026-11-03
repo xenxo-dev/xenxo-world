@@ -27,7 +27,7 @@ const rnd = (() => {
   let a = 12345;
   return () => ((a = (a * 1103515245 + 12345) >>> 0) / 4294967296);
 })();
-for (const id of ["arcade", "pixel", "taller", "cero"]) {
+for (const id of ["arcade", "pixel", "taller", "cero", "vertical"]) {
   const nav = buildNav(id)!;
   const linked = nav.nodes.filter((n) => n.links.length).length;
   let found = 0, clear = 0, total = 0;
@@ -291,7 +291,7 @@ console.log("Ciudadanos (Arcade):");
 
 /* --- Muchos a la vez --- */
 console.log("Todos juntos:");
-for (const id of ["arcade", "taller", "pixel"]) {
+for (const id of ["arcade", "taller", "pixel", "vertical"]) {
   const f = makeWorld(id);
   // Tú en medio de la ciudad: todos cerca, con física.
   Object.assign(f.env.me, { x: 31, y: 0, z: 31 });

@@ -22,6 +22,7 @@ import arcade
 import pixel
 import taller
 import cero
+import vertical
 import interiors
 import decor
 from kit import CHUNK, Part, finish, mat
@@ -107,9 +108,8 @@ def plan(lay: dict, d: dict) -> dict:
             for lot in lots:
                 out["buildings"].append({"style": "outpost", "rect": [lot[0], z0, lot[2], midz - ALLEY / 2], "h": 6.0, "q": 0})
                 out["buildings"].append({"style": "outpost", "rect": [lot[0], midz + ALLEY / 2, lot[2], z1], "h": 6.0, "q": 2})
-        elif theme == "vertical":
-            for lot in lots:
-                out["buildings"].append({"style": "stack", "rect": [lot[0] + 0.5, lot[1] + 0.5, lot[2] - 0.5, lot[3] - 0.5], "h": round(3.1 * rnd.randint(7, 12), 2), "q": q})
+        elif theme == "vertical":  # diseño propio: torres de caravanas y la ruta del parkour (vertical.py)
+            pass
         for b in out["buildings"][n0:]:
             b["block"] = (i, j)
             b["theme"] = theme
@@ -163,6 +163,8 @@ def colliders(lay: dict, d: dict) -> list[list[float]]:
         boxes += arcade.colliders()
     if d["id"] == "taller":
         boxes += taller.colliders()
+    if d["id"] == "vertical":
+        boxes += vertical.colliders()
     return boxes
 
 
@@ -426,6 +428,8 @@ def build(lay: dict, d: dict, detail: int = 1):
         pixel.build(p, detail)
     if d["id"] == "taller":
         taller.build(p, detail)
+    if d["id"] == "vertical":
+        vertical.build(p, color, detail)
     for b in pl["buildings"]:
         if b["style"] == "cabinet":
             continue

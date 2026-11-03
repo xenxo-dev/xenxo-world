@@ -125,7 +125,7 @@ Las medidas de los modelos de la gente las da `GET /assets/<hash>/meta`. Moverlo
 | Tipo | Payload | Notas |
 |---|---|---|
 | `HELLO` | `client_type`, `capabilities`, `display_name?`, `avatar?` | Obligatorio antes de cualquier otro. `avatar` = `{hash, format: "vrm"}` de un **avatar de serie** (invitados y agentes); cualquier otro hash se ignora, y las personas registradas llevan el de su cuenta |
-| `POSE` | `t`, `head {p, r}`, `hand_l?`, `hand_r?`, `emote?` | Sin `entity_id`: el servidor sabe de quién es. Máx. 15 Hz; el exceso se descarta. `emote` = gesto en curso (`^[a-z_]{1,24}$`; hoy `dance`, `wave`, `sit`, `talk`, `cheer`, `crouch`, `clap`, `point`, `beckon`, `laugh`, `shrug`, los de pareja `high_five`, `hug`, `handshake`, los de pelea `punch`, `kick`, `shove`, `hit_stagger`, `hit_down`, `get_up`, y `car_open`, `car_in`, `car_out`). Los clientes ignoran los que no conocen. `vehicle?` = en qué va si no va a pie (hoy solo `car`: va sentada dentro de su coche; `head` sigue siendo su cabeza) y `car?` = dónde está su coche, en marcha o aparcado (`p` = su origen en el suelo, `r` = su giro completo, con la inclinación). El servidor normaliza los giros (un cuaternión nulo descarta la pose) y no reparte una mano a más de 2,5 m de la cabeza. Ver «Movimiento» más abajo. Al subir y bajar, `emote` es `car_open` (abre la puerta), `car_in` (se sienta dentro) o `car_out` (sale): con esos tres, la puerta del coche está abierta. Quien no los conozca dibuja a la persona y no el coche. El servidor solo los reparte en los distritos (en la plaza se va a pie; `vehicle` sin `car` no vale) y con `vehicle` no cuentan los puntos de carrera (`CHECKPOINT` → `forbidden`). La cabeza más de 1,6 m por encima de lo que se pisa (el suelo o la cara de arriba de un `collider@1`: se puede estar de pie en un banco) indica un salto |
+| `POSE` | `t`, `head {p, r}`, `hand_l?`, `hand_r?`, `emote?` | Sin `entity_id`: el servidor sabe de quién es. Máx. 15 Hz; el exceso se descarta. `emote` = gesto en curso (`^[a-z_]{1,24}$`; hoy `dance`, `wave`, `sit`, `talk`, `cheer`, `crouch`, `clap`, `point`, `beckon`, `laugh`, `shrug`, los de pareja `high_five`, `hug`, `handshake`, los de pelea `punch`, `kick`, `shove`, `hit_stagger`, `hit_down`, `get_up`, los del coche `car_open`, `car_in`, `car_out` y, donde hay parkour, los `pk_*` de §9 octies bis). Los clientes ignoran los que no conocen. `vehicle?` = en qué va si no va a pie (hoy solo `car`: va sentada dentro de su coche; `head` sigue siendo su cabeza) y `car?` = dónde está su coche, en marcha o aparcado (`p` = su origen en el suelo, `r` = su giro completo, con la inclinación). El servidor normaliza los giros (un cuaternión nulo descarta la pose) y no reparte una mano a más de 2,5 m de la cabeza. Ver «Movimiento» más abajo. Al subir y bajar, `emote` es `car_open` (abre la puerta), `car_in` (se sienta dentro) o `car_out` (sale): con esos tres, la puerta del coche está abierta. Quien no los conozca dibuja a la persona y no el coche. El servidor solo los reparte en los distritos (en la plaza se va a pie; `vehicle` sin `car` no vale) y con `vehicle` no cuentan los puntos de carrera (`CHECKPOINT` → `forbidden`). La cabeza más de 1,6 m por encima de lo que se pisa (el suelo o la cara de arriba de un `collider@1`: se puede estar de pie en un banco) indica un salto |
 | `MUTATE_WORLD` | `idempotency_key`, `target`, `mutation` | Ver §8 |
 | `PING` | `t` | |
 | `COLLECT` | `entity_id` | Estoy en este objeto de búsqueda. Solo personas registradas. El servidor mira la última pose de la sesión (reciente y a menos del radio + 2,5 m) y responde `COLLECTED`. Tras un salto, `forbidden` con `detail.reason = "jump"` durante 15 s |
@@ -152,7 +152,7 @@ necesitan nada más; un agente que pruebe actividades tiene que ir andando.
 
 | Tipo | Payload |
 |---|---|
-| `WELCOME` | `session_id`, `principal`, `chunk_id`, `server_time`, `tick_hz`, `budgets`, `fight?` (estilo de pelea del lugar, §9 octies; ausente = aquí no se pelea) |
+| `WELCOME` | `session_id`, `principal`, `chunk_id`, `server_time`, `tick_hz`, `budgets`, `fight?` (estilo de pelea del lugar, §9 octies; ausente = aquí no se pelea), `parkour?` (`true` = aquí el cuerpo hace parkour, §9 octies bis) |
 | `SNAPSHOT` | `entities[]`, `peers[]`, `poses[]`, `chat[]?` (últimos 30 mensajes) |
 | `DELTA` | `changes[]`: `{kind: "upsert", entity}` o `{kind: "remove", entity_id}` |
 | `POSES` | `t` (hora del servidor), `poses[]` (cada una con su `emote?`, su `vehicle?` y su `car?`) — lote por tick (8 Hz; los clientes envían su pose a 8 Hz como mucho y se interpolan con ~200 ms de retraso) |
@@ -483,6 +483,29 @@ lo que dice el cliente. Los errores van como `ERROR` con el `ref` del mensaje.
   quien tenga cerca, tuyos y de los demás, y le cede el paso; nada de eso viaja (cada cliente tiene a
   su gente) y no cambia el protocolo.
 
+## 9 octies bis. Parkour
+
+Donde el lugar lo dice, el cuerpo hace parkour con los mismos botones (correr, saltar y agacharse):
+`WELCOME.parkour: true`, de `parkour` en `districts.json` (hoy solo Vertical). Sin ese campo, el
+cliente mueve el cuerpo como siempre. Es **solo del cliente**: el servidor no simula nada ni mueve a
+nadie; lo dice en `WELCOME` y reparte las poses como siempre. Las carreras y búsquedas del lugar se
+comprueban como en cualquier otro (`CHECKPOINT`, `COLLECT`: con la última pose de la sesión).
+
+- **Movimientos** (cliente, `world/parkour/moves.ts`, sobre las mismas colisiones): saltar vallas
+  corriendo, subirse a un borde de hasta unos 1,4 m, colgarse de uno más alto (de lado por el borde,
+  arriba con el salto, soltarse agachándose), subir corriendo por una pared hasta un borde de unos
+  3,8 m, correr por una pared y rebotar en ella (como mucho tres rebotes seguidos: así se sube entre
+  dos paredes juntas), deslizarse corriendo por debajo de algo, ir agachado y rodar al caer de alto (sin
+  rodar, un aterrizaje fuerte deja un momento sin moverse). En una viga estrecha, los brazos se abren.
+- **Cómo lo ven los demás:** la pose lleva el movimiento en `emote`: `pk_vault`, `pk_mantle`,
+  `pk_climb`, `pk_hang`, `pk_shimmy_l`, `pk_shimmy_r`, `pk_wallup`, `pk_wallrun_l`, `pk_wallrun_r`,
+  `pk_walljump`, `pk_slide`, `pk_slideup`, `pk_crouch`, `pk_roll`, `pk_land` y `pk_balance`. Cada
+  cliente lo dibuja con su propio reloj desde que lo ve (los de una vez, con su duración típica) y la
+  cabeza de la pose dice dónde está. Un cliente que no los conozca dibuja a la persona como siempre.
+  Cumplen la regla de `emote` (`^[a-z_]{1,24}$`): nada nuevo en el esquema.
+- Nunca en el nexo ni en la plaza (su `WELCOME` no lo lleva), ni en coche, en pareja o en el modo
+  pelea. En las gafas tampoco: allí el cuerpo sigue al casco.
+
 ## 10. Códigos de error
 
 `bad_message` · `unsupported_version` · `unauthorized` · `forbidden` · `not_found` · `version_conflict` · `budget_exceeded` · `unknown_component` · `rate_limited` · `duplicate`
@@ -547,7 +570,7 @@ antes no se renuevan y, pasados 10 minutos desde que se emitieron, tampoco abren
 ## 12. Lugares, semilla del sistema y jurisdicción
 
 - **Lugares con nombre** (`PLACES` en el protocolo): el **nexo** (`c_0_-1000`) es la entrada, una plataforma flotante fuera del mapa con un anillo de 8 huecos (cada 45°) para puertas de distrito, mirando al centro: la plaza al norte (enfrente de la llegada), los cuatro distritos abiertos en las diagonales y los tres «próximamente» en el resto, con la puerta cerrada (una hoja maciza) y el cartel «Próximamente». Cada puerta es abierta (velo del color del distrito, `portal@1.color`), con el emblema del distrito a la izquierda y, detrás, su isla flotante con el distrito en pequeño. En el nexo no hay proyectos. La **plaza** (`c_0_0`) es el distrito con historia; cruzar su arco (`gate_portal`) devuelve al nexo.
-- **Distritos** (`apps/realtime/src/districts.json`): chunks temáticos alrededor de la plaza — Arcade (`c_1_0`, juegos 3D), Píxel (`c_-1_0`, juegos 2D), Ágora (`c_0_1`, social), Taller (`c_0_-1`, herramientas), Frontera (`c_1_-1`, lo demás), Distrito Cero (`c_-1_-1`, la ciudad ciberpunk de Xen: ciencia ficción e IA) y Vertical (`c_-1_1`, torres de caravanas apiladas: webs personales y primeros proyectos) —. Los que llevan `soon: true` en `districts.json` (hoy Ágora, Frontera y Vertical) están **próximamente**: su isla sigue en el nexo, pero su puerta está cerrada (`portal@1.closed`), `GET /districts` lo dice (`soon`), publicar en ellos da `district_soon` y entrar (`/chunk/<id>/ws` o `/ticket`) da 403 `soon` salvo a moderación y a la clave de administración. Cada uno de 256 × 256 m (más grande que su chunk: `WELCOME.walk`), con su ciudad en el centro (100 × 100 m: ocho manzanas de su tema alrededor de una plaza con su monumento y cuatro puestos de actividad) y, alrededor de dos anillos de calles y cuatro avenidas, 64 parcelas de 15 × 15 m (N, S, E y W; fila 1 del 1 al 6, junto a la ciudad, y fila 2 del 7 al 16). El portal de un proyecto va al fondo de su parcela, mirando a la calle; su puerta al sur devuelve al nexo. En la fase 2 la parcela será también el terreno que su dueño (o su agente) puede construir.
+- **Distritos** (`apps/realtime/src/districts.json`): chunks temáticos alrededor de la plaza — Arcade (`c_1_0`, juegos 3D), Píxel (`c_-1_0`, juegos 2D), Ágora (`c_0_1`, social), Taller (`c_0_-1`, herramientas), Frontera (`c_1_-1`, lo demás), Distrito Cero (`c_-1_-1`, la ciudad ciberpunk de Xen: ciencia ficción e IA) y Vertical (`c_-1_1`, torres de caravanas apiladas: webs personales y primeros proyectos) —. Los que llevan `soon: true` en `districts.json` (hoy Ágora y Frontera) están **próximamente**: su isla sigue en el nexo, pero su puerta está cerrada (`portal@1.closed`), `GET /districts` lo dice (`soon`), publicar en ellos da `district_soon` y entrar (`/chunk/<id>/ws` o `/ticket`) da 403 `soon` salvo a moderación y a la clave de administración. Cada uno de 256 × 256 m (más grande que su chunk: `WELCOME.walk`), con su ciudad en el centro (100 × 100 m: ocho manzanas de su tema alrededor de una plaza con su monumento y cuatro puestos de actividad) y, alrededor de dos anillos de calles y cuatro avenidas, 64 parcelas de 15 × 15 m (N, S, E y W; fila 1 del 1 al 6, junto a la ciudad, y fila 2 del 7 al 16). El portal de un proyecto va al fondo de su parcela, mirando a la calle; su puerta al sur devuelve al nexo. En la fase 2 la parcela será también el terreno que su dueño (o su agente) puede construir.
 - Las piezas del sistema (`mesh@1` con hashes de la forja, como el marco de portal) se pueden usar en cualquier mutación sin subirlas: el servidor las conoce. Los clientes entran por el nexo y viajan entre lugares reconectándose al chunk de destino; cada lugar se dibuja en sus coordenadas locales (0..64, o hasta su `walk` si es más grande).
 - El nexo (`apps/realtime/src/nexo.ts` + `nexo-layout.json`, que también usa la forja) y la plaza (`seed.ts` + `plaza-layout.json`) son semillas del sistema. Las portadas del sistema (la de la plaza) las genera `tools/covers`.
 - La plaza inicial (`apps/realtime/src/seed.ts` + `plaza-layout.json`) son entidades normales con dueño `system`. Si cambia la semilla (su versión o su contenido, por ejemplo al volver a forjar los modelos), el chunk sustituye las entidades del sistema y conserva las de personas y agentes.
@@ -571,7 +594,7 @@ Un GLB puede nombrar sus materiales `xenxo:<biblioteca>.<tinte>` (p. ej. `xenxo:
 | `fachada` | Fachada de rascacielos con textura real (UV en metros): de noche se encienden sus ventanas |
 | `agua` | Superficie animada |
 | `pantalla` | Pantalla o anuncio vivo: bloques de luz que se mueven en el color del tinte, sin letras |
-| `oscuro`, `fruta`, `flor` | Colores sin textura |
+| `oscuro`, `fruta`, `flor`, `chapa` | Colores sin textura (`chapa`: chapa pintada, algo satinada; las caravanas de Vertical) |
 
 Un material llamado `xenxo-glow` (modelos generados con IA) hace brillar las luces pintadas en su textura (lo saturado y claro), más de noche.
 

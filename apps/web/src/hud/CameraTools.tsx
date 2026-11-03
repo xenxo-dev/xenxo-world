@@ -2,9 +2,10 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { useControls } from "../controls";
 import { fullscreenSupported, toggleFullscreen, useFullscreen } from "../fullscreen";
 import { t } from "../i18n";
-import { input, onPhoto, subscribeView, view } from "../world/input";
+import { input, onPhoto, setTouchCrouch, subscribeView, view } from "../world/input";
 import { setAmbientSound, useAmbientSound } from "../world/ambient-audio";
-import { EyeIcon, hudIconButton, JumpIcon, PersonIcon, SoundIcon } from "./icons";
+import { useWorldVersion, world } from "../net/world-store";
+import { CrouchIcon, EyeIcon, hudIconButton, JumpIcon, PersonIcon, SoundIcon } from "./icons";
 
 const hudBox = "rounded-xl border border-cal/10 bg-noche/70 backdrop-blur";
 const small = "grid h-9 w-9 place-items-center rounded-lg text-[#f4f7ff] transition hover:bg-cal/10 hover:text-neon active:scale-95";
@@ -80,17 +81,48 @@ export function TopTools({ onVR }: { onVR: (() => void) | null }) {
   );
 }
 
-/** Abajo, junto a los gestos: primera o tercera persona (V) y, en táctil sin botón grande, saltar. */
+/**
+ * Abajo, junto a los gestos: primera o tercera persona (V) y, en táctil sin botón grande, saltar (y
+ * agacharse donde hay parkour, mientras se mantiene).
+ */
 export function ViewTools({ touch }: { touch: boolean }) {
   const firstPerson = useSyncExternalStore(subscribeView, () => view.firstPerson);
   const c = useControls();
+  useWorldVersion();
   const jump = touch && !c.jumpButton;
+  const crouch = jump && world.parkour;
+  const [down, setDown] = useState(false);
+  useEffect(() => {
+    if (!crouch) setTouchCrouch(false);
+  }, [crouch]);
   if (!c.showCamera && !jump) return null;
+  const release = () => {
+    setTouchCrouch(false);
+    setDown(false);
+  };
   return (
     <div className="flex gap-1.5" style={touch ? { opacity: c.opacity } : undefined}>
       {jump && (
         <button title={t("tools.jump")} aria-label={t("tools.jump")} onPointerDown={() => (input.jump = true)} className={`${hudIconButton} touch-none`}>
           <JumpIcon />
+        </button>
+      )}
+      {crouch && (
+        <button
+          title={t("tools.crouch")}
+          aria-label={t("tools.crouch")}
+          aria-pressed={down}
+          onPointerDown={(e) => {
+            e.currentTarget.setPointerCapture(e.pointerId);
+            setTouchCrouch(true);
+            setDown(true);
+          }}
+          onPointerUp={release}
+          onPointerCancel={release}
+          onContextMenu={(e) => e.preventDefault()}
+          className={`${hudIconButton} touch-none`}
+        >
+          <CrouchIcon />
         </button>
       )}
       {c.showCamera && (

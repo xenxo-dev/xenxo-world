@@ -300,6 +300,50 @@ export const GESTURES: Record<string, Def> = {
     ],
   },
 
+  /* --- Parkour (world/parkour): la IK del mundo pone después las manos en el borde --- */
+  /**
+   * Colgado de un borde: los brazos arriba casi estirados y las manos cerradas en el borde, mirando
+   * hacia arriba; las rodillas algo dobladas y los pies hacia la pared, con un leve balanceo.
+   */
+  pk_hang: {
+    base: "idle",
+    loop: true,
+    keys: [
+      { t: 0, ...both({ at: [0.04, 0.49, 0.15], pole: [1, -0.1, -0.6], twist: 0, wrist: [-25, 0, 0] }), l: "grip", r: "grip", p: { chest: [5, 0, 0], neck: [-8, 0, 0], head: [-14, 0, 0] }, LL: { at: [0.03, -0.7, 0.2], pole: [0, 0, 1], foot: [25, 0, 0] }, RL: { at: [-0.04, -0.69, 0.25], pole: [0, 0, 1], foot: [20, 0, 0] }, turn: [4, 0, 1.5] },
+      { t: 0.8, ...both({ at: [0.04, 0.49, 0.15], pole: [1, -0.1, -0.6], twist: 0, wrist: [-25, 0, 0] }), l: "grip", r: "grip", p: { chest: [6, 0, 0], neck: [-8, 0, 0], head: [-13, 0, 0] }, LL: { at: [0.03, -0.71, 0.22], pole: [0, 0, 1], foot: [22, 0, 0] }, RL: { at: [-0.04, -0.7, 0.23], pole: [0, 0, 1], foot: [22, 0, 0] }, turn: [4, 0, -1.5] },
+      { t: 1.6, ...both({ at: [0.04, 0.49, 0.15], pole: [1, -0.1, -0.6], twist: 0, wrist: [-25, 0, 0] }), l: "grip", r: "grip", p: { chest: [5, 0, 0], neck: [-8, 0, 0], head: [-14, 0, 0] }, LL: { at: [0.03, -0.7, 0.2], pole: [0, 0, 1], foot: [25, 0, 0] }, RL: { at: [-0.04, -0.69, 0.25], pole: [0, 0, 1], foot: [20, 0, 0] }, turn: [4, 0, 1.5] },
+    ],
+  },
+  /** Colgado, de lado hacia su derecha: la cadera se balancea hacia donde va y las piernas la siguen. */
+  pk_shimmy_r: {
+    base: "idle",
+    loop: true,
+    keys: [
+      { t: 0, ...both({ at: [0.04, 0.49, 0.15], pole: [1, -0.1, -0.6], wrist: [-25, 0, 0] }), l: "grip", r: "grip", p: { chest: [5, -3, 0], head: [-12, -6, 0] }, LL: { at: [0.0, -0.71, 0.18], pole: [0, 0, 1], foot: [22, 0, 0] }, RL: { at: [-0.1, -0.67, 0.22], pole: [0, 0, 1], foot: [22, 0, 0] }, turn: [4, 0, 5] },
+      { t: 0.33, ...both({ at: [0.04, 0.49, 0.15], pole: [1, -0.1, -0.6], wrist: [-25, 0, 0] }), l: "grip", r: "grip", p: { chest: [5, -1, 0], head: [-12, -6, 0] }, LL: { at: [0.05, -0.69, 0.2], pole: [0, 0, 1], foot: [22, 0, 0] }, RL: { at: [-0.04, -0.71, 0.2], pole: [0, 0, 1], foot: [22, 0, 0] }, turn: [4, 0, -2] },
+      { t: 0.66, ...both({ at: [0.04, 0.49, 0.15], pole: [1, -0.1, -0.6], wrist: [-25, 0, 0] }), l: "grip", r: "grip", p: { chest: [5, -3, 0], head: [-12, -6, 0] }, LL: { at: [0.0, -0.71, 0.18], pole: [0, 0, 1], foot: [22, 0, 0] }, RL: { at: [-0.1, -0.67, 0.22], pole: [0, 0, 1], foot: [22, 0, 0] }, turn: [4, 0, 5] },
+    ],
+  },
+  pk_shimmy_l: {
+    base: "idle",
+    loop: true,
+    keys: [
+      { t: 0, ...both({ at: [0.04, 0.49, 0.15], pole: [1, -0.1, -0.6], wrist: [-25, 0, 0] }), l: "grip", r: "grip", p: { chest: [5, 3, 0], head: [-12, 6, 0] }, LL: { at: [0.1, -0.67, 0.22], pole: [0, 0, 1], foot: [22, 0, 0] }, RL: { at: [0.0, -0.71, 0.18], pole: [0, 0, 1], foot: [22, 0, 0] }, turn: [4, 0, -5] },
+      { t: 0.33, ...both({ at: [0.04, 0.49, 0.15], pole: [1, -0.1, -0.6], wrist: [-25, 0, 0] }), l: "grip", r: "grip", p: { chest: [5, 1, 0], head: [-12, 6, 0] }, LL: { at: [0.04, -0.71, 0.2], pole: [0, 0, 1], foot: [22, 0, 0] }, RL: { at: [-0.05, -0.69, 0.2], pole: [0, 0, 1], foot: [22, 0, 0] }, turn: [4, 0, 2] },
+      { t: 0.66, ...both({ at: [0.04, 0.49, 0.15], pole: [1, -0.1, -0.6], wrist: [-25, 0, 0] }), l: "grip", r: "grip", p: { chest: [5, 3, 0], head: [-12, 6, 0] }, LL: { at: [0.1, -0.67, 0.22], pole: [0, 0, 1], foot: [22, 0, 0] }, RL: { at: [0.0, -0.71, 0.18], pole: [0, 0, 1], foot: [22, 0, 0] }, turn: [4, 0, -5] },
+    ],
+  },
+  /** Equilibrio sobre una viga (encima de andar): los brazos abiertos, subiendo y bajando a contrapié. */
+  pk_balance: {
+    base: "idle",
+    loop: true,
+    keys: [
+      { t: 0, L: { at: [0.4, 0.02, 0.09], pole: [0.2, -0.6, -1], twist: -15 }, R: { at: [-0.4, -0.1, 0.09], pole: [-0.2, -0.6, -1], twist: -15 }, l: "relaxed", r: "relaxed", p: { chest: [0, 0, -3], head: [6, 0, 2] } },
+      { t: 0.9, L: { at: [0.4, -0.1, 0.09], pole: [0.2, -0.6, -1], twist: -15 }, R: { at: [-0.4, 0.02, 0.09], pole: [-0.2, -0.6, -1], twist: -15 }, l: "relaxed", r: "relaxed", p: { chest: [0, 0, 3], head: [6, 0, -2] } },
+      { t: 1.8, L: { at: [0.4, 0.02, 0.09], pole: [0.2, -0.6, -1], twist: -15 }, R: { at: [-0.4, -0.1, 0.09], pole: [-0.2, -0.6, -1], twist: -15 }, l: "relaxed", r: "relaxed", p: { chest: [0, 0, -3], head: [6, 0, 2] } },
+    ],
+  },
+
   /* --- Reacciones --- */
   /** Golpe por la espalda: la cadera sale hacia delante, el tronco se queda atrás y los brazos se abren. */
   hit_back: {

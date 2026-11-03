@@ -455,6 +455,9 @@ export const EMOTES = [
   "high_five", "hug", "handshake", "punch", "cross", "hook", "kick", "roundhouse", "shove", "push",
   // Reacciones: en la cara, en el cuerpo, por la espalda, traspié (antiguo), en el suelo y levantarse.
   "hit_head", "hit_body", "hit_back", "hit_stagger", "hit_down", "get_up",
+  // Parkour (§9 octies bis, solo donde WELCOME.parkour): lo que se está haciendo, mientras dura.
+  "pk_vault", "pk_mantle", "pk_hang", "pk_shimmy_l", "pk_shimmy_r", "pk_climb", "pk_wallrun_l", "pk_wallrun_r",
+  "pk_wallup", "pk_walljump", "pk_slide", "pk_slideup", "pk_crouch", "pk_roll", "pk_land", "pk_balance",
 ] as const;
 
 /**
@@ -611,6 +614,12 @@ export const WelcomeMsg = envelope(
     theme: z.object({ id: z.string().regex(/^[a-z0-9_-]{1,24}$/), color: z.string().regex(/^#[0-9a-fA-F]{6}$/) }).optional(),
     /** Estilo de pelea del lugar; sin el campo, aquí no se puede activar el modo pelea. */
     fight: FightStyle.optional(),
+    /**
+     * Parkour (§9 octies bis): en este lugar el personaje salta vallas, sube a bordes, se cuelga,
+     * corre por las paredes, se desliza y rueda al caer (lo dice el distrito, `parkour` en
+     * districts.json). Sin el campo, el movimiento de siempre. Un cliente que no lo entienda lo ignora.
+     */
+    parkour: z.boolean().optional(),
   }),
 );
 

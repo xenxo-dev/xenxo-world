@@ -52,6 +52,8 @@ export interface District {
   rank?: number;
   /** Estilo de pelea del distrito (FightStyle del protocolo); sin él, «comic». */
   fight?: string;
+  /** Parkour: el personaje salta vallas, trepa y corre por las paredes (WELCOME.parkour). */
+  parkour?: boolean;
   /** Próximamente: su isla está en el nexo con la puerta cerrada; solo entra moderación y no se publica en él. */
   soon?: boolean;
 }

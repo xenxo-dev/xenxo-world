@@ -1053,6 +1053,7 @@ await scenario("marcadores en el panel: /scores reúne los de los distritos (del
   assert(of("pixel").some((b) => b.kind === "points" && b.period === "week"), "Píxel: puntos de la semana");
   assert(of("arcade").some((b) => b.kind === "race" && b.period === "week"), "Arcade: carrera de la semana");
   assert(of("taller").some((b) => b.kind === "builds"), "Taller: lo que construyen los agentes");
+  assert(of("vertical").some((b) => b.kind === "race" && b.period === "week") && of("vertical").some((b) => b.kind === "hunt"), "Vertical: la ruta de la semana y los banderines");
 });
 
 await scenario("Circuito Neón (Arcade): carrera del sistema con salida, 11 puntos y meta, placas de impulso, 50 monedas y sus marcadores", async () => {
@@ -1066,6 +1067,40 @@ await scenario("Circuito Neón (Arcade): carrera del sistema con salida, 11 punt
   const boards = sys.filter((e) => e.components["scoreboard@1"]).map((e) => (e.components["scoreboard@1"] as { id: string }).id);
   assert(boards.includes("circuito") && boards.includes("monedas"), "marcador de la carrera y de las monedas");
   c.close();
+});
+
+await scenario("Ruta de las Azoteas (Vertical): parkour solo aquí (WELCOME.parkour); carrera con salida, 7 puntos y meta, 8 banderines en alto, sus marcadores, y los gestos pk_* llegan a los demás", async () => {
+  const chunkId = "c_-1_1";
+  const a = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-pk-a" });
+  assert(a.welcome.parkour === true, "en Vertical, WELCOME.parkour");
+  const sys = a.snapshot.entities.filter((e) => e.owner === "system");
+  const cps = sys.filter((e) => (e.components["checkpoint@1"] as { race?: string } | undefined)?.race === "azoteas");
+  const roles = (r: string) => cps.filter((e) => (e.components["checkpoint@1"] as { role: string }).role === r).length;
+  assert(roles("start") === 1 && roles("finish") === 1 && roles("cp") === 7, `salida, 7 puntos y meta (${roles("start")}/${roles("cp")}/${roles("finish")})`);
+  const flags = sys.filter((e) => (e.components["collectible@1"] as { set?: string } | undefined)?.set === "banderines");
+  assert(flags.length === 8, `ocho banderines (${flags.length})`);
+  // Todos en alto: desde el suelo no se alcanzan (hay que subir).
+  assert(flags.every((e) => (e.components["transform@1"] as { p: number[] }).p[1]! >= 3.5), "los banderines van en alto");
+  const boards = sys.filter((e) => e.components["scoreboard@1"]).map((e) => (e.components["scoreboard@1"] as { id: string }).id);
+  assert(boards.includes("azoteas") && boards.includes("banderines"), "marcador de la ruta y de los banderines");
+  // Lo que hace el parkour viaja en la pose, como cualquier gesto.
+  const b = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-pk-b" });
+  b.pose([30, 1.6, 30], 0);
+  await sleep(300);
+  for (const emote of ["pk_wallrun_l", "pk_hang", "pk_roll"]) {
+    await sleep(150);
+    const seen = b.next("POSES", (m) => m.payload.poses.some((p) => p.session_id === a.welcome.session_id && p.emote === emote), 3000);
+    a.pose([31, 1.6, 31], 0, emote);
+    await seen;
+  }
+  a.close();
+  b.close();
+  // En los demás lugares, no (ni en el nexo ni en la plaza ni en otro distrito).
+  for (const id of [PLACES.nexo, PLACES.plaza, "c_1_0"]) {
+    const c = await XenxoClient.connect({ baseUrl, chunkId: id });
+    assert(!c.welcome.parkour, `en ${id} no hay parkour`);
+    c.close();
+  }
 });
 
 await scenario("Plaza tablero (Píxel): el servidor enciende una figura, cuenta lo que se pisa con las poses y da un punto del día", async () => {

@@ -1,5 +1,5 @@
 {
- "$comment": "Distritos y su plantilla (coordenadas del chunk: X este, Z sur, metros). La usan el servidor (districts.ts), la forja (tools/forge/district.py y city.py) y la web (por GET /districts). Disposición v3 (tools/forge/layout_v3.py): 256 × 256 m (`bounds`), más grande que su chunk. En el centro, la ciudad (`city`: 3 × 3 manzanas, la del medio es la plaza); alrededor, dos anillos de calles (`roads`) con 64 parcelas de 15 × 15 m mirando a ellos (N, S, E y W: fila 1 del 1 al 6, fila 2 del 7 al 16) y cuatro avenidas; al sur, la puerta del nexo. Si cambias algo, vuelve a forjar (npm run forge:districts) y sube DISTRICT_SEED_VERSION; si mueves parcelas, añade su migración (districts.ts). `rank`: su orden en el panel (1 = el más importante; los «próximamente» van siempre detrás). `fight`: su estilo de pelea (FIGHT_STYLES del protocolo).",
+ "$comment": "Distritos y su plantilla (coordenadas del chunk: X este, Z sur, metros). La usan el servidor (districts.ts), la forja (tools/forge/district.py y city.py) y la web (por GET /districts). Disposición v3 (tools/forge/layout_v3.py): 256 × 256 m (`bounds`), más grande que su chunk. En el centro, la ciudad (`city`: 3 × 3 manzanas, la del medio es la plaza); alrededor, dos anillos de calles (`roads`) con 64 parcelas de 15 × 15 m mirando a ellos (N, S, E y W: fila 1 del 1 al 6, fila 2 del 7 al 16) y cuatro avenidas; al sur, la puerta del nexo. Si cambias algo, vuelve a forjar (npm run forge:districts) y sube DISTRICT_SEED_VERSION; si mueves parcelas, añade su migración (districts.ts). `rank`: su orden en el panel (1 = el más importante; los «próximamente» van siempre detrás). `fight`: su estilo de pelea (FIGHT_STYLES del protocolo). `parkour`: en él se salta, se trepa y se corre por las paredes (WELCOME.parkour, apps/web/src/world/parkour).",
  "parcel": {
   "w": 15,
   "d": 15,
@@ -516,7 +516,7 @@
    }
   },
   {
-   "id": "vertical", "rank": 7, "fight": "comic", "soon": true,
+   "id": "vertical", "rank": 7, "fight": "comic", "parkour": true,
    "chunk": "c_-1_1",
    "category": "other",
    "color": "#ff7a45",
@@ -526,8 +526,8 @@
     "en": "Vertical"
    },
    "desc": {
-    "es": "Torres de caravanas apiladas: webs personales, portfolios, blogs y primeros proyectos.",
-    "en": "Towers of stacked trailers: personal sites, portfolios, blogs and first projects."
+    "es": "Torres de caravanas apiladas y parkour por sus azoteas: webs personales, portfolios, blogs y primeros proyectos.",
+    "en": "Towers of stacked trailers and parkour across their rooftops: personal sites, portfolios, blogs and first projects."
    }
   }
  ]

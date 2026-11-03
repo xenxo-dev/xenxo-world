@@ -63,6 +63,22 @@ export const BADGES: Badge[] = [
     desc: { es: "Sumó 10 puntos en la plaza tablero.", en: "Scored 10 points on the tile plaza." },
     color: "#a26bff",
   },
+  {
+    id: "vertical_azoteas",
+    district: "vertical",
+    rule: { kind: "race", key: "system:azoteas" },
+    name: { es: "Por los tejados", en: "Rooftop Runner" },
+    desc: { es: "Terminó la Ruta de las Azoteas de Vertical.", en: "Finished the Rooftop Run in Vertical." },
+    color: "#ff7a45",
+  },
+  {
+    id: "vertical_banderines",
+    district: "vertical",
+    rule: { kind: "hunt", key: "system:banderines" },
+    name: { es: "Cazabanderines", en: "Pennant Hunter" },
+    desc: { es: "Encontró los 8 banderines de Vertical.", en: "Found all 8 pennants in Vertical." },
+    color: "#ffb347",
+  },
 ];
 
 /** Lo que un distrito guarda de una cuenta (ChunkRoom.activityOf), lo justo para las reglas. */

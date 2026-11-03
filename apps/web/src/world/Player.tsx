@@ -24,10 +24,13 @@ import { applyCarPose, CarModel, createCarHandle } from "./vehicle/CarModel";
 import { CAR, paintFor } from "./vehicle/car";
 import { bumpNpcs, camKick, peopleBusy, peopleFrame, resetPeople, selfFx, startStrike, striking } from "./people/selfPeople";
 import { people } from "../net/people-store";
-import { UPPER_EMOTES } from "./animation";
+import { preloadParkour, UPPER_EMOTES } from "./animation";
+import { createParkour, parkourStep, resetParkour } from "./parkour/moves";
 
 const WALK = 2.1; // m/s
 const RUN = 5.4;
+/** Corriendo donde hay parkour (Vertical): algo más, para coger impulso. */
+const PK_RUN = 6.0;
 const EYE = 1.6;
 /** Distancia de la cámara en tercera persona: por defecto, mínima y máxima (rueda o pellizco). */
 const CAM_DIST = 3.4;
@@ -65,6 +68,7 @@ const _lastQ = new THREE.Quaternion();
 const _yawE = new THREE.Euler();
 const _carQ = new THREE.Quaternion();
 const _seat = new THREE.Vector3();
+const _pkIn = { wantX: 0, wantZ: 0, jump: false, crouch: false, crouchPressed: false, yaw: 0 };
 /** Ojos de quien conduce, respecto al origen del coche. */
 const DRIVER_EYE = new THREE.Vector3(CAR.eye.x, CAR.eye.y, CAR.eye.z);
 /** Bulto del jugador para los peatones que le ceden el paso (radio, m): mayor en coche. */
@@ -90,6 +94,12 @@ export function Player({ active }: { active: boolean }) {
   const spawnSeq = useRef(spawn.seq);
   const motion = useRef(createMotion()).current;
   motion.fx ??= selfFx;
+  /** Parkour (donde el lugar lo dice: WELCOME.parkour). */
+  const pk = useRef(createParkour()).current;
+  /** Las manos del parkour estaban puestas (para soltarlas una vez, sin pisar las de la gente). */
+  const pkHands = useRef(false);
+  /** Colgado: lo que se sube el dibujo para que las manos lleguen al borde (m). */
+  const pkLift = useRef(0);
   const lastSend = useRef(0);
   const camReach = useRef(1);
   const cam3 = useRef({ dist: CAM_DIST, y: spawn.p[1] });
@@ -164,6 +174,7 @@ export function Player({ active }: { active: boolean }) {
       l.yaw = spawn.yaw;
       bodyYaw.current = spawn.yaw;
       resetPeople(motion);
+      resetParkour(pk, body);
       if (inXR) {
         placeOrigin(spawn.p[0], spawn.p[1], spawn.p[2]);
         origin.current.rotation.set(0, spawn.yaw, 0);
@@ -257,7 +268,7 @@ export function Player({ active }: { active: boolean }) {
         _right.set(-_fwd.z, 0, _fwd.x);
         const amount = Math.min(1, Math.hypot(input.move.x, input.move.y));
         // En móvil, el joystick a tope también corre.
-        let speed = input.run || (controls.autoRun && amount > 0.92) ? RUN : WALK;
+        let speed = input.run || (controls.autoRun && amount > 0.92) ? (world.parkour ? PK_RUN : RUN) : WALK;
         // Placa de impulso (boost@1): más rápido unos segundos, mientras te muevas.
         if (boost.until > performance.now()) speed = Math.max(speed, boost.speed);
         let wantX = (_fwd.x * input.move.y + _right.x * input.move.x) * speed;
@@ -284,7 +295,12 @@ export function Player({ active }: { active: boolean }) {
         self.wx = free ? wantX : 0;
         self.wz = free ? wantZ : 0;
 
-        if (input.jump && free) {
+        // Parkour (Vertical): saltar, trepar, colgarse, correr por las paredes, deslizarse y rodar, con
+        // los mismos botones (parkour/moves.ts). Nunca en el modo pelea ni en pareja.
+        const parkour = world.parkour && free && !_pf.lock && !motion.fight;
+        if (world.parkour) preloadParkour();
+        if (!parkour && pk.move !== "none") resetParkour(pk, body);
+        if (input.jump && free && !parkour) {
           requestJump(body);
           motion.emote = null; // saltar también levanta del banco
           input.jump = false;
@@ -293,15 +309,57 @@ export function Player({ active }: { active: boolean }) {
         // En el nexo (en solitario) se camina más allá del chunk: por las pasarelas hasta las islas.
         // Mientras se viaja (aún sin WELCOME ni suelo del lugar nuevo) el cuerpo espera quieto: si
         // diera pasos, los límites y el suelo del lugar anterior lo dejarían fuera de lo caminable.
-        if (free && !_pf.drawn && motion.emote !== "sit" && world.status === "open") stepBody(body, wantX, wantZ, dt, world.walk[0], world.walk[1]);
+        if (free && !_pf.drawn && motion.emote !== "sit" && world.status === "open") {
+          if (parkour) {
+            _pkIn.wantX = wantX;
+            _pkIn.wantZ = wantZ;
+            _pkIn.jump = input.jump;
+            _pkIn.crouch = input.crouch;
+            _pkIn.crouchPressed = input.crouchPressed;
+            _pkIn.yaw = bodyYaw.current;
+            if (input.jump) motion.emote = null;
+            parkourStep(pk, body, _pkIn, dt, world.walk[0], world.walk[1]);
+          } else stepBody(body, wantX, wantZ, dt, world.walk[0], world.walk[1]);
+        }
+        input.jump = false;
+        input.crouchPressed = false;
         if (free && !_pf.lock) bumpNpcs(body, bodyYaw.current);
         if (free) smoothSpeed(motion, Math.hypot(body.vx, body.vz), dt);
-        motion.airborne = free && !body.grounded;
+        motion.airborne = free && !body.grounded && pk.move === "none";
+        motion.pk = parkour ? pk.emote : null;
+        motion.pkP = pk.p;
+        // Las manos en el borde o en la valla (IK del esqueleto, people/rig.ts).
+        const fx = motion.fx;
+        if (fx && parkour && pk.hand.w > 0.01) {
+          fx.reachL.x = pk.hand.lx;
+          fx.reachL.y = pk.hand.ly;
+          fx.reachL.z = pk.hand.lz;
+          fx.reachL.w = pk.hand.w;
+          fx.reachR.x = pk.hand.rx;
+          fx.reachR.y = pk.hand.ry;
+          fx.reachR.z = pk.hand.rz;
+          fx.reachR.w = pk.hand.w;
+          pkHands.current = true;
+        } else if (fx && pkHands.current) {
+          fx.reachL.w = fx.reachR.w = 0;
+          pkHands.current = false;
+        }
+        // Colgado o trepando: el dibujo sube lo que les falte a sus brazos para llegar al borde (cada
+        // avatar mide lo suyo: people/rig.ts → reachLift) y vuelve a su sitio al soltarse.
+        const rigNow = fx?.rig;
+        if (parkour && (pk.move === "hang" || pk.move === "climb") && pk.hand.w > 0.5 && rigNow) {
+          pkLift.current = THREE.MathUtils.clamp(pkLift.current + rigNow.reachLift * Math.min(1, dt * 14), 0, 0.6);
+        } else pkLift.current *= 1 - Math.min(1, dt * 8);
 
         // El cuerpo gira hacia donde camina (la cámara puede mirar a otro lado); en primera
         // persona, hacia donde miras.
         if (!free || _pf.lock) {
           // Lo mueve la secuencia del coche (o la gente: un golpe, una pareja).
+        } else if (parkour && !Number.isNaN(pk.yaw)) {
+          // Lo que se está haciendo manda (de cara a la pared, a lo largo de ella…).
+          let d = pk.yaw - bodyYaw.current;
+          d = Math.atan2(Math.sin(d), Math.cos(d));
+          bodyYaw.current += d * Math.min(1, dt * 16);
         } else if (fp) bodyYaw.current = l.yaw;
         else if (amount > 0.05) {
           const want = Math.atan2(-wantX, -wantZ);
@@ -373,8 +431,9 @@ export function Player({ active }: { active: boolean }) {
         avatar.current.quaternion.copy(seated.q);
         visY.current = body.y;
       } else if (!_pf.drawn) {
-        avatar.current.position.set(body.x, visY.current, body.z);
-        avatar.current.rotation.set(0, bodyYaw.current, 0);
+        // Con parkour, el cuerpo entero se inclina (correr por la pared) y los pies van contra ella.
+        avatar.current.position.set(body.x + pk.ox, visY.current + pkLift.current, body.z + pk.oz);
+        avatar.current.rotation.set(pk.pitch, bodyYaw.current, -pk.lean, "YXZ");
       }
       playerPos.set(body.x, body.y, body.z);
       self.x = body.x;
@@ -404,18 +463,20 @@ export function Player({ active }: { active: boolean }) {
     if ((!active && !inXR) || world.status !== "open" || !world.sessionId || world.solo) return;
     const now = performance.now();
     if (now - lastSend.current < SEND_EVERY_MS) return;
-    const moved = _headP.distanceToSquared(_lastP) > 1e-4 || _headQ.angleTo(_lastQ) > 0.01 || motion.emote !== lastEmote.current || drive.phase !== lastPhase.current;
+    // Lo que se ve de la persona: el parkour que esté haciendo, o su gesto.
+    const shown = motion.pk ?? motion.emote;
+    const moved = _headP.distanceToSquared(_lastP) > 1e-4 || _headQ.angleTo(_lastQ) > 0.01 || shown !== lastEmote.current || drive.phase !== lastPhase.current;
     if (!moved && now - lastSend.current < HEARTBEAT_MS) return;
     lastSend.current = now;
     _lastP.copy(_headP);
     _lastQ.copy(_headQ);
-    lastEmote.current = motion.emote;
+    lastEmote.current = shown;
     lastPhase.current = drive.phase;
     net.send(
       msg("POSE", {
         t: world.serverNow(),
         head: { p: [_headP.x, _headP.y, _headP.z], r: [_headQ.x, _headQ.y, _headQ.z, _headQ.w] },
-        ...(motion.emote ? { emote: motion.emote } : {}),
+        ...(shown ? { emote: shown } : {}),
         ...carForPose(),
       }) as ClientMessage,
     );

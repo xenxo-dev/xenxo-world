@@ -280,7 +280,7 @@ export function neonGlow(ambience: Ambience, bloom: boolean) {
   return ambience === "night" ? 2.2 : 1.15;
 }
 
-const ROUGH: Record<string, number> = { azulejo: 0.35, ventana: 0.06, agua: 0.04, fruta: 0.5, flor: 0.8, hoja: 0.85 };
+const ROUGH: Record<string, number> = { azulejo: 0.35, ventana: 0.06, agua: 0.04, fruta: 0.5, flor: 0.8, hoja: 0.85, chapa: 0.42 };
 
 /**
  * Material de biblioteca para un nivel y un ambiente. `ao` es el mapa de oclusión horneado

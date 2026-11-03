@@ -1531,5 +1531,336 @@
         }
       }
     ]
+  },
+  "vertical": {
+    "races": [
+      {
+        "id": "azoteas",
+        "radius": 3.0,
+        "start": {
+          "p": [
+            32.0,
+            5.4,
+            21.9
+          ],
+          "radius": 2.5
+        },
+        "cps": [
+          [
+            38.9,
+            8.1,
+            -5.0
+          ],
+          [
+            69.0,
+            5.4,
+            1.9
+          ],
+          [
+            69.0,
+            5.4,
+            35.5
+          ],
+          [
+            62.1,
+            8.1,
+            69.0
+          ],
+          [
+            32.5,
+            8.1,
+            69.0
+          ],
+          [
+            -5.0,
+            5.4,
+            62.1
+          ],
+          [
+            1.9,
+            5.4,
+            32.0
+          ]
+        ],
+        "finish": {
+          "p": [
+            26.5,
+            0.0,
+            32.0
+          ],
+          "radius": 2.5
+        }
+      }
+    ],
+    "hunts": [
+      {
+        "id": "banderines",
+        "piece": "vertical_flag",
+        "radius": 1.0,
+        "items": [
+          {
+            "p": [
+              23.73,
+              5.4,
+              -12.5
+            ]
+          },
+          {
+            "p": [
+              76.5,
+              5.4,
+              -13.28
+            ]
+          },
+          {
+            "p": [
+              77.28,
+              5.4,
+              76.5
+            ]
+          },
+          {
+            "p": [
+              -12.5,
+              5.4,
+              77.28
+            ]
+          },
+          {
+            "p": [
+              -13.28,
+              5.4,
+              24.5
+            ]
+          },
+          {
+            "p": [
+              30.5,
+              3.7,
+              42.4
+            ]
+          },
+          {
+            "p": [
+              24.7,
+              5.4,
+              25.75
+            ]
+          },
+          {
+            "p": [
+              66.55,
+              8.1,
+              30.7
+            ]
+          }
+        ]
+      }
+    ],
+    "labels": [
+      {
+        "text": {
+          "es": "LA RUTA DE LAS AZOTEAS\nSube por las cajas y sal desde lo alto de la torre: siete manzanas por los tejados y vuelta aquí, a la plaza.",
+          "en": "THE ROOFTOP RUN\nClimb the crates and start from the top of the tower: seven blocks across the roofs and back here to the square."
+        },
+        "p": [
+          25.9,
+          2.6,
+          22.4
+        ],
+        "yaw": 0,
+        "size": 0.16,
+        "width": 3.6,
+        "style": "sign",
+        "max_distance": 16
+      },
+      {
+        "text": {
+          "es": "SALTAR VALLAS\nCorre contra ellas: las saltas sin pararte.",
+          "en": "VAULTS\nRun at them: you vault over without stopping."
+        },
+        "p": [
+          37.6,
+          1.9,
+          29.0
+        ],
+        "yaw": -90,
+        "size": 0.15,
+        "width": 3.2,
+        "style": "sign",
+        "max_distance": 16
+      },
+      {
+        "text": {
+          "es": "DESLIZARSE\nCorriendo, agáchate (X) y pasa por debajo.",
+          "en": "SLIDE\nWhile running, crouch (X) and slide under."
+        },
+        "p": [
+          37.6,
+          1.9,
+          36.0
+        ],
+        "yaw": -90,
+        "size": 0.15,
+        "width": 3.2,
+        "style": "sign",
+        "max_distance": 16
+      },
+      {
+        "text": {
+          "es": "EQUILIBRIO\nPor la viga: los brazos se abren solos.",
+          "en": "BALANCE\nAlong the beam: your arms open by themselves."
+        },
+        "p": [
+          35.2,
+          1.9,
+          39.2
+        ],
+        "yaw": 180,
+        "size": 0.15,
+        "width": 3.2,
+        "style": "sign",
+        "max_distance": 16
+      },
+      {
+        "text": {
+          "es": "COLGARSE\nSalta hacia el borde y agárrate. De lado por el borde; arriba con el salto; suéltate con X.",
+          "en": "HANG\nJump at the ledge to grab it. Shimmy sideways; jump to climb up; X to let go."
+        },
+        "p": [
+          24.5,
+          1.7,
+          41.2
+        ],
+        "yaw": 180,
+        "size": 0.15,
+        "width": 3.2,
+        "style": "sign",
+        "max_distance": 16
+      },
+      {
+        "text": {
+          "es": "SUBIR POR LA PARED\nCorriendo de frente, salta: dos pasos hacia arriba y a por el borde.",
+          "en": "RUN UP THE WALL\nRun straight at it and jump: two steps up, then grab the ledge."
+        },
+        "p": [
+          30.5,
+          1.7,
+          41.2
+        ],
+        "yaw": 180,
+        "size": 0.15,
+        "width": 3.2,
+        "style": "sign",
+        "max_distance": 16
+      },
+      {
+        "text": {
+          "es": "ENTRE PAREDES\nSalta hacia una pared y vuelve a saltar al tocarla: de una a otra se sube (tres rebotes seguidos).",
+          "en": "BETWEEN WALLS\nJump at one wall and jump again as you touch it: wall to wall you go up (three kicks in a row)."
+        },
+        "p": [
+          28.0,
+          1.9,
+          25.75
+        ],
+        "yaw": 90,
+        "size": 0.15,
+        "width": 3.2,
+        "style": "sign",
+        "max_distance": 16
+      },
+      {
+        "text": {
+          "es": "CORRER POR LA PARED\nCorriendo junto a ella, salta: unos pasos por la pared. Salta otra vez para rebotar.",
+          "en": "WALL RUN\nRunning alongside it, jump: a few steps along the wall. Jump again to kick off."
+        },
+        "p": [
+          21.15,
+          2.2,
+          37.8
+        ],
+        "yaw": 90,
+        "size": 0.15,
+        "width": 3.2,
+        "style": "sign",
+        "max_distance": 16
+      },
+      {
+        "text": {
+          "es": "RODAR AL CAER\nDe alto y corriendo, ruedas sin golpe. Si no, agáchate (X) justo antes de tocar el suelo.",
+          "en": "LANDING ROLL\nFrom high up while running, you roll without the hit. Otherwise crouch (X) just before you land."
+        },
+        "p": [
+          24.2,
+          2.2,
+          29.4
+        ],
+        "yaw": 90,
+        "size": 0.15,
+        "width": 3.2,
+        "style": "sign",
+        "max_distance": 16
+      }
+    ],
+    "boards": [
+      {
+        "kind": "race",
+        "id": "azoteas",
+        "p": [
+          32,
+          9.6,
+          20.3
+        ],
+        "yaw": 0,
+        "size": [
+          8,
+          4.8
+        ],
+        "period": "week",
+        "title": {
+          "es": "ESTA SEMANA",
+          "en": "THIS WEEK"
+        },
+        "title_y": -2.9
+      },
+      {
+        "kind": "race",
+        "id": "azoteas",
+        "period": "all",
+        "p": [
+          29.3,
+          1.75,
+          43.56
+        ],
+        "yaw": 0,
+        "size": [
+          2.2,
+          1.6
+        ],
+        "title": {
+          "es": "DE SIEMPRE",
+          "en": "ALL TIME"
+        }
+      },
+      {
+        "kind": "hunt",
+        "id": "banderines",
+        "p": [
+          31.7,
+          1.75,
+          43.56
+        ],
+        "yaw": 0,
+        "size": [
+          2.2,
+          1.6
+        ],
+        "title": {
+          "es": "BANDERINES",
+          "en": "PENNANTS"
+        }
+      }
+    ]
   }
 }

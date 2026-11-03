@@ -241,7 +241,7 @@ const byDist = (a: Citizen, b: Citizen) => a.dist - b.dist;
 const _want = { x: 0, z: 0 };
 const _me = new THREE.Vector3();
 
-const newBody = (): Body => ({ x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, grounded: true, airTime: 0, jumpAge: Infinity, jumped: false, landed: 0, stun: 0 });
+const newBody = (): Body => ({ x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, grounded: true, airTime: 0, jumpAge: Infinity, jumped: false, landed: 0, stun: 0, h: 1.8 });
 function placeAt(b: Body, x: number, y: number, z: number) {
   b.x = x;
   b.y = y;

@@ -24,6 +24,7 @@ jobs:
       - run: npm run test:vehicle -w @xenxo/web
       - run: npm run test:ragdoll -w @xenxo/web
       - run: npm run test:citizens -w @xenxo/web
+      - run: npm run test:parkour -w @xenxo/web
       # El servidor de distritos (workerd en una máquina propia): que siga compilando.
       - run: npm run build:district-host
       # Y sus scripts (portátil y relevo del NAS): que al menos se lean bien.

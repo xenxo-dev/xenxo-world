@@ -1,19 +1,23 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CONTROL_PX, useControls } from "../controls";
 import { t } from "../i18n";
-import { input } from "./input";
-import { JumpIcon } from "../hud/icons";
+import { useWorldVersion, world } from "../net/world-store";
+import { input, setTouchCrouch } from "./input";
+import { CrouchIcon, JumpIcon } from "../hud/icons";
 
 const bottom = "bottom-[max(1.5rem,env(safe-area-inset-bottom))]";
 
 /**
  * Controles táctiles: joystick para moverse y botón de saltar en el otro pulgar. Cada uno sigue
  * su propio dedo (eventos de puntero, no clics), así que se puede saltar mientras se camina.
- * Lado, tamaño y opacidad se cambian en Personalizar → Controles.
+ * Donde hay parkour (Vertical), al lado del de saltar va el de agacharse (mantenido: deslizarse,
+ * soltarse colgado y rodar al caer). Lado, tamaño y opacidad se cambian en Personalizar → Controles.
  */
 export function TouchJoystick() {
   const c = useControls();
   const px = CONTROL_PX[c.size];
+  useWorldVersion();
+  const parkour = world.parkour && c.jumpButton;
   const base = useRef<HTMLDivElement>(null);
   const pointer = useRef<number | null>(null);
   const [knob, setKnob] = useState({ x: 0, y: 0 });
@@ -64,6 +68,7 @@ export function TouchJoystick() {
           style={{ width: px.stick * 0.44, height: px.stick * 0.44, transform: `translate(calc(-50% + ${knob.x}px), calc(-50% + ${knob.y}px))` }}
         />
       </div>
+      {parkour && <CrouchButton size={Math.round(px.jump * 0.78)} offset={24 + px.jump + 14} bottomGap={Math.round(px.jump * 0.11)} left={left} opacity={c.opacity} />}
       {c.jumpButton && (
         <button
           type="button"
@@ -88,5 +93,40 @@ export function TouchJoystick() {
         </button>
       )}
     </>
+  );
+}
+
+/** Agacharse mientras se mantiene (el parkour): junto al de saltar, hacia el centro de la pantalla. */
+function CrouchButton({ size, offset, bottomGap, left, opacity }: { size: number; offset: number; bottomGap: number; left: boolean; opacity: number }) {
+  const [down, setDown] = useState(false);
+  const release = () => {
+    setTouchCrouch(false);
+    setDown(false);
+  };
+  // Al irse del lugar (o quitarse el botón) con el dedo encima, se deja de agachar.
+  useEffect(() => () => setTouchCrouch(false), []);
+  return (
+    <button
+      type="button"
+      title={t("tools.crouch")}
+      aria-label={t("tools.crouch")}
+      aria-pressed={down}
+      style={{ width: size, height: size, opacity, [left ? "right" : "left"]: offset, marginBottom: bottomGap }}
+      className={`pointer-events-auto absolute ${bottom} grid touch-none select-none place-items-center rounded-full border border-neon-suave/50 text-cal backdrop-blur-sm transition-transform ${down ? "scale-90 bg-neon/40" : "bg-neon/20"}`}
+      onPointerDown={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.currentTarget.setPointerCapture(e.pointerId);
+        setTouchCrouch(true);
+        setDown(true);
+      }}
+      onPointerUp={release}
+      onPointerCancel={release}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      <span aria-hidden className="grid h-[45%] w-[45%] place-items-center [&>svg]:h-full [&>svg]:w-full">
+        <CrouchIcon />
+      </span>
+    </button>
   );
 }

@@ -77,6 +77,15 @@ export function JumpIcon() {
   );
 }
 
+/** Agacharse (el parkour: deslizarse, soltarse y rodar): la flecha de saltar hacia el suelo. */
+export function CrouchIcon() {
+  return (
+    <svg aria-hidden className="h-5 w-5" {...svg}>
+      <path d="M12 4v13M6.5 11.5 12 17l5.5-5.5M5 20h14" />
+    </svg>
+  );
+}
+
 /** Coche visto de lado (conducir). */
 export function CarIcon() {
   return (

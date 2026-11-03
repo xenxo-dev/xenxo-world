@@ -25,8 +25,8 @@ export const STEP_UP = 0.45;
 const WAIST = 1.35;
 /** Lo más que se baja pegado al suelo (escaleras); más que esto y se cae. */
 const STEP_DOWN = 0.35;
-const GRAVITY = 15;
-const JUMP_V = 5.2; // ≈ 0,9 m de salto
+export const GRAVITY = 15;
+export const JUMP_V = 5.2; // ≈ 0,9 m de salto
 /** Rapidez con la que se alcanza la velocidad pedida (1/s): suelo, frenada y aire. */
 const ACCEL = 11;
 const BRAKE = 16;
@@ -36,8 +36,8 @@ const JUMP_BUFFER = 0.15; // s
 const SUBSTEP = 1 / 120;
 /** Caída máxima (no acelerar sin fin). */
 const TERMINAL = 30;
-/** A partir de esta velocidad de caída (≈ 3 m), el aterrizaje frena un momento. */
-const HARD_LANDING = 7.5;
+/** A partir de esta velocidad de caída (≈ 1,9 m), el aterrizaje frena un momento. */
+export const HARD_LANDING = 7.5;
 
 export interface Body {
   x: number;
@@ -57,10 +57,12 @@ export interface Body {
   landed: number;
   /** Segundos que quedan del aterrizaje fuerte (se anda despacio). */
   stun: number;
+  /** Altura del cuerpo (m): de pie BODY_HEIGHT; agachado o deslizándose, menos (world/parkour). */
+  h: number;
 }
 
 export function createBody(x: number, y: number, z: number): Body {
-  return { x, y, z, vx: 0, vy: 0, vz: 0, grounded: true, airTime: 0, jumpAge: Infinity, jumped: false, landed: 0, stun: 0 };
+  return { x, y, z, vx: 0, vy: 0, vz: 0, grounded: true, airTime: 0, jumpAge: Infinity, jumped: false, landed: 0, stun: 0, h: BODY_HEIGHT };
 }
 
 export function placeBody(b: Body, x: number, y: number, z: number) {
@@ -122,7 +124,8 @@ function substep(b: Body, wantX: number, wantZ: number, h: number, min: number, 
   _p.z = b.z + b.vz * h;
   // Lo que queda por debajo de un paso no frena: se sube. Lo que empieza por encima de la cintura
   // es techo (lo frena el salto, abajo), no pared: así un dintel o un techo bajo no te escupe a un lado.
-  resolveCircle(_p, BODY_RADIUS, b.y + STEP_UP, b.y + WAIST, people);
+  // Agachado (b.h menor), lo que empieza por encima de la cabeza tampoco es pared: se pasa por debajo.
+  resolveCircle(_p, BODY_RADIUS, b.y + STEP_UP, b.y + Math.min(WAIST, b.h - 0.1), people);
   _p.x = Math.min(max, Math.max(min, _p.x));
   _p.z = Math.min(max, Math.max(min, _p.z));
   b.x = _p.x;
@@ -164,9 +167,9 @@ function substep(b: Body, wantX: number, wantZ: number, h: number, min: number, 
     b.vy = Math.max(-TERMINAL, b.vy - GRAVITY * h);
     b.y += b.vy * h;
     if (b.vy > 0) {
-      const ceil = ceilingHeight(b.x, b.z, BODY_RADIUS * 0.75, b.y + BODY_HEIGHT - b.vy * h - 0.01);
-      if (b.y + BODY_HEIGHT > ceil) {
-        b.y = ceil - BODY_HEIGHT;
+      const ceil = ceilingHeight(b.x, b.z, BODY_RADIUS * 0.75, b.y + b.h - b.vy * h - 0.01);
+      if (b.y + b.h > ceil) {
+        b.y = ceil - b.h;
         b.vy = 0;
       }
     }

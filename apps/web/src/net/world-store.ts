@@ -41,6 +41,8 @@ class WorldStore {
   big = false;
   /** Ciudad de fondo del distrito (WELCOME.theme): la de un distrito del sistema o la que eligió su autor. */
   theme: { id: string; color: string } | null = null;
+  /** Aquí se hace parkour (WELCOME.parkour: Vertical): world/parkour. */
+  parkour = false;
   status: ConnectionStatus = "idle";
   lastError: string | null = null;
   /** El nodo que lleva este distrito no responde: se avisa y se sigue intentando (nodes.ts del servidor). */
@@ -104,6 +106,7 @@ class WorldStore {
     this.solo = false;
     this.big = false;
     this.theme = null;
+    this.parkour = false;
     this.unavailable = false;
     this.host = null;
     // Sin límites hasta que el lugar diga los suyos en WELCOME: el punto de llegada (p. ej. una
@@ -128,6 +131,7 @@ class WorldStore {
         this.walk = m.payload.walk ?? [1, CHUNK_SIZE - 1];
         this.big = !this.solo && (this.walk[0] < 0 || this.walk[1] > CHUNK_SIZE);
         this.theme = m.payload.theme ?? null;
+        this.parkour = m.payload.parkour === true;
         this.clockOffset = m.payload.server_time - Date.now();
         this.bump();
         break;

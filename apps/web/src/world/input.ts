@@ -32,6 +32,14 @@ export const input = {
   attack: null as "punch" | "kick" | "shove" | null,
   /** Abrir o cerrar la rueda de acciones (G). La consume el HUD. */
   wheel: false,
+  /**
+   * Agacharse (X mantenida, o el botón del HUD donde hay parkour): agachado andando, deslizarse
+   * corriendo, soltarse colgado y rodar al caer (world/parkour). `crouchPressed` se consume.
+   */
+  crouch: false,
+  crouchPressed: false,
+  /** El botón táctil de agacharse (se suma a la tecla). */
+  crouchTouch: false,
 };
 
 /** El HUD se entera de la tecla de la rueda de acciones sin mirar cada frame. */
@@ -76,6 +84,15 @@ function updateFromKeys() {
   input.move.y = f;
   input.run = keys.has("ShiftLeft") || keys.has("ShiftRight");
   input.brake = keys.has("Space");
+  input.crouch = keys.has("KeyX") || input.crouchTouch;
+}
+
+/** El botón táctil de agacharse: pulsado (true) o soltado. */
+export function setTouchCrouch(on: boolean) {
+  if (on && !input.crouchTouch) input.crouchPressed = true;
+  input.crouchTouch = on;
+  // Solo agacharse: el joystick escribe input.move él mismo (releer las teclas lo pondría a cero).
+  input.crouch = keys.has("KeyX") || on;
 }
 
 let attached = false;
@@ -102,6 +119,7 @@ export function attachDesktopInput(el: HTMLElement) {
     if (e.code === "KeyR" && !e.repeat) input.attack = "shove";
     if (e.code === "KeyG" && !e.repeat) for (const fn of wheelListeners) fn();
     if (e.code === "KeyF" && !e.repeat) void toggleFullscreen();
+    if (e.code === "KeyX" && !e.repeat) input.crouchPressed = true;
     updateFromKeys();
   };
   const up = (e: KeyboardEvent) => {

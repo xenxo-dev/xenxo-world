@@ -537,6 +537,7 @@ export class ChunkRoom extends DurableObject<Env> {
           ...(this.solo ? { solo: true, walk: NEXO_BOUNDS } : this.big ? { walk: this.bounds } : {}),
           ...this.themeHint(),
           ...(this.fightStyle ? { fight: this.fightStyle } : {}),
+          ...(this.parkour ? { parkour: true } : {}),
         }));
         // En solitario (el nexo) nadie ve a nadie: ni gente, ni poses, ni chat.
         if (this.solo) {
@@ -2147,6 +2148,12 @@ export class ChunkRoom extends DurableObject<Env> {
     if (this.community) return "comic";
     const d = districtByChunk(this.chunkId);
     return d ? styleOf(d.fight) : null;
+  }
+
+  /** Parkour: solo en los distritos del sistema que lo dicen (Vertical); nunca en el nexo ni la plaza. */
+  private get parkour(): boolean {
+    if (this.solo || !this.chunkId || this.community) return false;
+    return districtByChunk(this.chunkId)?.parkour === true;
   }
 
   /** La conexión de una sesión de este lugar (si sigue). */
