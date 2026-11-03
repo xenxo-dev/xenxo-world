@@ -1069,7 +1069,7 @@ await scenario("Circuito Neón (Arcade): carrera del sistema con salida, 11 punt
   c.close();
 });
 
-await scenario("Ruta de las Azoteas (Vertical): parkour solo aquí (WELCOME.parkour); carrera con salida, 7 puntos y meta, 8 banderines en alto, sus marcadores, las farolas del Patio (sin pasarse de las luces del chunk), y los gestos pk_* (también las caídas) llegan a los demás", async () => {
+await scenario("Ruta de las Azoteas (Vertical): parkour solo aquí (WELCOME.parkour); carrera con salida, 7 puntos y meta, 8 banderines en alto, sus marcadores, las farolas del Patio (sin pasarse de las luces del chunk), las Pilas con la escalera de la Gran Pila (choca con su malla), y los gestos pk_* (también las caídas) llegan a los demás", async () => {
   const chunkId = "c_-1_1";
   const a = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-pk-a" });
   assert(a.welcome.parkour === true, "en Vertical, WELCOME.parkour");
@@ -1087,6 +1087,12 @@ await scenario("Ruta de las Azoteas (Vertical): parkour solo aquí (WELCOME.park
   const lights = sys.filter((e) => e.components["light@1"]);
   const night = lights.filter((e) => (e.components["light@1"] as { when?: string }).when === "night");
   assert(night.length >= 4 && lights.length <= BUDGETS.maxLightsPerChunk, `farolas de noche y luces del chunk (${night.length}/${lights.length} de ${BUDGETS.maxLightsPerChunk})`);
+  // Las Pilas: dos modelos de atrezo y la escalera de la Gran Pila, que choca con su malla (el cliente
+  // solo la usa si su nivel ligero no pasa de 20 000 triángulos: MAX_COLLISION_TRIS en la web).
+  const props = sys.filter((e) => e.entity_id.startsWith("vertical_prop_") && e.components["mesh@1"]);
+  const meshCol = props.filter((e) => (e.components["collider@1"] as { from_mesh?: boolean } | undefined)?.from_mesh);
+  const lightest = (e: (typeof props)[number]) => (e.components["mesh@1"] as { lods: { tris: number }[] }).lods.at(-1)!.tris;
+  assert(props.length >= 3 && meshCol.length === 1 && lightest(meshCol[0]!) <= 20_000, `las Pilas y la escalera de la Gran Pila (${props.length} modelos; la escalera, ${meshCol[0] ? lightest(meshCol[0]) : "—"} triángulos)`);
   // Lo que hace el parkour viaja en la pose, como cualquier gesto.
   const b = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-pk-b" });
   b.pose([30, 1.6, 30], 0);

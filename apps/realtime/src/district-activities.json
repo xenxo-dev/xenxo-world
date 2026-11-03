@@ -1801,6 +1801,38 @@
         "width": 3.2,
         "style": "sign",
         "max_distance": 16
+      },
+      {
+        "text": {
+          "es": "LA GRAN PILA\nDieciséis pisos de caravanas. Sube por la escalera hasta el mirador, o por fuera, de tejado en tejado.",
+          "en": "THE GREAT STACK\nSixteen floors of trailers. Take the stairs up to the lookout, or climb the outside, roof by roof."
+        },
+        "p": [
+          4.6,
+          2.4,
+          -4.4
+        ],
+        "yaw": 90,
+        "size": 0.16,
+        "width": 3.4,
+        "style": "sign",
+        "max_distance": 18
+      },
+      {
+        "text": {
+          "es": "EL MIRADOR\n43 metros sobre la calle. Al sureste, la plaza y la Ruta de las Azoteas; alrededor, las Pilas.",
+          "en": "THE LOOKOUT\n43 metres above the street. To the southeast, the square and the Rooftop Run; all around, the Stacks."
+        },
+        "p": [
+          -4.5,
+          45.0,
+          -2.5
+        ],
+        "yaw": 90,
+        "size": 0.16,
+        "width": 3.4,
+        "style": "sign",
+        "max_distance": 14
       }
     ],
     "boards": [
@@ -1876,6 +1908,35 @@
           0,
           0
         ]
+      },
+      {
+        "piece": "vertical_towers_b",
+        "p": [
+          32,
+          0,
+          32
+        ],
+        "yaw": 0,
+        "half": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "piece": "vertical_stairs",
+        "p": [
+          32,
+          0,
+          32
+        ],
+        "yaw": 0,
+        "half": [
+          0,
+          0,
+          0
+        ],
+        "mesh_collider": true
       }
     ],
     "lights": [

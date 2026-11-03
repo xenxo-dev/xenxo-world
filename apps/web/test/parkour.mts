@@ -3,11 +3,13 @@
  * verdad, world/collision.ts): saltar una valla, subir a una plataforma corriendo y andando,
  * colgarse de un borde alto y trepar, moverse colgado, correr por una pared y rebotar, subir entre
  * dos paredes, deslizarse por debajo de una barra, agacharse en un túnel, rodar al caer de alto (y
- * el golpe sin rodar), y que nada de esto salte solo cuando no toca ni deje el cuerpo dentro de algo.
+ * el golpe sin rodar), que nada de esto salte solo cuando no toca ni deje el cuerpo dentro de algo, y
+ * subir a lo más alto de la Gran Pila de Vertical con sus cajas de verdad.
  *
  *   npm run test:parkour -w @xenxo/web
  */
 import type { Entity } from "@xenxo/protocol";
+import cities from "../../realtime/src/district-cities.json";
 import { world } from "../src/net/world-store";
 import { createBody, placeBody, type Body } from "../src/world/locomotion";
 import { createParkour, parkourStep, resetParkour, type Parkour, type ParkourInput } from "../src/world/parkour/moves";
@@ -338,6 +340,101 @@ scene([[0, 1, -5, 0.1, 1, 6]]);
     if (run.pk.balance) balanced = true;
   });
   check(balanced, "sobre una viga estrecha, en equilibrio");
+}
+
+// 13) Las Pilas de Vertical, con sus cajas de verdad (district-cities.json): de la calle a lo más alto
+//     de cada una (en la Gran Pila, por el hueco de su mirador), de tejado en tejado. Cada caravana de
+//     la espiral está 2,7 m más arriba y girada un cuarto: junto a la pared de la de encima siempre hay
+//     tejado donde ponerse y, por encima de esa pared, sitio para subir colgándose.
+{
+  type R = { x0: number; x1: number; z0: number; z1: number; y0: number; y1: number };
+  const list = (cities.cities as Record<string, number[][]>).vertical!;
+  const rects: R[] = list.map(([x, y, z, hx, hy, hz]) => ({ x0: x! - hx!, x1: x! + hx!, z0: z! - hz!, z1: z! + hz!, y0: y! - hy!, y1: y! + hy! }));
+  const isTrailer = (r: R) => {
+    const a = Math.max(r.x1 - r.x0, r.z1 - r.z0), b = Math.min(r.x1 - r.x0, r.z1 - r.z0);
+    return Math.abs(r.y1 - r.y0 - 2.7) < 0.02 && Math.abs(a - 6.8) < 0.02 && Math.abs(b - 2.45) < 0.02;
+  };
+  const trailers = rects.filter(isTrailer);
+  const overlap = (a: R, b: R) => Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)) * Math.max(0, Math.min(a.z1, b.z1) - Math.max(a.z0, b.z0));
+  // Cada pila: de una caravana en el suelo, la única de encima que la pisa por una esquina, y así.
+  const pilas: R[][] = [];
+  for (const t of trailers.filter((r) => r.y0 < 0.02)) {
+    const chain = [t];
+    for (;;) {
+      const cur = chain[chain.length - 1]!;
+      const next = trailers.filter((r) => Math.abs(r.y0 - cur.y1) < 0.02 && Math.abs(overlap(r, cur) - 2.45 * 2.45) < 0.2);
+      if (next.length !== 1) break;
+      chain.push(next[0]!);
+    }
+    if (chain.length >= 8) pilas.push(chain);
+  }
+  scene(list.map(([x, y, z, hx, hy, hz]) => [x!, y!, z!, hx!, hy!, hz!] as B));
+  type Step = { at: [number, number]; dir: [number, number]; top: number };
+  const mid = (a: number, b: number) => (a + b) / 2;
+  /** Por dónde se sube: de la calle a la primera (por su lado largo de fuera) y de cada una a la de encima. */
+  const route = (best: R[]): Step[] => {
+    const steps: Step[] = [];
+    const [a, b] = [best[0]!, best[1]!];
+    const cx = best.reduce((s, r) => s + mid(r.x0, r.x1), 0) / best.length;
+    const cz = best.reduce((s, r) => s + mid(r.z0, r.z1), 0) / best.length;
+    if (a.x1 - a.x0 > a.z1 - a.z0) {
+      const free = b.x0 > a.x0 + 0.1 ? [a.x0, b.x0] : [b.x1, a.x1];
+      const out = Math.abs(a.z0 - cz) > Math.abs(a.z1 - cz) ? -1 : 1;
+      steps.push({ at: [mid(free[0]!, free[1]!), (out < 0 ? a.z0 : a.z1) + out * 0.5], dir: [0, -out], top: a.y1 });
+    } else {
+      const free = b.z0 > a.z0 + 0.1 ? [a.z0, b.z0] : [b.z1, a.z1];
+      const out = Math.abs(a.x0 - cx) > Math.abs(a.x1 - cx) ? -1 : 1;
+      steps.push({ at: [(out < 0 ? a.x0 : a.x1) + out * 0.5, mid(free[0]!, free[1]!)], dir: [-out, 0], top: a.y1 });
+    }
+    for (let k = 0; k + 1 < best.length; k++) {
+      // La pared de la de encima que corta el tejado de esta: delante de ella, a medio metro.
+      const [a, b] = [best[k]!, best[k + 1]!];
+      const oz = mid(Math.max(a.z0, b.z0), Math.min(a.z1, b.z1));
+      const ox = mid(Math.max(a.x0, b.x0), Math.min(a.x1, b.x1));
+      if (b.x0 > a.x0 + 0.1 && b.x0 < a.x1 - 0.1) steps.push({ at: [b.x0 - 0.5, oz], dir: [1, 0], top: b.y1 });
+      else if (b.x1 > a.x0 + 0.1 && b.x1 < a.x1 - 0.1) steps.push({ at: [b.x1 + 0.5, oz], dir: [-1, 0], top: b.y1 });
+      else if (b.z0 > a.z0 + 0.1 && b.z0 < a.z1 - 0.1) steps.push({ at: [ox, b.z0 - 0.5], dir: [0, 1], top: b.y1 });
+      else steps.push({ at: [ox, b.z1 + 0.5], dir: [0, -1], top: b.y1 });
+    }
+    return steps;
+  };
+  const climb = (best: R[]) => {
+    const steps = route(best);
+    let i = 0;
+    let stage = "walk";
+    let t0 = 0;
+    let failed = "";
+    const r = simulate([steps[0]!.at[0], 0, steps[0]!.at[1]], 0, steps.length * 7, (t, run, inp) => {
+      inp.wantX = inp.wantZ = 0;
+      if (i >= steps.length || failed) return;
+      const st = steps[i]!;
+      const dx = st.at[0] - run.b.x, dz = st.at[1] - run.b.z;
+      if (stage === "walk") {
+        const d = Math.hypot(dx, dz);
+        if (d > 0.08) go(inp, dx, dz, Math.min(WALK, d * 3 + 0.3));
+        else (stage = "settle"), (t0 = t);
+      } else if (stage === "settle") {
+        if (t - t0 > 0.35) (stage = "jump"), (t0 = t);
+      } else if (stage === "jump") {
+        go(inp, st.dir[0], st.dir[1], 0.5);
+        if (t - t0 < 0.03) inp.jump = true;
+        if (run.pk.move === "hang") (stage = "hang"), (t0 = t);
+        else if (t - t0 > 1.5) failed = `piso ${i}: no se cuelga (y=${r2(run.b.y)})`;
+      } else if (stage === "hang") {
+        if (t - t0 > 0.4 && t - t0 < 0.43) inp.jump = true;
+        if (run.b.grounded && Math.abs(run.b.y - st.top) < 0.06 && run.pk.move !== "climb") (i++, (stage = "walk"));
+        else if (t - t0 > 3) failed = `piso ${i}: colgado, no sube (y=${r2(run.b.y)})`;
+      }
+    });
+    const ok = i === steps.length && Math.abs(r.b.y - best[best.length - 1]!.y1) < 0.06 && !r.stuck;
+    if (!ok) console.log(`  pila en (${r2(mid(best[0]!.x0, best[0]!.x1))}, ${r2(mid(best[0]!.z0, best[0]!.z1))}): subió ${i} de ${steps.length}, y=${r2(r.b.y)} ${failed}${r.stuck ? " (dentro de algo)" : ""}`);
+    return ok;
+  };
+  const tallest = Math.max(...pilas.map((p) => p.length));
+  const done = pilas.filter(climb).length;
+  console.log(`pilas: ${pilas.length} (la más alta, de ${tallest} pisos); subidas hasta arriba: ${done}`);
+  check(pilas.length >= 15 && tallest >= 16, "las Pilas, y la más alta de 16 pisos (la Gran Pila)");
+  check(done === pilas.length, "en todas, de la calle a lo más alto, colgándose de cada tejado");
 }
 
 if (fails) {

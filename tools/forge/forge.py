@@ -121,7 +121,10 @@ def main() -> None:
             add("vertical_flag", "prop", vertical.flag_object, [(ox + 32.0, -540.0, 0)])
             # Las torres de caravanas, aparte de la ciudad (cada modelo con su presupuesto); se hornean
             # en su sitio, con la ruta y el Patio haciéndoles sombra (y al revés).
-            add("vertical_towers", "district", lambda d, dd=dd: vertical.towers_object(dd["color"], d), [(ox + 32.0, 32.0, 0)])
+            add("vertical_towers", "district", lambda d, dd=dd: vertical.towers_object(dd["color"], d, "a"), [(ox + 32.0, 32.0, 0)])
+            add("vertical_towers_b", "district", lambda d, dd=dd: vertical.towers_object(dd["color"], d, "b"), [(ox + 32.0, 32.0, 0)])
+            # La escalera de la Gran Pila: su malla es su colisión (mesh_collider).
+            add("vertical_stairs", "district", lambda d, dd=dd: vertical.stairs_object(dd["color"], d), [(ox + 32.0, 32.0, 0)])
     # Las colisiones de las ciudades de los distritos (las mismas cajas que sus edificios).
     city.write_colliders(dl, dl["districts"])
     # La plaza también tiene su isla en el nexo, con su decorado mediterráneo.

@@ -1,7 +1,8 @@
 """
 Vertical, el distrito del parkour (diseño de detalle).
 
-Torres de caravanas apiladas alrededor de la plaza, y por encima **la Ruta de las Azoteas**: una
+**Las Pilas** (a lo Ready Player One: torres de caravanas en andamios de acero, que se escalan) en
+el borde de la ciudad, y alrededor de la plaza **la Ruta de las Azoteas**: una
 vuelta a la plaza por los tejados de siete manzanas, cruzando las calles por tablones, vigas y
 caravanas en voladizo. En cada manzana, un reto del parkour de world/parkour (saltar huecos y vallas,
 subir de un piso a otro, correr por la pared sobre un foso, deslizarse bajo un tubo, dejarse caer
@@ -12,9 +13,10 @@ plataforma de llegada.
 
 Todo sale de `plan()`, puro y determinista: el modelo (`build`) y las colisiones (`colliders`) usan
 las mismas cajas. `course()` da los puntos de la ruta y los banderines (la búsqueda) para la ficha de
-actividades. Las torres de alrededor van en su propio modelo (`towers_object`, la pieza
-`vertical_towers`, que el servidor pone como atrezo): así la ruta y el Patio caben con su detalle en
-el presupuesto de un modelo. Materiales de verdad: chapa ondulada, óxido, hormigón y hormigón pintado
+actividades. Las Pilas van en sus propios modelos (`towers_object`: las piezas `vertical_towers` y
+`vertical_towers_b`, que el servidor pone como atrezo; la escalera de la Gran Pila, `stairs_object`,
+choca con su malla): así la ruta y el Patio caben con su detalle en el presupuesto de un modelo.
+Materiales de verdad: chapa ondulada, óxido, hormigón y hormigón pintado
 (tools/materials/fetch.py). Las farolas del Patio salen de `lights` en district-activities.json, la
 misma lista con la que el servidor pone su luz (light@1).
 
@@ -79,6 +81,7 @@ class Plan:
 
     def __init__(self) -> None:
         self.items: list[dict] = []
+        self.pilas: list[dict] = []
 
     def add(self, kind: str, x0, z0, x1, z1, y0, y1, **kw) -> dict:
         it = {"kind": kind, "x0": round(x0, 3), "z0": round(z0, 3), "x1": round(x1, 3), "z1": round(z1, 3), "y0": round(y0, 3), "y1": round(y1, 3), **kw}
@@ -245,7 +248,7 @@ def _exit(b: Block, kind: str) -> tuple[float, float, float, float]:
 
 
 def plan() -> tuple[Plan, list]:
-    """Todo Vertical: la ruta, los cruces, el Patio y las torres de alrededor. Y sus marcas."""
+    """Todo Vertical: la ruta, los cruces, el Patio y las Pilas. Y sus marcas."""
     rnd = random.Random(1789)
     pl = Plan()
     marks: list = []
@@ -279,7 +282,7 @@ def plan() -> tuple[Plan, list]:
     x1, z1 = _to_world(fi, fj, fo, 0.4, 11.5)
     _crossing(pl, "plank", sx, START["deck"][1] + 0.4, x1, z1, roof(fP), rnd)
     _patio(pl, marks)
-    _towers(pl, rnd)
+    _pilas(pl, rnd)
     return pl, marks
 
 
@@ -363,36 +366,252 @@ def _patio(pl: Plan, marks: list) -> None:
         pl.add("lamp", x - 0.1, z - 0.1, x + 0.1, z + 0.1, 0, LAMP_H)
 
 
-def _towers(pl: Plan, rnd: random.Random) -> None:
-    """Torres de alrededor (decorado y retos libres): donde quepan, sin tocar la ruta ni las aceras."""
-    for (i, j) in [(i, j) for j in range(3) for i in range(3) if (i, j) != (1, 1)]:
+# --------------------------------------------------------------------------------------
+# Las Pilas (a lo Ready Player One)
+# --------------------------------------------------------------------------------------
+# Torres de caravanas en andamios de acero, que se escalan. Una caravana por piso, en espiral: al norte,
+# al este, al sur y al oeste del andamio (cada una girada un cuarto respecto a la de debajo, apoyada en
+# ella por una esquina y en las vigas por el resto). Así siempre queda, junto a la pared de la de
+# encima (2,7 m), un trozo de tejado donde ponerse, y por encima de esa pared, sitio para subir
+# colgándose del borde: se sube dando la vuelta (con dos por piso, alguna taparía el borde de otra).
+# Pilares y pasarelas son sólidos; vigas y cruces, no. La Gran Pila (16 pisos) lleva además la escalera
+# hasta el mirador de arriba (su malla es su colisión: `stairs_object`), puentes a sus tejados y un
+# montacargas.
+FRAME = 3.7          # m: del centro de una pila a la línea de sus pilares
+COL = 0.12           # m: medio grueso de un pilar
+EDGE = TL / 2        # 3,4: del centro al lado de fuera de cada caravana
+INNER = EDGE - TW    # 0,95: del centro al lado de dentro
+GRAN_TOP = 15        # último piso de la Gran Pila (16 pisos)
+MIRADOR = roof(GRAN_TOP)
+HOLE = 0.4           # m: hasta dónde llega (en X) el hueco del mirador por el que se llega trepando
+STAIR_W = 1.0        # m: ancho de cada tramo de la escalera
+STAIR_IN = FRAME + 0.15   # m: del centro de la Gran Pila a su escalera (al este)
+STAIR_RUN = 2.3      # m: medio largo de un tramo
+STAIR_END = 3.6      # m: del centro al borde de fuera de los descansillos
+STEPS = 8            # peldaños por tramo (medio piso: 1,35 m)
+LIFT = (FRAME + 0.35, FRAME + 2.25, 0.95)  # montacargas, al oeste: de dónde a dónde (en X) y medio ancho
+# Las cuatro posiciones de la espiral: (dirección del lado, a lo largo de X).
+SIDES = (("N", True), ("E", False), ("S", True), ("W", False))
+# Dónde: manzana, centro en su marco (u = x, v = z), fase de la espiral (qué posición lleva el piso 0) y
+# último piso. Un anillo de pilas en el borde de la ciudad, por fuera de la ruta; la primera, la Gran
+# Pila, en la manzana del noroeste (sin ruta). Las que tienen pasarela entre sí van con fases que
+# difieren en dos: a la misma altura, una tiene su caravana del lado de la otra y la otra, al revés.
+PILA_SITES = [
+    ((0, 0), 14.6, 14.0, 0, GRAN_TOP),   # 0: la Gran Pila
+    ((0, 0), 4.0, 4.0, 1, 12),           # 1
+    ((0, 0), 4.0, 14.5, 3, 10),          # 2
+    ((0, 0), 17.5, 4.0, 3, 11),          # 3
+    ((1, 0), 16.5, 4.0, 0, 13),          # 4
+    ((1, 0), 4.0, 15.3, 2, 11),          # 5
+    ((2, 0), 6.0, 4.0, 2, 11),           # 6
+    ((2, 0), 19.05, 16.0, 2, 12),        # 7
+    ((2, 0), 4.0, 19.0, 1, 10),          # 8
+    ((0, 1), 4.0, 15.3, 1, 12),          # 9
+    ((0, 1), 16.5, 4.0, 3, 10),          # 10
+    ((2, 1), 18.8, 5.0, 0, 11),          # 11
+    ((2, 1), 18.8, 17.6, 2, 13),         # 12
+    ((0, 2), 4.0, 5.2, 3, 13),           # 13
+    ((0, 2), 15.5, 19.0, 3, 12),         # 14
+    ((0, 2), 19.0, 4.0, 0, 10),          # 15
+    ((1, 2), 5.6, 19.0, 1, 10),          # 16
+    ((1, 2), 17.4, 19.0, 3, 12),         # 17
+    ((2, 2), 19.0, 5.6, 0, 11),          # 18
+    ((2, 2), 6.0, 19.0, 1, 12),          # 19
+]
+# Pasarelas (de tejado a tejado, entre pilas alineadas: la primera al norte o al oeste) y a qué
+# altura más o menos.
+WALKS = [(1, 2, 13.0), (1, 3, 21.0), (4, 6, 24.0), (9, 13, 19.0), (7, 11, 16.0), (11, 12, 22.0), (12, 18, 18.0),
+         (14, 16, 16.0), (16, 17, 22.0), (17, 19, 16.0)]
+
+
+def side_of(p: dict, k: int) -> int:
+    """Posición de la espiral (0 = N, 1 = E, 2 = S, 3 = W) de la caravana del piso k."""
+    return (k + p["phase"]) % 4
+
+
+def side_box(p: dict, s: int) -> tuple[float, float, float, float]:
+    """Planta de la caravana en la posición s de la pila."""
+    cx, cz = p["cx"], p["cz"]
+    if s == 0:
+        return cx - EDGE, cz - EDGE, cx + EDGE, cz - INNER
+    if s == 1:
+        return cx + INNER, cz - EDGE, cx + EDGE, cz + EDGE
+    if s == 2:
+        return cx - EDGE, cz + INNER, cx + EDGE, cz + EDGE
+    return cx - EDGE, cz - EDGE, cx - INNER, cz + EDGE
+
+
+def _pila_model(cx: float, cz: float) -> str:
+    """Las pilas van en dos modelos (cada uno con su presupuesto): las del noroeste y las del sureste."""
+    return "a" if cx + cz < 2 * C else "b"
+
+
+def _footprint(p: dict) -> tuple[float, float, float, float]:
+    """Lo que ocupa una pila en planta: el andamio; en la Gran Pila, también escalera y montacargas."""
+    a = FRAME + COL
+    x0, z0, x1, z1 = p["cx"] - a, p["cz"] - a, p["cx"] + a, p["cz"] + a
+    if p["gran"]:
+        x0, x1 = p["cx"] - LIFT[1] - 0.1, p["cx"] + STAIR_IN + 2 * STAIR_W + 0.1
+        z0, z1 = p["cz"] - STAIR_END - 0.2, p["cz"] + STAIR_END + 0.2
+    return x0, z0, x1, z1
+
+
+def pila_list() -> list[dict]:
+    """Las pilas (sin el plano): dónde, su fase, hasta qué piso y en qué modelo van."""
+    out = []
+    for n, ((i, j), cu, cv, phase, top) in enumerate(PILA_SITES):
         bx, bz = _inner(i, j)
-        spots = [(3.5, 3.5), (19.5, 3.5), (3.5, 19.5), (19.5, 19.5), (11.5, 3.5), (3.5, 11.5), (19.5, 11.5), (11.5, 19.5)]
-        rnd.shuffle(spots)
-        placed = 0
-        for (cu, cv) in spots:
-            if placed >= (4 if (i, j) == (0, 0) else 2):
-                break
-            along_x = rnd.random() < 0.5
-            hx, hz = (TL / 2, HALF) if along_x else (HALF, TL / 2)
-            x0, z0, x1, z1 = bx + cu - hx, bz + cv - hz, bx + cu + hx, bz + cv + hz
-            if x0 < bx or z0 < bz or x1 > bx + S or z1 > bz + S:
-                continue
-            top = rnd.randint(4, 8) if (i, j) == (0, 0) else rnd.randint(3, 6)
-            # Cruzadas debajo: comprobar el sitio con la huella de las cruzadas también.
-            cx0, cz0, cx1, cz1 = bx + cu - TL / 2, bz + cv - TL / 2, bx + cu + TL / 2, bz + cv + TL / 2
-            if cx0 < bx or cz0 < bz or cx1 > bx + S or cz1 > bz + S:
-                continue
-            if not pl.free(cx0 - 0.6, cz0 - 0.6, cx1 + 0.6, cz1 + 0.6, 0, roof(top) + 0.5):
-                continue
-            b = Block(pl, i, j, "E", rnd)
-            n0 = len(pl.items)
-            b.stack(cu - (TL / 2 if along_x else HALF), cv - (HALF if along_x else TL / 2), cu + (TL / 2 if along_x else HALF), cv + (HALF if along_x else TL / 2), top, route=False)
-            # Las torres van en su propio modelo (towers_object); la de arriba lleva lo de la azotea.
-            for it in pl.items[n0:]:
-                it["tower"] = True
-            pl.items[n0]["top"] = True
-            placed += 1
+        p = {"id": n, "i": i, "j": j, "cx": bx + cu, "cz": bz + cv, "top": top, "phase": phase, "gran": n == 0}
+        p["model"] = _pila_model(p["cx"], p["cz"])
+        p["h"] = MIRADOR + RAIL if p["gran"] else roof(top) + 0.35
+        out.append(p)
+    return out
+
+
+def _pilas(pl: Plan, rnd: random.Random) -> list[dict]:
+    """Las Pilas: sus caravanas y pilares, lo de la Gran Pila y las pasarelas."""
+    pilas = pila_list()
+    for p in pilas:
+        bx, bz = _inner(p["i"], p["j"])
+        x0, z0, x1, z1 = _footprint(p)
+        if x0 < bx - 0.01 or z0 < bz - 0.01 or x1 > bx + S + 0.01 or z1 > bz + S + 0.01:
+            raise ValueError(f"la pila {p['id']} se sale de su manzana")
+        if not pl.free(x0, z0, x1, z1, 0, MIRADOR + 3, margin=0.1):
+            raise ValueError(f"la pila {p['id']} pisa algo de la ruta")
+        _pila_stack(pl, p, rnd)
+    _gran(pl, pilas[0])
+    p_walks = _catwalks(pl, pilas)
+    for p in pilas:
+        p["walks"] = [w for w in p_walks if p["id"] in (w["a"], w["b"])]
+    pl.pilas = pilas
+    return pilas
+
+
+def _pila_stack(pl: Plan, p: dict, rnd: random.Random) -> None:
+    """Las caravanas de una pila (de arriba abajo, una por piso, en espiral) y sus cuatro pilares."""
+    kw = {"tower": True, "pila": p["id"], "model": p["model"]}
+    for k in range(p["top"], -1, -1):
+        s = side_of(p, k)
+        x0, z0, x1, z1 = side_box(p, s)
+        it = pl.trailer(x0, z0, x1, z1, k, rnd.choice(TINTS), side=s, **kw)
+        if k == p["top"]:
+            it["top"] = True
+            if p["gran"]:
+                it["mirador"] = True
+    for sx in (-1, 1):
+        for sz in (-1, 1):
+            x, z = p["cx"] + sx * FRAME, p["cz"] + sz * FRAME
+            pl.add("column", x - COL, z - COL, x + COL, z + COL, 0, p["h"], **kw)
+
+
+def _gran(pl: Plan, g: dict) -> None:
+    """
+    La Gran Pila: arriba, el mirador (el tejado de la última caravana y, alrededor, rejilla hasta los
+    pilares, con barandilla menos por donde llega la escalera; junto a la última caravana, un hueco con
+    barandilla en tres lados: por ahí se llega trepando). El sitio de la escalera (su malla es su
+    colisión) y el montacargas (sólido entero).
+    """
+    cx, cz = g["cx"], g["cz"]
+    kw = {"tower": True, "pila": 0, "model": g["model"]}
+    if side_of(g, g["top"]) != 3 or side_of(g, g["top"] - 1) != 2:
+        raise ValueError("el mirador cuenta con la última caravana al oeste y la de debajo al sur")
+    y = MIRADOR
+    a = FRAME + COL
+    grates = [
+        (cx - a, cz - a, cx + a, cz - EDGE),          # norte
+        (cx - a, cz + EDGE, cx + a, cz + a),          # sur
+        (cx - a, cz - EDGE, cx - EDGE, cz + EDGE),    # oeste (por fuera de la última caravana)
+        (cx - INNER, cz - EDGE, cx + a, cz + INNER),  # el noreste, sobre el vacío
+        (cx + HOLE, cz + INNER, cx + a, cz + EDGE),   # el sureste, sobre la penúltima
+    ]
+    for (x0, z0, x1, z1) in grates:
+        pl.add("grate", x0, z0, x1, z1, y - 0.1, y, mirador=True, **kw)
+    t = 0.06
+    pl.add("rail", cx - a, cz - a, cx + a, cz - a + t, y, y + RAIL, **kw)
+    pl.add("rail", cx - a, cz + a - t, cx + a, cz + a, y, y + RAIL, **kw)
+    pl.add("rail", cx - a, cz - a + t, cx - a + t, cz + a - t, y, y + RAIL, **kw)
+    pl.add("rail", cx + a - t, cz - STAIR_RUN + 0.1, cx + a, cz + a - t, y, y + RAIL, **kw)
+    # El hueco (x de -0,95 a 0,4; z de 0,95 a 3,4): barandilla al norte, al este y al sur.
+    pl.add("rail", cx - INNER, cz + INNER, cx + HOLE, cz + INNER + t, y, y + RAIL, **kw)
+    pl.add("rail", cx + HOLE, cz + INNER, cx + HOLE + t, cz + EDGE, y, y + RAIL, **kw)
+    pl.add("rail", cx - INNER, cz + EDGE - t, cx + HOLE, cz + EDGE, y, y + RAIL, **kw)
+    xa = cx + STAIR_IN
+    pl.add("stairs", xa, cz - STAIR_END - 0.1, xa + 2 * STAIR_W, cz + STAIR_END + 0.1, 0, MIRADOR + RAIL, nocol=True, **kw)
+    pl.add("lift", cx - LIFT[1], cz - LIFT[2], cx - LIFT[0], cz + LIFT[2], 0, MIRADOR + 2.6, **kw)
+
+
+def stair_flights(g: dict) -> list[dict]:
+    """
+    La escalera de la Gran Pila, al este de su andamio: tramos de medio piso (1,35 m en 4,6 m) en zigzag
+    por dos carriles, descansillos en los dos extremos y, en los pisos donde la caravana de debajo está
+    al este (cada cuatro), un puente a su tejado. El último descansillo da al mirador. Pura y
+    determinista: la usa el modelo (su malla es su colisión).
+    """
+    cx, cz, top = g["cx"], g["cz"], g["top"]
+    xa = cx + STAIR_IN
+    lanes = ((xa, xa + STAIR_W), (xa + STAIR_W, xa + 2 * STAIR_W))
+    n0, n1 = cz - STAIR_RUN, cz + STAIR_RUN
+    half = LV / 2
+    n = 2 * (top + 1)
+    out = []
+    for k in range(n):
+        y0, y1 = k * half, (k + 1) * half
+        south = k % 2 == 0  # los pares suben hacia el sur por el carril de dentro; los impares, de vuelta
+        lane = lanes[k % 2]
+        out.append({"kind": "flight", "x0": lane[0], "x1": lane[1], "za": n0 if south else n1, "zb": n1 if south else n0, "y0": y0, "y1": y1, "lane": k % 2})
+        z0, z1 = (n1, cz + STAIR_END) if south else (cz - STAIR_END, n0)
+        lvl = (k + 1) // 2
+        bridge = not south and k < n - 1 and side_of(g, lvl - 1) == 1
+        out.append({"kind": "landing", "x0": xa, "x1": xa + 2 * STAIR_W, "z0": z0, "z1": z1, "y": y1, "end": "S" if south else "N", "top": k == n - 1, "bridge": bridge})
+        if bridge:
+            out.append({"kind": "bridge", "x0": cx + EDGE - 0.45, "x1": xa, "z0": cz - EDGE + 0.05, "z1": n0, "y": y1})
+    return out
+
+
+def _catwalks(pl: Plan, pilas: list[dict]) -> list[dict]:
+    """
+    Pasarelas de `WALKS`: rectas, de tejado a tejado, en un piso en que la primera pila tiene su
+    caravana del lado de la segunda y la segunda, del lado de la primera (por eso sus fases difieren en
+    dos), a la altura más cercana a la que se pide; sin tocar nada por el camino.
+    """
+    out = []
+    for (ia, ib, want) in WALKS:
+        a, b = pilas[ia], pilas[ib]
+        dx, dz = b["cx"] - a["cx"], b["cz"] - a["cz"]
+        along_z = abs(dx) < 0.6 and dz > 0
+        if not along_z and not (abs(dz) < 0.6 and dx > 0):
+            raise ValueError(f"la pasarela {ia}-{ib} no va recta (la primera, al norte o al oeste)")
+        sa, sb = (2, 0) if along_z else (1, 3)
+        floors = [k for k in range(2, min(a["top"], b["top"])) if side_of(a, k) == sa and side_of(b, k) == sb]
+        if not floors:
+            raise ValueError(f"la pasarela {ia}-{ib} no tiene piso común")
+        k = min(floors, key=lambda k: abs(roof(k) - want))
+        y = roof(k)
+        w = 0.55
+        kw = {"tower": True, "model": a["model"]}
+        if along_z:
+            c = (a["cx"] + b["cx"]) / 2
+            z0, z1 = a["cz"] + EDGE, b["cz"] - EDGE
+            box = (c - w, z0, c + w, z1)
+        else:
+            c = (a["cz"] + b["cz"]) / 2
+            x0, x1 = a["cx"] + EDGE, b["cx"] - EDGE
+            box = (x0, c - w, x1, c + w)
+        # Lo de en medio, libre (sin contar los dos tejados de los extremos).
+        inset = FRAME + COL - EDGE + 0.05
+        free = (box[0] + 0.05, box[1] + inset, box[2] - 0.05, box[3] - inset) if along_z else (box[0] + inset, box[1] + 0.05, box[2] - inset, box[3] - 0.05)
+        if not pl.free(*free, y - 0.6, y + 2.6):
+            raise ValueError(f"la pasarela {ia}-{ib} pisa algo")
+        pl.add("catwalk", *box, y - 0.1, y, along="z" if along_z else "x", **kw)
+        t = 0.05
+        if along_z:
+            pl.add("rail", c - w, z0, c - w + t, z1, y, y + RAIL, **kw)
+            pl.add("rail", c + w - t, z0, c + w, z1, y, y + RAIL, **kw)
+        else:
+            pl.add("rail", x0, c - w, x1, c - w + t, y, y + RAIL, **kw)
+            pl.add("rail", x0, c + w - t, x1, c + w, y, y + RAIL, **kw)
+        out.append({"a": ia, "b": ib, "k": k, "along_z": along_z})
+    return out
 
 
 # --------------------------------------------------------------------------------------
@@ -403,6 +622,8 @@ def colliders() -> list[list[float]]:
     pl, _marks = plan()
     out = []
     for it in pl.items:
+        if it.get("nocol"):
+            continue
         x0, z0, x1, z1, y0, y1 = it["x0"], it["z0"], it["x1"], it["z1"], it["y0"], it["y1"]
         out.append([round((x0 + x1) / 2, 3), round((y0 + y1) / 2, 3), round((z0 + z1) / 2, 3), round((x1 - x0) / 2, 3), round((y1 - y0) / 2, 3), round((z1 - z0) / 2, 3)])
     return out
@@ -482,6 +703,7 @@ TEAL = "#3f9c93"
 CORAL = "#e0715a"
 YELLOW = "#f2c230"
 GALV = "#c9ced6"          # acero galvanizado (barandillas y farolas)
+SHEET_STEEL = "#80878f"   # chapa de acero (las barandillas de las Pilas en el nivel ligero)
 SHEET = "#5f8fa8"         # la chapa de la pared de correr
 AWNINGS = ["#c8553d", "#2f7d6a", "#d9a441"]
 CLOTHES = ["#d94f4f", "#f2e6c9"]
@@ -592,7 +814,11 @@ def _trailer(p: Part, it: dict, rnd: random.Random, detail: int, color: str) -> 
             while k < L - rc - 0.9:
                 q.box((-W / 2 + 0.05, k - 0.025, H), (W / 2 - 0.05, k + 0.025, H + 0.012), seam, skip=("-z",))
                 k += 1.25
-    elif detail and (it.get("tower") or it.get("level", 0) == 0):
+    elif detail and it.get("tower"):
+        # En las pilas, nada en los lados (por ahí se trepa): a veces, un rótulo de neón en la trasera.
+        if 0.4 < extra < 0.62 and it.get("level", 0) >= 2:
+            _sign(q, L, W, H, yb, color)
+    elif detail and it.get("level", 0) == 0:
         # La vida de fuera de la ruta: toldo sobre la puerta, el aparato del aire bajo una ventana o,
         # en lo alto de las torres, un rótulo de neón en la trasera.
         if extra < 0.3:
@@ -605,9 +831,9 @@ def _trailer(p: Part, it: dict, rnd: random.Random, detail: int, color: str) -> 
             q.box((min(xo, xg), wc - 0.26, yb + 1.0), (max(xo, xg), wc + 0.26, yb + 1.28), mat("metal", "#2b2f38"), skip=("+x" if ws < 0 else "-x",))
         elif extra < 0.62 and it.get("level", 0) >= 2:
             _sign(q, L, W, H, yb, color)
-    if it.get("top"):
+    if it.get("top") and not it.get("mirador"):
         _roof_life(q, L, W, H, pick, detail)
-    elif detail and not route:
+    elif detail and not route and not it.get("tower"):
         # En el techo, a veces: claraboya, antena con su parabólica o placas solares.
         if r < 0.25:
             q.box((-0.45, L * 0.5 - 0.35, H), (0.45, L * 0.5 + 0.35, H + 0.5), mat("metal", GREY))
@@ -901,7 +1127,7 @@ def _boards(p: Part, color: str, detail: int) -> None:
 
 
 def build(p: Part, color: str, detail: int) -> None:
-    """La ruta y el Patio, con sus farolas (las torres de alrededor van aparte: towers_object)."""
+    """La ruta y el Patio, con sus farolas (las Pilas van aparte: towers_object y stairs_object)."""
     _boards(p, color, detail)
     pl, _marks = plan()
     rnd = random.Random(42)
@@ -949,72 +1175,382 @@ def build(p: Part, color: str, detail: int) -> None:
     _festoon(p)
 
 
-def _cables(p: Part, pl: Plan, rnd: random.Random) -> None:
-    """Cables de torre a torre (con su vecina más cercana), y en la mitad, bombillas."""
-    tops = [it for it in pl.items if it.get("top")]
+def _beam_box(p: Part, x0, z0, x1, z1, y0, y1, m) -> None:
+    """Viga de acero: una caja sin las tapas de los extremos."""
+    if (x1 - x0) >= (z1 - z0):
+        _box(p, x0, z0, x1, z1, y0, y1, m, skip=("+x", "-x"))
+    else:
+        _box(p, x0, z0, x1, z1, y0, y1, m, skip=("+y", "-y"))
+
+
+def _grate(p: Part, it: dict) -> None:
+    """Suelo de chapa de acero (pasarelas, descansillos y el mirador) sobre su canto de perfil oxidado."""
+    x0, z0, x1, z1, y0, y1 = it["x0"], it["z0"], it["x1"], it["z1"], it["y0"], it["y1"]
+    _box(p, x0, z0, x1, z1, y1 - 0.04, y1, mat("metal", "#4a4f58"))
+    _box(p, x0, z0, x1, z1, y0, y1 - 0.04, mat("oxido", STEEL), skip=("+z",))
+
+
+def _frame(p: Part, g: dict, items: list, detail: int) -> None:
+    """
+    El andamio de una pila: pilares en H, un anillo de vigas en cada piso, una viga bajo el extremo de
+    cada caravana que no descansa en la de debajo (se ve que la aguanta el andamio), cruces de San
+    Andrés en dos lados por donde no llega ninguna pasarela (en la Gran Pila, solo detrás del
+    montacargas: al este va la escalera) y, cada pocos pisos, una lámpara de obra en un pilar.
+    """
+    cx, cz, top = g["cx"], g["cz"], g["top"]
+    steel = mat("oxido", STEEL)
+    F = FRAME
+    for it in items:
+        if it["kind"] == "column" and it.get("pila") == g["id"]:
+            _column(p, it)
+    for k in range(1, top + 2):
+        y = k * LV
+        if detail or k % 2 == 0 or k == top + 1:
+            b0, b1 = y - 0.2, y - 0.02
+            _beam_box(p, cx - F, cz - F - 0.05, cx + F, cz - F + 0.05, b0, b1, steel)
+            _beam_box(p, cx - F, cz + F - 0.05, cx + F, cz + F + 0.05, b0, b1, steel)
+            _beam_box(p, cx - F - 0.05, cz - F, cx - F + 0.05, cz + F, b0, b1, steel)
+            _beam_box(p, cx + F - 0.05, cz - F, cx + F + 0.05, cz + F, b0, b1, steel)
+        if k <= top:
+            # El extremo de la caravana del piso k que no se apoya en la de debajo, de lado a lado.
+            e = EDGE - 0.15
+            s = side_of(g, k)
+            if s == 0:
+                _beam_box(p, cx + e - 0.06, cz - F, cx + e + 0.06, cz + F, y - 0.17, y - 0.01, steel)
+            elif s == 1:
+                _beam_box(p, cx - F, cz + e - 0.06, cx + F, cz + e + 0.06, y - 0.17, y - 0.01, steel)
+            elif s == 2:
+                _beam_box(p, cx - e - 0.06, cz - F, cx - e + 0.06, cz + F, y - 0.17, y - 0.01, steel)
+            else:
+                _beam_box(p, cx - F, cz - e - 0.06, cx + F, cz - e + 0.06, y - 0.17, y - 0.01, steel)
+    # Cruces: en dos lados (opuestos, si se puede) por donde no pasa ninguna pasarela.
+    used = set()
+    for w in g.get("walks", []):
+        first = w["a"] == g["id"]
+        used.add(("z", 1 if first else -1) if w["along_z"] else ("x", 1 if first else -1))
+    if g["gran"]:
+        faces = [("x", -1)]
+    else:
+        faces = [f for f in (("x", -1), ("x", 1)) if f not in used]
+        if len(faces) < 2:
+            faces = [f for f in (("z", -1), ("z", 1)) if f not in used] if not ({("z", -1), ("z", 1)} & used) else faces
+    for (axis, sg) in faces:
+        for k in range(top + 1):
+            if not detail and k % 2:
+                continue
+            ya, yb = k * LV + 0.12, (k + 1) * LV - 0.28
+            if axis == "x":
+                x = cx + sg * (F + 0.02)
+                ends = ((_bl(x, cz - F, ya), _bl(x, cz + F, yb)), (_bl(x, cz + F, ya), _bl(x, cz - F, yb)))
+            else:
+                z = cz + sg * (F + 0.02)
+                ends = ((_bl(cx - F, z, ya), _bl(cx + F, z, yb)), (_bl(cx + F, z, ya), _bl(cx - F, z, yb)))
+            for (u, v) in ends:
+                p.tube([u, v], 0.035, steel, segments=4 if detail else 3)
+    # Lámparas de obra: cada tres pisos, en un pilar distinto (por fuera de la esquina).
+    corners = ((1, 1), (-1, 1), (-1, -1), (1, -1))
+    for n, k in enumerate(range(2, top + 1, 3)):
+        sx, sz = corners[(n + g["id"]) % 4]
+        x, z = cx + sx * (F + COL + 0.12), cz + sz * (F + COL + 0.12)
+        y = k * LV + 2.1
+        _box(p, min(x, cx + sx * (F + COL)), z - 0.02, max(x, cx + sx * (F + COL)), z + 0.02, y + 0.06, y + 0.1, steel)
+        p.sphere(_bl(x, z, y), 0.08, mat("farol", BULB), subdiv=0)
+        if detail:
+            p.lathe(_bl(x, z, y + 0.02), [(0.15, 0.0), (0.1, 0.07), (0.03, 0.13)], mat("hierro", DARK), segments=8, close_top=True)
+
+
+def _catwalk(p: Part, it: dict, detail: int) -> None:
+    """Pasarela entre dos pilas: suelo de chapa y, a los lados, vigas de celosía (las barandillas, aparte)."""
+    _grate(p, it)
+    x0, z0, x1, z1, y0, y1 = it["x0"], it["z0"], it["x1"], it["z1"], it["y0"], it["y1"]
+    steel = mat("oxido", STEEL)
+    along_x = it.get("along") == "x"
+    L = (x1 - x0) if along_x else (z1 - z0)
+    n = max(2, round(L / 1.6))
+    lo, hi = y0 - 0.22, y1 + RAIL - 0.04
+    for side in (-1, 1):
+        if along_x:
+            zc = (z0 + z1) / 2 + side * ((z1 - z0) / 2 - 0.03)
+
+            def at(s, y, zc=zc):
+                return _bl(x0 + s, zc, y)
+        else:
+            xc = (x0 + x1) / 2 + side * ((x1 - x0) / 2 - 0.03)
+
+            def at(s, y, xc=xc):
+                return _bl(xc, z0 + s, y)
+        p.tube([at(0.0, lo), at(L, lo)], 0.05, steel, segments=4)
+        for k in range(n if detail else 0):
+            s0, s1 = L * k / n, L * (k + 1) / n
+            a, b = (lo, hi) if k % 2 == 0 else (hi, lo)
+            p.tube([at(s0, a), at(s1, b)], 0.022, steel, segments=4)
+    # Travesaños bajo el suelo (de lado a lado), cada tramo de la celosía.
+    for k in range(n + 1):
+        s = L * k / n
+        if along_x:
+            _beam_box(p, x0 + s - 0.04, z0, x0 + s + 0.04, z1, lo - 0.05, y0, steel)
+        else:
+            _beam_box(p, x0, z0 + s - 0.04, x1, z0 + s + 0.04, lo - 0.05, y0, steel)
+
+
+def _cage(p: Part, x0, z0, x1, z1, y0, y1, detail: int) -> None:
+    """Jaula del montacargas: suelo, techo, cuatro postes y barrotes (la puerta, al oeste, de rombos)."""
+    steel = mat("oxido", STEEL)
+    paint = mat("pintado", YELLOW)
+    _box(p, x0, z0, x1, z1, y0, y0 + 0.12, steel)
+    _box(p, x0, z0, x1, z1, y1 - 0.1, y1, paint)
+    for (x, z) in ((x0, z0), (x1, z0), (x0, z1), (x1, z1)):
+        _box(p, x - 0.04, z - 0.04, x + 0.04, z + 0.04, y0 + 0.12, y1 - 0.1, paint, skip=("+z", "-z"))
+    n = 6 if detail else 3
+    for k in range(1, n):
+        t = k / n
+        x, z = x0 + (x1 - x0) * t, z0 + (z1 - z0) * t
+        for (a0, b0, a1, b1) in ((x - 0.012, z0 - 0.012, x + 0.012, z0 + 0.012), (x - 0.012, z1 - 0.012, x + 0.012, z1 + 0.012), (x1 - 0.012, z - 0.012, x1 + 0.012, z + 0.012)):
+            _box(p, a0, b0, a1, b1, y0 + 0.12, y1 - 0.1, steel, skip=("+z", "-z"))
+    if detail:  # la puerta de tijera
+        for k in range(5):
+            za, zb = z0 + (z1 - z0) * k / 5, z0 + (z1 - z0) * (k + 1) / 5
+            p.tube([_bl(x0, za, y0 + 0.15), _bl(x0, zb, y1 - 0.15)], 0.012, steel, segments=3)
+            p.tube([_bl(x0, zb, y0 + 0.15), _bl(x0, za, y1 - 0.15)], 0.012, steel, segments=3)
+
+
+def _lift(p: Part, it: dict, detail: int) -> None:
+    """
+    El montacargas de la Gran Pila, al oeste: cuatro guías de abajo arriba atadas cada piso (y al
+    andamio cada dos), el cabezal sobre el mirador con su polea, los cables y dos jaulas: una abajo y
+    otra parada a media altura.
+    """
+    x0, z0, x1, z1, y1 = it["x0"], it["z0"], it["x1"], it["z1"], it["y1"]
+    steel = mat("oxido", STEEL)
+    dark = mat("hierro", DARK)
+    top = y1 - 0.5
+    for (x, z) in ((x0 + 0.06, z0 + 0.06), (x1 - 0.06, z0 + 0.06), (x0 + 0.06, z1 - 0.06), (x1 - 0.06, z1 - 0.06)):
+        _box(p, x - 0.06, z - 0.06, x + 0.06, z + 0.06, 0, top, steel, skip=("-z",))
+    for k in range(1, int(top / LV) + 1):
+        if not detail and k % 2:
+            continue
+        y = k * LV
+        _beam_box(p, x0, z0, x1, z0 + 0.08, y - 0.1, y, steel)
+        _beam_box(p, x0, z1 - 0.08, x1, z1, y - 0.1, y, steel)
+        _beam_box(p, x0, z0, x0 + 0.08, z1, y - 0.1, y, steel)
+        if k % 2 == 0:  # atada al andamio
+            _beam_box(p, x1, z0 + 0.3, x1 + (LIFT[0] - FRAME), z0 + 0.38, y - 0.1, y, steel)
+            _beam_box(p, x1, z1 - 0.38, x1 + (LIFT[0] - FRAME), z1 - 0.3, y - 0.1, y, steel)
+    # El cabezal: dos vigas por encima y la polea en medio.
+    xm, zm = (x0 + x1) / 2, (z0 + z1) / 2
+    _beam_box(p, x0, z0, x1, z0 + 0.14, top, top + 0.22, steel)
+    _beam_box(p, x0, z1 - 0.14, x1, z1, top, top + 0.22, steel)
+    _box(p, xm - 0.1, z0, xm + 0.1, z1, top + 0.22, top + 0.4, steel)
+    wx, wy, wz = _bl(xm - 0.06, zm, top + 0.75)
+    p.cylinder((wx, wy, wz), 0.38, 0.12, mat("pintado", YELLOW), segments=14 if detail else 8, axis="x")
+    for (zz, cy) in ((zm - 0.36, 0.0), (zm + 0.36, roof(7) + 0.4)):
+        p.tube([_bl(xm, zz, top + 0.75), _bl(xm, zz, cy + 2.45)], 0.014, dark, segments=3)
+    for cy in (0.0, roof(7) + 0.4):
+        _cage(p, x0 + 0.16, z0 + 0.16, x1 - 0.16, z1 - 0.16, cy, cy + 2.45, detail)
+
+
+def _mast(p: Part, g: dict, color: str, detail: int) -> None:
+    """Mástil del mirador: en la esquina del suroeste, con su banderín y una baliza que brilla."""
+    x, z = g["cx"] - FRAME + 0.35, g["cz"] + FRAME - 0.35
+    dark = mat("hierro", DARK)
+    p.cylinder(_bl(x, z, MIRADOR), 0.06, 6.5, dark, segments=8 if detail else 5, radius_top=0.035)
+    q = Part("banderin")
+    q.prism([(0.0, 0.0), (1.6, 0.35), (0.0, 0.9)], -0.015, 0.015, mat("neon", ORANGE))
+    p.merge(q, Matrix.Translation(_bl(x, z, MIRADOR + 5.3)) @ Matrix.Rotation(math.radians(-30), 4, "Z"))
+    q.bm.free()
+    p.sphere(_bl(x, z, MIRADOR + 6.6), 0.12, mat("neon", color), subdiv=1 if detail else 0)
+
+
+def _pila_cables(p: Part, mine: list[dict], pilas: list[dict], solid: list[dict], rnd: random.Random) -> None:
+    """
+    Cables de una pila a sus dos vecinas más cercanas, de lo alto de un pilar a lo alto del otro (los
+    de la que está más al noroeste: así no se dibujan dos veces), y en la mitad, bombillas.
+    """
     wire = mat("hierro", DARK)
     bulb = mat("farol", BULB)
-    solid = [it for it in pl.items if it["kind"] == "trailer"]
-
-    def centre(it):
-        return (it["x0"] + it["x1"]) / 2, (it["z0"] + it["z1"]) / 2
-
-    def exit_point(it, dx, dz):
-        cx, cz = centre(it)
-        hx, hz = (it["x1"] - it["x0"]) / 2, (it["z1"] - it["z0"]) / 2
-        t = min(hx / abs(dx) if dx else 1e9, hz / abs(dz) if dz else 1e9)
-        return cx + dx * (t + 0.02), cz + dz * (t + 0.02)
-
+    ids = {g["id"] for g in mine}
     done = set()
-    for a in tops:
-        ax, az = centre(a)
-        near = sorted((math.hypot(centre(b)[0] - ax, centre(b)[1] - az), n) for n, b in enumerate(tops) if b is not a)
-        lit = rnd.random() < 0.5
-        for d, n in near[:2]:
-            b = tops[n]
-            key = tuple(sorted((id(a), id(b))))
-            if key in done or not (6.0 < d < 24.0):
+    for a in pilas:
+        near = sorted((math.hypot(b["cx"] - a["cx"], b["cz"] - a["cz"]), b["id"]) for b in pilas if b is not a)
+        for d, bid in near[:2]:
+            b = pilas[bid]
+            key = (min(a["id"], b["id"]), max(a["id"], b["id"]))
+            lit = rnd.random() < 0.6
+            if key in done or key[0] not in ids or not (8.0 < d < 34.0):
                 continue
             done.add(key)
-            bx, bz = centre(b)
-            dx, dz = (bx - ax) / d, (bz - az) / d
-            pa, pb = exit_point(a, dx, dz), exit_point(b, -dx, -dz)
-            ya, yb = a["y1"] - 0.35, b["y1"] - 0.35
-            sag = 0.25 + 0.05 * d
-            # Que no atraviese ninguna caravana por el camino.
+            dx, dz = (b["cx"] - a["cx"]) / d, (b["cz"] - a["cz"]) / d
+            sa = (1 if dx >= 0 else -1, 1 if dz >= 0 else -1)
+            pa = (a["cx"] + sa[0] * FRAME, a["h"] - 0.15, a["cz"] + sa[1] * FRAME)
+            pb = (b["cx"] - sa[0] * FRAME, b["h"] - 0.15, b["cz"] - sa[1] * FRAME)
+            sag = 0.6 + 0.05 * d
             clear = True
-            for k in range(1, 12):
-                t = k / 12
-                x, z = pa[0] + (pb[0] - pa[0]) * t, pa[1] + (pb[1] - pa[1]) * t
-                y = ya + (yb - ya) * t - sag * 4 * t * (1 - t)
-                for it in solid:
-                    if it is a or it is b:
-                        continue
-                    if it["x0"] - 0.1 < x < it["x1"] + 0.1 and it["z0"] - 0.1 < z < it["z1"] + 0.1 and it["y0"] - 0.1 < y < it["y1"] + 0.1:
-                        clear = False
-                        break
-                if not clear:
+            for k in range(1, 16):
+                t = k / 16
+                x, z = pa[0] + (pb[0] - pa[0]) * t, pa[2] + (pb[2] - pa[2]) * t
+                y = pa[1] + (pb[1] - pa[1]) * t - sag * 4 * t * (1 - t)
+                if any(it["x0"] - 0.1 < x < it["x1"] + 0.1 and it["z0"] - 0.1 < z < it["z1"] + 0.1 and it["y0"] - 0.1 < y < it["y1"] + 0.1 for it in solid):
+                    clear = False
                     break
             if clear:
-                _catenary(p, (pa[0], ya, pa[1]), (pb[0], yb, pb[1]), sag, wire, bulb if lit else None, every=1.1)
+                _catenary(p, pa, pb, sag, wire, bulb if lit else None, every=1.2, n=12)
 
 
-def towers_object(color: str, detail: int):
+def towers_object(color: str, detail: int, model: str = "a"):
     """
-    Las torres de caravanas de alrededor (decorado y retos libres), en su propio modelo: con su azotea,
-    sus cables de una a otra y, en la mitad de los cables, bombillas. Sus colisiones van con las de la
-    ciudad (colliders()); el servidor las pone con el atrezo de district-activities.json.
+    Las Pilas (decorado y retos libres), en dos modelos (cada uno con su presupuesto): las del noroeste
+    (`vertical_towers`, con la Gran Pila) y las del sureste (`vertical_towers_b`). Caravanas, andamios,
+    balcones, pasarelas, cables con bombillas y, en la Gran Pila, el montacargas y el mástil del
+    mirador. Sus colisiones van con las de la ciudad (colliders()); la escalera, aparte (stairs_object).
     """
-    p = Part("vertical_towers")
+    name = "vertical_towers" if model == "a" else "vertical_towers_b"
+    p = Part(name)
     pl, _marks = plan()
-    rnd = random.Random(4242)
-    for it in pl.items:
-        if it.get("tower"):
+    pilas = pl.pilas
+    mine = [g for g in pilas if g["model"] == model]
+    rnd = random.Random(4242 if model == "a" else 4243)
+    items = [it for it in pl.items if it.get("tower") and it.get("model") == model]
+    for it in items:
+        k = it["kind"]
+        if k == "trailer":
             _trailer(p, it, rnd, detail, color)
+        elif k == "grate":
+            _grate(p, it)
+        elif k == "rail":
+            if detail:
+                _rail(p, it, detail)
+            else:  # en el nivel ligero, una chapa de acero (como la colisión)
+                _box(p, it["x0"], it["z0"], it["x1"], it["z1"], it["y0"] + 0.06, it["y1"], mat("metal", SHEET_STEEL), skip=("-z",))
+        elif k == "catwalk":
+            _catwalk(p, it, detail)
+        elif k == "lift":
+            _lift(p, it, detail)
+    for g in mine:
+        _frame(p, g, items, detail)
+        if g["gran"]:
+            _mast(p, g, color, detail)
     if detail:
-        _cables(p, pl, random.Random(77))
+        solid = [it for it in pl.items if it["kind"] == "trailer"]
+        _pila_cables(p, mine, pilas, solid, random.Random(77))
     ob = p.to_object()
-    ob.name = "vertical_towers"
+    ob.name = name
+    finish(ob)
+    return ob
+
+
+def _incline(p: Part, x: float, za: float, zb: float, ya: float, yb: float, r: float, m, seg: int) -> None:
+    """Tubo inclinado a lo largo de Z (pasamanos, barras y zancas de la escalera)."""
+    p.tube([_bl(x, za, ya), _bl(x, zb, yb)], r, m, segments=seg)
+
+
+def stairs_object(color: str, detail: int):
+    """
+    La escalera de la Gran Pila (stair_flights): peldaños de chapa sobre dos zancas, descansillos,
+    puentes al tejado de la atravesada del este y barandillas en todo lo que da al vacío, con los
+    postes de su torre y, en cada descansillo de fuera, una bombilla. Su malla es su colisión: el
+    nivel ligero (el que choca) lleva lo mismo que se pisa y las barandillas.
+    """
+    p = Part("vertical_stairs")
+    g = pila_list()[0]
+    cx, cz = g["cx"], g["cz"]
+    steel = mat("oxido", STEEL)
+    plate = mat("metal", "#4a4f58")
+    galv = mat("pintado", GALV)
+    sheet = mat("metal", SHEET_STEEL)  # las barandillas del nivel ligero: una chapa
+    yellow = mat("pintado", YELLOW)
+    seg = 6 if detail else 4
+    xa = cx + STAIR_IN
+    xb = xa + 2 * STAIR_W
+    flights = stair_flights(g)
+
+    def panel(x, za, zb, ya, yb):
+        """Barandilla de chapa (nivel ligero): de (za, ya) a (zb, yb) a lo largo de Z, en x."""
+        outline = [(-(za - C), ya), (-(zb - C), yb), (-(zb - C), yb + RAIL - 0.03), (-(za - C), ya + RAIL - 0.03)]
+        p.prism(outline, x - 0.015 - C, x + 0.015 - C, sheet)
+
+    def rail_x(x, z0, z1, y):
+        """Barandilla recta a lo largo de Z (en x), a la altura y."""
+        if not detail:
+            panel(x, z0, z1, y, y)
+            return
+        n = max(1, round((z1 - z0) / 1.2))
+        for k in range(n + 1):
+            z = z0 + 0.03 + (z1 - z0 - 0.06) * k / n
+            _box(p, x - 0.025, z - 0.025, x + 0.025, z + 0.025, y, y + RAIL - 0.03, galv, skip=("+z", "-z"))
+        _incline(p, x, z0, z1, y + RAIL - 0.03, y + RAIL - 0.03, 0.03, galv, seg)
+        _incline(p, x, z0, z1, y + 0.5, y + 0.5, 0.016, galv, 4)
+
+    def rail_z(z, x0, x1, y):
+        """Barandilla recta a lo largo de X (en z)."""
+        if not detail:
+            _box(p, x0, z - 0.015, x1, z + 0.015, y, y + RAIL - 0.03, sheet, skip=("-z",))
+            return
+        n = max(1, round((x1 - x0) / 1.2))
+        for k in range(n + 1):
+            x = x0 + 0.03 + (x1 - x0 - 0.06) * k / n
+            _box(p, x - 0.025, z - 0.025, x + 0.025, z + 0.025, y, y + RAIL - 0.03, galv, skip=("+z", "-z"))
+        p.tube([_bl(x0, z, y + RAIL - 0.03), _bl(x1, z, y + RAIL - 0.03)], 0.03, galv, segments=seg)
+        p.tube([_bl(x0, z, y + 0.5), _bl(x1, z, y + 0.5)], 0.016, galv, segments=4)
+
+    for f in flights:
+        if f["kind"] == "flight":
+            x0, x1, za, zb, y0, y1 = f["x0"], f["x1"], f["za"], f["zb"], f["y0"], f["y1"]
+            sgn = 1 if zb > za else -1
+            run = abs(zb - za) / STEPS
+            rise = (y1 - y0) / STEPS
+            for i in range(STEPS):
+                za_i = za + sgn * i * run
+                zb_i = za + sgn * (i + 1) * run
+                top = y0 + (i + 1) * rise
+                lo, hi = sorted((za_i, zb_i))
+                _box(p, x0 + 0.04, lo, x1 - 0.04, hi, top - 0.045, top, plate, skip=() if detail else ("+x", "-x"))
+                if detail:  # el canto amarillo de cada peldaño
+                    edge = hi if sgn < 0 else lo
+                    _box(p, x0 + 0.04, edge - 0.02, x1 - 0.04, edge + 0.02, top - 0.002, top + 0.004, yellow, skip=("-z",))
+            # Zancas a los dos lados (de un descansillo al otro).
+            for x in (x0 + 0.03, x1 - 0.03):
+                _incline(p, x, za, zb, y0 - 0.12, y1 - 0.12, 0.05, steel, 4)
+            # Barandillas: la de fuera y la de en medio (cada carril, la suya), inclinadas.
+            outer = x0 + 0.03 if f["lane"] == 0 else x1 - 0.03
+            middle = x1 - 0.03 if f["lane"] == 0 else x0 + 0.03
+            for x in (outer, middle):
+                if not detail:
+                    panel(x, za, zb, y0, y1)
+                    continue
+                n = 4
+                for k in range(n + 1):
+                    t = k / n
+                    z = za + (zb - za) * (0.04 + 0.92 * t)
+                    yy = y0 + (y1 - y0) * (0.04 + 0.92 * t)
+                    _box(p, x - 0.025, z - 0.025, x + 0.025, z + 0.025, yy, yy + RAIL - 0.03, galv, skip=("+z", "-z"))
+                _incline(p, x, za, zb, y0 + RAIL - 0.03, y1 + RAIL - 0.03, 0.03, galv, seg)
+                _incline(p, x, za, zb, y0 + 0.5, y1 + 0.5, 0.016, galv, 4)
+        elif f["kind"] == "landing":
+            x0, x1, z0, z1, y = f["x0"], f["x1"], f["z0"], f["z1"], f["y"]
+            _grate(p, {"x0": x0, "z0": z0, "x1": x1, "z1": z1, "y0": y - 0.12, "y1": y})
+            far = z1 - 0.03 if f["end"] == "S" else z0 + 0.03
+            rail_z(far, x0, x1, y)
+            rail_x(x1 - 0.03, z0, z1, y)
+            if not f["bridge"] and not f["top"]:
+                rail_x(x0 + 0.03, z0, z1, y)
+            if f["top"]:  # arriba no sigue ningún tramo por el carril de dentro
+                rail_z(z1 - 0.03, x0, x0 + STAIR_W, y)
+            if f["end"] == "S":  # una bombilla en el poste de fuera
+                xl, zl = x1 + 0.12, (z0 + z1) / 2
+                _box(p, x1 - 0.03, zl - 0.03, xl, zl + 0.03, y + 2.1, y + 2.16, steel)
+                p.sphere(_bl(xl, zl, y + 2.0), 0.07, mat("farol", BULB), subdiv=0)
+        else:  # puente al tejado de la atravesada del este
+            x0, x1, z0, z1, y = f["x0"], f["x1"], f["z0"], f["z1"], f["y"]
+            _grate(p, {"x0": x0, "z0": z0, "x1": x1, "z1": z1, "y0": y - 0.1, "y1": y + 0.012})
+            rail_z(z0 + 0.03, x0 + 0.2, x1, y)
+            rail_z(z1 - 0.03, x0 + 0.2, x1, y)
+    # La torre de la escalera: postes en las esquinas y en los extremos de los tramos, de abajo arriba.
+    top = MIRADOR + RAIL
+    for x in (xa + 0.05, xb - 0.05):
+        for z in (cz - STAIR_END + 0.05, cz - STAIR_RUN, cz + STAIR_RUN, cz + STAIR_END - 0.05):
+            _box(p, x - 0.06, z - 0.06, x + 0.06, z + 0.06, 0, top, steel, skip=("-z",))
+    ob = p.to_object()
+    ob.name = "vertical_stairs"
     finish(ob)
     return ob
 

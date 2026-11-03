@@ -126,17 +126,22 @@ const THEMES: Record<string, { pitch: number; fill: number; build: Theme; cars: 
       return out;
     },
   },
-  // Torres de caravanas apiladas sobre andamios: cada caravana, su ventana encendida.
+  // Las Pilas hasta el horizonte: caravanas apiladas en andamios de acero, más altas cuanto más lejos
+  // (de 6 a 27 pisos), con los postes de arriba abajo, una plataforma cada dos pisos y, en cada
+  // caravana, su ventana encendida.
   vertical: {
     pitch: 20,
-    fill: 0.8,
+    fill: 0.85,
     cars: 0.3,
     build: (x, z, r, color, far) => {
       const out: Box[] = [];
-      const levels = 4 + Math.floor(r() * (5 + far * 9));
-      const lh = 3.1;
+      const levels = 6 + Math.floor(r() * (6 + far * 16));
+      const lh = 2.9;
+      const top = levels * lh;
+      for (const [px, pz] of [[-5.5, -4], [5.5, -4], [-5.5, 4], [5.5, 4]] as const) out.push(box(x + px, 0, z + pz, 0.3, top + 0.6, 0.3, "#4a4f5c"));
       for (let k = 0; k < levels; k++) {
         const y = k * lh;
+        if (k % 2 === 0) out.push(box(x, y, z, 11.5, 0.2, 8.5, "#3a3f4a"));
         const n = 2 + Math.floor(r() * 2);
         for (let i = 0; i < n; i++) {
           if (r() < 0.12) continue; // hueco
@@ -147,11 +152,8 @@ const THEMES: Record<string, { pitch: number; fill: number; build: Theme; cars: 
           out.push(along ? box(x + dx, y + 0.25, z + dz, 2.6, 2.5, 7, tint) : box(x + dz, y + 0.25, z + dx, 7, 2.5, 2.6, tint));
           if (r() < 0.25) out.push(box(x + dx, y + 1.2, z + dz - (along ? 3.55 : 1.35), 1.2, 0.5, 0.1, r() < 0.5 ? color : "#ffd27a", 1));
         }
-        // Andamio: cuatro postes por planta y una plataforma.
-        for (const [px, pz] of [[-5.5, -4], [5.5, -4], [-5.5, 4], [5.5, 4]] as const) out.push(box(x + px, y, z + pz, 0.25, lh, 0.25, "#4a4f5c"));
-        out.push(box(x, y, z, 11.5, 0.2, 8.5, "#3a3f4a"));
       }
-      if (r() < 0.5) out.push(box(x, levels * lh, z, 0.5, 1, 0.5, "#ff3b3b", 2));
+      if (r() < 0.6) out.push(box(x, top + 0.6, z, 0.5, 1, 0.5, "#ff3b3b", 2));
       return out;
     },
   },
