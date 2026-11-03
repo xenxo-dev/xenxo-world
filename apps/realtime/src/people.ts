@@ -4,9 +4,9 @@
  * la última pose de cada sesión. Nada se guarda: todo vive mientras dura la conexión.
  *
  * El modo pelea es de consentimiento: solo se golpea a quien también lo tiene activado, nunca en el
- * nexo ni en la plaza, y sin vida ni sangre. Cómo se cae depende del distrito (`fight` en
- * districts.json): de dibujos, de 8 bits, en duelo (al tercer golpe, fuera de combate un momento)
- * o solo empujones.
+ * nexo ni en la plaza, y sin sangre. Cada golpe resta vida (FIGHT_HP); a 0, fuera de combate en el
+ * suelo hasta reaparecer (RESPAWN). Cómo se cae depende del distrito (`fight` en districts.json): de
+ * dibujos, de 8 bits, en duelo (al tercer golpe, fuera de combate un momento) o solo empujones.
  */
 import { FIGHT_REACH, PAIR_RANGE, type FightMove, type FightStyle } from "@xenxo/protocol";
 
@@ -27,16 +27,34 @@ export const DUEL_KO_HITS = 3;
 export const DUEL_WINDOW_MS = 8_000;
 
 /** Alcance de cada golpe (m, entre cabezas): el del protocolo, con un poco de margen por la red. */
-export const REACH: Record<FightMove, number> = { punch: FIGHT_REACH.punch + 0.3, kick: FIGHT_REACH.kick + 0.3, shove: FIGHT_REACH.shove + 0.3 };
+export const REACH: Record<FightMove, number> = {
+  punch: FIGHT_REACH.punch + 0.3,
+  kick: FIGHT_REACH.kick + 0.3,
+  shove: FIGHT_REACH.shove + 0.3,
+  // La barrida se manda al llegar a las piernas, deslizándose deprisa: algo más de margen.
+  slide: FIGHT_REACH.slide + 0.6,
+};
 
-/** Fuerza (0–1) de cada golpe en cada estilo y a partir de cuánta se cae. */
+/** Fuerza (0–1) de cada golpe en cada estilo y a partir de cuánta se cae (la barrida, siempre). */
 const POWER: Record<FightStyle, Record<FightMove, number>> = {
-  comic: { punch: 0.7, kick: 0.9, shove: 0.45 },
-  pixel: { punch: 0.6, kick: 0.8, shove: 0.5 },
-  duel: { punch: 0.45, kick: 0.6, shove: 0.3 },
-  shove: { punch: 0, kick: 0, shove: 0.55 },
+  comic: { punch: 0.7, kick: 0.9, shove: 0.45, slide: 0.75 },
+  pixel: { punch: 0.6, kick: 0.8, shove: 0.5, slide: 0.7 },
+  duel: { punch: 0.45, kick: 0.6, shove: 0.3, slide: 0.55 },
+  shove: { punch: 0, kick: 0, shove: 0.55, slide: 0 },
 };
 const FALL_AT: Record<FightStyle, number> = { comic: 0.65, pixel: 0.75, duel: 1.1, shove: 1.1 };
+/** Vida que quita cada golpe (de FIGHT_HP); en los de empujones, los empujones quitan algo más. */
+const DAMAGE: Record<FightMove, number> = { punch: 10, kick: 16, shove: 6, slide: 12 };
+
+/** Cuánta vida quita un golpe en un estilo. */
+export function damageOf(style: FightStyle, move: FightMove): number {
+  return style === "shove" && move === "shove" ? 9 : DAMAGE[move];
+}
+
+/** Mientras alguien se desliza (su pose lo dice), los puñetazos (a la cara) le pasan por encima. */
+export function dodges(move: FightMove, emote: string | undefined): boolean {
+  return move === "punch" && emote === "pk_slide";
+}
 
 /** ¿Vale este golpe en este estilo? (en los de empujones, solo empujones). */
 export function moveAllowed(style: FightStyle, move: FightMove): boolean {
@@ -50,7 +68,7 @@ export function moveAllowed(style: FightStyle, move: FightMove): boolean {
 export function hitOutcome(style: FightStyle, move: FightMove, recent: number): { power: number; fall: boolean; ko: boolean } {
   const power = POWER[style][move];
   const ko = style === "duel" && recent >= DUEL_KO_HITS;
-  return { power, fall: ko || power >= FALL_AT[style], ko };
+  return { power, fall: ko || move === "slide" || power >= FALL_AT[style], ko };
 }
 
 /** El estilo guardado en districts.json, si es uno de los del protocolo; si no, «comic». */

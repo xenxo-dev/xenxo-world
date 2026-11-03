@@ -96,7 +96,8 @@ export async function startSession(displayName: string | undefined, chunkId: str
       net.send(
         msg("HELLO", {
           client_type: detectClientType(),
-          capabilities: { xr: false, hand_tracking: false, haptics: false, lod: "medium" },
+          // npc_host: este cliente puede llevar a los ciudadanos del distrito para todos (§9 nonies).
+          capabilities: { xr: false, hand_tracking: false, haptics: false, lod: "medium", npc_host: true },
           display_name: guestName,
           // El de un invitado (elegido o el que le tocó en este navegador): así lo ven igual los demás.
           ...(!accountToken() ? { avatar: { hash: guestPreset().hash, format: "vrm" as const } } : {}),

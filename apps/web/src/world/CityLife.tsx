@@ -1,8 +1,9 @@
 /**
  * Vida de las ciudades de los distritos: su gente (city/citizens.ts: pocos, cada uno con su forma de
  * ser y su día, que se dan cuenta de ti, te contestan y tienen física de verdad) y el tráfico de
- * coches voladores y drones. Es decorado del cliente, como el horizonte: no son personas ni entidades
- * del mundo, no cuentan en «quién hay» y no viajan por la red.
+ * coches voladores y drones. No son personas ni entidades del mundo ni cuentan en «quién hay», pero
+ * son los mismos para todos: a los ciudadanos los mueve uno de los que están y reparte su estado
+ * (§9 nonies, net/npc-store.ts) y el tráfico va con la hora del servidor.
  *
  * Rendimiento (Quest 3): de la gente solo se dibujan los más cercanos (`FEATURES.pedestrians`), cada
  * uno siempre con el mismo personaje de serie (se monta la primera vez que se le ve y se queda, oculto
@@ -158,6 +159,9 @@ function lanesFor(id: string, count: number): Lane[] {
   return out;
 }
 
+/** El tráfico va con la hora del servidor (igual para todos), contada desde aquí (s, sin perder precisión). */
+const TRAFFIC_EPOCH = Date.UTC(2026, 0, 1);
+
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _e2 = new THREE.Euler();
@@ -183,10 +187,10 @@ function Fleet({ mesh, lanes, features, ambience, offsets }: { mesh: THREE.Mesh;
     const base = mesh.material as THREE.Material;
     return paintedLights(features.pbr ? base : lightweight(base), ambience);
   }, [mesh, features.pbr, ambience]);
-  useFrame((state) => {
+  useFrame(() => {
     const im = ref.current;
     if (!im) return;
-    const t = state.clock.elapsedTime;
+    const t = (world.serverNow() - TRAFFIC_EPOCH) / 1000;
     for (let n = 0; n < lanes.length; n++) {
       const l = lanes[n]!;
       const d = (((offsets[n]! + l.dir * l.speed * t - LANE_MIN) % LANE_LEN) + LANE_LEN) % LANE_LEN + LANE_MIN;

@@ -39,12 +39,66 @@ def _lift(y: float) -> float:
     return y * LIFT if 0.0 < y < 0.05 else y
 
 
-def _rect(p: Part, x0: float, z0: float, x1: float, z1: float, y0: float, y1: float, m) -> None:
-    a, b = _W(x0, z1), _W(x1, z0)
-    p.box((a[0], a[1], _lift(y0)), (b[0], b[1], _lift(y1)), m, skip=("-z",))
+def _rect(p: list, x0: float, z0: float, x1: float, z1: float, y0: float, y1: float, m) -> None:
+    """Una capa del suelo (o una caja apoyada en él): se dibujan todas juntas al final (_emit_layers)."""
+    p.append((x0, z0, x1, z1, _lift(y0), _lift(y1), m))
 
 
-def _frame_lines(p: Part, x0: float, z0: float, x1: float, z1: float, y: float, w: float, m) -> None:
+def _cut(r: tuple, c: tuple) -> list[tuple]:
+    """El rectángulo r (x0, z0, x1, z1) menos c: hasta cuatro rectángulos."""
+    x0, z0, x1, z1 = r
+    u0, v0, u1, v1 = c
+    if u0 >= x1 or u1 <= x0 or v0 >= z1 or v1 <= z0:
+        return [r]
+    out = []
+    if v0 > z0:
+        out.append((x0, z0, x1, v0))
+    if v1 < z1:
+        out.append((x0, v1, x1, z1))
+    za, zb = max(z0, v0), min(z1, v1)
+    if u0 > x0:
+        out.append((x0, za, u0, zb))
+    if u1 < x1:
+        out.append((u1, za, x1, zb))
+    return out
+
+
+# Hasta dónde una capa que flota por encima de otra la sigue tapando (las del suelo van a milímetros).
+COVER_GAP = 0.1
+# Altura de los aros de luz del suelo (la plaza, los puestos y la llegada): no se recortan de lo que tienen
+# debajo, así que van 3 cm por encima de lo más alto (la plaza, a 6 cm).
+RING_Y = 0.09
+
+
+def _emit_layers(p: Part, layers: list) -> None:
+    """
+    Dibuja las capas del suelo sin caras escondidas: de cada una, sus lados y solo la parte de arriba
+    que no tapa otra más alta (o otra a la misma altura que va después). Una cara tapada por otra a
+    unos milímetros se horneaba negra (la de encima le hace sombra) y, con poca precisión de profundidad
+    (algunos móviles), se colaba por encima: manchas oscuras en las calles. Y dos capas a la misma
+    altura (los cruces de las calles) se hacían sombra la una a la otra: cuadrados negros.
+    """
+    for i, (x0, z0, x1, z1, y0, y1, m) in enumerate(layers):
+        a, b = _W(x0, z1), _W(x1, z0)
+        p.box((a[0], a[1], y0), (b[0], b[1], y1), m, skip=("-z", "+z"))
+        pieces = [(x0, z0, x1, z1)]
+        for j, (u0, v0, u1, v1, w0, w1, _m) in enumerate(layers):
+            if j == i or u0 >= x1 or u1 <= x0 or v0 >= z1 or v1 <= z0:
+                continue
+            above = w1 > y1 + 1e-6 or (abs(w1 - y1) <= 1e-6 and j > i)
+            if not above or w0 > y1 + COVER_GAP:
+                continue
+            pieces = [q for r in pieces for q in _cut(r, (u0, v0, u1, v1))]
+            if not pieces:
+                break
+        for (q0, r0, q1, r1) in pieces:
+            if q1 - q0 < 1e-4 or r1 - r0 < 1e-4:
+                continue
+            a, b = _W(q0, r1), _W(q1, r0)
+            p.box((a[0], a[1], y1 - 0.001), (b[0], b[1], y1), m, skip=("-z", "+x", "-x", "+y", "-y"))
+
+
+def _frame_lines(p: list, x0: float, z0: float, x1: float, z1: float, y: float, w: float, m) -> None:
     """Contorno de luz de un rectángulo, embutido en el suelo."""
     _rect(p, x0, z0, x1, z0 + w, y, y + 0.004, m)
     _rect(p, x0, z1 - w, x1, z1, y, y + 0.004, m)
@@ -52,7 +106,7 @@ def _frame_lines(p: Part, x0: float, z0: float, x1: float, z1: float, y: float, 
     _rect(p, x1 - w, z0 + w, x1, z1 - w, y, y + 0.004, m)
 
 
-def _square_ring(p: Part, a: float, b: float, m, y0: float = 0.0, y1: float = 0.003) -> None:
+def _square_ring(p: list, a: float, b: float, m, y0: float = 0.0, y1: float = 0.003) -> None:
     """Calle en anillo cuadrado entre las coordenadas a..b (por fuera) y su simétrica (64 − b..64 − a)."""
     S = CHUNK
     lo0, lo1 = a, b
@@ -74,55 +128,56 @@ def ground(lay: dict, d: dict, detail: int = 1):
     neon = mat("neon", color)
     white = mat("neon", "#cfe8ff")
     p = Part(f"district_{d['id']}")
+    layers: list = []  # las capas del suelo y las cajas apoyadas en él (se dibujan al final, sin caras escondidas)
     b0, b1 = lay["bounds"]
     # Base (el vacío se ve por debajo de los bordes) y suelo.
-    _rect(p, b0, b0, b1, b1, -0.62, -0.6, void)
-    _rect(p, b0, b0, b1, b1, -0.6, 0.0, floor)
+    _rect(layers, b0, b0, b1, b1, -0.62, -0.6, void)
+    _rect(layers, b0, b0, b1, b1, -0.6, 0.0, floor)
     # Franja exterior: zona de actividades y parques (un tono verdoso), con su borde de luz.
     r = lay["roads"]
     edge = r["ring2"][0] - lay["parcel"]["d"]
     for (x0, z0, x1, z1) in ((b0, b0, b1, edge), (b0, CHUNK - edge, b1, b1), (b0, edge, edge, CHUNK - edge), (CHUNK - edge, edge, b1, CHUNK - edge)):
-        _rect(p, x0, z0, x1, z1, 0.0, 0.002, park)
-    _frame_lines(p, b0 + 0.4, b0 + 0.4, b1 - 0.4, b1 - 0.4, 0.002, 0.12, neon)
+        _rect(layers, x0, z0, x1, z1, 0.0, 0.002, park)
+    _frame_lines(layers, b0 + 0.4, b0 + 0.4, b1 - 0.4, b1 - 0.4, 0.002, 0.12, neon)
     # Dos anillos de calles y cuatro avenidas del centro a los bordes, con bordes de luz fría.
-    _square_ring(p, r["ring1"][0], r["ring1"][1], street)
-    _square_ring(p, r["ring2"][0], r["ring2"][1], street)
+    _square_ring(layers, r["ring1"][0], r["ring1"][1], street)
+    _square_ring(layers, r["ring2"][0], r["ring2"][1], street)
     h = r["avenue"] / 2
     C2 = CHUNK / 2
-    _rect(p, C2 - h, b0, C2 + h, b1, 0.003, 0.005, street)
-    _rect(p, b0, C2 - h, b1, C2 + h, 0.003, 0.005, street)
+    _rect(layers, C2 - h, b0, C2 + h, b1, 0.003, 0.005, street)
+    _rect(layers, b0, C2 - h, b1, C2 + h, 0.003, 0.005, street)
     for x in (C2 - h, C2 + h - 0.08):
-        _rect(p, x, b0, x + 0.08, b1, 0.005, 0.009, white)  # por encima de las calles de la ciudad (0,008): sin capas a la misma altura
-        _rect(p, b0, x, b1, x + 0.08, 0.005, 0.009, white)
+        _rect(layers, x, b0, x + 0.08, b1, 0.005, 0.009, white)  # por encima de las calles de la ciudad (0,008): sin capas a la misma altura
+        _rect(layers, b0, x, b1, x + 0.08, 0.005, 0.009, white)
     # La ciudad: losa, borde de luz del distrito, calles entre manzanas y la plaza del medio.
     c = lay["city"]
     pave = mat("losa", "#3a4252")
-    _rect(p, c["x0"], c["z0"], c["x1"], c["z1"], 0.0, 0.006, pave)
-    _frame_lines(p, c["x0"], c["z0"], c["x1"], c["z1"], 0.006, 0.12, neon)
+    _rect(layers, c["x0"], c["z0"], c["x1"], c["z1"], 0.0, 0.006, pave)
+    _frame_lines(layers, c["x0"], c["z0"], c["x1"], c["z1"], 0.006, 0.12, neon)
     blk, st = c["block"], c["street"]
     for k in (1, 2):
         a = c["x0"] + k * blk + (k - 1) * st
-        _rect(p, a, c["z0"], a + st, c["z1"], 0.006, 0.008, street)
-        _rect(p, c["x0"], a, c["x1"], a + st, 0.006, 0.008, street)
+        _rect(layers, a, c["z0"], a + st, c["z1"], 0.006, 0.008, street)
+        _rect(layers, c["x0"], a, c["x1"], a + st, 0.006, 0.008, street)
     pa = c["x0"] + blk + st
     plaza = mat("losa", "#4a4f5c")
-    _rect(p, pa, pa, pa + blk, pa + blk, 0.008, 0.01, plaza)
+    _rect(layers, pa, pa, pa + blk, pa + blk, 0.008, 0.01, plaza)
     seg = 64 if detail else 32
-    p.lathe((0, 0, 0), [(c["plaza"], _lift(0.012)), (c["plaza"] - 0.2, _lift(0.012))], neon, segments=seg, smooth=False)
+    p.lathe((0, 0, 0), [(c["plaza"], RING_Y), (c["plaza"] - 0.2, RING_Y)], neon, segments=seg, smooth=False)
     # Cuatro puestos de actividad en las esquinas de la plaza (círculos de luz, para minijuegos).
     for (ax, az) in ((pa + 4, pa + 4), (pa + blk - 4, pa + 4), (pa + 4, pa + blk - 4), (pa + blk - 4, pa + blk - 4)):
         ox, oy = _W(ax, az)
-        p.lathe((ox, oy, 0.0), [(2.2, _lift(0.012)), (2.05, _lift(0.012))], white, segments=32 if detail else 16, smooth=False)
+        p.lathe((ox, oy, 0.0), [(2.2, RING_Y), (2.05, RING_Y)], white, segments=32 if detail else 16, smooth=False)
     # Parcelas: rejilla octogonal y contorno de luz del color del distrito.
     W, D = lay["parcel"]["w"], lay["parcel"]["d"]
     for q in lay["parcels"]:
         x0, z0 = q["x"] - W / 2, q["z"] - D / 2
-        _rect(p, x0, z0, x0 + W, z0 + D, 0.0, 0.007, pad)
-        _frame_lines(p, x0, z0, x0 + W, z0 + D, 0.007, 0.1, neon)
+        _rect(layers, x0, z0, x0 + W, z0 + D, 0.0, 0.007, pad)
+        _frame_lines(layers, x0, z0, x0 + W, z0 + D, 0.007, 0.1, neon)
     # Emblema del punto de llegada
     sx, _, sz = lay["spawn"]
     ox, oy = _W(sx, sz)
-    p.lathe((ox, oy, 0.0), [(1.7, _lift(0.012)), (1.58, _lift(0.012))], neon, segments=48 if detail else 24, smooth=False)
+    p.lathe((ox, oy, 0.0), [(1.7, RING_Y), (1.58, RING_Y)], neon, segments=48 if detail else 24, smooth=False)
     # Puerta de vuelta al nexo: dos pilares y dintel con luz por dentro
     g = lay["gate"]
     body = mat("metal", "#1a202b")
@@ -130,12 +185,13 @@ def ground(lay: dict, d: dict, detail: int = 1):
     gz = g["z"]
     for sx_ in (-1, 1):
         cx = 32 + sx_ * (half + 0.45)
-        _rect(p, cx - 0.45, gz - 0.45, cx + 0.45, gz + 0.45, 0.0, 6.2, body)
+        _rect(layers, cx - 0.45, gz - 0.45, cx + 0.45, gz + 0.45, 0.0, 6.2, body)
         inner = cx - sx_ * 0.45
         lo, hi = sorted((inner, inner - sx_ * 0.05))
-        _rect(p, lo, gz - 0.3, hi, gz + 0.3, 0.2, 5.6, neon)
-    _rect(p, 32 - half - 0.9, gz - 0.5, 32 + half + 0.9, gz + 0.5, 6.2, 7.0, body)
-    _rect(p, 32 - half, gz - 0.3, 32 + half, gz + 0.3, 6.15, 6.2, neon)
+        _rect(layers, lo, gz - 0.3, hi, gz + 0.3, 0.2, 5.6, neon)
+    _rect(layers, 32 - half - 0.9, gz - 0.5, 32 + half + 0.9, gz + 0.5, 6.2, 7.0, body)
+    _rect(layers, 32 - half, gz - 0.3, 32 + half, gz + 0.3, 6.15, 6.2, neon)
+    _emit_layers(p, layers)
     ob = p.to_object()
     ob.name = f"district_{d['id']}"
     finish(ob)

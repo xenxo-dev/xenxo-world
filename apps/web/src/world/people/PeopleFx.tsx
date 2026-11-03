@@ -1,16 +1,17 @@
 /**
  * Lo que se ve de la gente en el mundo (§9 octies): reacciones que flotan sobre la cabeza, destellos
  * de las acciones en pareja, el golpe de cada estilo de pelea (de dibujos, de 8 bits, eléctrico en
- * los duelos o una nube de polvo en los empujones), estrellas al quedar fuera de combate y la marca
- * del modo pelea. Todo con sprites de un grupo fijo (sin crear objetos por frame) y texturas
- * pintadas una vez en un lienzo con los mismos trazos que los iconos del HUD.
+ * los duelos o una nube de polvo en los empujones), estrellas al quedar fuera de combate, la marca
+ * del modo pelea y la vida de quien pelea (una barra encima). Todo con sprites de un grupo fijo (sin
+ * crear objetos por frame) y texturas pintadas una vez en un lienzo con los mismos trazos que los
+ * iconos del HUD (la barra, en BAR_STEPS tramos).
  *
  * También rellena `others` (collision.ts) con dónde está cada persona: así nadie se atraviesa.
  */
 import { useEffect, useMemo } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import type { FightStyle } from "@xenxo/protocol";
+import { FIGHT_HP, type FightStyle } from "@xenxo/protocol";
 import { HIT_MS, people, REACTION_MS, usePeople } from "../../net/people-store";
 import { world } from "../../net/world-store";
 import { PEOPLE_PATHS } from "../../hud/people-icons";
@@ -146,6 +147,39 @@ function hitTexture(style: FightStyle): THREE.CanvasTexture {
   return t;
 }
 
+/** La barra de vida, en tramos (una textura por tramo, pintada la primera vez que hace falta). */
+const BAR_STEPS = 20;
+function rounded(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  g.beginPath();
+  if (g.roundRect) g.roundRect(x, y, w, h, r);
+  else g.rect(x, y, w, h);
+}
+function barTexture(step: number): THREE.CanvasTexture {
+  const key = `bar-${step}`;
+  let t = textures.get(key);
+  if (t) return t;
+  const c = document.createElement("canvas");
+  c.width = 128;
+  c.height = 16;
+  const g = c.getContext("2d")!;
+  g.fillStyle = "rgba(8, 13, 25, 0.82)";
+  rounded(g, 1, 1, 126, 14, 7);
+  g.fill();
+  const k = step / BAR_STEPS;
+  if (k > 0) {
+    g.fillStyle = k > 0.5 ? "#36d9ff" : k > 0.25 ? "#d9a441" : "#ff4fd8";
+    rounded(g, 3, 3, Math.max(10, 122 * k), 10, 5);
+    g.fill();
+  }
+  g.lineWidth = 1.5;
+  g.strokeStyle = "rgba(246, 241, 231, 0.4)";
+  rounded(g, 1, 1, 126, 14, 7);
+  g.stroke();
+  t = finish(c);
+  textures.set(key, t);
+  return t;
+}
+
 function makeSprite(): THREE.Sprite {
   const s = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthWrite: false, toneMapped: false }));
   s.visible = false;
@@ -215,7 +249,7 @@ export function PeopleFx() {
     let i = 0;
     const now = performance.now();
     const t = state.clock.elapsedTime;
-    const put = (tex: THREE.Texture, x: number, y: number, z: number, scale: number, opacity: number) => {
+    const put = (tex: THREE.Texture, x: number, y: number, z: number, scale: number, opacity: number, h = scale) => {
       if (i >= sprites.length) return;
       const s = sprites[i++]!;
       if (s.material.map !== tex) {
@@ -224,7 +258,7 @@ export function PeopleFx() {
       }
       s.material.opacity = opacity;
       s.position.set(x, y, z);
-      s.scale.setScalar(scale);
+      s.scale.set(scale, h, 1);
       s.visible = true;
     };
 
@@ -252,18 +286,26 @@ export function PeopleFx() {
       const k = Math.min(1, age / (HIT_MS * 0.45));
       put(hitTexture(h.style), _f.x - h.dir[0] * 0.15, _f.y + 1.3, _f.z - h.dir[1] * 0.15, 0.45 + k * 0.75, age > HIT_MS * 0.45 ? 1 - (age - HIT_MS * 0.45) / (HIT_MS * 0.55) : 1);
     }
-    // Fuera de combate: tres estrellas que dan vueltas sobre quien está en el suelo.
+    // Fuera de combate: tres estrellas que dan vueltas sobre quien está en el suelo (hasta que reaparece).
     for (const [id, h] of people.lastHit) {
-      if (!h.ko || now - h.at > 3600 || !feetOf(id, _f)) continue;
+      if (!h.ko || (now - h.at > 3600 && !people.downUntil(id)) || !feetOf(id, _f)) continue;
       for (let s = 0; s < 3; s++) {
         const a = t * 3 + (s / 3) * Math.PI * 2;
         put(iconTexture("star"), _f.x + Math.cos(a) * 0.35 + h.dir[0] * 1.1, _f.y + 0.55, _f.z + Math.sin(a) * 0.35 + h.dir[1] * 1.1, 0.2, 1);
       }
     }
-    // Quién está en modo pelea (y tú, si lo tienes): un puño pequeño sobre la cabeza.
+    // Quién está en modo pelea (y tú, si lo tienes): un puño pequeño sobre la cabeza y, encima, su vida
+    // (la tuya está en el HUD).
     if (people.style) {
       if (people.fightOn && world.sessionId && feetOf(world.sessionId, _f)) put(iconTexture("fight"), _f.x, _f.y + 2.05, _f.z, 0.2, 0.9);
-      for (const id of people.fighters) if (feetOf(id, _f)) put(iconTexture("fight"), _f.x, _f.y + 2.05, _f.z, 0.2, 0.9);
+      const st = world.serverNow();
+      for (const id of people.fighters) {
+        if (id === world.sessionId || !feetOf(id, _f)) continue;
+        put(iconTexture("fight"), _f.x, _f.y + 2.05, _f.z, 0.2, 0.9);
+        if (!people.health.has(id)) continue;
+        const step = Math.round((people.hpOf(id, st) / FIGHT_HP) * BAR_STEPS);
+        put(barTexture(step), _f.x, _f.y + 2.25, _f.z, 0.56, 0.95, 0.07);
+      }
     }
     for (; i < sprites.length; i++) sprites[i]!.visible = false;
   });

@@ -247,6 +247,148 @@ await scenario("gente: reacciones a los de alrededor, acciones en pareja con pro
   t.close();
 });
 
+await scenario("modo pelea con vida: cada golpe resta (lo ven ella y los de cerca), deslizándose los puñetazos pasan por encima y la barrida tira; a cero, fuera de combate (sin golpear) hasta poder reaparecer con RESPAWN y toda la vida", async () => {
+  const send = (c: XenxoClient, type: string, payload: unknown) => c.sendRaw(JSON.stringify(msg(type, payload)));
+  const chunkId = "c_-1_0"; // Píxel: los puñetazos no tiran (así se llega a cero deprisa)
+  const a = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-vida-a" });
+  const b = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-vida-b" });
+  assert(a.welcome.fight === "pixel", `Píxel pelea en estilo «pixel» (${a.welcome.fight})`);
+  const A = a.welcome.session_id, B = b.welcome.session_id;
+  const skew = a.welcome.server_time - Date.now();
+  const at = (p: [number, number, number], emote?: string) => {
+    a.pose([40, 1.6, 120]);
+    b.pose(p, 0, emote);
+  };
+  for (let i = 0; i < 2; i++) {
+    at([41, 1.6, 120]);
+    await sleep(220);
+  }
+  const notDown = b.next("ERROR", (m) => m.payload.code === "bad_message", 3000);
+  send(b, "RESPAWN", {});
+  await notDown;
+  // Al activar el modo pelea, la vida entera (a ella y a los de cerca).
+  const full = a.next("HEALTH", (m) => m.payload.session_id === B && m.payload.hp === 100, 3000);
+  send(a, "FIGHT", { on: true });
+  send(b, "FIGHT", { on: true });
+  await full;
+  at([41, 1.6, 120]);
+  await sleep(250);
+  const hurt = a.next("HEALTH", (m) => m.payload.session_id === B && m.payload.hp === 90 && !m.payload.down_until, 3000);
+  const hurtB = b.next("HEALTH", (m) => m.payload.session_id === B && m.payload.hp === 90, 3000);
+  send(a, "HIT", { to: B, move: "punch" });
+  await Promise.all([hurt, hurtB]);
+  // Deslizándose (su pose lo dice), el puñetazo le pasa por encima.
+  at([41, 1.6, 120], "pk_slide");
+  await sleep(700);
+  const dodged = a.next("ERROR", (m) => (m.payload.detail as { reason?: string } | undefined)?.reason === "dodged", 3000);
+  send(a, "HIT", { to: B, move: "punch" });
+  await dodged;
+  // La barrida tira (y quita su parte).
+  at([41, 1.6, 120]);
+  await sleep(700);
+  const swept = b.next("HIT_EVENT", (m) => m.payload.from === A && m.payload.move === "slide" && m.payload.fall, 3000);
+  const after = b.next("HEALTH", (m) => m.payload.session_id === B && m.payload.hp === 78, 3000);
+  send(a, "HIT", { to: B, move: "slide" });
+  await Promise.all([swept, after]);
+  // Ya levantado, a puñetazos hasta cero: fuera de combate hasta `down_until`.
+  await sleep(2600);
+  const ko = b.next("HEALTH", (m) => m.payload.session_id === B && m.payload.hp === 0 && !!m.payload.down_until, 12_000);
+  const koEv = a.next("HIT_EVENT", (m) => m.payload.to === B && m.payload.ko === true && m.payload.fall, 12_000);
+  for (let i = 0; i < 8; i++) {
+    at([41, 1.6, 120]);
+    send(a, "HIT", { to: B, move: "punch" });
+    await sleep(650);
+  }
+  const [down] = await Promise.all([ko, koEv]);
+  // Fuera de combate no se golpea, no se le puede golpear y reaparecer antes de tiempo no vale.
+  const cant = b.next("ERROR", (m) => /fuera de combate/.test(m.payload.message), 3000);
+  send(b, "HIT", { to: A, move: "punch" });
+  await cant;
+  const early = b.next("ERROR", (m) => m.payload.code === "forbidden" && /aún no/.test(m.payload.message), 3000);
+  send(b, "RESPAWN", {});
+  await early;
+  await sleep(down.payload.down_until! - (Date.now() + skew) + 300);
+  // Reaparece (en la entrada: la pose siguiente ya es allí) con toda la vida.
+  const back = a.next("HEALTH", (m) => m.payload.session_id === B && m.payload.hp === 100 && !m.payload.down_until, 3000);
+  send(b, "RESPAWN", {});
+  await back;
+  b.pose([32, 1.6, 150]);
+  a.close();
+  b.close();
+}, 40_000);
+
+await scenario("ciudadanos compartidos: el servidor elige quién los lleva (NPC_HOST) entre quien sabe, reparte su estado a los demás y a quien llega, le pasa los golpes y las propuestas de quien está cerca (los de la gente de las salas, a los de cerca) y, si se aparta o se va, elige a otro", async () => {
+  const send = (c: XenxoClient, type: string, payload: unknown) => c.sendRaw(JSON.stringify(msg(type, payload)));
+  const chunkId = "c_1_0"; // Arcade
+  const h = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-npc-lleva", npcHost: true });
+  const H = h.welcome.session_id;
+  await h.next("NPC_HOST", (m) => m.payload.session_id === H, 3000);
+  const r = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-npc-otro" });
+  const R = r.welcome.session_id;
+  await r.next("NPC_HOST", (m) => m.payload.session_id === H, 3000);
+  for (let i = 0; i < 2; i++) {
+    h.pose([30, 1.6, 30]);
+    r.pose([31, 1.6, 30]);
+    await sleep(220);
+  }
+  // Su estado le llega al otro.
+  const cast = [
+    { i: 0, p: [31, 0, 32], r: 0, v: 1.2, e: "talk", d: "chat" },
+    { i: 1, p: [60, 0, 60], r: 1, v: 0, e: "sit", d: "stay" },
+  ];
+  const got = r.next("NPC_STATE", (m) => m.payload.cast.length === 2 && m.payload.cast[0]!.e === "talk", 3000);
+  send(h, "NPC_STATE", { t: Date.now(), cast });
+  await got;
+  // Quien no los lleva no reparte nada; un estado fuera del lugar no vale.
+  send(r, "NPC_STATE", { t: Date.now(), cast: [{ i: 0, p: [1, 0, 1], r: 0, v: 0 }] });
+  await sleep(300);
+  assert(!h.received.some((m) => m.type === "NPC_STATE"), "el estado de quien no los lleva no se reparte");
+  const bad = h.next("ERROR", (m) => m.payload.code === "bad_message", 3000);
+  send(h, "NPC_STATE", { t: Date.now(), cast: [{ i: 0, p: [9999, 0, 0], r: 0, v: 0 }] });
+  await bad;
+  // El otro le da al que tiene al lado: a quien los lleva le llega con quién fue; al de lejos, no.
+  const hitEv = h.next("NPC_HIT_EVENT", (m) => m.payload.from === R && m.payload.npc === 0 && m.payload.kind === "hit" && m.payload.power === 3.2, 3000);
+  send(r, "NPC_HIT", { npc: 0, dir: [0, 2], power: 3.2, kind: "hit" });
+  const ev = await hitEv;
+  assert(Math.abs(Math.hypot(ev.payload.dir[0], ev.payload.dir[1]) - 1) < 1e-6, "la dirección llega normalizada");
+  const far = r.next("ERROR", (m) => m.payload.code === "forbidden", 3000);
+  send(r, "NPC_HIT", { npc: 1, dir: [1, 0], power: 3, kind: "hit" });
+  await far;
+  const pairEv = h.next("NPC_PAIR_EVENT", (m) => m.payload.from === R && m.payload.npc === 0 && m.payload.kind === "high_five", 3000);
+  send(r, "NPC_PAIR", { npc: 0, kind: "high_five" });
+  await pairEv;
+  // Quien llega sabe enseguida quién los lleva y cómo están.
+  const late = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-npc-tarde" });
+  await late.next("NPC_HOST", (m) => m.payload.session_id === H, 3000);
+  await late.next("NPC_STATE", (m) => m.payload.cast.some((c) => c.i === 0), 3000);
+  // La gente de las salas: un golpe a quien tienes al lado lo ven los de cerca (sin quien los lleve).
+  for (let i = 0; i < 2; i++) {
+    r.pose([59.25, 1.6, 3]);
+    late.pose([60.5, 1.6, 3]);
+    await sleep(220);
+  }
+  const resEv = late.next("NPC_HIT_EVENT", (m) => m.payload.res === 0 && m.payload.from === R, 3000);
+  send(r, "NPC_HIT", { res: 0, dir: [0, -1], power: 3, kind: "hit" });
+  await resEv;
+  const both = r.next("ERROR", (m) => m.payload.code === "bad_message", 3000);
+  send(r, "NPC_HIT", { npc: 0, res: 0, dir: [0, -1], power: 3, kind: "hit" });
+  await both;
+  // Si quien los lleva se aparta (pestaña en segundo plano), otro que sepa; si ese se va, nadie.
+  const h2 = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-npc-relevo", npcHost: true });
+  const H2 = h2.welcome.session_id;
+  h2.pose([32, 1.6, 30]);
+  await sleep(250);
+  const handoff = r.next("NPC_HOST", (m) => m.payload.session_id === H2, 3000);
+  send(h, "NPC_HOSTING", { on: false });
+  await handoff;
+  const nobody = r.next("NPC_HOST", (m) => m.payload.session_id === null, 3000);
+  h2.close();
+  await nobody;
+  h.close();
+  r.close();
+  late.close();
+});
+
 await scenario("avatar de serie: un invitado puede llevarlo; un hash cualquiera se ignora", async () => {
   const preset = AVATAR_PRESETS[0]!;
   const watcher = await XenxoClient.connect({ baseUrl });

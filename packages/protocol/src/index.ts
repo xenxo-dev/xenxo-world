@@ -394,6 +394,11 @@ export const Capabilities = z.object({
   lod: z.enum(["low", "medium", "high"]).default("medium"),
   /** Pista; el presupuesto real lo decide el servidor. */
   max_tris_hint: z.number().int().positive().optional(),
+  /**
+   * Sabe llevar la gente de las ciudades de los distritos (§9 nonies): el servidor puede elegir a esta
+   * sesión para que mueva a los ciudadanos y reparta su estado a los demás.
+   */
+  npc_host: z.boolean().default(false),
 });
 
 export const Pose = z.object({ p: Vec3, r: Quat });
@@ -524,12 +529,31 @@ export const PAIR_ACTIONS = ["high_five", "hug", "handshake"] as const;
 export const PairAction = z.enum(PAIR_ACTIONS);
 export type PairAction = z.infer<typeof PairAction>;
 
-/** Golpes del modo pelea (cómicos: sin vida ni sangre; cómo caen depende del distrito). */
-export const FIGHT_MOVES = ["punch", "kick", "shove"] as const;
+/**
+ * Golpes del modo pelea (sin sangre; cómo caen depende del distrito). `slide` es la barrida: corriendo
+ * y agachándose, deslizarse por el suelo hasta las piernas del otro (y, mientras, los golpes a la
+ * cara pasan por encima).
+ */
+export const FIGHT_MOVES = ["punch", "kick", "shove", "slide"] as const;
 export const FightMove = z.enum(FIGHT_MOVES);
 export type FightMove = z.infer<typeof FightMove>;
 /** Alcance de cada golpe (m, entre cabezas): el servidor no admite más; el cliente apunta con él. */
-export const FIGHT_REACH: Record<FightMove, number> = { punch: 2.0, kick: 2.3, shove: 1.8 };
+export const FIGHT_REACH: Record<FightMove, number> = { punch: 2.0, kick: 2.3, shove: 1.8, slide: 1.6 };
+/**
+ * Vida en el modo pelea: cada golpe que llega resta (cuánto, lo dice el servidor), a los 8 s sin
+ * recibir se recupera sola (5 por segundo) y, a 0, se queda fuera de combate en el suelo hasta poder
+ * reaparecer (`RESPAWN`) con toda la vida.
+ */
+export const FIGHT_HP = 100;
+export const FIGHT_REGEN_DELAY_MS = 8_000;
+export const FIGHT_REGEN_PER_S = 5;
+export const FIGHT_RESPAWN_MS = 5_000;
+/** La vida que tiene ahora quien tenía `hp` en `at` (hora del servidor), con lo que se recupera sola. */
+export function hpAt(hp: number, at: number, now: number, downUntil?: number): number {
+  if (downUntil && now < downUntil) return 0;
+  const idle = now - at - FIGHT_REGEN_DELAY_MS;
+  return idle > 0 ? Math.min(FIGHT_HP, hp + (idle / 1000) * FIGHT_REGEN_PER_S) : hp;
+}
 /** Distancia (m) para proponer una acción en pareja. */
 export const PAIR_RANGE = 3;
 
@@ -551,8 +575,92 @@ export const PairMsg = envelope("PAIR", z.object({ to: SessionRef, kind: PairAct
 export const FightMsg = envelope("FIGHT", z.object({ on: z.boolean() }));
 /** Un golpe a otra sesión: solo si las dos tienen el modo pelea y están cerca. */
 export const HitMsg = envelope("HIT", z.object({ to: SessionRef, move: FightMove }));
+/** Tras quedar fuera de combate, volver con toda la vida (cuando el servidor lo permite: `HEALTH.down_until`). */
+export const RespawnMsg = envelope("RESPAWN", z.object({}));
 
-export const ClientMessage = z.discriminatedUnion("type", [HelloMsg, PoseMsg, MutateWorldMsg, PingMsg, ChatMsg, CollectMsg, CheckpointMsg, ScoresRequestMsg, ReactMsg, PairMsg, FightMsg, HitMsg]);
+/*
+ * La gente de las ciudades, compartida (§9 nonies): una sesión del lugar (la que elige el servidor,
+ * `NPC_HOST`) mueve a los ciudadanos y reparte su estado; los demás los dibujan con ese estado y le
+ * mandan lo que les hacen (golpes, atropellos, acciones en pareja). Nada se guarda.
+ */
+export const NPC_MAX = 32;
+const NpcIndex = z.number().int().min(0).max(NPC_MAX - 1);
+/** Qué está haciendo un ciudadano (lo que hace falta para dibujarlo igual en todos los clientes). */
+export const NPC_DOINGS = ["travel", "stay", "chat", "respond", "follow", "watch", "flee", "dodge", "pair", "down"] as const;
+/** Un ciudadano en un momento: dónde, hacia dónde mira, a qué paso, qué hace, qué dice y si le han dado. */
+export const NpcSnap = z.object({
+  i: NpcIndex,
+  p: z.tuple([z.number(), z.number(), z.number()]),
+  /** Giro (rad) y velocidad (m/s: andar, correr). */
+  r: z.number(),
+  v: z.number().min(0).max(20),
+  /** Lo que hace en su sitio (sentado, jugando, hablando…) y el gesto que hace encima. */
+  e: Emote.optional(),
+  g: Emote.optional(),
+  /** Hacia dónde mira la cabeza (x, y, z) y cuánto (0–1). */
+  l: z.tuple([z.number(), z.number(), z.number(), z.number()]).optional(),
+  /** Lo que dice (clave `npc.*` de los textos del cliente) y cuántas veces ha hablado (cambia con cada frase). */
+  s: z.string().regex(/^npc\.[a-z_]{1,24}$/).optional(),
+  n: z.number().int().min(0).optional(),
+  /** El último golpe que le han dado: número (cambia con cada uno), hacia dónde (x, z), fuerza (m/s) y si fue en la cabeza (1). */
+  k: z.tuple([z.number().int().min(0), z.number(), z.number(), z.number(), z.number().int().min(0).max(1)]).optional(),
+  d: z.enum(NPC_DOINGS).optional(),
+  /** A quién atiende (una sesión) y, en pareja, qué hacen. */
+  w: z.string().max(64).optional(),
+  q: PairAction.optional(),
+});
+export type NpcSnap = z.infer<typeof NpcSnap>;
+/** El estado de todos los ciudadanos del lugar (`t`: hora del servidor). Solo lo manda quien los lleva. */
+export const NpcStateMsg = envelope("NPC_STATE", z.object({ t: z.number(), cast: z.array(NpcSnap).max(NPC_MAX) }));
+/**
+ * La gente de las salas de un distrito (los de `district-interiors.json` con sala, en su orden): no se
+ * mueven, así que no los lleva nadie; lo que se les hace se reparte a quien esté cerca.
+ */
+export const RES_MAX = 256;
+const ResIndex = z.number().int().min(0).max(RES_MAX - 1);
+/** Qué le ha dado: un golpe del modo pelea (o la barrida), el coche o correr contra él. */
+export const NPC_HIT_KINDS = ["hit", "car", "bump"] as const;
+/**
+ * Le has dado a un ciudadano (`npc`: el servidor se lo pasa a quien los lleva) o a alguien de una sala
+ * (`res`: a quien esté cerca). Uno de los dos.
+ */
+export const NpcHitMsg = envelope(
+  "NPC_HIT",
+  z
+    .object({
+      npc: NpcIndex.optional(),
+      res: ResIndex.optional(),
+      dir: z.tuple([z.number(), z.number()]),
+      power: z.number().min(0).max(30),
+      head: z.boolean().optional(),
+      kind: z.enum(NPC_HIT_KINDS),
+    })
+    .refine((p) => (p.npc === undefined) !== (p.res === undefined), { message: "npc o res (uno de los dos)" }),
+);
+/** Proponer a un ciudadano una acción en pareja (contesta quien los lleva, en su estado). */
+export const NpcPairMsg = envelope("NPC_PAIR", z.object({ npc: NpcIndex, kind: PairAction }));
+/** Ofrecerse (`on`) o dejar de llevar a los ciudadanos (la pestaña se va a segundo plano). */
+export const NpcHostingMsg = envelope("NPC_HOSTING", z.object({ on: z.boolean() }));
+
+export const ClientMessage = z.discriminatedUnion("type", [
+  HelloMsg,
+  PoseMsg,
+  MutateWorldMsg,
+  PingMsg,
+  ChatMsg,
+  CollectMsg,
+  CheckpointMsg,
+  ScoresRequestMsg,
+  ReactMsg,
+  PairMsg,
+  FightMsg,
+  HitMsg,
+  RespawnMsg,
+  NpcStateMsg,
+  NpcHitMsg,
+  NpcPairMsg,
+  NpcHostingMsg,
+]);
 export type ClientMessage = z.infer<typeof ClientMessage>;
 
 /* --- servidor → cliente --- */
@@ -770,6 +878,32 @@ export const HitEventMsg = envelope(
     ko: z.boolean().optional(),
   }),
 );
+/**
+ * La vida de alguien en el modo pelea: la que tenía en `at` (hora del servidor; se recupera sola con
+ * `hpAt`) y, si está fuera de combate, hasta cuándo (después puede mandar `RESPAWN`). Le llega a esa
+ * persona y a quien esté cerca, cada vez que cambia (golpes, reaparecer, activar el modo pelea).
+ */
+export const HealthMsg = envelope(
+  "HEALTH",
+  z.object({ session_id: z.string(), hp: z.number().min(0).max(FIGHT_HP), at: z.number(), down_until: z.number().optional() }),
+);
+/** Quién lleva ahora a los ciudadanos del lugar (§9 nonies); `null`, nadie. */
+export const NpcHostMsg = envelope("NPC_HOST", z.object({ session_id: z.string().nullable() }));
+/** Lo que alguien le ha hecho a un ciudadano (`npc`: solo a quien los lleva) o a alguien de una sala (`res`: a quien esté cerca). */
+export const NpcHitEventMsg = envelope(
+  "NPC_HIT_EVENT",
+  z.object({
+    from: z.string(),
+    npc: NpcIndex.optional(),
+    res: ResIndex.optional(),
+    dir: z.tuple([z.number(), z.number()]),
+    power: z.number(),
+    head: z.boolean().optional(),
+    kind: z.enum(NPC_HIT_KINDS),
+  }),
+);
+/** Alguien propone una acción en pareja a un ciudadano (solo a quien los lleva). */
+export const NpcPairEventMsg = envelope("NPC_PAIR_EVENT", z.object({ from: z.string(), npc: NpcIndex, kind: PairAction }));
 
 export const ServerMessage = z.discriminatedUnion("type", [
   ProgressMsg,
@@ -793,6 +927,11 @@ export const ServerMessage = z.discriminatedUnion("type", [
   PairStartMsg,
   PairEndMsg,
   HitEventMsg,
+  HealthMsg,
+  NpcHostMsg,
+  NpcStateMsg,
+  NpcHitEventMsg,
+  NpcPairEventMsg,
 ]);
 export type ServerMessage = z.infer<typeof ServerMessage>;
 

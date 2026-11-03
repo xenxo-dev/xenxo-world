@@ -23,6 +23,8 @@ export interface ConnectOptions {
   displayName?: string;
   /** Avatar de serie (solo invitados y agentes; el servidor ignora hashes que no publica). */
   avatar?: { hash: string; format: "vrm" };
+  /** Se ofrece a llevar a los ciudadanos del distrito para los demás (HELLO `capabilities.npc_host`, §9 nonies). */
+  npcHost?: boolean;
 }
 
 export class XenxoClient {
@@ -91,7 +93,7 @@ export class XenxoClient {
     this.sendRaw(
       msg("HELLO", {
         client_type: "headless",
-        capabilities: { xr: false, hand_tracking: false, haptics: false, lod: "low" },
+        capabilities: { xr: false, hand_tracking: false, haptics: false, lod: "low", ...(o.npcHost ? { npc_host: true } : {}) },
         display_name: o.displayName,
         ...(o.avatar ? { avatar: o.avatar } : {}),
       }),

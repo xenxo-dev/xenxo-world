@@ -146,6 +146,15 @@ function interiorCabinets(id: string): { p: V3; yaw: number }[] {
 }
 
 /**
+ * La gente de las salas de un distrito (§9 nonies): los de district-interiors.json que tienen sala, en
+ * su orden (el mismo que usa el cliente, world/Interiors.tsx). Para comprobar que un golpe es de cerca.
+ */
+export function residentsOf(id: string): readonly V3[] {
+  const list = (lives.districts as unknown as Record<string, { npcs?: { x: number; y: number; z: number; room: number }[] } | undefined>)[id]?.npcs ?? [];
+  return list.filter((p) => p.room >= 0).map((p) => [p.x, p.y, p.z] as V3);
+}
+
+/**
  * Huecos de las máquinas-portal de un distrito (las llena el Worker con sus juegos: syncCabinets):
  * primero los de la plaza y después los de dentro de los edificios.
  */

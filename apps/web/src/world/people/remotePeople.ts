@@ -68,6 +68,9 @@ export class RemotePeople {
   private lastY = 0;
   private lastVy = 0;
   private pair: { kind: PairAction; partner: string; t: number; on: boolean } | null = null;
+  /** Fuera de combate: en el suelo hasta que reaparece (y cuánto hace que reapareció, para soltarlo). */
+  private held = false;
+  private heldT = 0;
   private offs: (() => void)[] = [];
 
   constructor(private id: string) {
@@ -160,6 +163,25 @@ export class RemotePeople {
             this.t = 0;
           }
         } else if (this.phase === "ground") {
+          // Fuera de combate: en el suelo hasta que reaparece en la entrada; allí no se levanta (su
+          // pose salta a la entrada en cuanto llega: entonces se le suelta, sin levantarse aquí).
+          if (people.downUntil(this.id)) {
+            this.held = true;
+            this.heldT = 0;
+            break;
+          }
+          if (this.held) {
+            this.heldT += dt;
+            if (Math.hypot(x - _l.x, z - _l.z) > 2 || this.heldT > 1.2) {
+              this.held = false;
+              rig.cancelFall();
+              this.end();
+              this.quiet = 0;
+              out.placed = false;
+              out.emote = netEmote;
+            }
+            break;
+          }
           if (this.t >= (this.ko ? LIE_KO : LIE)) {
             if (_l.face < -0.3 && !this.rolled) {
               this.phase = "roll";
@@ -188,6 +210,7 @@ export class RemotePeople {
         break;
       case "clipfall":
         out.emote = "hit_down";
+        if (people.downUntil(this.id)) break;
         if (this.t >= 2.2 + (this.ko ? LIE_KO : LIE)) {
           this.phase = "cliprise";
           this.t = 0;

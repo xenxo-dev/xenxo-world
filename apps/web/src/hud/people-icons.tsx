@@ -46,6 +46,8 @@ export const PEOPLE_PATHS: Record<string, string[]> = {
   fight: FIST,
   punch: [...FIST, "M2.5 9h2.5M2 12.5h3M2.5 16h2.5"],
   kick: ["M9 3.5v7.5l-4.5 6.5a1.6 1.6 0 0 0 1.3 2.5H14a3 3 0 0 0 3-3v-1h-5.5", "M13 3.5v7", "M19 8.5l2-1M19.5 12h2.5"],
+  // Deslizarse: tumbado hacia atrás, los pies por delante, sobre el suelo.
+  slide: [CIRCLE(17.5, 7, 2), "M16.3 9.4L12.5 15", "M12.5 15H5", "M12.5 15l2.2 3.2H10", "M15.6 11.3l3.4 1.3", "M3 20.5h18", "M19 16.5h2.5M19.8 18.5h1.7"],
   shove: [
     "M9 18v-6.5a1.4 1.4 0 0 1 2.8 0V9",
     "M11.8 12V6.6a1.4 1.4 0 0 1 2.8 0V12",

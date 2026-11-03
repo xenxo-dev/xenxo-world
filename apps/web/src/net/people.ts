@@ -97,7 +97,7 @@ let lastAttack = 0;
  * seguido). Si sí, cuenta como golpe dado (para el ritmo).
  */
 export function canAttack(move: FightMove): boolean {
-  if (!people.fightOn || !people.style) return false;
+  if (!people.fightOn || !people.style || isDown()) return false;
   if (people.style === "shove" && move !== "shove") {
     people.setNotice("people.err.onlyShove");
     return false;
@@ -125,4 +125,14 @@ export function hitReady(): boolean {
 export function sendHit(to: string, move: FightMove) {
   lastHit = performance.now();
   send("HIT", { to, move }, "hit");
+}
+
+/** ¿Está esta persona fuera de combate? (la vida a 0, hasta que reaparece: después también, mientras espera). */
+export function isDown(id: string | null = world.sessionId): boolean {
+  return !!id && people.downUntil(id) > 0;
+}
+
+/** Tras quedar fuera de combate: volver con toda la vida (el servidor lo deja pasado su tiempo). */
+export function sendRespawn() {
+  send("RESPAWN", {}, "respawn");
 }

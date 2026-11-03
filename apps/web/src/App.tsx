@@ -5,7 +5,7 @@ import { Chat } from "./hud/Chat";
 import { CONTROL_PX, useControls } from "./controls";
 import { enterFullscreen } from "./fullscreen";
 import { TopTools, ViewTools } from "./hud/CameraTools";
-import { ActionWheel, FightButtons, PairPrompts, PeopleNotice } from "./hud/PeopleHud";
+import { ActionWheel, FightButtons, KnockoutNotice, PairPrompts, PeopleNotice } from "./hud/PeopleHud";
 import { CarButton, CarNotice, CarSpeed } from "./hud/CarTools";
 import { useDrive } from "./world/vehicle/drive-state";
 import { People } from "./hud/People";
@@ -239,13 +239,14 @@ export function App() {
             </div>
             {!driving.on && (
               <div className="flex gap-1.5" style={touch ? { opacity: controls.opacity } : undefined}>
-                {!world.solo && <FightButtons />}
+                {!world.solo && <FightButtons touch={touch} />}
                 {controls.showEmotes && <ActionWheel solo={world.solo} touch={touch} />}
               </div>
             )}
           </div>
           {!world.solo && <PairPrompts />}
           <PeopleNotice />
+          {!world.solo && <KnockoutNotice />}
           <CarNotice className={`absolute left-1/2 top-24 -translate-x-1/2 px-3 py-1.5 text-center text-sm text-cal ${hudBox}`} />
           {/* En pantallas estrechas, por debajo de la fila de arriba (si no, tapa a la gente del lugar). */}
           <CarSpeed className={`absolute left-1/2 top-[calc(max(1rem,env(safe-area-inset-top))+3.5rem)] -translate-x-1/2 px-3 py-1 sm:top-[max(1rem,env(safe-area-inset-top))] ${hudBox}`} />

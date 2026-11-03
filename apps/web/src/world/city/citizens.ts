@@ -1,7 +1,10 @@
 /**
  * La gente de las ciudades: pocos ciudadanos (diez por distrito, catorce en Distrito Cero), cada uno
- * con su cara, su forma de ser y su día. Son decorado del cliente (no viajan por la red: cada uno
- * tiene a los suyos, como el horizonte), pero se portan como gente:
+ * con su cara, su forma de ser y su día. Son los mismos para todos los del distrito (§9 nonies): el
+ * servidor elige a uno de los que están (`CityLink`) que los mueve aquí ("host") y reparte su estado;
+ * los demás los dibujan como llegan ("replica": con un poco de retraso, como a las personas) y le
+ * cuentan lo que les hacen. Sin red (o sin nadie que los lleve), cada cliente los mueve para sí
+ * ("local"). Se portan como gente:
  *
  *   - **Van a sitios** (city/nav.ts): se sientan en los bancos, juegan a las máquinas, sacan algo de
  *     la expendedora, miran escaparates y anuncios, esperan con el móvil, charlan en los corros de
@@ -18,7 +21,7 @@
  *     saltan a un lado.
  *   - **Recuerdan**: si les pegas o los atropellas, te tienen miedo y rencor un rato (se apartan, se
  *     van y no te contestan); si ven una pelea, unos miran desde lejos y otros se van; si estás en modo
- *     pelea cerca, los más miedosos se apartan.
+ *     pelea cerca, los más miedosos se apartan. A cada persona, lo suyo: a quien le pega, a quien saluda.
  *
  * Solo se dibujan los más cercanos (`FEATURES.pedestrians`); el resto sigue su vida por el mapa, sin
  * física. Todo lo de fuera (tú, las demás personas, el coche, la física, las caídas) llega por
@@ -26,7 +29,7 @@
  * frame (solo al decidir un camino nuevo).
  */
 import * as THREE from "three";
-import { PAIR_RANGE, type PairAction } from "@xenxo/protocol";
+import { PAIR_RANGE, type NpcSnap, type PairAction } from "@xenxo/protocol";
 import { createMotion, type Motion } from "../motion";
 import { createFx } from "../people/rig";
 import { PAIR, pairTargets } from "../people/pair";
@@ -53,7 +56,7 @@ export interface Me {
   fight: boolean;
 }
 
-/** Otra persona (multijugador), donde se la ve. */
+/** Otra persona (multijugador), donde se la ve, y si está en modo pelea. */
 export interface Remote {
   id: string;
   x: number;
@@ -61,15 +64,59 @@ export interface Remote {
   z: number;
   yaw: number;
   emote: string | null;
+  fight: boolean;
 }
 
-/** El coche que conduces: dónde, hacia dónde avanza (unitario) y a qué velocidad (m/s, ≥ 0). */
+/**
+ * Un coche (el tuyo o el de otra persona): dónde, hacia dónde avanza (unitario), a qué velocidad
+ * (m/s, ≥ 0) y quién lo conduce ("me" o su sesión; sin decir, tú).
+ */
 export interface CarInfo {
   x: number;
   z: number;
   fx: number;
   fz: number;
   speed: number;
+  who?: string;
+}
+
+/** Un estado de los ciudadanos que llega de quien los lleva (`t`: hora del servidor, ms). */
+export interface NpcStateIn {
+  t: number;
+  cast: NpcSnap[];
+}
+
+/** Lo que alguien le ha hecho a un ciudadano (le llega a quien los lleva): un golpe o una propuesta. */
+export interface NpcEvent {
+  kind: "hit" | "pair";
+  from: string;
+  npc: number;
+  dir: [number, number];
+  power: number;
+  head: boolean;
+  hit: "hit" | "car" | "bump";
+  pair: PairAction;
+}
+
+/**
+ * La red (§9 nonies, net/npc-store.ts). `role`: "local" (cada uno los suyos), "host" (este cliente los
+ * mueve y reparte su estado) o "replica" (los dibuja como llegan y cuenta lo que les hace).
+ */
+export interface CityLink {
+  role(): "local" | "host" | "replica";
+  /** Hora del servidor (ms). */
+  now(): number;
+  /** Esta sesión (los ciudadanos dicen a quién atienden con su sesión). */
+  me(): string | null;
+  /** Cuántas personas más hay en el lugar (sin nadie, se reparte el estado mucho menos). */
+  others(): number;
+  publish(cast: NpcSnap[]): void;
+  /** Lo siguiente que le han hecho los demás a algún ciudadano (o null). */
+  nextEvent(): NpcEvent | null;
+  /** Los estados que han llegado, del más viejo al más nuevo. */
+  states(): readonly NpcStateIn[];
+  hit(npc: number, dx: number, dz: number, power: number, head: boolean, kind: "hit" | "car" | "bump"): void;
+  pair(npc: number, kind: PairAction): void;
 }
 
 export interface CityEnv {
@@ -78,7 +125,10 @@ export interface CityEnv {
   sync(): void;
   /** Las demás personas: rellena `out` y dice cuántas hay. */
   remotes(out: Remote[]): number;
+  /** Tu coche (si conduces). */
   car(): CarInfo | null;
+  /** Todos los coches que se mueven (el tuyo y los de los demás): rellena `out` y dice cuántos. Sin esto, solo el tuyo. */
+  cars?(out: CarInfo[]): number;
   /** Un paso de física (locomotion.stepBody, sin la gente: entre ellos se empujan aquí). */
   step(b: Body, wantX: number, wantZ: number, dt: number): void;
   /** Golpes y caídas (knock.ts) del hueco `i`; true mientras mandan ellos. */
@@ -87,7 +137,9 @@ export interface CityEnv {
   /** Tu parte de una acción en pareja con un ciudadano (selfPeople.startLocalPair). */
   pair(kind: PairAction, key: string): void;
   /** Los huecos de la gente (collision.ts → npcs): dónde están y los golpes que les llegan. */
-  npcs: { count: number; pos: Float32Array; knock: Float32Array };
+  npcs: { count: number; pos: Float32Array; knock: Float32Array; knockHead?: Uint8Array };
+  /** La red: sin ella, cada cliente los suyos. */
+  link?: CityLink;
 }
 
 /* ------------------------------------------------------------------ */
@@ -128,8 +180,26 @@ const MAX_FOLLOWERS = 2;
 /** Cuánto dura un bocadillo (s). */
 const SPEECH = 2.6;
 const HIDDEN_Y = -1000;
+/** Por encima de esta fuerza (m/s) un golpe tira al suelo (knock.ts → FALL_SPEED). */
+const FALL_AT = 2.5;
+/** Cuánto está «en el suelo» alguien a quien han dado lejos de quien los lleva (sin física: s). */
+const VK_FALL = 4.8;
+const VK_REACT = 0.8;
+/**
+ * Quien los lleva reparte su estado cada tanto (ms de verdad, no del reloj de la ciudad: con pocos
+ * frames por segundo ese va más despacio): con más gente en el lugar y sin nadie más (para que el
+ * servidor sepa que sigue: a los 4 s sin nada, elige a otro).
+ */
+const PUB_GAP_MS = 250;
+const PUB_IDLE_MS = 1500;
+/** Los demás los dibujan este tanto por detrás (ms): dos estados de margen, como a las personas. */
+const NPC_DELAY_MS = 450;
+/** Un golpe a un ciudadano se ve en el estado (para quien no lo ha dado) durante esto (s). */
+const KNOCK_SHOW = 3;
+const EMOTE_OK = /^[a-z_]{1,24}$/;
+const SPEECH_OK = /^npc\.[a-z_]{1,24}$/;
 
-type Doing = "travel" | "stay" | "chat" | "respond" | "follow" | "watch" | "flee" | "dodge" | "pair";
+type Doing = "travel" | "stay" | "chat" | "respond" | "follow" | "watch" | "flee" | "dodge" | "pair" | "down";
 /** Qué le ha dado: corrías contra él, un golpe del modo pelea o el coche. */
 type HitKind = "" | "bump" | "hit" | "car";
 
@@ -172,7 +242,7 @@ export interface Citizen {
   /** Con quién charla y si le toca hablar. */
   partner: number;
   talking: boolean;
-  /** A quién atiende ("me", el id de una persona o "") y un punto que mirar (fx, fz; NaN si no). */
+  /** A quién atiende ("me", la sesión de otra persona o "") y un punto que mirar (fx, fz; NaN si no). */
   who: string;
   fx: number;
   fz: number;
@@ -192,10 +262,13 @@ export interface Citizen {
   dodgeZ: number;
   dodgeSaid: boolean;
   fear: number;
-  /** De qué tiene miedo: "me" o "fight" (una pelea, en fx, fz). */
-  feared: "me" | "fight";
+  /** De qué tiene miedo: de una persona ("me" o su sesión) o de una pelea ("fight", en fx, fz). */
+  feared: string;
+  /** Rencor y simpatía: hasta cuándo y a quién. */
   grudge: number;
+  grudgeWho: string;
   friend: number;
+  friendWho: string;
   lastChat: number;
   lastGreet: number;
   lastSaid: number;
@@ -215,6 +288,32 @@ export interface Citizen {
   sideDir: number;
   lastX: number;
   lastZ: number;
+  /** Quién le ha dado (y, con quien los lleva, de qué y quién: lo de los demás llega por la red). */
+  hitBy: string;
+  pendingKind: HitKind;
+  pendingBy: string;
+  /** Le han dado lejos de quien los lleva: «en el suelo» sin física hasta entonces (o −1). */
+  vk: number;
+  /** Golpes: cuántos (cambia con cada uno), el último (hacia dónde, fuerza, en la cabeza) y cuándo. */
+  kn: number;
+  kAt: number;
+  /** Quien conduce el coche del que se aparta y dónde estaba. */
+  dangerWho: string;
+  dangerX: number;
+  dangerZ: number;
+  /** Viéndolos como llegan: el último golpe visto, cuándo le diste tú, si el golpe es de la red y si la pareja es contigo. */
+  kSeen: number;
+  localHitAt: number;
+  injected: boolean;
+  pairMine: boolean;
+  /** Al levantarse (viéndolos como llegan): de dónde a dónde dice el estado, se junta poco a poco. */
+  ox: number;
+  oz: number;
+  /** Su estado para repartir (siempre el mismo objeto). */
+  snap: NpcSnap;
+  snapP: [number, number, number];
+  snapL: [number, number, number, number];
+  snapK: [number, number, number, number, number];
 }
 
 /** Qué contestan a cada gesto: gesto (encima de lo que hagan) o de cuerpo entero, y qué dicen. */
@@ -235,10 +334,14 @@ export const POSED = new Set(["sit", "arcade", "talk", "dance", "phone", "intera
 /** Sitios: cuánto apetece cada uno (después, según cada cual). */
 const WANT: Record<PoiKind, number> = { sit: 1.1, play: 1.1, vend: 0.7, window: 0.9, look: 0.8, hang: 1.0, dance: 0.35, watch: 0.7, corner: 0.5 };
 
-const _remotes: Remote[] = Array.from({ length: 48 }, () => ({ id: "", x: 0, y: 0, z: 0, yaw: 0, emote: null }));
+const _remotes: Remote[] = Array.from({ length: 48 }, () => ({ id: "", x: 0, y: 0, z: 0, yaw: 0, emote: null, fight: false }));
+const _cars: CarInfo[] = Array.from({ length: 16 }, () => ({ x: 0, z: 0, fx: 0, fz: 1, speed: 0, who: "" }));
 const _order: Citizen[] = [];
 const byDist = (a: Citizen, b: Citizen) => a.dist - b.dist;
 const _want = { x: 0, z: 0 };
+/** A quién se mira al pasar (notice) y dónde está la pelea que da miedo (fearAt). */
+const _near = { who: "", d: 0, x: 0, y: 0, z: 0, yaw: 0 };
+const _fear = { x: 0, z: 0 };
 const _me = new THREE.Vector3();
 
 const newBody = (): Body => ({ x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, grounded: true, airTime: 0, jumpAge: Infinity, jumped: false, landed: 0, stun: 0, h: 1.8 });
@@ -252,6 +355,15 @@ function placeAt(b: Body, x: number, y: number, z: number) {
   b.jumpAge = Infinity;
 }
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
+const r2 = (v: number) => Math.round(v * 100) / 100;
+const r3 = (v: number) => Math.round(v * 1000) / 1000;
+/** El ciudadano `i` de un estado (van en orden; si falta alguno, se busca). */
+function snapIn(st: NpcStateIn, i: number): NpcSnap | null {
+  const c = st.cast[i];
+  if (c && c.i === i) return c;
+  for (const o of st.cast) if (o.i === i) return o;
+  return null;
+}
 
 /* ------------------------------------------------------------------ */
 /* La ciudad                                                            */
@@ -276,12 +388,22 @@ export class CitySim {
   /** Lo que se suma al rodear a alguien (avoid). */
   private ax = 0;
   private az = 0;
+  private nCars = 0;
+  /** La red y el papel de este cliente (§9 nonies): ver CityLink. */
+  private link: CityLink | null;
+  role: "local" | "host" | "replica" = "local";
+  /** Viéndolos como llegan: ¿ya ha llegado el primer estado? */
+  private synced = false;
+  /** Cuándo se repartió el estado por última vez (hora del servidor, ms). */
+  private pubAt = -1e12;
+  private snaps: NpcSnap[] = [];
 
   constructor(
     readonly nav: CityNav,
     private env: CityEnv,
     count: number,
   ) {
+    this.link = env.link ?? null;
     this.r = rng(seedOf(`city-${nav.id}`));
     for (const p of nav.pois) {
       if (p.group < 0) continue;
@@ -341,7 +463,9 @@ export class CitySim {
         fear: 0,
         feared: "me",
         grudge: -1,
+        grudgeWho: "me",
         friend: -1,
+        friendWho: "me",
         lastChat: -60,
         lastGreet: -120,
         lastSaid: -60,
@@ -357,7 +481,27 @@ export class CitySim {
         sideDir: 1,
         lastX: 0,
         lastZ: 0,
+        hitBy: "me",
+        pendingKind: "",
+        pendingBy: "",
+        vk: -1,
+        kn: 0,
+        kAt: -1e9,
+        dangerWho: "me",
+        dangerX: 0,
+        dangerZ: 0,
+        kSeen: 0,
+        localHitAt: -1e9,
+        injected: false,
+        pairMine: false,
+        ox: 0,
+        oz: 0,
+        snap: { i: id, p: [0, 0, 0], r: 0, v: 0 },
+        snapP: [0, 0, 0],
+        snapL: [0, 0, 0, 0],
+        snapK: [0, 0, 0, 0, 0],
       };
+      c.snap.p = c.snapP;
       c.motion.fx = createFx();
       c.motion.hidden = true;
       this.cast.push(c);
@@ -397,6 +541,8 @@ export class CitySim {
 
   /** Una pelea entre personas en (x, z): quién mira desde lejos y quién se va. */
   event(kind: "fight", x: number, z: number) {
+    // Viéndolos como llegan, de eso se encarga quien los lleva.
+    if (this.watching()) return;
     let said = false;
     for (const c of this.cast) {
       if (!c.near || c.knocked || kind !== "fight") continue;
@@ -429,12 +575,23 @@ export class CitySim {
       bestD = d;
     }
     if (!best) return false;
-    const c = best;
-    if (c.grudge > this.clock || c.fear > 0.3) {
-      // No, gracias.
-      this.reply(c, "me", "shake_head", false, 0.3, 2);
-      this.say(c, c.fear > 0.3 ? "npc.leave" : "npc.no");
+    // Viéndolos como llegan: se lo pregunta quien los lleva (si dice que sí, su estado lo dirá).
+    if (this.watching()) {
+      this.link!.pair(best.id, kind);
       return true;
+    }
+    this.pairWith(best, kind, "me");
+    return true;
+  }
+
+  /** `who` le propone `kind` a `c`: si le apetece, se queda de cara para hacerlo; si no, que no. */
+  private pairWith(c: Citizen, kind: PairAction, who: string) {
+    if (c.knocked || c.vk >= 0 || c.doing === "dodge" || c.doing === "pair") return;
+    if (this.upset(c, who)) {
+      // No, gracias.
+      this.reply(c, who, "shake_head", false, 0.3, 2);
+      this.say(c, c.fear > 0.3 ? "npc.leave" : "npc.no");
+      return;
     }
     this.leaveChat(c);
     this.release(c);
@@ -442,10 +599,25 @@ export class CitySim {
     c.pairKind = kind;
     c.t = 0;
     c.dur = PAIR[kind].s + 0.3;
-    c.who = "me";
+    c.who = who;
     c.motion.gesture = null;
-    this.env.pair(kind, c.key);
-    return true;
+    // Tu parte la haces tú (selfPeople.ts); la de los demás, cada uno en su cliente (al ver el estado).
+    if (who === "me") this.env.pair(kind, c.key);
+  }
+
+  /** ¿Le tiene manía a `who`? (rencor o miedo: entonces no le contesta ni le choca los cinco). */
+  private upset(c: Citizen, who: string): boolean {
+    return (c.grudge > this.clock && c.grudgeWho === who) || (c.fear > 0.3 && (c.feared === who || c.feared === "fight"));
+  }
+
+  /** ¿Se les dibuja con el estado de quien los lleva? (entonces aquí no se decide nada). */
+  private watching(): boolean {
+    return this.role === "replica" && this.synced;
+  }
+
+  /** ¿Se entera de lo que pasa a su alrededor? Llevándolos para todos, si está cerca de alguien; si no, si se le ve aquí. */
+  private aware(c: Citizen): boolean {
+    return this.role === "host" ? c.near : c.drawn;
   }
 
   /* ---------------------------------------------------------------- */
@@ -457,11 +629,27 @@ export class CitySim {
     if (!(dt > 0)) return;
     this.clock += dt;
     this.env.sync();
+    const role = this.link?.role() ?? "local";
+    if (role !== this.role) this.switchRole(role);
+    if (role === "replica") {
+      const states = this.link!.states();
+      // Hasta que llegue el primer estado, siguen a lo suyo aquí.
+      if (states.length) return this.replicaFrame(dt, states);
+    }
     const me = this.env.me;
     this.nRemotes = this.env.remotes(_remotes);
+    this.nCars = this.carsNow();
+    // Lo que los demás les han hecho (llevándolos para todos).
+    if (role === "host") for (let ev = this.link!.nextEvent(); ev; ev = this.link!.nextEvent()) this.remoteEvent(ev);
     for (const c of this.cast) {
       c.dist = Math.hypot(c.body.x - me.x, c.body.z - me.z, (c.body.y - me.y) * 2);
-      const near = c.drawn || c.dist < NEAR;
+      // Con física y enterándose: cerca de ti o de cualquiera (cada uno los ve en su cliente).
+      let any = c.dist;
+      for (let k = 0; k < this.nRemotes; k++) {
+        const o = _remotes[k]!;
+        any = Math.min(any, Math.hypot(c.body.x - o.x, c.body.z - o.z, (c.body.y - o.y) * 2));
+      }
+      const near = c.drawn || any < NEAR;
       if (near && !c.near) {
         placeAt(c.body, c.body.x, c.body.y, c.body.z);
         c.lastX = c.body.x;
@@ -481,10 +669,296 @@ export class CitySim {
       if (c.speech && this.clock > c.speechUntil) c.speech = null;
       if (c.motion.gesture && this.clock > c.gestUntil) c.motion.gesture = null;
       if (c.knocked) continue;
+      if (c.vk >= 0) {
+        // Le han dado lejos de aquí: «en el suelo» (los demás lo ven caer con su física) y luego, de pie.
+        if (this.clock < c.vk) continue;
+        c.vk = -1;
+        this.recover(c, c.body.x, c.body.y, c.body.z, c.yaw);
+      }
       if (c.near) this.think(c, dt);
       else this.farStep(c, dt);
     }
     this.physics(dt);
+    this.knocks();
+    this.place(dt);
+    if (role === "host") this.publish();
+  }
+
+  /** Los coches que se mueven ahora (el tuyo y, si se sabe, los de los demás), en `_cars`. */
+  private carsNow(): number {
+    if (this.env.cars) return this.env.cars(_cars);
+    const car = this.env.car();
+    if (!car) return 0;
+    Object.assign(_cars[0]!, car);
+    _cars[0]!.who = car.who ?? "me";
+    return 1;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Compartidos (§9 nonies)                                            */
+  /* ---------------------------------------------------------------- */
+
+  private switchRole(next: "local" | "host" | "replica") {
+    // Dejan de llegar los estados de otro: desde como se les veía, a decidir aquí.
+    if (this.watching() && next !== "replica") this.adoptBrain();
+    if (next === "replica") this.synced = false;
+    if (next === "host") this.pubAt = -1e12;
+    this.role = next;
+  }
+
+  /**
+   * Se pasa a llevarlos (quien los llevaba se ha ido): cada uno sigue desde donde se le veía; quien
+   * estaba en su sitio, sigue en él; los demás, a un sitio nuevo.
+   */
+  private adoptBrain() {
+    for (const p of this.nav.pois) p.taken = -1;
+    for (const c of this.cast) {
+      c.kn = Math.max(c.kn, c.kSeen);
+      c.pairMine = c.injected = false;
+      c.reply = null;
+      c.partner = -1;
+      c.who = "";
+      c.fx = c.fz = NaN;
+      c.side = c.stuck = c.stuckN = 0;
+      c.arriving = false;
+      c.poi = null;
+      c.path = [];
+      c.pi = 0;
+      c.ox = c.oz = 0;
+      c.motion.fx!.reachL.w = c.motion.fx!.reachR.w = 0;
+      c.motion.fx!.look.w = 0;
+      c.lastX = c.body.x;
+      c.lastZ = c.body.z;
+      const was = c.doing;
+      c.doing = "travel";
+      if (c.knocked) continue; // al levantarse, recover() lo pone en marcha
+      if (was === "down") {
+        c.vk = this.clock + 1.5;
+        continue;
+      }
+      if (was === "stay") {
+        let best: Poi | null = null, bestD = 0.6;
+        for (const p of this.nav.pois) {
+          const d = Math.hypot(p.x - c.body.x, p.z - c.body.z);
+          if (p.taken < 0 && d < bestD && Math.abs(p.y - c.body.y) < 0.5) (best = p), (bestD = d);
+        }
+        if (best) {
+          this.take(c, best);
+          this.startStay(c, 0.3 + this.r() * 0.5);
+          continue;
+        }
+      }
+      c.motion.emote = null;
+      c.motion.gesture = null;
+      this.goSomewhere(c);
+    }
+  }
+
+  /** Llevándolos para todos: lo que otra persona le ha hecho a uno (un golpe o una propuesta). */
+  private remoteEvent(ev: NpcEvent) {
+    const c = this.cast[ev.npc];
+    if (!c) return;
+    const who = ev.from === this.link?.me() ? "me" : ev.from;
+    if (ev.kind === "pair") return this.pairWith(c, ev.pair, who);
+    if (c.knocked || c.vk >= 0) return;
+    const npcs = this.env.npcs;
+    if (c.drawn && c.slot >= 0 && c.group) {
+      // Se le ve aquí: cae con su física, como con un golpe tuyo (knocks).
+      const i = c.slot;
+      npcs.knock[i * 4] = this.clock * 1000 + 1;
+      npcs.knock[i * 4 + 1] = ev.dir[0];
+      npcs.knock[i * 4 + 2] = ev.dir[1];
+      npcs.knock[i * 4 + 3] = ev.power;
+      if (npcs.knockHead) npcs.knockHead[i] = ev.head ? 1 : 0;
+      c.pendingKind = ev.hit;
+      c.pendingBy = who;
+      return;
+    }
+    // Lejos de aquí: sin física; quien lo ve, lo ve caer (el golpe va en el estado).
+    this.noteKnock(c, ev.dir[0], ev.dir[1], ev.power, ev.head ? 1 : 0);
+    c.hitKind = ev.hit;
+    c.hitBy = who;
+    c.vk = this.clock + (ev.power >= FALL_AT ? VK_FALL : VK_REACT);
+    this.struck(c);
+  }
+
+  /** Apunta un golpe (para repartirlo en el estado). */
+  private noteKnock(c: Citizen, nx: number, nz: number, power: number, head: number) {
+    c.kn++;
+    c.kAt = this.clock;
+    const k = c.snapK;
+    k[0] = c.kn;
+    k[1] = r3(nx);
+    k[2] = r3(nz);
+    k[3] = r2(Math.min(30, power));
+    k[4] = head ? 1 : 0;
+  }
+
+  /** Llevándolos para todos: reparte el estado de cada uno (a menudo si hay alguien más; si no, de vez en cuando). */
+  private publish() {
+    const link = this.link!;
+    const now = link.now();
+    if (now - this.pubAt < (link.others() > 0 ? PUB_GAP_MS : PUB_IDLE_MS)) return;
+    this.pubAt = now;
+    const myId = link.me();
+    const list = this.snaps;
+    list.length = 0;
+    for (const c of this.cast) {
+      const s = c.snap, m = c.motion;
+      const down = c.knocked || c.vk >= 0;
+      // En el suelo (aquí, con su física), donde está su cuerpo; si no, donde va.
+      const x = down && c.drawn ? c.feet.x : c.body.x, y = down && c.drawn ? c.feet.y : c.body.y, z = down && c.drawn ? c.feet.z : c.body.z;
+      s.p[0] = r2(x);
+      s.p[1] = r2(y);
+      s.p[2] = r2(z);
+      s.r = r3(wrap(c.yaw));
+      s.v = r2(Math.max(0, Math.min(20, m.speed)));
+      s.e = m.emote && EMOTE_OK.test(m.emote) ? m.emote : undefined;
+      s.g = m.gesture && EMOTE_OK.test(m.gesture) ? m.gesture : undefined;
+      const l = m.fx!.look;
+      if (l.w > 0.01) {
+        c.snapL[0] = r2(l.x);
+        c.snapL[1] = r2(l.y);
+        c.snapL[2] = r2(l.z);
+        c.snapL[3] = r2(Math.min(1, l.w));
+        s.l = c.snapL;
+      } else s.l = undefined;
+      if (c.speech && SPEECH_OK.test(c.speech)) {
+        s.s = c.speech;
+        s.n = c.said;
+      } else s.s = s.n = undefined;
+      s.k = c.kn > 0 && this.clock - c.kAt < KNOCK_SHOW ? c.snapK : undefined;
+      s.d = down ? "down" : c.doing;
+      s.w = c.who === "me" ? (myId ?? undefined) : c.who && c.who !== "fight" ? c.who.slice(0, 64) : undefined;
+      s.q = c.doing === "pair" ? c.pairKind : undefined;
+      list.push(s);
+    }
+    link.publish(list);
+  }
+
+  /**
+   * Viéndolos como llegan: cada uno donde dice el estado (entre los dos que rodean el momento que se
+   * dibuja), con lo que hace, lo que mira y lo que dice; los golpes de los demás, con su física aquí;
+   * los tuyos se ven enseguida y se le cuentan a quien los lleva (knocks).
+   */
+  private replicaFrame(dt: number, states: readonly NpcStateIn[]) {
+    const link = this.link!;
+    const me = this.env.me;
+    this.nRemotes = this.env.remotes(_remotes);
+    const myId = link.me();
+    const first = !this.synced;
+    this.synced = true;
+    const rt = link.now() - NPC_DELAY_MS;
+    let i1 = 0;
+    while (i1 < states.length && states[i1]!.t <= rt) i1++;
+    const s0 = states[Math.max(0, i1 - 1)]!, s1 = states[Math.min(states.length - 1, i1)]!;
+    const span = s1.t - s0.t;
+    const k = span > 0 ? Math.max(0, Math.min(1, (rt - s0.t) / span)) : 1;
+    const npcs = this.env.npcs;
+    for (const c of this.cast) {
+      c.t += dt;
+      if (c.speech && this.clock > c.speechUntil) c.speech = null;
+      const a = snapIn(s0, c.id), b = snapIn(s1, c.id);
+      const now = a ?? b;
+      if (!now) continue;
+      const to = b ?? a!;
+      const m = c.motion, body = c.body;
+      // Dónde: entre los dos estados (si ha dado un salto, sin pasar por en medio).
+      let x = to.p[0], y = to.p[1], z = to.p[2], yaw = to.r, v = to.v;
+      if (a && b && a !== b) {
+        if (Math.hypot(b.p[0] - a.p[0], b.p[2] - a.p[2]) < 6) {
+          x = a.p[0] + (b.p[0] - a.p[0]) * k;
+          y = a.p[1] + (b.p[1] - a.p[1]) * k;
+          z = a.p[2] + (b.p[2] - a.p[2]) * k;
+          yaw = a.r + wrap(b.r - a.r) * k;
+          v = a.v + (b.v - a.v) * k;
+        } else if (k < 0.5) (x = a.p[0]), (y = a.p[1]), (z = a.p[2]), (yaw = a.r), (v = a.v);
+      }
+      if (first || !c.near) {
+        // Recién llegado (o lejos): donde está, sin más.
+        c.visY = y;
+        c.ox = c.oz = 0;
+      }
+      body.x = x;
+      body.y = y;
+      body.z = z;
+      body.vx = body.vz = body.vy = 0;
+      body.grounded = true;
+      c.near = c.drawn;
+      c.dist = Math.hypot(x - me.x, z - me.z, (y - me.y) * 2);
+      if (!c.knocked) {
+        c.yaw = yaw;
+        m.speed = v;
+        m.airborne = false;
+      }
+      // Qué hace (lo del estado que manda en este momento).
+      const doing = (now.d ?? "travel") as Doing;
+      if (doing !== c.doing) {
+        if (c.doing === "pair") {
+          m.fx!.reachL.w = m.fx!.reachR.w = 0;
+          c.pairMine = false;
+        }
+        c.doing = doing;
+        c.t = 0;
+      }
+      if (!c.knocked) {
+        m.emote = now.e ?? null;
+        m.gesture = now.g ?? null;
+      }
+      const look = m.fx!.look;
+      if (now.l && now.w && now.w === myId) {
+        // Te mira a ti: a donde estás (no a donde te veía quien los lleva).
+        look.x = me.x;
+        look.y = me.y + 1.55;
+        look.z = me.z;
+        look.w = now.l[3];
+      } else if (now.l) {
+        look.x = now.l[0];
+        look.y = now.l[1];
+        look.z = now.l[2];
+        look.w = now.l[3];
+      } else look.w = 0;
+      if (now.s) {
+        if (now.n !== c.said || !c.speech) {
+          c.speech = now.s;
+          c.said = now.n ?? c.said + 1;
+          c.speechUntil = this.clock + SPEECH;
+        }
+      } else c.speech = null;
+      // En pareja: las manos se encuentran con las de su pareja; si es contigo, tu parte la haces tú.
+      if (doing === "pair" && now.q) {
+        const p = now.w === myId ? me : now.w ? this.whereIs(now.w) : null;
+        if (p) {
+          _me.set(p.x, p.y, p.z);
+          pairTargets(now.q, c.t, body.x, body.y, body.z, _me, m.fx!);
+        }
+        if (now.w === myId && !c.pairMine) {
+          c.pairMine = true;
+          this.env.pair(now.q, c.key);
+        }
+      }
+      // Un golpe nuevo de otro: cae aquí con su física (si se le ve; el tuyo ya se ve desde que lo das).
+      if (now.k) {
+        const n = now.k[0];
+        if (first) c.kSeen = Math.max(c.kSeen, n);
+        else if (n > c.kSeen) {
+          c.kSeen = n;
+          if (this.clock - c.localHitAt > 2.5 && c.drawn && c.slot >= 0 && c.group && !c.knocked) {
+            const i = c.slot;
+            npcs.knock[i * 4] = this.clock * 1000 + 1;
+            npcs.knock[i * 4 + 1] = now.k[1];
+            npcs.knock[i * 4 + 2] = now.k[2];
+            npcs.knock[i * 4 + 3] = now.k[3];
+            if (npcs.knockHead) npcs.knockHead[i] = now.k[4];
+            c.injected = true;
+          }
+        }
+      }
+    }
+    if (--this.tick <= 0) {
+      this.tick = 15;
+      this.selectDrawn();
+    }
     this.knocks();
     this.place(dt);
   }
@@ -570,7 +1044,7 @@ export class CitySim {
     let a: Citizen | null = null, b: Citizen | null = null, sa = 0.12, sb = 0.12;
     const reach = emote === "dance" ? 11 : GREET;
     for (const c of this.cast) {
-      if (!c.drawn || c.knocked || c.doing === "dodge" || c.doing === "pair" || c.doing === "flee") continue;
+      if (!this.aware(c) || c.knocked || c.vk >= 0 || c.doing === "dodge" || c.doing === "pair" || c.doing === "flee") continue;
       const dx = c.body.x - x, dz = c.body.z - z, d = Math.hypot(dx, dz);
       if (d > reach || Math.abs(c.body.y - y) > 1.5) continue;
       const toward = d > 0.3 ? (dx * fx + dz * fz) / d : 1;
@@ -590,14 +1064,13 @@ export class CitySim {
     // Bailar delante de la gente: se acerca un corrillo a mirar y a aplaudir.
     if (emote === "dance")
       for (const c of this.cast) {
-        if (c === a || c === b || !c.drawn || c.knocked || c.doing !== "travel" || c.curious < 0.45) continue;
+        if (c === a || c === b || !this.aware(c) || c.knocked || c.vk >= 0 || c.doing !== "travel" || c.curious < 0.45) continue;
         if (Math.hypot(c.body.x - x, c.body.z - z) < 11) this.watch(c, x, z, 6 + c.curious * 4, "clap", who);
       }
   }
 
   private answer(c: Citizen, who: string, emote: string, x: number, z: number, yaw: number, first: boolean) {
-    const upset = who === "me" && (c.grudge > this.clock || c.fear > 0.3);
-    if (upset) {
+    if (this.upset(c, who)) {
       if (first) {
         this.reply(c, who, "shake_head", false, 0.4, 2);
         this.say(c, "npc.leave");
@@ -645,7 +1118,10 @@ export class CitySim {
     if (r.say && first) this.say(c, r.say[Math.floor(this.r() * r.say.length)]!);
     // Ya os habéis saludado: no te vuelve a saludar en un rato.
     c.lastGreet = this.clock;
-    if (emote === "wave" && who === "me") c.friend = this.clock + FRIEND;
+    if (emote === "wave") {
+      c.friend = this.clock + FRIEND;
+      c.friendWho = who;
+    }
   }
 
   /**
@@ -695,7 +1171,8 @@ export class CitySim {
   }
 
   private say(c: Citizen, key: string) {
-    if (!c.drawn) return;
+    // Sin dibujar aquí no lo oye nadie (salvo llevándolos para todos: lo oyen donde se les vea).
+    if (!c.drawn && this.role !== "host") return;
     c.speech = key;
     c.speechUntil = this.clock + SPEECH;
     c.said++;
@@ -717,10 +1194,10 @@ export class CitySim {
     this.danger(c);
     if (c.doing !== "dodge" && c.doing !== "pair" && this.clock >= c.dangerAt) this.startDodge(c);
     this.wary(c, dt);
-    // Miedo: lejos de ti (o de la pelea), corriendo.
+    // Miedo: lejos de quien le da miedo (o de la pelea), corriendo.
     if (c.fear > 0.35 && c.doing !== "dodge" && c.doing !== "flee" && c.doing !== "pair") {
-      const tx = c.feared === "me" ? me.x : c.fx, tz = c.feared === "me" ? me.z : c.fz;
-      if (Number.isFinite(tx) && Math.hypot(b.x - tx, b.z - tz) < 6.5) this.flee(c, tx, tz);
+      const f = this.fearAt(c);
+      if (f && Math.hypot(b.x - f.x, b.z - f.z) < 6.5) this.flee(c, f.x, f.z);
     }
 
     switch (c.doing) {
@@ -787,7 +1264,7 @@ export class CitySim {
         const p = this.whereIs(c.who);
         const still = p === me ? Math.hypot(me.vx, me.vz) < 0.3 : false;
         c.idleT = still ? c.idleT + dt : 0;
-        if (!p || c.t > c.dur || c.idleT > FOLLOW_IDLE || Math.hypot(p.x - b.x, p.z - b.z) > 25 || Math.abs(p.y - b.y) > 3 || (c.who === "me" && (c.grudge > this.clock || me.driving))) {
+        if (!p || c.t > c.dur || c.idleT > FOLLOW_IDLE || Math.hypot(p.x - b.x, p.z - b.z) > 25 || Math.abs(p.y - b.y) > 3 || this.upset(c, c.who) || (c.who === "me" && me.driving)) {
           this.gest(c, "wave", 2);
           this.say(c, "npc.bye");
           this.resume(c);
@@ -819,12 +1296,13 @@ export class CitySim {
         break;
       }
       case "flee": {
-        const tx = c.feared === "me" ? me.x : c.fx, tz = c.feared === "me" ? me.z : c.fz;
-        const far = Number.isFinite(tx) ? Math.hypot(b.x - tx, b.z - tz) : Infinity;
-        if (c.fear < 0.2 || far > 14) {
+        const f = this.fearAt(c);
+        const far = f ? Math.hypot(b.x - f.x, b.z - f.z) : Infinity;
+        if (!f || c.fear < 0.2 || far > 14) {
           this.resume(c);
           break;
         }
+        const tx = f.x, tz = f.z;
         this.followPath(c, c.fear > 0.6 ? JOG : 2.2);
         wantX = _want.x;
         wantZ = _want.z;
@@ -843,23 +1321,34 @@ export class CitySim {
           this.gest(c, "shake_head", 2);
           this.say(c, this.r() < 0.5 ? "npc.careful" : "npc.crazy");
           c.fear = Math.min(1, c.fear + 0.25);
-          c.feared = "me";
+          c.feared = c.dangerWho;
           c.grudge = Math.max(c.grudge, this.clock + GRUDGE * 0.5);
+          c.grudgeWho = c.dangerWho;
         }
-        const car = this.env.car();
-        if (car) this.lookAt(c, car.x, b.y + 1.2, car.z, 0.9);
+        // Mira al coche (el que le hizo saltar).
+        for (let k = 0; k < this.nCars; k++) {
+          const car = _cars[k]!;
+          if ((car.who ?? "me") !== c.dangerWho) continue;
+          c.dangerX = car.x;
+          c.dangerZ = car.z;
+        }
+        this.lookAt(c, c.dangerX, b.y + 1.2, c.dangerZ, 0.9);
         if (c.t > c.dur && b.grounded) this.resume(c);
         break;
       }
       case "pair": {
-        // Se queda de cara a ti; tú te acercas a la distancia de la acción (selfPeople.ts).
-        _me.set(me.x, me.y, me.z);
-        face = faceYaw(me.x - b.x, me.z - b.z);
+        // Se queda de cara a su pareja; ella se acerca a la distancia de la acción (selfPeople.ts).
+        const p = this.whereIs(c.who);
+        if (p) {
+          _me.set(p.x, p.y, p.z);
+          face = faceYaw(p.x - b.x, p.z - b.z);
+          pairTargets(c.pairKind, c.t, b.x, b.y, b.z, _me, m.fx!);
+        }
         m.emote = c.pairKind;
-        pairTargets(c.pairKind, c.t, b.x, b.y, b.z, _me, m.fx!);
-        if (c.t > c.dur) {
+        if (c.t > c.dur || !p) {
           m.fx!.reachL.w = m.fx!.reachR.w = 0;
           c.friend = this.clock + FRIEND;
+          c.friendWho = c.who;
           c.lastGreet = this.clock;
           this.say(c, c.pairKind === "hug" ? "npc.thanks" : "npc.ok");
           this.resume(c);
@@ -928,22 +1417,34 @@ export class CitySim {
     }
   }
 
-  /** ¿Viene el coche hacia él? Apunta cuándo se da cuenta (antes quien es más precavido). */
+  /** ¿Viene un coche hacia él? Apunta cuándo se da cuenta (antes quien es más precavido). */
   private danger(c: Citizen) {
-    const car = this.env.car();
     const b = c.body;
-    if (!car || car.speed < 4 || c.doing === "dodge") {
+    if (c.doing === "dodge") {
       c.dangerAt = Infinity;
       return;
     }
-    const rx = b.x - car.x, rz = b.z - car.z;
-    const along = rx * car.fx + rz * car.fz;
-    const lat = rx * -car.fz + rz * car.fx;
-    if (!(along > 0.5 && along < car.speed * 1.4 + 2 && Math.abs(lat) < 2)) {
+    let car: CarInfo | null = null, lat = 0;
+    for (let k = 0; k < this.nCars; k++) {
+      const o = _cars[k]!;
+      if (o.speed < 4) continue;
+      const rx = b.x - o.x, rz = b.z - o.z;
+      const along = rx * o.fx + rz * o.fz;
+      const l = rx * -o.fz + rz * o.fx;
+      if (along > 0.5 && along < o.speed * 1.4 + 2 && Math.abs(l) < 2) {
+        car = o;
+        lat = l;
+        break;
+      }
+    }
+    if (!car) {
       c.dangerAt = Infinity;
       return;
     }
     if (c.dangerAt !== Infinity) return;
+    c.dangerWho = car.who ?? "me";
+    c.dangerX = car.x;
+    c.dangerZ = car.z;
     c.dangerAt = this.clock + 0.15 + c.bold * 0.3 + this.r() * 0.15;
     // Hacia el lado en que ya está (si está en medio, al que tenga sitio).
     const lx = -car.fz, lz = car.fx;
@@ -972,22 +1473,40 @@ export class CitySim {
     b.grounded = false;
   }
 
-  /** Estás en modo pelea cerca: los miedosos se apartan; los demás te miran con los brazos cruzados. */
+  /** Alguien en modo pelea cerca: los miedosos se apartan; los demás le miran con los brazos cruzados. */
   private wary(c: Citizen, dt: number) {
+    if (c.doing === "pair" || c.doing === "dodge") return;
     const me = this.env.me;
-    if (!me.fight || me.driving || c.doing === "pair" || c.doing === "dodge") return;
-    const d = Math.hypot(me.x - c.body.x, me.z - c.body.z);
-    if (d > 4.5 || Math.abs(me.y - c.body.y) > 1.5) return;
+    if (me.fight && !me.driving && this.waryOf(c, dt, "me", me.x, me.y, me.z)) return;
+    for (let k = 0; k < this.nRemotes; k++) {
+      const o = _remotes[k]!;
+      if (o.fight && this.waryOf(c, dt, o.id, o.x, o.y, o.z)) return;
+    }
+  }
+
+  private waryOf(c: Citizen, dt: number, who: string, x: number, y: number, z: number): boolean {
+    const d = Math.hypot(x - c.body.x, z - c.body.z);
+    if (d > 4.5 || Math.abs(y - c.body.y) > 1.5) return false;
     if (c.bold < 0.5) {
       c.fear = Math.min(0.6, c.fear + dt * 0.3);
-      c.feared = "me";
+      c.feared = who;
     } else if (this.clock > c.glanceNext && c.doing !== "follow") {
-      this.lookAt(c, me.x, me.y + 1.55, me.z, 0.9);
+      this.lookAt(c, x, y + 1.55, z, 0.9);
       this.gest(c, "fold_arms", 3);
-      c.who = "me";
+      c.who = who;
       c.glance = this.clock + 3;
       c.glanceNext = c.glance + 6;
     }
+    return true;
+  }
+
+  /** Dónde está lo que le da miedo (la persona o la pelea), o null si ya no está. */
+  private fearAt(c: Citizen): { x: number; z: number } | null {
+    if (c.feared !== "fight") return this.whereIs(c.feared);
+    if (!Number.isFinite(c.fx) || !Number.isFinite(c.fz)) return null;
+    _fear.x = c.fx;
+    _fear.z = c.fz;
+    return _fear;
   }
 
   private flee(c: Citizen, tx: number, tz: number) {
@@ -1074,33 +1593,56 @@ export class CitySim {
       if (p) this.lookAt(c, p.x, p.y + 1.55, p.z, c.motion.fx!.look.w || 0.8);
       return true;
     }
+    // Sin dibujar no hay a quién mirar (ni quien lo vea; llevándolos para todos, quien esté cerca).
+    if (!this.aware(c)) return false;
+    // La persona más cercana que tenga delante (tú o cualquiera).
     const me = this.env.me;
-    // Sin dibujar no hay a quién mirar (ni quien lo vea).
-    if (me.driving || !c.drawn) return false;
     const b = c.body;
-    const dx = me.x - b.x, dz = me.z - b.z, d = Math.hypot(dx, dz);
-    if (d > NOTICE || Math.abs(me.y - b.y) > 1.5) return false;
-    const front = d > 0.1 ? (dx * -Math.sin(c.yaw) + dz * -Math.cos(c.yaw)) / d : 1;
-    if (front < -0.2) return false;
-    const looked = d > 0.1 ? (-dx * -Math.sin(me.yaw) + -dz * -Math.cos(me.yaw)) / d : 1;
-    if (this.clock - c.lastGreet > 90 && d < 4.5 && looked > 0.6 && (c.friend > this.clock || (c.social > 0.75 && this.r() < dt * 0.8))) {
+    const n = _near;
+    n.who = "";
+    n.d = NOTICE;
+    if (!me.driving) this.consider(c, "me", me.x, me.y, me.z, me.yaw);
+    for (let k = 0; k < this.nRemotes; k++) {
+      const o = _remotes[k]!;
+      this.consider(c, o.id, o.x, o.y, o.z, o.yaw);
+    }
+    const who = n.who, d = n.d, px = n.x, py = n.y, pz = n.z, pyaw = n.yaw;
+    if (!who) return false;
+    const dx = px - b.x, dz = pz - b.z;
+    const looked = d > 0.1 ? (-dx * -Math.sin(pyaw) + -dz * -Math.cos(pyaw)) / d : 1;
+    if (this.clock - c.lastGreet > 90 && d < 4.5 && looked > 0.6 && ((c.friend > this.clock && c.friendWho === who) || (c.social > 0.75 && this.r() < dt * 0.8))) {
       c.lastGreet = this.clock;
       this.gest(c, "wave", 2.2);
       this.say(c, "npc.hi");
-      this.lookAt(c, me.x, me.y + 1.55, me.z, 0.8);
-      c.who = "me";
+      this.lookAt(c, px, py + 1.55, pz, 0.8);
+      c.who = who;
       c.glance = this.clock + 2.5;
       c.glanceNext = c.glance + 6;
       return true;
     }
     if (this.clock > c.glanceNext && this.r() < dt * (0.5 + c.curious)) {
-      this.lookAt(c, me.x, me.y + 1.55, me.z, c.grudge > this.clock ? 0.9 : 0.65);
-      c.who = "me";
+      this.lookAt(c, px, py + 1.55, pz, c.grudge > this.clock && c.grudgeWho === who ? 0.9 : 0.65);
+      c.who = who;
       c.glance = this.clock + 1.5 + this.r() * 1.5;
       c.glanceNext = c.glance + 4 + this.r() * 6;
       return true;
     }
     return false;
+  }
+
+  /** ¿Es esta persona la más cercana de las que `c` tiene delante? (en `_near`) */
+  private consider(c: Citizen, id: string, x: number, y: number, z: number, yaw: number) {
+    const b = c.body, n = _near;
+    const dd = Math.hypot(x - b.x, z - b.z);
+    if (dd > n.d || Math.abs(y - b.y) > 1.5) return;
+    const front = dd > 0.1 ? ((x - b.x) * -Math.sin(c.yaw) + (z - b.z) * -Math.cos(c.yaw)) / dd : 1;
+    if (front < -0.2) return;
+    n.who = id;
+    n.d = dd;
+    n.x = x;
+    n.y = y;
+    n.z = z;
+    n.yaw = yaw;
   }
 
   /** El gesto pendiente de contestar, cuando toca. */
@@ -1171,8 +1713,8 @@ export class CitySim {
   }
 
   private whereIs(who: string): { x: number; y: number; z: number; yaw: number } | null {
-    if (!who) return null;
-    if (who === "me") return this.env.me;
+    if (!who || who === "fight") return null;
+    if (who === "me" || who === this.link?.me()) return this.env.me;
     for (let k = 0; k < this.nRemotes; k++) if (_remotes[k]!.id === who) return _remotes[k]!;
     return null;
   }
@@ -1554,17 +2096,45 @@ export class CitySim {
   private knocks() {
     const me = this.env.me;
     const npcs = this.env.npcs;
+    const watching = this.watching();
     for (const c of this.cast) {
       if (!c.drawn || c.slot < 0 || !c.group) continue;
       const i = c.slot;
-      // Un golpe nuevo: de qué (el coche si conduces, un golpe en modo pelea o que corrías contra él).
-      if (npcs.knock[i * 4]) c.hitKind = me.driving ? "car" : me.fight ? "hit" : "bump";
+      if (npcs.knock[i * 4]) {
+        // Un golpe nuevo: de qué (el coche si conduces, un golpe en modo pelea o que corrías contra él)
+        // y de quién (lo de los demás llega con lo suyo: remoteEvent).
+        const kind: HitKind = me.driving ? "car" : me.fight ? "hit" : "bump";
+        if (watching) {
+          // Viéndolos como llegan: el de la red ya está contado; el tuyo se ve ya y se le cuenta a quien los lleva.
+          if (c.injected) c.injected = false;
+          else {
+            c.localHitAt = this.clock;
+            this.link!.hit(c.id, npcs.knock[i * 4 + 1]!, npcs.knock[i * 4 + 2]!, npcs.knock[i * 4 + 3]!, (npcs.knockHead?.[i] ?? 0) === 1, kind as "hit" | "car" | "bump");
+          }
+        } else {
+          c.hitKind = c.pendingKind || kind;
+          c.hitBy = c.pendingBy || "me";
+          c.pendingKind = "";
+          c.pendingBy = "";
+          this.noteKnock(c, npcs.knock[i * 4 + 1]!, npcs.knock[i * 4 + 2]!, npcs.knock[i * 4 + 3]!, npcs.knockHead?.[i] ?? 0);
+        }
+      }
       const was = c.knocked;
       const g = c.group;
       const busy = this.env.knock(i, g, c.body.x, c.body.y, c.body.z, c.yaw, c.motion);
       c.knocked = busy;
+      if (watching) {
+        // De pie otra vez: de donde se levantó a donde dice el estado, poco a poco (place).
+        if (!busy && was) {
+          c.ox = g.position.x - c.body.x;
+          c.oz = g.position.z - c.body.z;
+          c.visY = g.position.y;
+          c.yaw = g.rotation.y;
+        }
+        continue;
+      }
       if (busy && !was) this.struck(c);
-      if (!busy && was) this.recover(c, g);
+      if (!busy && was) this.recover(c, g.position.x, g.position.y, g.position.z, g.rotation.y);
     }
   }
 
@@ -1583,32 +2153,35 @@ export class CitySim {
       const d = Math.hypot(o.body.x - c.body.x, o.body.z - c.body.z);
       if (d > 10) continue;
       o.fear = Math.min(1, o.fear + (0.25 + (1 - o.bold) * 0.4) * (1 - d / 12));
-      o.feared = "me";
+      o.feared = c.hitBy;
       if (o.fear <= 0.35 && o.doing !== "pair" && o.doing !== "follow" && o.doing !== "dodge") this.watch(o, c.body.x, c.body.z, 3 + o.curious * 3, o.bold > 0.6 ? "shake_head" : null);
     }
   }
 
-  /** Ya de pie, donde ha caído: sigue con su vida (con miedo y rencor, según lo que le han hecho). */
-  private recover(c: Citizen, g: THREE.Object3D) {
-    placeAt(c.body, g.position.x, g.position.y, g.position.z);
-    c.visY = g.position.y;
-    c.yaw = g.rotation.y;
+  /** Ya de pie, donde ha caído: sigue con su vida (con miedo y rencor a quien le ha dado, según lo que le ha hecho). */
+  private recover(c: Citizen, x: number, y: number, z: number, yaw: number) {
+    placeAt(c.body, x, y, z);
+    c.visY = y;
+    c.yaw = yaw;
     c.motion.gesture = null;
     c.lastX = c.body.x;
     c.lastZ = c.body.z;
     const kind = c.hitKind;
+    const by = c.hitBy || "me";
     c.hitKind = "";
-    c.feared = "me";
+    c.feared = by;
     if (kind === "bump") {
       c.fear = Math.min(1, c.fear + 0.12);
       this.say(c, this.r() < 0.5 ? "npc.careful" : "npc.ouch");
       this.gest(c, "shake_head", 1.8);
-      this.lookAt(c, this.env.me.x, this.env.me.y + 1.55, this.env.me.z, 0.9);
-      c.who = "me";
+      const p = this.whereIs(by);
+      if (p) this.lookAt(c, p.x, p.y + 1.55, p.z, 0.9);
+      c.who = by;
       c.glance = this.clock + 2;
     } else {
       c.fear = Math.min(1, c.fear + (kind === "car" ? 0.6 : 0.4) + (1 - c.bold) * 0.4);
       c.grudge = this.clock + (kind === "car" ? GRUDGE * 1.4 : GRUDGE);
+      c.grudgeWho = by;
       this.say(c, kind === "car" ? "npc.crazy" : this.r() < 0.5 ? "npc.ouch" : "npc.leave");
     }
     this.resume(c);
@@ -1627,7 +2200,13 @@ export class CitySim {
         // Los escalones, con suavidad (la física sube de golpe).
         const dy = c.body.y - c.visY;
         c.visY = Math.abs(dy) < 0.6 && c.body.grounded ? c.visY + dy * Math.min(1, dt * 14) : c.body.y;
-        g.position.set(c.body.x, c.visY, c.body.z);
+        // Tras levantarse (viéndolos como llegan), de donde quedó a donde está, poco a poco.
+        if (c.ox !== 0 || c.oz !== 0) {
+          const f = Math.exp(-dt * 2.5);
+          c.ox = Math.abs(c.ox) < 0.01 ? 0 : c.ox * f;
+          c.oz = Math.abs(c.oz) < 0.01 ? 0 : c.oz * f;
+        }
+        g.position.set(c.body.x + c.ox, c.visY, c.body.z + c.oz);
         g.rotation.set(0, c.yaw, 0);
       }
       c.feet.set(g.position.x, g.position.y, g.position.z);

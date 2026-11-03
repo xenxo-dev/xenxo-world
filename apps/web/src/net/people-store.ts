@@ -4,7 +4,7 @@
  * useFrame, sin re-renderizar) y el HUD (con `usePeople`, solo ante cambios estructurales).
  */
 import { useSyncExternalStore } from "react";
-import type { FightMove, FightStyle, PairAction, Reaction, ServerMessage } from "@xenxo/protocol";
+import { FIGHT_HP, hpAt, type FightMove, type FightStyle, type PairAction, type Reaction, type ServerMessage } from "@xenxo/protocol";
 
 /** Ref de los mensajes de gente: sus errores van al aviso del HUD, no al chat. */
 export const PEOPLE_REF = "people-";
@@ -26,6 +26,13 @@ export interface HitEvent {
   fall: boolean;
   ko: boolean;
   at: number;
+}
+
+/** La vida de alguien en el modo pelea (HEALTH): la que tenía en `at` (hora del servidor) y hasta cuándo está fuera de combate. */
+export interface Health {
+  hp: number;
+  at: number;
+  downUntil: number;
 }
 
 export interface PairEvent {
@@ -59,6 +66,8 @@ class PeopleStore {
   lastHit = new Map<string, HitEvent>();
   /** Esta sesión (de WELCOME). */
   me: string | null = null;
+  /** La vida de cada uno en el modo pelea (HEALTH), la tuya también. */
+  health = new Map<string, Health>();
 
   private version = 0;
   private listeners = new Set<() => void>();
@@ -88,6 +97,17 @@ class PeopleStore {
     this.bump();
   }
 
+  /** La vida de `id` ahora (`now`: hora del servidor), con lo que se recupera sola; entera si no se sabe. */
+  hpOf(id: string, now: number): number {
+    const h = this.health.get(id);
+    return h ? hpAt(h.hp, h.at, now, h.downUntil) : FIGHT_HP;
+  }
+
+  /** Hasta cuándo está fuera de combate (hora del servidor; 0 si no lo está). */
+  downUntil(id: string): number {
+    return this.health.get(id)?.downUntil ?? 0;
+  }
+
   /** Mensajes de la red que tocan a la gente (los demás se ignoran). */
   apply(m: ServerMessage) {
     const now = performance.now();
@@ -101,6 +121,7 @@ class PeopleStore {
         this.pairs = [];
         this.offers = [];
         this.lastHit.clear();
+        this.health.clear();
         this.bump();
         break;
       case "SNAPSHOT":
@@ -120,8 +141,16 @@ class PeopleStore {
         break;
       }
       case "PEER_LEAVE":
+        this.health.delete(m.payload.session_id);
         if (this.fighters.delete(m.payload.session_id)) this.bump();
         break;
+      case "HEALTH": {
+        const { session_id, hp, at, down_until } = m.payload;
+        this.health.set(session_id, { hp, at, downUntil: down_until ?? 0 });
+        // La tuya, en el HUD (al cambiar); la de los demás, solo en el mundo (cada frame).
+        if (session_id === this.me) this.bump();
+        break;
+      }
       case "REACTION":
         this.reactions = [...this.reactions.filter((r) => now - r.at < REACTION_MS), { ...m.payload, at: now }].slice(-24);
         break;
@@ -155,7 +184,10 @@ class PeopleStore {
         const ref = m.payload.ref;
         if (!ref?.startsWith(PEOPLE_REF)) break;
         const action = ref.slice(PEOPLE_REF.length).split("-")[0];
-        this.setNotice(m.payload.code === "rate_limited" ? "people.err.slow" : `people.err.${action}`);
+        // Reaparecer se repite solo hasta que el servidor lo da por bueno (selfPeople.ts): sin aviso.
+        if (action === "respawn") break;
+        const reason = (m.payload.detail as { reason?: string } | undefined)?.reason;
+        this.setNotice(m.payload.code === "rate_limited" ? "people.err.slow" : reason === "dodged" ? "people.err.dodged" : `people.err.${action}`);
         break;
       }
       default:

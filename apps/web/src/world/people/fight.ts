@@ -31,9 +31,13 @@ export const STRIKES: Record<string, Strike> = {
   roundhouse: { move: "kick", impact: 0.32, dur: 0.78, ideal: 0.98, head: false, plant: true, twist: 6 },
   shove: { move: "shove", impact: 0.27, dur: 0.62, ideal: 0.72, head: false },
   push: { move: "shove", impact: 0.26, dur: 0.58, ideal: 0.7, head: false },
+  // La barrida (people/slide.ts): no es un golpe de brazos; esto es para quien la recibe.
+  slide: { move: "slide", impact: 0, dur: 0.8, ideal: 0.6, head: false },
 };
+/** Los golpes que se dan con los botones (la barrida sale de deslizarse: people/slide.ts). */
+export type StrikeMove = Exclude<FightMove, "slide">;
 /** Combinaciones: cada golpe del mismo tipo seguido saca el siguiente. */
-export const COMBO: Record<FightMove, string[]> = {
+export const COMBO: Record<StrikeMove, string[]> = {
   punch: ["punch", "cross", "hook"],
   kick: ["kick", "roundhouse"],
   shove: ["shove", "push"],
@@ -74,6 +78,22 @@ export function lightReaction(h: HitEvent, yaw: number, head: boolean): { emote:
  */
 export function fallFor(h: HitEvent, head: boolean, vx: number, vz: number): FallSpec {
   const p = h.power;
+  if (h.move === "slide") {
+    // La barrida: las piernas salen hacia donde iba quien se desliza y el cuerpo cae hacia atrás, encima.
+    const legs = 4.5 * (2.4 + 1.6 * p);
+    return {
+      vel: [vx * 0.3, 0.3, vz * 0.3],
+      impulses: [
+        { part: PART.lLowerLeg, vec: [h.dir[0] * legs, legs * 0.45, h.dir[1] * legs] },
+        { part: PART.rLowerLeg, vec: [h.dir[0] * legs, legs * 0.45, h.dir[1] * legs] },
+        { part: PART.thorax, vec: [-h.dir[0] * 7, 0, -h.dir[1] * 7] },
+      ],
+      tone: h.ko ? 0.2 : 0.45,
+      toneMin: 0.03,
+      toneTau: 0.3,
+      bounce: 0.05,
+    };
+  }
   let horiz: number, up: number, tone: number, toneMin: number, toneTau: number, bounce = 0.04;
   switch (h.style) {
     case "pixel":

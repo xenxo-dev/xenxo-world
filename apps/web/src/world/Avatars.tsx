@@ -8,6 +8,7 @@ import { t } from "../i18n";
 import { BUBBLE_MS, chat, useChatVersion, useWorldVersion, world } from "../net/world-store";
 import { people } from "../net/people-store";
 import { remoteFeet } from "./people/where";
+import { self } from "./self";
 import { RemotePeople, type RemoteDraw } from "./people/remotePeople";
 import { walkAmount } from "./avatar-model";
 import { groundHeight } from "./collision";
@@ -33,6 +34,8 @@ const _seatQ = new THREE.Quaternion()
 const INTERP_DELAY_MS = 320;
 /** Sin poses nuevas en este tiempo (lugares grandes), la persona está lejos: no se dibuja. */
 const STALE_MS = 3500;
+/** En los lugares grandes, más lejos de esto (m) no se dibuja a nadie (las poses llegan a menos de 70: AOI_RADIUS). */
+const FAR = 75;
 export const EYE_HEIGHT = 1.6;
 
 const _a = new THREE.Vector3();
@@ -224,6 +227,10 @@ function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; n
 
     _a.fromArray(s0.head.p).lerp(_b.fromArray(s1.head.p), k);
     _qa.fromArray(s0.head.r).slerp(_qb.fromArray(s1.head.r), k);
+    // Quien lleva a los ciudadanos recibe las poses de todo el lugar (§9 nonies): se dibuja (y se
+    // anima) solo a quien está tan cerca como para que le llegaran sin eso.
+    if (world.big && (_a.x - self.x) ** 2 + (_a.z - self.z) ** 2 > FAR * FAR) body.current.visible = false;
+    motion.hidden = !body.current.visible;
 
     // Velocidad horizontal medida entre frames, suavizada: de ella sale el paso.
     const step = Number.isNaN(last.x) ? 0 : Math.hypot(_a.x - last.x, _a.z - last.z);

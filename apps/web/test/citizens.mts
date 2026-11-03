@@ -6,13 +6,16 @@
  *   - contestan a un saludo, te siguen si los llamas con la mano, saltan a un lado si viene el coche,
  *     te tienen miedo y se van si les pegas (y después no quieren chocar los cinco), chocan los cinco
  *     si les apetece, se dejan empujar;
- *   - no se pisan entre ellos, no se quedan atascados, nada se vuelve NaN y van a sus sitios.
+ *   - no se pisan entre ellos, no se quedan atascados, nada se vuelve NaN y van a sus sitios;
+ *   - compartidos (§9 nonies): con dos clientes, uno los lleva y el otro los ve igual (con el retraso
+ *     de dibujar), contestan a los gestos del otro, sus golpes llegan a quien los lleva (y se ven una
+ *     vez) y, si quien los lleva se va, el otro sigue desde donde estaban.
  *
  *   npm run test:citizens -w @xenxo/web
  */
 import * as THREE from "three";
 import { buildNav, clearLine, findPath, type Box2, type CityNav } from "../src/world/city/nav.ts";
-import { CitySim, type CarInfo, type CityEnv, type Citizen, type Remote } from "../src/world/city/citizens.ts";
+import { CitySim, type CarInfo, type CityEnv, type CityLink, type Citizen, type NpcEvent, type NpcStateIn, type Remote } from "../src/world/city/citizens.ts";
 import type { Body } from "../src/world/locomotion.ts";
 
 let fails = 0;
@@ -87,7 +90,7 @@ function circleOut(boxes: readonly Box2[], p: { x: number; z: number }, r: numbe
     }
 }
 
-function makeWorld(id: string, count?: number): Fake {
+function makeWorld(id: string, count?: number, link?: CityLink, remotes?: (out: Remote[]) => number): Fake {
   const nav = buildNav(id)!;
   const npcs = { count: 0, pos: new Float32Array(64 * 3), knock: new Float32Array(64 * 4) };
   const f = { car: null as CarInfo | null, pairs: [] as string[], knockUntil: new Float64Array(64) } as Fake;
@@ -95,7 +98,7 @@ function makeWorld(id: string, count?: number): Fake {
   const env: CityEnv = {
     me: { x: -200, y: 0, z: -200, yaw: 0, vx: 0, vz: 0, wx: 0, wz: 0, emote: null, driving: false, fight: false },
     sync() {},
-    remotes: (_out: Remote[]) => 0,
+    remotes: remotes ?? ((_out: Remote[]) => 0),
     car: () => f.car,
     step(b: Body, wantX: number, wantZ: number, dt: number) {
       // Como locomotion.stepBody (acelerar, paredes, gravedad), con el suelo plano.
@@ -128,6 +131,7 @@ function makeWorld(id: string, count?: number): Fake {
     knockReset() {},
     pair: (_kind, key) => void f.pairs.push(key),
     npcs,
+    link,
   };
   f.env = env;
   f.nav = nav;
@@ -343,6 +347,118 @@ for (const id of ["arcade", "taller", "pixel", "vertical"]) {
   check(high, "cero: alguien ha subido a la pasarela");
   const kinds = new Set(f.sim.cast.filter((c) => c.poi).map((c) => c.poi!.kind));
   console.log(`    ahora: ${[...kinds].join(", ")}`);
+}
+
+/* --- Compartidos: dos clientes, uno los lleva --- */
+console.log("Compartidos (§9 nonies):");
+{
+  let now = 1_000_000;
+  const net = { states: [] as NpcStateIn[], toHost: [] as NpcEvent[], roleA: "host" as "host" | "replica", roleB: "replica" as "host" | "replica" };
+  const copy = (cast: unknown) => JSON.parse(JSON.stringify(cast)) as NpcStateIn["cast"];
+  const linkFor = (who: "A" | "B"): CityLink => ({
+    role: () => (who === "A" ? net.roleA : net.roleB),
+    now: () => now,
+    me: () => who,
+    others: () => 1,
+    publish(cast) {
+      net.states.push({ t: now, cast: copy(cast) });
+      if (net.states.length > 8) net.states.shift();
+    },
+    nextEvent: () => net.toHost.shift() ?? null,
+    states: () => net.states,
+    hit: (npc, dx, dz, power, head, kind) => void net.toHost.push({ kind: "hit", from: who, npc, dir: [dx, dz], power, head, hit: kind, pair: "high_five" }),
+    pair: (npc, kind) => void net.toHost.push({ kind: "pair", from: who, npc, dir: [0, 0], power: 0, head: false, hit: "hit", pair: kind }),
+  });
+  let A: Fake, B: Fake;
+  const seeOther = (other: () => Fake, id: string) => (out: Remote[]) => {
+    const m = other().env.me;
+    Object.assign(out[0]!, { id, x: m.x, y: m.y, z: m.z, yaw: m.yaw, emote: m.emote, fight: m.fight });
+    return 1;
+  };
+  A = makeWorld("arcade", undefined, linkFor("A"), seeOther(() => B, "B"));
+  B = makeWorld("arcade", undefined, linkFor("B"), seeOther(() => A, "A"));
+  Object.assign(A.env.me, { x: 31, y: 0, z: 31 });
+  Object.assign(B.env.me, { x: 31, y: 0, z: 33, yaw: 0 });
+  // Lo que había hace NPC_DELAY (450 ms) en quien los lleva: lo que el otro dibuja ahora.
+  const hist: { t: number; p: Float64Array }[] = [];
+  const step = () => {
+    now += 1000 / 60;
+    A.sim.frame(1 / 60);
+    B.sim.frame(1 / 60);
+    const p = new Float64Array(A.sim.cast.length * 2);
+    A.sim.cast.forEach((c, i) => ((p[i * 2] = c.body.x), (p[i * 2 + 1] = c.body.z)));
+    hist.push({ t: now, p });
+    if (hist.length > 120) hist.shift();
+  };
+  const go = (seconds: number) => {
+    for (let k = 0; k < seconds * 60; k++) step();
+  };
+  go(20);
+  check(A.sim.role === "host" && B.sim.role === "replica", `papeles: uno los lleva (${A.sim.role}) y el otro los ve (${B.sim.role})`);
+  const then = hist.find((h) => h.t >= now - 450)!;
+  let worst = 0;
+  B.sim.cast.forEach((c, i) => {
+    if (c.knocked || A.sim.cast[i]!.knocked) return;
+    worst = Math.max(worst, Math.hypot(c.body.x - then.p[i * 2]!, c.body.z - then.p[i * 2 + 1]!));
+  });
+  check(worst < 0.35, `el otro los ve donde estaban hace 450 ms (lo más lejos, ${worst.toFixed(2)} m)`);
+  const sameDoing = B.sim.cast.filter((c, i) => c.doing === A.sim.cast[i]!.doing || A.sim.cast[i]!.doing === "respond").length;
+  check(sameDoing >= B.sim.cast.length - 2, `y haciendo lo mismo (${sameDoing}/${B.sim.cast.length})`);
+
+  // El otro saluda: le contestan (quien los lleva decide) y lo ve.
+  const near = A.sim.cast.filter((c) => c.drawn && !c.knocked).sort((a, b) => Math.hypot(a.body.x - 31, a.body.z - 33) - Math.hypot(b.body.x - 31, b.body.z - 33))[0]!;
+  const nb = B.sim.cast[near.id]!;
+  Object.assign(B.env.me, { x: near.body.x, z: near.body.z + 2.5, yaw: facing(0, -1) });
+  near.social = 0.95;
+  go(0.6);
+  B.env.me.emote = "wave";
+  let answered = false;
+  for (let k = 0; k < 120; k++) {
+    step();
+    if (nb.motion.gesture === "wave" || nb.motion.emote === "wave") answered = true;
+  }
+  B.env.me.emote = null;
+  check(answered && near.who === "B", `el otro saluda y le contestan a él (${near.who}), y lo ve`);
+
+  // El otro le da (modo pelea): lo ve caer enseguida, quien los lleva lo sabe y no se repite.
+  go(3);
+  const c = B.sim.cast.find((x) => x.drawn && !x.knocked && A.sim.cast[x.id]!.drawn)!;
+  const h = A.sim.cast[c.id]!;
+  const kn0 = h.kn;
+  let falls = 0;
+  const i = c.slot;
+  B.env.me.fight = true;
+  B.env.npcs.knock[i * 4] = 1;
+  B.env.npcs.knock[i * 4 + 1] = 1;
+  B.env.npcs.knock[i * 4 + 2] = 0;
+  B.env.npcs.knock[i * 4 + 3] = 3.4;
+  for (let k = 0; k < 60 * 4; k++) {
+    const was = B.env.npcs.knock[c.slot * 4];
+    step();
+    if (was && !B.env.npcs.knock[c.slot * 4]) falls++;
+    if (B.env.npcs.knock[c.slot * 4]) falls++;
+  }
+  B.env.me.fight = false;
+  check(h.kn === kn0 + 1 && h.grudgeWho === "B" && h.fear > 0.3, `le da el otro: quien los lleva lo apunta (golpes ${kn0}→${h.kn}) y le coge miedo a él (${h.grudgeWho})`);
+  check(c.kSeen >= h.kn && falls <= 2, `el otro lo ve caer una sola vez (${falls})`);
+
+  // Quien los lleva se va: el otro sigue desde donde estaban, decidiendo él.
+  const before = B.sim.cast.map((x) => [x.body.x, x.body.z] as const);
+  net.roleB = "host";
+  net.roleA = "replica";
+  B.sim.frame(1 / 60);
+  const jump = Math.max(...B.sim.cast.map((x, k) => Math.hypot(x.body.x - before[k]![0], x.body.z - before[k]![1])));
+  let nan = false;
+  const stayed = new Set<number>();
+  for (let k = 0; k < 60 * 30; k++) {
+    now += 1000 / 60;
+    B.sim.frame(1 / 60);
+    for (const x of B.sim.cast) {
+      if (!Number.isFinite(x.body.x + x.body.z)) nan = true;
+      if (x.doing === "stay") stayed.add(x.id);
+    }
+  }
+  check(B.sim.role === "host" && jump < 1 && !nan && stayed.size >= 5, `quien los lleva se va: el otro sigue desde donde estaban (salto ${jump.toFixed(2)} m) y van a sus sitios (${stayed.size})`);
 }
 
 console.log(fails ? `\n${fails} fallo(s)` : "\nTodo bien");

@@ -24,6 +24,7 @@ import { floorAt, NPC_CITY, npcs } from "./collision";
 import { knockApply, knockReset, npcMotion } from "./knock";
 import { self } from "./self";
 import { REPLY } from "./city/citizens";
+import { npc, sendResHit } from "../net/npc-store";
 import { Speech, type Speaker } from "./city/Speech";
 
 interface Door {
@@ -146,6 +147,8 @@ interface Slot extends Speaker {
   bz: number;
   yaw: number;
   knocked: boolean;
+  /** El golpe de este frame llega de otro (npc-store): no se vuelve a contar. */
+  injected: boolean;
   /** Mirándote hasta `glance`; no vuelve a mirarte antes de `glanceNext`. */
   glance: number;
   glanceNext: number;
@@ -199,6 +202,7 @@ export function Residents({ chunk, count }: { chunk: string; count: number }) {
         bz: 0,
         yaw: 0,
         knocked: false,
+        injected: false,
         glance: 0,
         glanceNext: 0,
         reply: null,
@@ -304,8 +308,23 @@ export function Residents({ chunk, count }: { chunk: string; count: number }) {
       s.dist = Math.hypot(s.bx - self.x, s.bz - self.z, (s.by - self.y) * 2);
       if (s.speech && clock > s.speechUntil) s.speech = null;
       if (s.motion.gesture && clock > s.gestUntil) s.motion.gesture = null;
+      // Lo que le hacen los demás (§9 nonies: se reparte a los de cerca) y lo que le haces tú (se cuenta).
+      const i = NPC_CITY + e;
+      for (const h of npc.resHits) {
+        if (h.res !== s.who || s.knocked || npcs.knock[i * 4]) continue;
+        npcs.knock[i * 4] = now;
+        npcs.knock[i * 4 + 1] = h.dir[0];
+        npcs.knock[i * 4 + 2] = h.dir[1];
+        npcs.knock[i * 4 + 3] = h.power;
+        npcs.knockHead[i] = h.head ? 1 : 0;
+        s.injected = true;
+      }
+      if (npcs.knock[i * 4]) {
+        if (s.injected) s.injected = false;
+        else sendResHit(s.who, npcs.knock[i * 4 + 1]!, npcs.knock[i * 4 + 2]!, npcs.knock[i * 4 + 3]!, npcs.knockHead[i] === 1, self.driving ? "car" : self.fight ? "hit" : "bump");
+      }
       // Si le dan, lo encaja o cae y se levanta (knock.ts); después, a su sitio, a lo suyo y se queja.
-      const k = knockApply(NPC_CITY + e, g, s.bx, s.by, s.bz, s.yaw, s.motion);
+      const k = knockApply(i, g, s.bx, s.by, s.bz, s.yaw, s.motion);
       if (!k && s.knocked) {
         g.position.set(s.bx, s.by, s.bz);
         g.rotation.set(0, s.yaw, 0);
@@ -316,12 +335,14 @@ export function Residents({ chunk, count }: { chunk: string; count: number }) {
       }
       s.knocked = k;
       if (!k) attend(s, s === answer || (s === second && Math.random() < 0.5), s === answer, emote, clock);
-      npcs.pos[(NPC_CITY + e) * 3] = g.position.x;
-      npcs.pos[(NPC_CITY + e) * 3 + 1] = g.position.y;
-      npcs.pos[(NPC_CITY + e) * 3 + 2] = g.position.z;
+      npcs.pos[i * 3] = g.position.x;
+      npcs.pos[i * 3 + 1] = g.position.y;
+      npcs.pos[i * 3 + 2] = g.position.z;
       e++;
     }
     npcs.extra = e;
+    // Los golpes a quien no se ve aquí, se pierden (no hay nada que dibujar).
+    npc.resHits.length = 0;
   }, -0.5);
   useEffect(() => () => void (npcs.extra = 0), []);
 

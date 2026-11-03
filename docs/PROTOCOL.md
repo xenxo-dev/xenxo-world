@@ -124,7 +124,7 @@ Las medidas de los modelos de la gente las da `GET /assets/<hash>/meta`. Moverlo
 
 | Tipo | Payload | Notas |
 |---|---|---|
-| `HELLO` | `client_type`, `capabilities`, `display_name?`, `avatar?` | Obligatorio antes de cualquier otro. `avatar` = `{hash, format: "vrm"}` de un **avatar de serie** (invitados y agentes); cualquier otro hash se ignora, y las personas registradas llevan el de su cuenta |
+| `HELLO` | `client_type`, `capabilities`, `display_name?`, `avatar?` | Obligatorio antes de cualquier otro. `avatar` = `{hash, format: "vrm"}` de un **avatar de serie** (invitados y agentes); cualquier otro hash se ignora, y las personas registradas llevan el de su cuenta. `capabilities.npc_host: true` = puede llevar a los ciudadanos del distrito para todos (§9 nonies) |
 | `POSE` | `t`, `head {p, r}`, `hand_l?`, `hand_r?`, `emote?` | Sin `entity_id`: el servidor sabe de quién es. Máx. 15 Hz; el exceso se descarta. `emote` = gesto en curso (`^[a-z_]{1,24}$`; hoy `dance`, `wave`, `sit`, `talk`, `cheer`, `crouch`, `clap`, `point`, `beckon`, `laugh`, `shrug`, los de pareja `high_five`, `hug`, `handshake`, los de pelea `punch`, `kick`, `shove`, `hit_stagger`, `hit_down`, `get_up`, los del coche `car_open`, `car_in`, `car_out` y, donde hay parkour, los `pk_*` de §9 octies bis). Los clientes ignoran los que no conocen. `vehicle?` = en qué va si no va a pie (hoy solo `car`: va sentada dentro de su coche; `head` sigue siendo su cabeza) y `car?` = dónde está su coche, en marcha o aparcado (`p` = su origen en el suelo, `r` = su giro completo, con la inclinación). El servidor normaliza los giros (un cuaternión nulo descarta la pose) y no reparte una mano a más de 2,5 m de la cabeza. Ver «Movimiento» más abajo. Al subir y bajar, `emote` es `car_open` (abre la puerta), `car_in` (se sienta dentro) o `car_out` (sale): con esos tres, la puerta del coche está abierta. Quien no los conozca dibuja a la persona y no el coche. El servidor solo los reparte en los distritos (en la plaza se va a pie; `vehicle` sin `car` no vale) y con `vehicle` no cuentan los puntos de carrera (`CHECKPOINT` → `forbidden`). La cabeza más de 1,6 m por encima de lo que se pisa (el suelo o la cara de arriba de un `collider@1`: se puede estar de pie en un banco) indica un salto |
 | `MUTATE_WORLD` | `idempotency_key`, `target`, `mutation` | Ver §8 |
 | `PING` | `t` | |
@@ -135,7 +135,12 @@ Las medidas de los modelos de la gente las da `GET /assets/<hash>/meta`. Moverlo
 | `REACT` | `kind` | Reacción flotante (§9 octies). Máx. una cada 600 ms. No en el nexo |
 | `PAIR` | `to`, `kind`, `answer?` | Propone (`answer` ausente) o contesta (`true`/`false`) una acción en pareja (§9 octies) |
 | `FIGHT` | `on` | Activa o quita el modo pelea de la sesión (§9 octies) |
-| `HIT` | `to`, `move` | Golpe a otra sesión en modo pelea (§9 octies) |
+| `HIT` | `to`, `move` | Golpe a otra sesión en modo pelea (§9 octies; `slide` = la barrida) |
+| `RESPAWN` | — | Fuera de combate, pasado `down_until`: volver con toda la vida (§9 octies) |
+| `NPC_STATE` | `t`, `cast[]` | Solo quien lleva a los ciudadanos: su estado (§9 nonies) |
+| `NPC_HIT` | `npc` o `res`, `dir`, `power`, `head?`, `kind` | Le has dado a un ciudadano o a alguien de una sala (§9 nonies) |
+| `NPC_PAIR` | `npc`, `kind` | Le propones a un ciudadano una acción en pareja (§9 nonies) |
+| `NPC_HOSTING` | `on` | Ofrecerse a llevar a los ciudadanos o dejar de hacerlo (§9 nonies) |
 
 **Movimiento.** El servidor no se fía de dónde dice estar un cliente para las actividades: lleva, por
 sesión, cuánto puede avanzar cada pose (en horizontal, 40 m/s sostenidos —el coche— con 15 m de golpe
@@ -171,7 +176,12 @@ necesitan nada más; un agente que pruebe actividades tiene que ir andando.
 | `PAIR_OFFER` | `from`, `kind` | Solo a quien recibe la propuesta |
 | `PAIR_START` | `a` (quien propuso), `b`, `kind`, `t` | Empieza la acción en pareja (a quien esté cerca) |
 | `PAIR_END` | `a`, `b`, `kind`, `reason` (`declined` \| `expired` \| `far`) | A los dos |
-| `HIT_EVENT` | `from`, `to`, `move`, `style`, `dir` ([x, z], unitario), `power` (0–1), `fall`, `ko?` | Un golpe que ha llegado (a quien esté cerca) |
+| `HIT_EVENT` | `from`, `to`, `move`, `style`, `dir` ([x, z], unitario), `power` (0–1), `fall`, `ko?` | Un golpe que ha llegado (a quien esté cerca). `ko` también cuando deja la vida a 0 |
+| `HEALTH` | `session_id`, `hp` (0–100), `at`, `down_until?` | La vida de alguien en el modo pelea (a esa persona y a quien esté cerca, §9 octies) |
+| `NPC_HOST` | `session_id` (o `null`) | Quién lleva a los ciudadanos del lugar (§9 nonies) |
+| `NPC_STATE` | `t`, `cast[]` | El estado de los ciudadanos, de quien los lleva (a los demás y a quien llega) |
+| `NPC_HIT_EVENT` | `from`, `npc` o `res`, `dir`, `power`, `head?`, `kind` | Un golpe a un ciudadano (a quien los lleva) o a alguien de una sala (a quien esté cerca) |
+| `NPC_PAIR_EVENT` | `from`, `npc`, `kind` | Una propuesta a un ciudadano (a quien los lleva) |
 
 ## 8. Mutaciones
 
@@ -454,8 +464,8 @@ lo que dice el cliente. Los errores van como `ERROR` con el `ref` del mensaje.
   (`expired`). Una propuesta por sesión a la vez (la nueva pisa la anterior); proponer y contestar
   cuentan en el mismo tope que `COLLECT`.
 - **Modo pelea** (`FIGHT {on}`): es de **consentimiento**. Solo se golpea a quien también lo tiene
-  activado, y solo te golpean si lo activas. Se ve en la pose (`fight: true`). No hay vida ni sangre:
-  quien cae se levanta. Nunca en el nexo ni en la plaza: allí `WELCOME` no trae `fight` y `FIGHT`/`HIT`
+  activado, y solo te golpean si lo activas. Se ve en la pose (`fight: true`). Sin sangre; con **vida**
+  (abajo). Nunca en el nexo ni en la plaza: allí `WELCOME` no trae `fight` y `FIGHT`/`HIT`
   dan `forbidden`. Al cambiar de lugar se pierde; el cliente lo vuelve a pedir si estaba activado.
 - **Estilos** (`WELCOME.fight`, de `fight` en `districts.json`; los distritos de la comunidad, `comic`):
   `comic` (de dibujos: un golpe fuerte te lanza y te levantas), `pixel` (8 bits), `duel` (nadie cae
@@ -467,6 +477,23 @@ lo que dice el cliente. Los errores van como `ERROR` con el `ref` del mensaje.
   servidor reparte `HIT_EVENT` con la dirección (de quien golpea hacia quien recibe), la fuerza y si cae;
   cada cliente lo dibuja (la reacción según de dónde le viene, o una caída con física y levantarse) y
   quien recibe se mueve él mismo: el servidor no mueve a nadie.
+- **Deslizarse y la barrida** (`slide`): corriendo, agacharse desliza el cuerpo por el suelo (cliente;
+  la pose lleva `pk_slide` y después `pk_slideup`, como en el parkour). Mientras la pose dice `pk_slide`,
+  los `punch` le pasan por encima: `forbidden` con `detail.reason: "dodged"` (cuenta para el ritmo de
+  quien golpea). Si llega a las piernas de alguien en modo pelea, el cliente manda `HIT {move: "slide"}`
+  (alcance 1,6 m, con 0,6 de margen): siempre tira. En los de empujones (`shove`) no hay barrida.
+- **Vida** (`FIGHT_HP` = 100): cada golpe que llega resta (`punch` 10, `kick` 16, `shove` 6 —9 donde
+  solo se empuja—, `slide` 12). A los 8 s sin recibir se recupera sola, 5 por segundo
+  (`FIGHT_REGEN_DELAY_MS`, `FIGHT_REGEN_PER_S`; `hpAt` del protocolo la calcula igual en todas partes).
+  El servidor manda `HEALTH {session_id, hp, at, down_until?}` a esa persona y a quien esté cerca al
+  activar el modo pelea y con cada golpe; `hp` es la de `at` (hora del servidor). Apagar y encender el
+  modo pelea no la rellena; salir del lugar, sí. A 0, **fuera de combate**: el golpe llega con
+  `fall: true` y `ko: true`, y `down_until` dice hasta cuándo (`FIGHT_RESPAWN_MS`, 5 s). Mientras, y
+  hasta reaparecer, no golpea (`forbidden`) ni se le golpea (se ignora). Pasado ese momento manda
+  `RESPAWN {}`: vuelve con toda la vida (`HEALTH` sin `down_until`, a todos los de cerca) y el cliente
+  la pone en la entrada del lugar (`spawn` de `districts.json`); su pose siguiente llega de un salto
+  (como al entrar: reinicia su carrera). Antes de tiempo, `forbidden` con `detail.ms_left`; sin estar
+  fuera de combate, `bad_message`. Nada se guarda.
 - **Cómo se ve** (solo cliente; no cambia las reglas): el `HIT` se manda cuando llega el golpe en la
   animación, no al pulsar. Los golpes seguidos del mismo tipo se combinan y la pose lleva cuál es
   (`punch` → `cross` → `hook`, `kick` → `roundhouse`, `shove` → `push`; un cliente que no los conozca los
@@ -476,12 +503,56 @@ lo que dice el cliente. Los errores van como `ERROR` con el `ref` del mensaje.
   `hit_down` y `get_up` para quien no vio el golpe.
 - **Choques:** las personas son sólidas para los demás (cada cliente aparta a su jugador de las poses
   de los demás) y la gente de decorado se aparta de ellas. Con el modo pelea, un golpe sin nadie en
-  modo pelea delante le llega a alguien de la gente de decorado (solo en ese cliente: no viaja nada):
-  el jab, el directo y los empujones los encaja; el gancho y las patadas la tiran, con la misma caída
-  con física que las personas, y se levanta y vuelve a lo suyo. A quien está en el suelo no se le da.
-- **La gente de las ciudades** (solo cliente): contesta a los gestos que traen las poses (`emote`) de
-  quien tenga cerca, tuyos y de los demás, y le cede el paso; nada de eso viaja (cada cliente tiene a
-  su gente) y no cambia el protocolo.
+  modo pelea delante le llega a alguien de la gente de decorado (§9 nonies: lo ven caer todos):
+  el jab, el directo y los empujones los encaja; el gancho, las patadas y la barrida la tiran, con la
+  misma caída con física que las personas, y se levanta y vuelve a lo suyo. A quien está en el suelo
+  no se le da.
+- **La gente de las ciudades** contesta a los gestos que traen las poses (`emote`) de quien tenga
+  cerca, tuyos y de los demás, y le cede el paso; es la misma para todos (§9 nonies).
+
+## 9 nonies. La gente de las ciudades, compartida
+
+Los ciudadanos de los distritos del sistema (diez por distrito, catorce en Distrito Cero) son los
+mismos para todos los del distrito. No los simula el servidor: elige a una de las sesiones del lugar
+para que los mueva y reparta su estado, y los demás los dibujan con él. Nada se guarda. Nunca en el
+nexo, la plaza ni los distritos de la comunidad (allí no hay ciudadanos y estos mensajes se ignoran).
+
+- **Quién los lleva:** una sesión se ofrece en su `HELLO` (`capabilities.npc_host: true`; la web lo
+  hace, los agentes no). El servidor elige a la primera que se ofrece y, si se va, deja de mandar su
+  estado durante 4 s o dice `NPC_HOSTING {on: false}` (la pestaña pasa a segundo plano; con
+  `{on: true}` se vuelve a ofrecer), a la que lleva más tiempo en el lugar y ha mandado su pose hace
+  menos de 5 s. Cada cambio llega a todos como `NPC_HOST {session_id}` (`null`: nadie; entonces cada
+  cliente los mueve para sí). Quien entra recibe `NPC_HOST` y el último estado tras el `SNAPSHOT`.
+  Quien los lleva recibe las poses y los avisos de cerca (`HEALTH`, `HIT_EVENT`…) de todo el lugar,
+  no solo de los que tiene a menos de 70 m: tiene que saber dónde está cada uno.
+- **El estado** (`NPC_STATE {t, cast}`, solo de quien los lleva; de otro se ignora): hasta `NPC_MAX`
+  (32) ciudadanos con su índice `i`, dónde están `p`, su giro `r` y su paso `v` (m/s), lo que hacen en
+  su sitio `e` y el gesto de encima `g` (regla de `emote`), hacia dónde miran `l` (x, y, z y cuánto),
+  lo que dicen `s` (clave `npc.*` de los textos del cliente) con un contador `n` que cambia con cada
+  frase, su último golpe `k` (número que cambia con cada uno, dirección, fuerza y si fue en la cabeza),
+  qué hacen `d` (`travel`, `stay`, `chat`, `respond`, `follow`, `watch`, `flee`, `dodge`, `pair`,
+  `down`), a quién atienden `w` (una sesión) y, en pareja, qué hacen `q`. Uno cada 120 ms como mucho
+  (los demás se descartan sin error); quien los lleva lo manda cada 250 ms si hay alguien más y cada
+  2 s si no. Un ciudadano fuera del lugar da `bad_message` (y no se reparte nada). El servidor lo
+  reparte con su hora (`t`); los demás dibujan a cada uno entre los dos estados que rodean el momento
+  de 450 ms atrás (como a las personas) y, si un estado trae un golpe nuevo (`k`), lo hacen caer con
+  su propia física. Quien atiende a tu sesión te mira a ti; si `d` es `pair` con tu sesión, tu cliente
+  hace tu parte (acercarte, las manos).
+- **Lo que les hacen los demás:** quien no los lleva y le da a uno (un golpe, la barrida, el coche o
+  correr contra él) lo ve caer enseguida y manda `NPC_HIT {npc, dir, power, head?, kind}` (`kind`:
+  `hit`, `car` o `bump`); si su última pose está a menos de 4,5 m del ciudadano (9 m en coche) y a
+  menos de 3 m de altura, el servidor se lo pasa a quien los lleva como `NPC_HIT_EVENT` (con `from` y
+  la dirección normalizada); si no, `forbidden`. Proponerle chocar los cinco, un abrazo o un apretón es
+  `NPC_PAIR {npc, kind}` (a menos de 4 m) → `NPC_PAIR_EVENT`; quien los lleva decide (si le tiene
+  miedo o rencor a esa sesión, no) y lo dice en su estado. Seis de estos por segundo y sesión como
+  mucho (`rate_limited`).
+- **La gente de las salas** (los de `district-interiors.json` con sala, en su orden: `res`) no se mueve
+  y no la lleva nadie. Un golpe a uno de ellos es `NPC_HIT {res, …}` (con las mismas distancias) y el
+  servidor lo reparte como `NPC_HIT_EVENT {res, …}` a quien esté cerca (menos a quien lo dio); cada
+  cliente lo hace caer si lo tiene dibujado. `npc` o `res`, uno de los dos (`bad_message` si no).
+- **Miedo y rencor, a cada uno lo suyo:** quien los lleva recuerda a qué sesión le tienen miedo o
+  rencor (quien les pegó o casi los atropella) y a quién simpatía (quien les saludó o les chocó los
+  cinco); a los demás les contestan como siempre.
 
 ## 9 octies bis. Parkour
 

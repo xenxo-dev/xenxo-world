@@ -6,10 +6,11 @@
  */
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { FIGHT_MOVES, REACTIONS, PAIR_ACTIONS, type FightMove, type PairAction, type Reaction } from "@xenxo/protocol";
+import { FIGHT_HP, REACTIONS, PAIR_ACTIONS, type PairAction, type Reaction } from "@xenxo/protocol";
 import { t, type Key } from "../i18n";
-import { OFFER_MS, usePeople } from "../net/people-store";
+import { OFFER_MS, people, usePeople } from "../net/people-store";
 import { answerPair, displayName, offerPair, react, setFight } from "../net/people";
+import { world } from "../net/world-store";
 import { input, onWheelKey } from "../world/input";
 import { CheerIcon, DanceIcon, hudIconButton, SitIcon, WaveIcon } from "./icons";
 import { PeopleIcon } from "./people-icons";
@@ -164,28 +165,82 @@ export function ActionWheel({ solo, touch = false }: { solo: boolean; touch?: bo
   );
 }
 
-/** Botones de golpe mientras el modo pelea está activo (en los de empujones, solo empujar). */
-export function FightButtons({ className = "" }: { className?: string }) {
+type FightButton = "punch" | "kick" | "shove" | "slide";
+const FIGHT_KEYS: Record<FightButton, string> = { punch: "Q", kick: "E", shove: "R", slide: "X" };
+
+/**
+ * Botones de golpe mientras el modo pelea está activo (en los de empujones, solo empujar) y, en
+ * táctil, deslizarse (corriendo; con teclado, la X). Encima, la vida.
+ */
+export function FightButtons({ className = "", touch = false }: { className?: string; touch?: boolean }) {
   const p = usePeople();
   if (!p.fightOn || !p.style) return null;
-  const moves: readonly FightMove[] = p.style === "shove" ? ["shove"] : FIGHT_MOVES;
-  const keyOf: Record<FightMove, string> = { punch: "Q", kick: "E", shove: "R" };
+  const attacks: FightButton[] = p.style === "shove" ? ["shove"] : ["punch", "kick", "shove"];
+  const moves: readonly FightButton[] = touch ? [...attacks, "slide"] : attacks;
   return (
-    <div role="toolbar" aria-label={t("people.fight.toggle")} className={`flex gap-1.5 ${className}`}>
+    <div role="toolbar" aria-label={t("people.fight.toggle")} className={`relative flex gap-1.5 ${className}`}>
+      <HealthBar />
       {moves.map((m) => (
         <button
           key={m}
           aria-label={t(`fight.${m}` as Key)}
-          title={`${t(`fight.${m}` as Key)} (${keyOf[m]})`}
+          title={`${t(`fight.${m}` as Key)} (${FIGHT_KEYS[m]})`}
           onPointerDown={(e) => {
             e.preventDefault();
-            input.attack = m;
+            if (m === "slide") input.crouchPressed = true;
+            else input.attack = m;
           }}
           className={`${hudIconButton} border-rosa/40 text-rosa`}
         >
           <PeopleIcon name={m} />
         </button>
       ))}
+    </div>
+  );
+}
+
+/** Vuelve a pintar cada `ms` mientras `on` (la vida se recupera sola; la cuenta atrás corre). */
+function useTicker(on: boolean, ms: number) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!on) return;
+    const id = window.setInterval(() => tick((n) => n + 1), ms);
+    return () => window.clearInterval(id);
+  }, [on, ms]);
+}
+
+/** Tu vida en el modo pelea: una barra encima de los botones de golpe (se recupera sola). */
+function HealthBar() {
+  const me = world.sessionId;
+  const hp = me ? people.hpOf(me, world.serverNow()) : FIGHT_HP;
+  useTicker(hp < FIGHT_HP, 250);
+  const k = Math.max(0, Math.min(1, hp / FIGHT_HP));
+  const color = k > 0.5 ? "bg-neon" : k > 0.25 ? "bg-ocre" : "bg-rosa";
+  return (
+    <div className="pointer-events-none absolute bottom-full right-0 mb-1.5 w-full min-w-[8.5rem]" role="meter" aria-label={t("people.hp")} aria-valuemin={0} aria-valuemax={FIGHT_HP} aria-valuenow={Math.round(hp)}>
+      <div className="meta mb-0.5 flex justify-between text-[0.65rem] text-cal/70">
+        <span>{t("people.hp")}</span>
+        <span>{Math.round(hp)}</span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full border border-cal/15 bg-noche/80">
+        <div className={`h-full rounded-full ${color} transition-[width] duration-200`} style={{ width: `${k * 100}%` }} />
+      </div>
+    </div>
+  );
+}
+
+/** Fuera de combate: en el centro, cuánto falta para volver a la entrada del distrito. */
+export function KnockoutNotice() {
+  const p = usePeople();
+  const me = world.sessionId;
+  const until = me ? p.downUntil(me) : 0;
+  useTicker(!!until, 250);
+  if (!until) return null;
+  const left = Math.max(0, Math.ceil((until - world.serverNow()) / 1000));
+  return (
+    <div role="status" className={`pointer-events-none absolute left-1/2 top-1/3 -translate-x-1/2 px-5 py-3 text-center ${box}`}>
+      <p className="display text-lg text-rosa">{t("people.ko")}</p>
+      <p className="mt-0.5 text-sm text-cal/80">{left > 0 ? t("people.respawnIn", { s: String(left) }) : t("people.respawning")}</p>
     </div>
   );
 }

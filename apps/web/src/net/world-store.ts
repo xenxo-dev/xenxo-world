@@ -8,6 +8,9 @@
 import { activity, ACTIVITY_REF } from "./activity-store";
 import { people, PEOPLE_REF } from "./people-store";
 import { sandbox, SANDBOX_REF } from "./sandbox";
+
+/** Ref de los mensajes de la gente de las ciudades (npc-store.ts): sus errores no van al chat. */
+export const NPC_REF = "npc-";
 import { useSyncExternalStore } from "react";
 import { CHUNK_SIZE, PLACES, type AvatarPose, type ChatMessage, type Entity, type Peer, type ServerMessage } from "@xenxo/protocol";
 import type { ConnectionStatus } from "./NetworkAdapter";
@@ -185,8 +188,9 @@ class WorldStore {
         if (m.payload.ref?.startsWith(SANDBOX_REF)) sandbox.ack(m.payload.ref, m.payload.entity_id);
         break;
       case "ERROR":
-        // Los avisos de actividad (demasiado lejos, fuera de orden…) y de gente no son errores para el chat.
-        if (m.payload.ref?.startsWith(ACTIVITY_REF) || m.payload.ref?.startsWith(PEOPLE_REF)) break;
+        // Los avisos de actividad (demasiado lejos, fuera de orden…), de gente y de la gente de las
+        // ciudades (npc-store.ts) no son errores para el chat.
+        if (m.payload.ref?.startsWith(ACTIVITY_REF) || m.payload.ref?.startsWith(PEOPLE_REF) || m.payload.ref?.startsWith(NPC_REF)) break;
         // Los de la zona de pruebas, a su panel.
         if (m.payload.ref?.startsWith(SANDBOX_REF)) {
           sandbox.error(m.payload.ref, m.payload.code, m.payload.message);

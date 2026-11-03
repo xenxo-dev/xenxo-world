@@ -147,6 +147,8 @@ function pkShot(emote: string, p: number, t: number, speed: number): PkShot | nu
  */
 const IN_PLACE = new Set(["climb_up"]);
 
+/** Deslizarse (también en el modo pelea, fuera de Vertical). */
+const SLIDE_CLIPS = ["slide_start", "slide_loop", "slide_exit"];
 /** Los clips del parkour, para tenerlos antes del primer salto (solo donde hay parkour). */
 const PK_CLIPS = ["climb_up", "ninja_loop", "ninja_land", "slide_start", "slide_loop", "slide_exit", "roll", "crouch_idle", "crouch_walk", "pk_hang", "pk_shimmy_l", "pk_shimmy_r"];
 let pkLoaded = false;
@@ -380,10 +382,11 @@ export class VrmAnimator {
     if (shot) emote = null;
     const known = emote ? EMOTE_CLIPS[emote] : undefined;
 
-    // La guardia se carga al entrar en el modo pelea.
+    // La guardia y el deslizarse (people/slide.ts) se cargan al entrar en el modo pelea.
     if (fight && !this.wantGuard) {
       this.wantGuard = true;
       void this.ensure("guard");
+      for (const c of SLIDE_CLIPS) void this.ensure(c);
     }
 
     // Gesto: se carga bajo demanda la primera vez.

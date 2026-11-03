@@ -10,6 +10,9 @@ import { DurableObject } from "cloudflare:workers";
 import {
   ACCEPTED_IN_V0,
   BUDGETS,
+  FIGHT_HP,
+  FIGHT_RESPAWN_MS,
+  hpAt,
   CheckpointV1,
   CHUNK_SIZE,
   ClientMessage,
@@ -33,13 +36,14 @@ import {
   type Peer,
   type FightMove,
   type FightStyle,
+  type NpcSnap,
   type PairAction,
   type Reaction,
 } from "@xenxo/protocol";
 import type { Env } from "./index";
 import { randomId, type Principal } from "./auth";
 import { plazaSeed, SEED_VERSION } from "./seed";
-import { billboardSlots, cabinetSlots, sandboxOf, type SandboxRect, DISTRICT_BOUNDS, districtByChunk, districtSeed, DISTRICT_SEED_VERSION, migrateParcelPose, migrateSlot, PARCEL_LAYOUT_VERSION, PARCELS, parcelIndex, parcelReserved, parcelSlot } from "./districts";
+import { billboardSlots, cabinetSlots, residentsOf, sandboxOf, type SandboxRect, DISTRICT_BOUNDS, districtByChunk, districtSeed, DISTRICT_SEED_VERSION, migrateParcelPose, migrateSlot, PARCEL_LAYOUT_VERSION, PARCELS, parcelIndex, parcelReserved, parcelSlot } from "./districts";
 import { communityGates, nexoArrival, NEXO_BOUNDS, NEXO_SEED_VERSION, nexoSeed, SHOWCASE_SLOTS } from "./nexo";
 import { at, portalEntities, r3, yaw, type Seeded } from "./places";
 
@@ -52,7 +56,7 @@ import { ACTIVITY_SCHEMA, activityKey, ARRIVALS_FREE, ARRIVALS_WINDOW_MS, isoWee
 import { SEED_ASSETS } from "./seed-assets";
 import { figureFor, pointsDay, TILES_IDLE_MS, TILES_PAUSE_MS, TILES_SCHEMA, TILES_START_MS, tileAt, tilesRoundMs, type TileBoard, type TileGame } from "./tiles";
 import { isAvatarPreset } from "./avatar-presets-check";
-import { DOWN_IMMUNE_MS, DUEL_WINDOW_MS, HIT_GAP_MS, HIT_MAX_DY, hitOutcome, moveAllowed, PAIR_OFFER_RANGE, PAIR_START_RANGE, PAIR_TTL_MS, REACH, REACT_GAP_MS, styleOf } from "./people";
+import { damageOf, dodges, DOWN_IMMUNE_MS, DUEL_WINDOW_MS, HIT_GAP_MS, HIT_MAX_DY, hitOutcome, moveAllowed, PAIR_OFFER_RANGE, PAIR_START_RANGE, PAIR_TTL_MS, REACH, REACT_GAP_MS, styleOf } from "./people";
 
 const TICK_HZ = 8;
 /** En lugares más grandes que un chunk, cada uno recibe las poses de quien tiene a menos de esto (m). */
@@ -189,7 +193,15 @@ interface Attachment {
   run?: RaceRun;
   /** Modo pelea activado (people.ts): solo con él se puede golpear y recibir golpes. */
   fight?: boolean;
+  /** Sabe llevar a los ciudadanos (HELLO `capabilities.npc_host`, §9 nonies) y no ha dicho que no. */
+  npc?: boolean;
 }
+
+/** Cada cuánto, como poco, manda su estado quien lleva a los ciudadanos (ms) y cuándo se le da por perdido. */
+const NPC_STATE_GAP_MS = 120;
+const NPC_STALE_MS = 4_000;
+/** Golpes y propuestas a los ciudadanos por sesión: como mucho estos por segundo. */
+const NPC_EVENTS_PER_S = 6;
 
 class MutationError extends Error {
   constructor(
@@ -255,6 +267,16 @@ export class ChunkRoom extends DurableObject<Env> {
   private hitAt = new Map<string, number>();
   private downUntil = new Map<string, number>();
   private duelHits = new Map<string, number[]>();
+  /** Vida en el modo pelea: la que tenía en `at` (se recupera sola: hpAt) y hasta cuándo está fuera de combate. */
+  private health = new Map<string, { hp: number; at: number; downUntil?: number }>();
+  /** Los ciudadanos (§9 nonies): quién los lleva, desde cuándo, su último estado y dónde estaba cada uno. */
+  private npcHost: string | null = null;
+  private npcHostSince = 0;
+  private npcLastAt = 0;
+  private npcPos = new Map<number, readonly [number, number, number]>();
+  private npcEvents = new Map<string, number[]>();
+  /** El último estado repartido (para quien llega: lo ve enseguida). */
+  private npcLast: { t: number; cast: NpcSnap[] } | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -526,6 +548,7 @@ export class ChunkRoom extends DurableObject<Env> {
         if (m.payload.avatar && !att.principal.avatar && isAvatarPreset(m.payload.avatar.hash)) {
           att.preset = { hash: m.payload.avatar.hash, format: "vrm" };
         }
+        if (m.payload.capabilities.npc_host && this.npcPlace) att.npc = true;
         ws.serializeAttachment(att);
         this.send(ws, msg("WELCOME", {
           session_id: att.session_id,
@@ -558,6 +581,12 @@ export class ChunkRoom extends DurableObject<Env> {
         }
         if (att.principal.kind === "user") this.send(ws, msg("PROGRESS", this.progressOf(att.principal.sub)));
         for (const g of this.tileGames.values()) if (g.state === "show") this.send(ws, this.tilesMsg(g));
+        // Los ciudadanos: si nadie los lleva y esta sesión sabe, ella; si no, quién (a esta sesión).
+        if (this.npcPlace) {
+          if (att.npc && !this.npcHostAlive()) this.setNpcHost(att.session_id);
+          else this.send(ws, msg("NPC_HOST", { session_id: this.npcHost }));
+          if (this.npcHost && this.npcLast && Date.now() - this.npcLast.t < NPC_STALE_MS) this.send(ws, msg("NPC_STATE", this.npcLast));
+        }
         return;
       }
       case "POSE": {
@@ -586,6 +615,10 @@ export class ChunkRoom extends DurableObject<Env> {
         this.scheduleTick();
         // Una pose que llega de un salto no pisa baldosas.
         if (!jump) this.tilesPose(att, head.p);
+        // Quien lleva a los ciudadanos ha dejado de mandar su estado (pestaña dormida, conexión mala): otro.
+        // Y si no los lleva nadie, quien sepa y se mueva.
+        if (this.npcHost && !this.npcHostAlive(now)) this.electNpcHost(this.npcHost);
+        else if (!this.npcHost && att.npc && this.npcPlace) this.setNpcHost(att.session_id);
         return;
       }
       case "CHAT":
@@ -609,6 +642,16 @@ export class ChunkRoom extends DurableObject<Env> {
         return this.handleFight(ws, att, m.id, m.payload.on);
       case "HIT":
         return this.handleHit(ws, att, m.id, m.payload.to, m.payload.move);
+      case "RESPAWN":
+        return this.handleRespawn(ws, att, m.id);
+      case "NPC_STATE":
+        return this.handleNpcState(ws, att, m.id, m.payload.cast);
+      case "NPC_HIT":
+        return this.handleNpcHit(ws, att, m.id, m.payload);
+      case "NPC_PAIR":
+        return this.handleNpcPair(ws, att, m.id, m.payload.npc, m.payload.kind);
+      case "NPC_HOSTING":
+        return this.handleNpcHosting(ws, att, m.payload.on);
     }
   }
 
@@ -635,7 +678,10 @@ export class ChunkRoom extends DurableObject<Env> {
     this.hitAt.delete(att.session_id);
     this.downUntil.delete(att.session_id);
     this.duelHits.delete(att.session_id);
+    this.health.delete(att.session_id);
+    this.npcEvents.delete(att.session_id);
     if (att.hello && !this.solo) this.broadcast(msg("PEER_LEAVE", { session_id: att.session_id }), ws);
+    if (this.npcHost === att.session_id) this.electNpcHost(att.session_id, ws);
   }
 
   /** Cubo de mensajes de una conexión (ver MSG_BURST): false si se ha quedado sin. */
@@ -750,7 +796,8 @@ export class ChunkRoom extends DurableObject<Env> {
       const att = ws.deserializeAttachment() as Attachment | null;
       if (!att?.hello) continue;
       const me = this.poses.get(att.session_id)?.head.p;
-      const near = me
+      // Quien lleva a los ciudadanos recibe todas: tiene que saber dónde está cada uno (§9 nonies).
+      const near = me && att.session_id !== this.npcHost
         ? poses.filter((q) => {
             const dx = q.head.p[0]! - me[0]!, dz = q.head.p[2]! - me[2]!;
             return dx * dx + dz * dz <= R2;
@@ -2172,16 +2219,20 @@ export class ChunkRoom extends DurableObject<Env> {
     return pose && age <= POSE_MAX_AGE_MS ? pose.head.p : null;
   }
 
-  /** A quien está cerca de `p` (en los lugares grandes; en los demás, a todos). */
-  private broadcastNear(p: number[], m: unknown) {
-    if (!this.big) return this.broadcast(m);
+  /**
+   * A quien esté a menos de AOI_RADIUS de `p` (en los lugares grandes; si no, a todos), menos `except`.
+   * Quien lleva a los ciudadanos lo recibe siempre: tiene que saber de todo el lugar (§9 nonies).
+   */
+  private broadcastNear(p: number[], m: unknown, except?: WebSocket) {
+    if (!this.big) return this.broadcast(m, except);
     const data = JSON.stringify(m);
     const R2 = AOI_RADIUS * AOI_RADIUS;
     for (const ws of this.ctx.getWebSockets()) {
+      if (ws === except) continue;
       const att = ws.deserializeAttachment() as Attachment | null;
       if (!att?.hello) continue;
       const me = this.poses.get(att.session_id)?.head.p;
-      if (me && (me[0]! - p[0]!) ** 2 + (me[2]! - p[2]!) ** 2 > R2) continue;
+      if (me && att.session_id !== this.npcHost && (me[0]! - p[0]!) ** 2 + (me[2]! - p[2]!) ** 2 > R2) continue;
       try {
         ws.send(data);
       } catch {
@@ -2233,6 +2284,11 @@ export class ChunkRoom extends DurableObject<Env> {
     if (!!att.fight === on) return;
     att.fight = on;
     ws.serializeAttachment(att);
+    // Su vida (la que le quede: apagar y encender no la rellena), para ella y quien esté cerca.
+    if (on) {
+      this.healthOf(att.session_id, Date.now());
+      this.sendHealth(att.session_id, ws);
+    }
     // Los demás lo ven en su siguiente pose (con su marca encima).
     const pose = this.poses.get(att.session_id);
     if (pose) {
@@ -2253,6 +2309,9 @@ export class ChunkRoom extends DurableObject<Env> {
     if (!other || !other.att.fight || to === att.session_id) return this.sendError(ws, ref, "forbidden", "esa persona no está en modo pelea");
     const now = Date.now();
     if (now - (this.hitAt.get(att.session_id) ?? 0) < HIT_GAP_MS) return this.sendError(ws, ref, "rate_limited", "más despacio");
+    // Fuera de combate (hasta reaparecer) no se golpea ni se recibe; quien acaba de caer tampoco.
+    if (this.health.get(att.session_id)?.downUntil) return this.sendError(ws, ref, "forbidden", "estás fuera de combate");
+    if (this.health.get(to)?.downUntil) return;
     if ((this.downUntil.get(to) ?? 0) > now || (this.downUntil.get(att.session_id) ?? 0) > now) return; // en el suelo: no cuenta
     const me = this.headOf(att.session_id), them = this.headOf(to);
     if (!me || !them) return this.sendError(ws, ref, "bad_message", "manda tu pose primero");
@@ -2261,14 +2320,187 @@ export class ChunkRoom extends DurableObject<Env> {
     const d = Math.hypot(dx, dz);
     if (d > REACH[move] || Math.abs(them[1]! - me[1]!) > HIT_MAX_DY) return this.sendError(ws, ref, "forbidden", "demasiado lejos");
     this.hitAt.set(att.session_id, now);
+    // Deslizándose, los puñetazos le pasan por encima.
+    if (dodges(move, this.poses.get(to)?.emote)) return this.sendError(ws, ref, "forbidden", "esquivado", { reason: "dodged" });
     const recent = (this.duelHits.get(to) ?? []).filter((t) => now - t < DUEL_WINDOW_MS);
     recent.push(now);
     const out = hitOutcome(style, move, recent.length);
     if (out.ko) this.duelHits.delete(to);
     else this.duelHits.set(to, recent);
-    if (out.fall) this.downUntil.set(to, now + DOWN_IMMUNE_MS);
+    // La vida: a 0, fuera de combate hasta que pueda reaparecer (cae y no se levanta).
+    const h = this.healthOf(to, now);
+    h.hp = Math.max(0, hpAt(h.hp, h.at, now) - damageOf(style, move));
+    h.at = now;
+    const down = h.hp <= 0;
+    if (down) {
+      h.downUntil = now + FIGHT_RESPAWN_MS;
+      this.duelHits.delete(to);
+    }
+    const fall = out.fall || down;
+    if (fall) this.downUntil.set(to, down ? h.downUntil! : now + DOWN_IMMUNE_MS);
     const dir: [number, number] = d > 0.05 ? [dx / d, dz / d] : [0, 1];
-    this.broadcastNear(them, msg("HIT_EVENT", { from: att.session_id, to, move, style, dir: [Math.round(dir[0] * 1000) / 1000, Math.round(dir[1] * 1000) / 1000], power: out.power, fall: out.fall, ...(out.ko ? { ko: true } : {}) }));
+    this.broadcastNear(them, msg("HIT_EVENT", { from: att.session_id, to, move, style, dir: [Math.round(dir[0] * 1000) / 1000, Math.round(dir[1] * 1000) / 1000], power: out.power, fall, ...(out.ko || down ? { ko: true } : {}) }));
+    this.sendHealth(to);
+  }
+
+  /** La vida de una sesión (con la que se le haya recuperado sola hasta ahora); la crea entera si no tenía. */
+  private healthOf(id: string, now: number): { hp: number; at: number; downUntil?: number } {
+    let h = this.health.get(id);
+    if (!h) {
+      h = { hp: FIGHT_HP, at: now };
+      this.health.set(id, h);
+    }
+    return h;
+  }
+
+  /** Reparte la vida de `id` a esa persona y a quien tenga cerca (para dibujar su barra). */
+  private sendHealth(id: string, ws?: WebSocket) {
+    const h = this.health.get(id);
+    if (!h) return;
+    const m = msg("HEALTH", { session_id: id, hp: Math.round(h.hp * 10) / 10, at: h.at, ...(h.downUntil ? { down_until: h.downUntil } : {}) });
+    // Donde se la vio por última vez (aunque lleve un rato quieta: fuera de combate no se mueve).
+    const head = this.poses.get(id)?.head.p;
+    if (head) this.broadcastNear(head, m);
+    else if (ws) this.send(ws, m);
+    else {
+      const s = this.sessionById(id);
+      if (s) this.send(s.ws, m);
+    }
+  }
+
+  /** Fuera de combate, pasado su tiempo: vuelve con toda la vida (el cliente se pone él mismo en la salida). */
+  private handleRespawn(ws: WebSocket, att: Attachment, ref: string | undefined) {
+    const h = this.health.get(att.session_id);
+    const now = Date.now();
+    if (!h?.downUntil) return this.sendError(ws, ref, "bad_message", "no estás fuera de combate");
+    if (now < h.downUntil) return this.sendError(ws, ref, "forbidden", "aún no", { ms_left: h.downUntil - now });
+    h.hp = FIGHT_HP;
+    h.at = now;
+    h.downUntil = undefined;
+    this.downUntil.delete(att.session_id);
+    // Aparece en la entrada: su siguiente pose llega de un salto (como al entrar; reinicia la carrera).
+    this.moves.delete(att.session_id);
+    this.sendHealth(att.session_id, ws);
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* La gente de las ciudades, compartida (§9 nonies)                    */
+  /* ---------------------------------------------------------------- */
+
+  /** Solo en los distritos del sistema (los que tienen ciudadanos), nunca en el nexo, la plaza o los de la comunidad. */
+  private get npcPlace(): boolean {
+    return !this.solo && !!this.chunkId && !this.community && !!districtByChunk(this.chunkId);
+  }
+
+  /** ¿Sigue mandando su estado quien lleva a los ciudadanos? (al empezar tiene un margen). */
+  private npcHostAlive(now = Date.now()): boolean {
+    return !!this.npcHost && now - Math.max(this.npcLastAt, this.npcHostSince) <= NPC_STALE_MS;
+  }
+
+  private setNpcHost(id: string | null) {
+    this.npcHost = id;
+    this.npcHostSince = Date.now();
+    this.broadcast(msg("NPC_HOST", { session_id: id }));
+  }
+
+  /**
+   * Elige quién lleva a los ciudadanos en lugar de `exclude`: de las otras sesiones que saben, la que
+   * lleva más tiempo y ha mandado pose hace poco (una pestaña dormida no). Si no hay otra y `exclude`
+   * sigue aquí ofreciéndose (solo se ha retrasado), sigue ella; si no, nadie.
+   */
+  private electNpcHost(exclude: string | null, closing?: WebSocket) {
+    const now = Date.now();
+    let best: Attachment | null = null;
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws === closing) continue;
+      const att = ws.deserializeAttachment() as Attachment | null;
+      if (!att?.hello || !att.npc || att.session_id === exclude) continue;
+      if (now - (this.lastPoseAt.get(att.session_id) ?? 0) > 5_000) continue;
+      if (!best || (att.since ?? 0) < (best.since ?? 0)) best = att;
+    }
+    if (best) {
+      if (best.session_id !== this.npcHost) this.setNpcHost(best.session_id);
+      return;
+    }
+    if (exclude && this.npcHost === exclude && !closing && this.sessionById(exclude)?.att.npc) {
+      this.npcHostSince = now;
+      return;
+    }
+    if (this.npcHost !== null) this.setNpcHost(null);
+  }
+
+  /** Golpes y propuestas a los ciudadanos: como mucho NPC_EVENTS_PER_S por segundo y sesión. */
+  private npcEventAllowed(id: string): boolean {
+    const now = Date.now();
+    const list = (this.npcEvents.get(id) ?? []).filter((t) => now - t < 1000);
+    if (list.length >= NPC_EVENTS_PER_S) return false;
+    list.push(now);
+    this.npcEvents.set(id, list);
+    return true;
+  }
+
+  /** El estado de los ciudadanos, de quien los lleva: se comprueba y se reparte a los demás. */
+  private handleNpcState(ws: WebSocket, att: Attachment, ref: string | undefined, cast: NpcSnap[]) {
+    if (!this.npcPlace) return this.sendError(ws, ref, "forbidden", "aquí no hay ciudadanos");
+    if (this.npcHost !== att.session_id) return; // ya no los lleva (llegará NPC_HOST): se ignora sin error
+    const now = Date.now();
+    if (now - this.npcLastAt < NPC_STATE_GAP_MS) return; // descarta en silencio
+    const [lo, hi] = this.bounds;
+    for (const c of cast) {
+      const [x, y, z] = c.p;
+      if (!(x >= lo && x <= hi && z >= lo && z <= hi && y >= -16 && y <= 256)) return this.sendError(ws, ref, "bad_message", "un ciudadano fuera del lugar");
+    }
+    this.npcLastAt = now;
+    for (const c of cast) this.npcPos.set(c.i, c.p);
+    this.npcLast = { t: now, cast };
+    this.broadcast(msg("NPC_STATE", this.npcLast), ws);
+  }
+
+  /**
+   * Le han dado a un ciudadano (`npc`) o a alguien de una sala (`res`): si quien lo dice está cerca, el
+   * del ciudadano se lo pasa a quien los lleva y el de la sala, a quien esté cerca (cada uno lo dibuja).
+   */
+  private handleNpcHit(ws: WebSocket, att: Attachment, ref: string | undefined, p: { npc?: number; res?: number; dir: [number, number]; power: number; head?: boolean; kind: "hit" | "car" | "bump" }) {
+    if (!this.npcPlace) return;
+    if (p.npc !== undefined && (!this.npcHost || this.npcHost === att.session_id)) return;
+    if (!this.npcEventAllowed(att.session_id)) return this.sendError(ws, ref, "rate_limited", "más despacio");
+    const me = this.headOf(att.session_id);
+    const at = p.npc !== undefined ? this.npcPos.get(p.npc) : residentsOf(districtByChunk(this.chunkId!)!.id)[p.res!];
+    if (!me) return this.sendError(ws, ref, "bad_message", "manda tu pose primero");
+    if (!at) return this.sendError(ws, ref, "bad_message", "no existe");
+    const reach = p.kind === "car" ? 9 : 4.5;
+    if (Math.hypot(at[0] - me[0]!, at[2] - me[2]!) > reach || Math.abs(at[1] - (me[1]! - 1.6)) > 3) return this.sendError(ws, ref, "forbidden", "demasiado lejos");
+    const l = Math.hypot(p.dir[0], p.dir[1]) || 1;
+    const ev = msg("NPC_HIT_EVENT", {
+      from: att.session_id,
+      ...(p.npc !== undefined ? { npc: p.npc } : { res: p.res! }),
+      dir: [p.dir[0] / l, p.dir[1] / l] as [number, number],
+      power: p.power,
+      ...(p.head ? { head: true } : {}),
+      kind: p.kind,
+    });
+    if (p.res !== undefined) return this.broadcastNear([at[0], at[1], at[2]], ev, ws);
+    const host = this.sessionById(this.npcHost!);
+    if (host) this.send(host.ws, ev);
+  }
+
+  /** Propuesta a un ciudadano: si está cerca, a quien los lleva (contesta en su estado). */
+  private handleNpcPair(ws: WebSocket, att: Attachment, ref: string | undefined, npc: number, kind: PairAction) {
+    if (!this.npcPlace || !this.npcHost || this.npcHost === att.session_id) return;
+    if (!this.npcEventAllowed(att.session_id)) return this.sendError(ws, ref, "rate_limited", "más despacio");
+    const me = this.headOf(att.session_id), at = this.npcPos.get(npc);
+    if (!me || !at || Math.hypot(at[0] - me[0]!, at[2] - me[2]!) > PAIR_OFFER_RANGE + 1) return this.sendError(ws, ref, "forbidden", "acércate más");
+    const host = this.sessionById(this.npcHost);
+    if (host) this.send(host.ws, msg("NPC_PAIR_EVENT", { from: att.session_id, npc, kind }));
+  }
+
+  /** Ofrecerse a llevar a los ciudadanos o dejar de hacerlo (la pestaña se va a segundo plano). */
+  private handleNpcHosting(ws: WebSocket, att: Attachment, on: boolean) {
+    if (!this.npcPlace) return;
+    att.npc = on;
+    ws.serializeAttachment(att);
+    if (!on && this.npcHost === att.session_id) this.electNpcHost(att.session_id);
+    else if (on && !this.npcHostAlive()) this.setNpcHost(att.session_id);
   }
 
   private peers(): Peer[] {

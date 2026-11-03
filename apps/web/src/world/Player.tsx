@@ -23,6 +23,7 @@ import { useDrive } from "./vehicle/drive-state";
 import { applyCarPose, CarModel, createCarHandle } from "./vehicle/CarModel";
 import { CAR, paintFor } from "./vehicle/car";
 import { bumpNpcs, camKick, parkourFall, peopleBusy, peopleFrame, prepareFights, resetPeople, selfFx, startStrike, striking } from "./people/selfPeople";
+import { cancelSlide, slideDir, slideEmote, slideP, slideStep, sliding, startSlide } from "./people/slide";
 import { people } from "../net/people-store";
 import { preloadParkour, UPPER_EMOTES } from "./animation";
 import { createParkour, parkourStep, resetParkour } from "./parkour/moves";
@@ -177,6 +178,7 @@ export function Player({ active }: { active: boolean }) {
       bodyYaw.current = spawn.yaw;
       resetPeople(motion);
       resetParkour(pk, body);
+      cancelSlide();
       if (inXR) {
         placeOrigin(spawn.p[0], spawn.p[1], spawn.p[2]);
         origin.current.rotation.set(0, spawn.yaw, 0);
@@ -256,7 +258,8 @@ export function Player({ active }: { active: boolean }) {
         // Coche: sacarlo, subir o bajar (tecla C o el HUD). Mientras sube o baja, manda la secuencia.
         if (input.car) {
           input.car = false;
-          requestCar(body.x, body.y, body.z, l.yaw, inXR);
+          // En el suelo, en pareja o fuera de combate, no.
+          if (!peopleBusy()) requestCar(body.x, body.y, body.z, l.yaw, inXR);
         }
         mode = carFrame(dt, seqCtx);
         applyCarPose(carHandle, carPose);
@@ -293,6 +296,10 @@ export function Player({ active }: { active: boolean }) {
           wantZ = _pf.wantZ;
           input.jump = false;
         }
+        // Deslizarse en el modo pelea: corriendo, agacharse (people/slide.ts). Un golpe, una caída o
+        // salir del modo pelea lo cortan.
+        if (!motion.fight || !free || _pf.lock) cancelSlide();
+        else if (input.crouchPressed && !striking() && !peopleBusy() && startSlide(body)) motion.emote = null;
         // Lo que pides (contra alguien de la ciudad, es lo que le empuja: city/citizens.ts).
         self.wx = free ? wantX : 0;
         self.wz = free ? wantZ : 0;
@@ -331,15 +338,16 @@ export function Player({ active }: { active: boolean }) {
               parkourFall(pk.fall, pk.fallX, pk.fallZ, pk.fallV);
               pk.fall = "";
             }
-          } else stepBody(body, wantX, wantZ, dt, world.walk[0], world.walk[1]);
+          } else if (sliding()) slideStep(body, dt, world.walk[0], world.walk[1]);
+          else stepBody(body, wantX, wantZ, dt, world.walk[0], world.walk[1]);
         }
         input.jump = false;
         input.crouchPressed = false;
         if (free && !_pf.lock) bumpNpcs(body, bodyYaw.current);
         if (free) smoothSpeed(motion, Math.hypot(body.vx, body.vz), dt);
         motion.airborne = free && !body.grounded && pk.move === "none";
-        motion.pk = parkour ? pk.emote : null;
-        motion.pkP = pk.p;
+        motion.pk = parkour ? pk.emote : slideEmote();
+        motion.pkP = parkour ? pk.p : slideP();
         // Las manos en el borde o en la valla (IK del esqueleto, people/rig.ts).
         const fx = motion.fx;
         if (fx && parkour && pk.hand.w > 0.01) {
@@ -370,6 +378,12 @@ export function Player({ active }: { active: boolean }) {
         } else if (parkour && !Number.isNaN(pk.yaw)) {
           // Lo que se está haciendo manda (de cara a la pared, a lo largo de ella…).
           let d = pk.yaw - bodyYaw.current;
+          d = Math.atan2(Math.sin(d), Math.cos(d));
+          bodyYaw.current += d * Math.min(1, dt * 16);
+        } else if (sliding()) {
+          // Deslizándose: de cara a donde va.
+          const sd = slideDir();
+          let d = Math.atan2(-sd.x, -sd.z) - bodyYaw.current;
           d = Math.atan2(Math.sin(d), Math.cos(d));
           bodyYaw.current += d * Math.min(1, dt * 16);
         } else if (fp) bodyYaw.current = l.yaw;

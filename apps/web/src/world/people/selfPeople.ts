@@ -13,13 +13,17 @@
  *     levantas desde la pose en que quedaste.
  *   - En pareja: os acercáis, os miráis y las manos se encuentran (IK).
  *   - Correr contra la gente de decorado la hace tropezar.
+ *   - Fuera de combate (la vida a 0, HEALTH.down_until): en el suelo hasta que se puede reaparecer y,
+ *     entonces, a la entrada del distrito con toda la vida (RESPAWN).
  *
  * Mientras dura, manda esto y no el joystick.
  */
 import * as THREE from "three";
-import { FIGHT_REACH, type FightMove, type PairAction } from "@xenxo/protocol";
+import { FIGHT_REACH, type PairAction } from "@xenxo/protocol";
 import { people, type HitEvent, type PairEvent } from "../../net/people-store";
-import { canAttack, fightTarget, hitReady, sendHit } from "../../net/people";
+import { canAttack, fightTarget, hitReady, sendHit, sendRespawn } from "../../net/people";
+import { DISTRICT_SPAWN } from "../../net/districts";
+import { teleport } from "../../net/session";
 import { world } from "../../net/world-store";
 import { remoteFeet } from "./where";
 import { crowd, floorAt, NPC_CITY, npcs } from "../collision";
@@ -27,7 +31,7 @@ import { knockBusy } from "../knock";
 import { placeBody, type Body } from "../locomotion";
 import type { Motion } from "../motion";
 import { impact, thud, whoosh } from "./fight-audio";
-import { COMBO, COMBO_RESET, fallFor, FALL_MAX, HIT_DELAY_MS, LIE, LIE_KO, lightReaction, myStrike, parkourFallFor, RISE, STRIKES, strikeOf, type Strike } from "./fight";
+import { COMBO, COMBO_RESET, fallFor, FALL_MAX, HIT_DELAY_MS, LIE, LIE_KO, lightReaction, myStrike, parkourFallFor, RISE, STRIKES, strikeOf, type Strike, type StrikeMove } from "./fight";
 import { loadRagdolls, ragdolls } from "./ragdoll";
 import { PAIR, pairTargets } from "./pair";
 import { createFx, type Lying } from "./rig";
@@ -75,11 +79,23 @@ export function parkourFall(kind: "land" | "crash", x: number, z: number, v: num
 }
 /** El golpe que estás dando. */
 const strike = { name: "", def: null as Strike | null, t: 0, target: "", npc: -1, sent: false };
-const combo = { move: "" as FightMove | "", i: 0, last: -1e9 };
+const combo = { move: "" as StrikeMove | "", i: 0, last: -1e9 };
 const queue: { h: HitEvent; due: number }[] = [];
 let pendingPair: PairEvent | null = null;
 /** Sacudida de la cámara al recibir (la aplica Player). */
 export const camKick = { x: 0, y: 0, z: 0, t: 1 };
+/**
+ * Fuera de combate: "down" (en el suelo hasta poder reaparecer) o "respawning" (ya en la entrada,
+ * esperando a que el servidor lo confirme; si tarda, se vuelve a pedir). `at`: cuándo se pidió.
+ */
+const ko = { phase: "" as "" | "down" | "respawning", at: 0 };
+/** Margen tras la hora de reaparecer (ms): el reloj del servidor aquí es una estimación. */
+const RESPAWN_MARGIN_MS = 250;
+
+/** ¿Fuera de combate? (sin golpear, sin andar; el HUD lo enseña). */
+export function knockedOut(): boolean {
+  return ko.phase !== "";
+}
 
 people.onHit((h) => {
   if (h.to !== world.sessionId) return;
@@ -170,7 +186,7 @@ function npcAhead(x: number, y: number, z: number, yaw: number, reach: number, c
  * Empieza un golpe (Q, E, R o el HUD). El gesto sale siempre que el modo pelea lo permita; a quién
  * le llega se decide al llegar el puño.
  */
-export function startStrike(move: FightMove, c: PeopleCtx) {
+export function startStrike(move: StrikeMove, c: PeopleCtx) {
   if ((me.phase !== "none" && me.phase !== "pair") || !canAttack(move)) return;
   const now = performance.now() / 1000;
   if (combo.move !== move || now - combo.last > COMBO_RESET) combo.i = 0;
@@ -208,6 +224,7 @@ export function peopleFrame(dt: number, c: PeopleCtx, out: { lock: boolean; want
   // Golpes recibidos cuya hora ha llegado.
   const now = performance.now();
   while (queue.length && queue[0]!.due <= now) receive(queue.shift()!.h, c);
+  koFrame(c);
 
   const pair = pendingPair;
   if (pair && me.phase === "none" && !strike.def) {
@@ -265,7 +282,8 @@ export function peopleFrame(dt: number, c: PeopleCtx, out: { lock: boolean; want
           me.t = 0;
         }
       } else if (me.phase === "ground") {
-        if (me.t >= (me.ko ? LIE_KO : LIE)) {
+        // Fuera de combate no se levanta: reaparece en la entrada (koFrame).
+        if (me.t >= (me.ko ? LIE_KO : LIE) && !ko.phase) {
           if (_l.face < -0.3 && !me.rolled) {
             // Boca abajo: primero se da la vuelta.
             me.phase = "roll";
@@ -293,7 +311,7 @@ export function peopleFrame(dt: number, c: PeopleCtx, out: { lock: boolean; want
       const k = Math.max(0, 1 - me.t / 0.5);
       out.wantX = me.vx * k;
       out.wantZ = me.vz * k;
-      if (me.t >= 2.2 + (me.ko ? LIE_KO : LIE)) {
+      if (me.t >= 2.2 + (me.ko ? LIE_KO : LIE) && !ko.phase) {
         me.phase = "cliprise";
         me.t = 0;
       }
@@ -308,6 +326,41 @@ export function peopleFrame(dt: number, c: PeopleCtx, out: { lock: boolean; want
       pairFrame(dt, c);
       break;
   }
+}
+
+/**
+ * Fuera de combate: si el golpe que lo dejó así no lo ha tirado (llegó levantándose), cae aquí; pasado
+ * su tiempo, a la entrada del distrito (Player lo coloca allí al empezar el frame siguiente) y RESPAWN.
+ */
+function koFrame(c: PeopleCtx) {
+  const id = world.sessionId;
+  const until = id ? people.downUntil(id) : 0;
+  if (!until) {
+    ko.phase = "";
+    return;
+  }
+  if (!ko.phase) ko.phase = "down";
+  const now = performance.now();
+  if (ko.phase === "down") {
+    if (me.phase === "none" && !queue.length) koFall(c);
+    if (world.serverNow() >= until + RESPAWN_MARGIN_MS) {
+      ko.phase = "respawning";
+      ko.at = now;
+      teleport([DISTRICT_SPAWN[0], DISTRICT_SPAWN[1], DISTRICT_SPAWN[2]], 0);
+      sendRespawn();
+    }
+  } else if (now - ko.at > 1500) {
+    ko.at = now;
+    sendRespawn();
+  }
+}
+
+/** Cae fuera de combate sin un golpe que dibujar (de espaldas a quien le dio por última vez). */
+function koFall(c: PeopleCtx) {
+  const id = world.sessionId!;
+  const last = people.lastHit.get(id);
+  const dir: [number, number] = last ? last.dir : [Math.sin(c.bodyYaw.current), Math.cos(c.bodyYaw.current)];
+  receive({ from: last?.from ?? "", to: id, move: last?.move ?? "punch", style: people.style ?? "comic", dir, power: 0.6, fall: true, ko: true, at: performance.now() }, c);
 }
 
 /** Caída del parkour: el cuerpo con física desde como iba (o, sin física aún, la de la animación). */
