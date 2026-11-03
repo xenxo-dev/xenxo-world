@@ -547,6 +547,7 @@ let _jumpWanted = false;
  * antes si empieza algo. `min`/`max`: límites del lugar en X y Z.
  */
 export function parkourStep(pk: Parkour, b: Body, inp: ParkourInput, dt: number, min: number, max: number) {
+  if (!(dt > 0)) return;
   dt = Math.min(dt, 0.1);
   _jumpWanted = inp.jump;
   if (pk.noGrab > 0) pk.noGrab -= dt;

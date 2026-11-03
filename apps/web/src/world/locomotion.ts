@@ -97,6 +97,8 @@ let people = true;
  */
 export function stepBody(b: Body, wantX: number, wantZ: number, dt: number, min: number, max: number, o?: StepOptions) {
   b.landed = 0;
+  // Un reloj que no avanza (o que va hacia atrás) no mueve nada: con h ≤ 0 todo se volvería NaN.
+  if (!(dt > 0)) return;
   const total = Math.min(dt, 0.1);
   const n = Math.max(1, Math.ceil(total / (o?.substep ?? SUBSTEP)));
   const h = total / n;
