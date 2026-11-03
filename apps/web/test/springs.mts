@@ -1,8 +1,8 @@
 /**
- * Prueba del pelo y la ropa con física sin navegador (world/springs.ts con los VRM de serie de
- * verdad): a quién le salen cadenas (coleta, trenza, melena y falda sí; pelo corto y pantalones no),
- * que los pesos nuevos sumen uno y apunten a huesos que existen, que el pelo se quede atrás al correr
- * y vuelva al reposo al pararse, sin NaN, y lo que cuesta.
+ * Prueba del pelo con física sin navegador (world/springs.ts con los VRM de serie de verdad): a quién
+ * le salen cadenas (coleta, trenza y melena sí; pelo corto no; la ropa nunca, ni la falda: va con las
+ * piernas), que los pesos nuevos sumen uno y apunten a huesos que existen, que el pelo se quede atrás
+ * al correr y vuelva al reposo al pararse, sin NaN, y lo que cuesta.
  *
  *   npm run test:springs -w @xenxo/web
  */
@@ -72,26 +72,20 @@ async function load(id: string): Promise<VRM> {
   return vrm;
 }
 
-// Quién debe tener qué (pelo largo: coleta, trenza, melena por la barbilla; falda: el traje de Mar).
-const expect: Record<string, { hair: boolean; cloth: boolean }> = {
-  alba: { hair: true, cloth: false },
-  iris: { hair: true, cloth: false },
-  mar: { hair: true, cloth: true },
-  nora: { hair: false, cloth: false },
-  dani: { hair: false, cloth: false },
-  kai: { hair: false, cloth: false },
-  leo: { hair: false, cloth: false },
-  sam: { hair: false, cloth: false },
-};
+// Quién lleva pelo con física (pelo largo: coleta, trenza, melena por la barbilla).
+const expect: Record<string, boolean> = { alba: true, iris: true, mar: true, nora: false, dani: false, kai: false, leo: false, sam: false };
 
 console.log("Avatares de serie:");
 for (const id of Object.keys(expect)) {
   const vrm = await load(id);
   const s = addSprings(vrm.scene, springBodyOf(vrm)!);
-  const hair = s?.hair ?? 0, cloth = s?.cloth ?? 0;
-  console.log(`  ${id}: ${hair} cadenas de pelo, ${cloth} de ropa, ${s?.joints ?? 0} huesos con muelle`);
-  check(expect[id]!.hair === hair > 0, `${id}: pelo ${expect[id]!.hair ? "con" : "sin"} física`);
-  check(expect[id]!.cloth === cloth > 0, `${id}: ropa ${expect[id]!.cloth ? "con" : "sin"} física`);
+  const hair = s?.hair ?? 0;
+  console.log(`  ${id}: ${hair} cadenas de pelo, ${s?.joints ?? 0} huesos con muelle`);
+  check(expect[id] === hair > 0, `${id}: pelo ${expect[id] ? "con" : "sin"} física`);
+  // La ropa nunca lleva muelles (ni la falda: las piernas la atravesaban).
+  let clothBones = 0;
+  vrm.scene.traverse((o) => void (o.name.startsWith("cloth_") && clothBones++));
+  check(clothBones === 0, `${id}: la ropa, sin muelles`);
   if (!s) continue;
   // Pesos: suman uno y apuntan a huesos del esqueleto.
   let bad = 0;
@@ -153,4 +147,4 @@ if (fails) {
   console.log(`\n${fails} fallo(s)`);
   process.exit(1);
 }
-console.log("\npelo y ropa: todo bien");
+console.log("\npelo: todo bien");

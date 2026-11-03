@@ -76,7 +76,7 @@ export interface Features {
    */
   ragdolls: number;
   /**
-   * Pelo y ropa con física (huesos con muelles, springs.ts): hasta qué distancia de la cámara se
+   * Pelo con física (huesos con muelles, springs.ts): hasta qué distancia de la cámara se
    * mueven (m; la gente de decorado, la mitad; 0 = nadie). Más lejos se quedan como en reposo.
    */
   springs: number;
@@ -175,7 +175,7 @@ function portableClamp(f: Features, xr: boolean): Features {
     // En las gafas, solo los charcos (las gotas cruzan la vista y marean); en el móvil, poca.
     rain: xr ? 0 : Math.min(f.rain, 900),
     ragdolls: Math.min(f.ragdolls, xr ? 2 : 3),
-    // En las gafas, el pelo y la ropa de quien tienes cerca; en el móvil, algo más.
+    // En las gafas, el pelo de quien tienes cerca; en el móvil, algo más.
     springs: Math.min(f.springs, xr ? 6 : 10),
     lod: f.lod,
   };

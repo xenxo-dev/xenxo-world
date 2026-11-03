@@ -1,5 +1,5 @@
 /**
- * Pelo y ropa con física: huesos con muelles (los de VRMC_springBone, que mueve three-vrm) para los
+ * Pelo con física: huesos con muelles (los de VRMC_springBone, que mueve three-vrm) para los
  * personajes que no los traen, puestos al cargar. Sirve para todos: los de serie, las fundas y los
  * VRM que sube la gente (si el archivo ya trae los suyos, se usan esos y esto no hace nada).
  *
@@ -7,10 +7,9 @@
  *     trenza, melena). Alrededor de la cabeza, por sectores, una cadena de huesos que baja por donde
  *     va el pelo de cada sector; cada vértice pasa a ir con su cadena según lo que cuelga (y entre dos
  *     sectores, con los dos, para que no se abra).
- *   - Falda, vestido o abrigo largo: lo que pasa por entre las piernas a media altura del muslo (un
- *     pantalón nunca: cada pernera va por su lado). Cadenas desde la entrepierna hacia abajo, y los
- *     vértices van mitad con su cadena y mitad con las piernas (las rodillas la empujan).
- *   - Colisionadores: cabeza, cuello, hombros, pecho, cadera y piernas, a la medida de cada cuerpo.
+ *   - Colisionadores: cabeza, cuello, hombros y pecho, a la medida de cada cuerpo.
+ *   - La ropa, no: una falda con muelles se quedaba atrás al andar y las piernas la atravesaban (y,
+ *     lejos de la cámara, quieta, peor). Va con las piernas, como la pesó MakeHuman.
  *
  * Todo se mide en el espacio de la pose de enlace (la de los `boneInverses`), así que da igual cómo
  * esté colocado el personaje al cargarlo. Sin nada del navegador: se prueba en Node (test/springs.mts).
@@ -35,12 +34,6 @@ export interface SpringBody {
   hips: THREE.Object3D;
   leftUpperArm?: THREE.Object3D | null;
   rightUpperArm?: THREE.Object3D | null;
-  leftUpperLeg?: THREE.Object3D | null;
-  rightUpperLeg?: THREE.Object3D | null;
-  leftLowerLeg?: THREE.Object3D | null;
-  rightLowerLeg?: THREE.Object3D | null;
-  leftFoot?: THREE.Object3D | null;
-  rightFoot?: THREE.Object3D | null;
 }
 
 /** Los huesos de verdad (los que mueven las mallas) de un VRM, para `addSprings`. */
@@ -57,20 +50,13 @@ export function springBodyOf(vrm: VRM): SpringBody | null {
     chest: raw("chest"),
     leftUpperArm: raw("leftUpperArm"),
     rightUpperArm: raw("rightUpperArm"),
-    leftUpperLeg: raw("leftUpperLeg"),
-    rightUpperLeg: raw("rightUpperLeg"),
-    leftLowerLeg: raw("leftLowerLeg"),
-    rightLowerLeg: raw("rightLowerLeg"),
-    leftFoot: raw("leftFoot"),
-    rightFoot: raw("rightFoot"),
   };
 }
 
 export interface Springs {
   manager: VRMSpringBoneManager;
-  /** Cuántas cadenas de pelo y de ropa, y cuántos huesos con muelle en total. */
+  /** Cuántas cadenas de pelo y cuántos huesos con muelle en total. */
   hair: number;
-  cloth: number;
   joints: number;
   /** Un frame (después de que la animación y vrm.update hayan colocado el cuerpo). */
   update(dt: number): void;
@@ -82,7 +68,6 @@ export interface Springs {
 const SKIP = /eye|lash|brow|ceja|pesta|teeth|tongue|beard|moustache|mustache|barba|bigote|glass|gafa|^gl_|hat|hood|gorro|sombrero|helmet|casco|implant|^imp_|glove|^gv_|shoe|^sh_|boot|bota|body|base|low-poly|skin|piel/i;
 
 const HAIR = { sectors: 6, seg: 0.085, maxJoints: 5, min: 0.06, stiffness: 1.35, gravity: 0.3, drag: 0.42, hit: 0.018 };
-const CLOTH = { sectors: 8, seg: 0.12, maxJoints: 4, min: 0.1, stiffness: 1.1, gravity: 0.35, drag: 0.45, hit: 0.025 };
 
 const _m = new THREE.Matrix4();
 const _v = new THREE.Vector3();
@@ -98,7 +83,7 @@ interface Chain {
 }
 
 /**
- * Pone pelo y ropa con muelles en un personaje (sus mallas con huesos comparten un esqueleto: el de
+ * Pone el pelo con muelles en un personaje (sus mallas con huesos comparten un esqueleto: el de
  * VRMUtils.combineSkeletons). Devuelve null si no hay nada que mover.
  */
 export function addSprings(root: THREE.Object3D, body: SpringBody): Springs | null {
@@ -119,37 +104,25 @@ export function addSprings(root: THREE.Object3D, body: SpringBody): Springs | nu
   if (!head || !hips) return null;
   // Escala del cuerpo: 0,62 m de la cadera a la cabeza en el de referencia (1,75 m).
   const s = THREE.MathUtils.clamp((head.y - hips.y) / 0.62, 0.6, 1.6);
-  const legL = bindPos(body.leftUpperLeg, new THREE.Vector3());
-  const legR = bindPos(body.rightUpperLeg, new THREE.Vector3());
-  const crotchY = Math.min(legL?.y ?? hips.y, legR?.y ?? hips.y) - 0.07 * s;
-
-  const plans: { mesh: THREE.SkinnedMesh; kind: "hair" | "cloth"; pos: Float32Array }[] = [];
+  const plans: { mesh: THREE.SkinnedMesh; pos: Float32Array }[] = [];
   for (const mesh of meshes) {
     if (SKIP.test(mesh.name) || SKIP.test(materialName(mesh))) continue;
     const pos = bindPositions(mesh);
     const dom = dominant(mesh);
     const headIdx = skel.bones.indexOf(body.head as THREE.Bone);
     const neckIdx = body.neck ? skel.bones.indexOf(body.neck as THREE.Bone) : -1;
-    let onHead = 0, below = 0, front = 0, back = 0, low = 0, top = -Infinity;
+    let onHead = 0, below = 0, top = -Infinity;
     const n = pos.length / 3;
     for (let i = 0; i < n; i++) {
-      const x = pos[i * 3]!, y = pos[i * 3 + 1]!, z = pos[i * 3 + 2]!;
+      const y = pos[i * 3 + 1]!;
       top = Math.max(top, y);
       if (dom[i] === headIdx || dom[i] === neckIdx) onHead++;
       if (y < head.y - HAIR.min * s) below++;
-      // A media altura del muslo, por el medio y por delante y por detrás de las piernas: una falda
-      // pasa por ahí; un pantalón, nunca (entre las perneras, como mucho la costura de dentro).
-      if (y < crotchY - 0.08 * s && y > crotchY - 0.22 * s && Math.abs(x - hips.x) < 0.025 * s) {
-        if (z - hips.z > 0.07 * s) front++;
-        else if (z - hips.z < -0.06 * s) back++;
-      }
-      if (y < crotchY - CLOTH.min * s) low++;
     }
     // Pelo: sube por encima de la cabeza (el cuero cabelludo), buena parte va con ella (en las trenzas,
     // el resto con el pecho), no baja de la cintura y algo cuelga por debajo de la articulación.
     const hairLike = top > head.y + 0.1 * s && onHead > n * 0.15 && minY(pos) > hips.y + 0.1 * s;
-    if (hairLike && below >= 8) plans.push({ mesh, kind: "hair", pos });
-    else if (!hairLike && front >= 2 && back >= 2 && low >= 12) plans.push({ mesh, kind: "cloth", pos });
+    if (hairLike && below >= 8) plans.push({ mesh, pos });
   }
   if (!plans.length) return null;
 
@@ -158,16 +131,13 @@ export function addSprings(root: THREE.Object3D, body: SpringBody): Springs | nu
   const base = skel.bones.length;
   const manager = new VRMSpringBoneManager();
   const groups = colliders(body, skel, s);
-  let hairChains = 0, clothChains = 0, joints = 0;
+  let hairChains = 0, joints = 0;
   // Cada malla, sus cadenas (dos mallas de pelo, p. ej. flequillo y coleta, van cada una con las suyas).
-  const work: { mesh: THREE.SkinnedMesh; kind: "hair" | "cloth"; pos: Float32Array; chains: (Chain | null)[]; rootY: number; center: THREE.Vector3; seg: number }[] = [];
+  const work: { mesh: THREE.SkinnedMesh; pos: Float32Array; chains: (Chain | null)[]; seg: number }[] = [];
   for (const p of plans) {
-    const cfg = p.kind === "hair" ? HAIR : CLOTH;
-    const center = p.kind === "hair" ? head : hips;
-    const rootY = p.kind === "hair" ? head.y : crotchY;
-    const seg = cfg.seg * s;
-    const chains = buildChains(p.pos, center, rootY, seg, cfg.sectors, cfg.maxJoints, cfg.min * s);
-    const parent = p.kind === "hair" ? body.head : body.hips;
+    const seg = HAIR.seg * s;
+    const chains = buildChains(p.pos, head, head.y, seg, HAIR.sectors, HAIR.maxJoints, HAIR.min * s);
+    const parent = body.head;
     for (const c of chains) {
       if (!c) continue;
       // Huesos: el primero cuelga de la cabeza (o de la cadera), cada uno del anterior; el último
@@ -176,7 +146,7 @@ export function addSprings(root: THREE.Object3D, body: SpringBody): Springs | nu
       let prevBind = _m.copy(skel.boneInverses[skel.bones.indexOf(parent as THREE.Bone)]!).invert().clone();
       for (let k = 0; k < c.pts.length; k++) {
         const b = new THREE.Bone();
-        b.name = `${p.kind}_${p.mesh.name}_${c.angle.toFixed(2)}_${k}`;
+        b.name = `hair_${p.mesh.name}_${c.angle.toFixed(2)}_${k}`;
         const world = new THREE.Matrix4().makeTranslation(c.pts[k]!.x, c.pts[k]!.y, c.pts[k]!.z);
         const local = prevBind.clone().invert().multiply(world);
         local.decompose(b.position, b.quaternion, b.scale);
@@ -191,19 +161,18 @@ export function addSprings(root: THREE.Object3D, body: SpringBody): Springs | nu
       for (let k = 0; k < c.bones.length - 1; k++) {
         manager.addJoint(
           new VRMSpringBoneJoint(c.bones[k]!, c.bones[k + 1]!, {
-            hitRadius: cfg.hit * s,
-            stiffness: cfg.stiffness * (1 + k * 0.1),
-            gravityPower: cfg.gravity,
+            hitRadius: HAIR.hit * s,
+            stiffness: HAIR.stiffness * (1 + k * 0.1),
+            gravityPower: HAIR.gravity,
             gravityDir: new THREE.Vector3(0, -1, 0),
-            dragForce: cfg.drag,
-          }, p.kind === "hair" ? groups.hair : groups.cloth),
+            dragForce: HAIR.drag,
+          }, groups),
         );
         joints++;
       }
-      if (p.kind === "hair") hairChains++;
-      else clothChains++;
+      hairChains++;
     }
-    work.push({ ...p, chains, rootY, center, seg });
+    work.push({ ...p, chains, seg });
   }
   if (!joints) return null;
 
@@ -211,14 +180,13 @@ export function addSprings(root: THREE.Object3D, body: SpringBody): Springs | nu
   const skeleton = new THREE.Skeleton([...skel.bones, ...newBones], [...skel.boneInverses, ...newInverses]);
   for (const mesh of meshes) mesh.bind(skeleton, mesh.bindMatrix);
   skel.dispose();
-  for (const w of work) reweight(w.mesh, w.kind, w.pos, w.chains, w.center, w.rootY, w.seg);
+  for (const w of work) reweight(w.mesh, w.pos, w.chains, head, head.y, w.seg);
 
   root.updateMatrixWorld(true);
   manager.setInitState();
   return {
     manager,
     hair: hairChains,
-    cloth: clothChains,
     joints,
     update: (dt) => manager.update(dt),
     reset: () => manager.reset(),
@@ -318,10 +286,9 @@ const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 
 /**
  * Pesos nuevos para lo que cuelga: a lo largo de su cadena (entre las dos articulaciones de su
- * altura) y, entre dos sectores, repartido con el de al lado. La ropa se queda en parte con las
- * piernas (lo de antes). Lo que no cuelga, como estaba.
+ * altura) y, entre dos sectores, repartido con el de al lado. Lo que no cuelga, como estaba.
  */
-function reweight(mesh: THREE.SkinnedMesh, kind: "hair" | "cloth", pos: Float32Array, chains: (Chain | null)[], center: THREE.Vector3, rootY: number, seg: number) {
+function reweight(mesh: THREE.SkinnedMesh, pos: Float32Array, chains: (Chain | null)[], center: THREE.Vector3, rootY: number, seg: number) {
   const g = mesh.geometry;
   const si = g.getAttribute("skinIndex");
   const sw = g.getAttribute("skinWeight");
@@ -356,11 +323,6 @@ function reweight(mesh: THREE.SkinnedMesh, kind: "hair" | "cloth", pos: Float32A
       s1 = s0;
       t = 0;
     }
-    if (kind === "cloth") {
-      // La ropa, con una sola cadena (la más cercana): las piernas ponen el resto.
-      if (t > 0.5) s0 = s1;
-      t = 0;
-    }
     let m = 0;
     const put = (c: Chain, share: number) => {
       const along = Math.min(c.pts.length - 1, hang / seg);
@@ -371,24 +333,8 @@ function reweight(mesh: THREE.SkinnedMesh, kind: "hair" | "cloth", pos: Float32A
       tmpI[m] = c.idx[k + 1]!;
       tmpW[m++] = share * u;
     };
-    // Cuánto manda la cadena: el pelo, todo; la ropa, más cuanto más baja (las rodillas empujan).
-    const springW = kind === "hair" ? 1 : THREE.MathUtils.smoothstep(hang, 0, seg * 1.5) * 0.7;
-    if (kind === "cloth") {
-      put(chains[s0]!, springW);
-      // Lo que tenía, con sus dos huesos más fuertes, para el resto.
-      let b0 = 0, b1 = 1;
-      for (let k = 0; k < 4; k++) if (wts[i * 4 + k]! > wts[i * 4 + b0]!) b0 = k;
-      b1 = b0 === 0 ? 1 : 0;
-      for (let k = 0; k < 4; k++) if (k !== b0 && wts[i * 4 + k]! > wts[i * 4 + b1]!) b1 = k;
-      const w0 = wts[i * 4 + b0]!, w1 = wts[i * 4 + b1]!, sum = w0 + w1 || 1;
-      tmpI[m] = idx[i * 4 + b0]!;
-      tmpW[m++] = ((1 - springW) * w0) / sum;
-      tmpI[m] = idx[i * 4 + b1]!;
-      tmpW[m++] = ((1 - springW) * w1) / sum;
-    } else {
-      put(chains[s0]!, 1 - t);
-      if (t > 0) put(chains[s1]!, t);
-    }
+    put(chains[s0]!, 1 - t);
+    if (t > 0) put(chains[s1]!, t);
     for (let k = 0; k < 4; k++) {
       idx[i * 4 + k] = k < m ? tmpI[k]! : 0;
       wts[i * 4 + k] = k < m ? tmpW[k]! : 0;
@@ -398,8 +344,8 @@ function reweight(mesh: THREE.SkinnedMesh, kind: "hair" | "cloth", pos: Float32A
   g.setAttribute("skinWeight", new THREE.Float32BufferAttribute(wts, 4));
 }
 
-/** Colisionadores del cuerpo (en la pose de enlace, pegados a sus huesos): uno para el pelo y otro para la ropa. */
-function colliders(body: SpringBody, skel: THREE.Skeleton, s: number): { hair: VRMSpringBoneColliderGroup[]; cloth: VRMSpringBoneColliderGroup[] } {
+/** Colisionadores del pelo (en la pose de enlace, pegados a sus huesos): cabeza, cuello, pecho y hombros. */
+function colliders(body: SpringBody, skel: THREE.Skeleton, s: number): VRMSpringBoneColliderGroup[] {
   const P = (o: THREE.Object3D | null | undefined) => {
     const i = o ? skel.bones.indexOf(o as THREE.Bone) : -1;
     return i < 0 ? null : new THREE.Vector3().setFromMatrixPosition(_m.copy(skel.boneInverses[i]!).invert());
@@ -420,9 +366,6 @@ function colliders(body: SpringBody, skel: THREE.Skeleton, s: number): { hair: V
   };
   const head = P(body.head)!, neck = P(body.neck), chestBone = body.upperChest ?? body.chest, chest = P(chestBone);
   const armL = P(body.leftUpperArm), armR = P(body.rightUpperArm);
-  const hips = P(body.hips)!;
-  const ul = P(body.leftUpperLeg), ur = P(body.rightUpperLeg), ll = P(body.leftLowerLeg), lr = P(body.rightLowerLeg);
-  const fl = P(body.leftFoot), fr = P(body.rightFoot);
   const up = (v: THREE.Vector3, dy: number, dz = 0) => _w.set(v.x, v.y + dy * s, v.z + dz * s).clone();
   const hair = [
     sphere(body.head, up(head, 0.075, -0.005), 0.098 * s),
@@ -430,12 +373,5 @@ function colliders(body: SpringBody, skel: THREE.Skeleton, s: number): { hair: V
     chest ? sphere(chestBone, up(chest, 0.02, -0.02), 0.12 * s) : null,
     armL && armR && chestBone ? capsule(chestBone, armL, armR, 0.06 * s) : null,
   ].filter((c): c is VRMSpringBoneCollider => !!c);
-  const cloth = [
-    sphere(body.hips, hips, 0.11 * s),
-    ul && ll ? capsule(body.leftUpperLeg, ul, ll, 0.075 * s) : null,
-    ur && lr ? capsule(body.rightUpperLeg, ur, lr, 0.075 * s) : null,
-    ll && fl ? capsule(body.leftLowerLeg, ll, fl, 0.055 * s) : null,
-    lr && fr ? capsule(body.rightLowerLeg, lr, fr, 0.055 * s) : null,
-  ].filter((c): c is VRMSpringBoneCollider => !!c);
-  return { hair: [{ colliders: hair, name: "cuerpo (pelo)" }], cloth: [{ colliders: cloth, name: "piernas (ropa)" }] };
+  return [{ colliders: hair, name: "cuerpo (pelo)" }];
 }

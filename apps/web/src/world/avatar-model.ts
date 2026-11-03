@@ -20,8 +20,8 @@ export interface LoadedAvatar {
   object: THREE.Object3D;
   /**
    * Llamar en cada frame con el estado de movimiento (velocidad, fase del paso,
-   * si está en el aire y el gesto en curso). `view`: dónde está la cámara (el pelo y la ropa con
-   * física solo se mueven cerca; sin ella, siempre).
+   * si está en el aire y el gesto en curso). `view`: dónde está la cámara (el pelo con
+   * física solo se mueve cerca; sin ella, siempre).
    */
   update(dt: number, motion: Motion, view?: THREE.Vector3): void;
   /** El esqueleto (solo los VRM): golpes, miradas, parejas y caídas. */
@@ -110,14 +110,14 @@ const _sp = new THREE.Vector3();
 function fromVrm(vrm: VRM, scene: THREE.Group, decor: boolean): LoadedAvatar {
   VRMUtils.removeUnnecessaryVertices(scene);
   VRMUtils.combineSkeletons(scene);
-  // Pelo y ropa con muelles (springs.ts), si el archivo no trae los suyos.
+  // El pelo con muelles (springs.ts), si el archivo no trae los suyos.
   const own = (vrm.springBoneManager?.joints.size ?? 0) > 0;
   const sb = own ? null : springBodyOf(vrm);
   let springs: ReturnType<typeof addSprings> = null;
   try {
     springs = sb ? addSprings(vrm.scene, sb) : null;
   } catch (e) {
-    console.warn("[xenxo] sin física en el pelo y la ropa", e);
+    console.warn("[xenxo] sin física en el pelo", e);
   }
   /** Tiempo sin moverlos y dónde estaba el personaje la última vez (para volver al reposo tras un salto). */
   let springIdle = 1;

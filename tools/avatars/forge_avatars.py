@@ -128,8 +128,131 @@ def flatten_shape_keys(meshes) -> None:
 
 MAX_TRIS = 27_500
 
+# La piel bajo la ropa (hide_covered_skin), con las medidas del kit de fundas (kit/forge_kit.py):
+# hasta dónde se busca la prenda siguiendo la normal de la piel (o un poco por dentro: prendas que
+# se meten en la piel), a qué distancia de un borde de la prenda (cuello, mangas, cintura) ya no se
+# quita, y cuánto se mete la piel tapada que se queda (si la prenda va pegada).
+REACH = 0.06
+BEHIND = 0.015
+EDGE = 0.04
+PUSH = 0.006
 
-def fit_budget(meshes) -> None:
+
+def hide_covered_skin(root, meshes, clothes: list[str]) -> None:
+    """
+    Que la piel no asome por la ropa al moverse (en las prendas ceñidas se veía el cuerpo a través:
+    el pecho por la camiseta, las rodillas por el pantalón). Desde cada vértice del cuerpo se sigue
+    su normal hacia fuera y se busca la prenda, contando solo las partes de la prenda que mueve el
+    mismo hueso o uno contiguo (así, la cara de dentro del brazo no queda «tapada» por el costado de
+    la camiseta). La piel tapada se mete un poco hacia dentro; la tapada por todos lados (seis rayos
+    más en cono) y lejos de los bordes de la prenda, se quita: ni asoma ni se dibuja.
+    Lo mismo que hace el configurador de fundas con su kit (`coverage` en kit/forge_kit.py).
+    """
+    import bmesh
+    from mathutils import Vector
+    from mathutils.bvhtree import BVHTree
+    from mathutils.kdtree import KDTree
+
+    body = next((o for o in meshes if o.name == "Human_x"), None)
+    wear = [o for o in meshes if any(c in o.name for c in clothes)]
+    if body is None or not wear:
+        return
+    parent = {b.name: (b.parent.name if b.parent else None) for b in root.data.bones}
+
+    def near(a: str | None, b: str | None) -> bool:
+        return a is not None and b is not None and (a == b or parent.get(a) == b or parent.get(b) == a)
+
+    def dominant(ob) -> list[str | None]:
+        # Solo los grupos de huesos (el cuerpo de MakeHuman trae además los suyos: «body», «Left»…).
+        names = {g.index: g.name for g in ob.vertex_groups if g.name in parent}
+        out = []
+        for v in ob.data.vertices:
+            best = max((g for g in v.groups if g.group in names), key=lambda g: g.weight, default=None)
+            out.append(names[best.group] if best else None)
+        return out
+
+    # Todas las prendas en un árbol de rayos (en el mundo), sabiendo de qué prenda es cada cara.
+    verts, polys, owner = [], [], []
+    for ob in wear:
+        mw = ob.matrix_world
+        base = len(verts)
+        verts += [mw @ v.co for v in ob.data.vertices]
+        bones = dominant(ob)
+        for p in ob.data.polygons:
+            polys.append([base + i for i in p.vertices])
+            owner.append(bones[p.vertices[0]])
+    tree = BVHTree.FromPolygons(verts, polys)
+    # Bordes de las prendas (aristas con una sola cara), por puntos.
+    edge_pts = []
+    for ob in wear:
+        bm = bmesh.new()
+        bm.from_mesh(ob.data)
+        bm.transform(ob.matrix_world)
+        for e in bm.edges:
+            if e.is_boundary:
+                a, b = e.verts[0].co, e.verts[1].co
+                edge_pts += [a.lerp(b, k / 5) for k in range(6)]
+        bm.free()
+    kd = KDTree(max(1, len(edge_pts)))
+    for i, co in enumerate(edge_pts):
+        kd.insert(co, i)
+    kd.balance()
+
+    mw = body.matrix_world
+    nrm_mat = mw.to_3x3().inverted().transposed()
+    body_bones = dominant(body)
+    vs = body.data.vertices
+    under: dict[int, float] = {}
+    deep: set[int] = set()
+    backs = fronts = 0
+    cone: dict[int, list[Vector]] = {}
+    for v in vs:
+        co = mw @ v.co
+        n = (nrm_mat @ v.normal).normalized()
+        hit, hn, idx, dist = tree.ray_cast(co - n * BEHIND, n, REACH + BEHIND)
+        if hit is None or not near(body_bones[v.index], owner[idx]):
+            continue
+        under[v.index] = dist - BEHIND  # negativo: la prenda se mete en la piel
+        if hn.dot(n) > 0:
+            backs += 1
+        else:
+            fronts += 1
+        # Seis rayos en cono (unos 33°): si alguno se escapa, esa piel se ve por una abertura.
+        t1 = n.cross(Vector((0, 0, 1)) if abs(n.z) < 0.9 else Vector((1, 0, 0))).normalized()
+        t2 = n.cross(t1)
+        cone[v.index] = [(n + 0.65 * (math.cos(k * math.pi / 3) * t1 + math.sin(k * math.pi / 3) * t2)).normalized() for k in range(6)]
+    # Las prendas de MakeHuman tienen la normal hacia fuera: desde dentro se ve su cara de atrás.
+    inside_is_back = backs >= fronts
+    for i, dirs in cone.items():
+        co = mw @ vs[i].co
+        if edge_pts and kd.find(co)[2] <= EDGE:
+            continue
+        ok = True
+        for d in dirs:
+            hit, hn, idx, dist = tree.ray_cast(co - d * BEHIND, d, REACH * 1.6 + BEHIND)
+            if hit is None or (hn.dot(d) > 0) != inside_is_back or not near(body_bones[i], owner[idx]):
+                ok = False
+                break
+        if ok:
+            deep.add(i)
+    # Quitar las caras con todos sus vértices tapados del todo; meter el resto de la piel tapada.
+    bm = bmesh.new()
+    bm.from_mesh(body.data)
+    bm.verts.ensure_lookup_table()
+    for v in bm.verts:
+        g = under.get(v.index)
+        if g is not None and g < 0.015:
+            v.co -= v.normal * (PUSH + max(0.0, -g))
+    gone = [f for f in bm.faces if all(v.index in deep for v in f.verts)]
+    n_gone = len(gone)
+    bmesh.ops.delete(bm, geom=gone, context="FACES")
+    bm.to_mesh(body.data)
+    bm.free()
+    body.data.update()
+    print(f"    piel tapada {len(under)}, se quitan {n_gone} caras", flush=True)
+
+
+def fit_budget(meshes, clothes: list[str]) -> None:
     """Si se pasa del presupuesto, simplifica pelo y ropa (nunca el cuerpo ni los ojos)."""
     def tris(o):
         return sum(len(f.vertices) - 2 for f in o.data.polygons)
@@ -140,22 +263,40 @@ def fit_budget(meshes) -> None:
     cands = sorted((o for o in meshes if not o.name.startswith("Human_x") and "low-poly" not in o.name and tris(o) > 1500), key=tris, reverse=True)
     excess = total - MAX_TRIS
     pool = sum(tris(o) for o in cands)
+    import bmesh
+
     for o in cands:
         ratio = max(0.35, 1 - (excess / pool) * 1.1)
+        # Los bordes de cada prenda (bajos, puños, cuellos, aberturas) no se tocan: si no, se quedan
+        # dentados (se veía en la chaqueta y la falda de Mar). El pelo no: sus mechones son todo borde.
+        edge: list[int] = []
+        if any(c in o.name for c in clothes):
+            bm = bmesh.new()
+            bm.from_mesh(o.data)
+            edge = sorted({v.index for e in bm.edges if e.is_boundary for v in e.verts})
+            bm.free()
+        keep = o.vertex_groups.new(name="fit_keep")
+        if edge:
+            keep.add(edge, 1.0, "REPLACE")
         mod = o.modifiers.new("fit", "DECIMATE")
         mod.ratio = ratio
         mod.use_collapse_triangulate = True
+        if edge:
+            mod.vertex_group = "fit_keep"
+            mod.invert_vertex_group = True
+            mod.vertex_group_factor = 10.0
         bpy.context.view_layer.objects.active = o
         for x in bpy.data.objects:
             x.select_set(x == o)
         bpy.ops.object.modifier_move_to_index(modifier="fit", index=0)
         bpy.ops.object.modifier_apply(modifier="fit")
+        o.vertex_groups.remove(o.vertex_groups["fit_keep"])
 
 
-def shrink_textures(meshes) -> None:
-    """Texturas al presupuesto de avatar: piel a 1024, el resto a 512."""
+def shrink_textures(meshes, clothes: list[str]) -> None:
+    """Texturas al presupuesto de avatar: piel y ropa a 1024 (se ven de cerca), el resto a 512."""
     for ob in meshes:
-        target = TEX_BODY if ob.name.startswith("Human_x") or ob.name == "Human_x" else TEX_OTHER
+        target = TEX_BODY if ob.name == "Human_x" or any(c in ob.name for c in clothes) else TEX_OTHER
         for m in ob.data.materials:
             if not m or not m.node_tree:
                 continue
@@ -235,6 +376,23 @@ def preview(root, meshes, path: str) -> None:
     del head
 
 
+def forge_one(p: dict, out: str) -> dict:
+    t0 = time.time()
+    clear_scene()
+    root, meshes = build(p)
+    flatten_shape_keys(meshes)
+    hide_covered_skin(root, meshes, p["clothes"])
+    fit_budget(meshes, p["clothes"])
+    shrink_textures(meshes, p["clothes"])
+    tris = sum(sum(len(f.vertices) - 2 for f in m.data.polygons) for m in meshes)
+    if "--preview" in sys.argv:
+        preview(root, meshes, os.path.join(out, f"{p['id']}.png"))
+    path = os.path.join(out, f"{p['id']}.vrm")
+    to_vrm(root, p, path)
+    print(f"[avatar] {p['id']}: {tris} triángulos, {os.path.getsize(path) // 1024} KB, {time.time() - t0:.0f}s", flush=True)
+    return {"name": p["name"], "tris": tris, "bytes": os.path.getsize(path)}
+
+
 def main() -> None:
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     out = os.path.abspath(args[0]) if args else DEFAULT_OUT
@@ -243,24 +401,25 @@ def main() -> None:
         if a.startswith("--only="):
             only = set(a.split("=", 1)[1].split(","))
     os.makedirs(out, exist_ok=True)
-    setup()
+    todo = [p for p in PRESETS if not only or p["id"] in only]
+    if "--one" in sys.argv:
+        # Un personaje por proceso: en la misma sesión de Blender, lo que deja MPFB de uno se colaba
+        # en el siguiente (a Iris le salía pelo de otra).
+        setup()
+        report = forge_one(todo[0], out)
+        with open(os.path.join(out, f"{todo[0]['id']}.report.json"), "w", encoding="utf-8") as f:
+            json.dump(report, f, ensure_ascii=False)
+        return
+    import subprocess
+
     report = {}
-    for p in PRESETS:
-        if only and p["id"] not in only:
-            continue
-        t0 = time.time()
-        clear_scene()
-        root, meshes = build(p)
-        flatten_shape_keys(meshes)
-        fit_budget(meshes)
-        shrink_textures(meshes)
-        tris = sum(sum(len(f.vertices) - 2 for f in m.data.polygons) for m in meshes)
-        if "--preview" in sys.argv:
-            preview(root, meshes, os.path.join(out, f"{p['id']}.png"))
-        path = os.path.join(out, f"{p['id']}.vrm")
-        to_vrm(root, p, path)
-        report[p["id"]] = {"name": p["name"], "tris": tris, "bytes": os.path.getsize(path)}
-        print(f"[avatar] {p['id']}: {tris} triángulos, {os.path.getsize(path) // 1024} KB, {time.time() - t0:.0f}s", flush=True)
+    for p in todo:
+        flags = [a for a in sys.argv[1:] if a in ("--preview",)]
+        subprocess.run([sys.executable, os.path.abspath(__file__), out, f"--only={p['id']}", "--one", *flags], check=True)
+        rp = os.path.join(out, f"{p['id']}.report.json")
+        with open(rp, encoding="utf-8") as f:
+            report[p["id"]] = json.load(f)
+        os.remove(rp)
     with open(os.path.join(out, "avatars.json"), "w", encoding="utf-8") as f:
         json.dump(report, f, indent=1, ensure_ascii=False)
 

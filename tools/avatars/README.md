@@ -30,7 +30,18 @@ python3 tools/avatars/pack_avatars.py out                     # texturas WebP, p
   el catálogo en `apps/realtime/src/avatar-presets.ts` y `apps/web/src/world/avatar-presets.json`,
   y los retratos en `apps/web/public/avatars/`.
 - Las animaciones VRMA valen para **cualquier** VRM, también los que sube la gente.
-- Presupuesto de avatar: 30.000 triángulos, 4 MB, texturas de 1024 px (la forja reduce pelo y ropa si hace falta).
+- Presupuesto de avatar: 30.000 triángulos, 4 MB, texturas de 1024 px (piel y ropa a 1024; pelo, cejas
+  y ojos a 512). Si se pasa, la forja simplifica pelo y ropa, sin tocar los bordes de las prendas
+  (bajos, puños, cuellos: si no, quedan dentados).
+- **La piel bajo la ropa** (`hide_covered_skin`, las mismas medidas que el kit de fundas): desde cada
+  vértice del cuerpo se sigue su normal hasta la prenda (solo por partes que mueve el mismo hueso o
+  uno contiguo); la piel tapada se mete hacia dentro y la tapada por todos lados y lejos de los
+  bordes se quita. Así no asoma por las prendas ceñidas al moverse.
+- Cada personaje se forja en su propio proceso: en la misma sesión de Blender, lo que deja MPFB de uno
+  se colaba en el siguiente.
+- Al volver a forjar, cambian los hashes: `pack_avatars.py` apunta en
+  `apps/realtime/src/avatar-presets-renamed.json` el viejo → el nuevo, y el `Directory` pasa al
+  personaje nuevo a quien llevaba el viejo.
 
 ## Kit del configurador de fundas
 

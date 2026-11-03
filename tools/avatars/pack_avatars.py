@@ -25,6 +25,9 @@ SRC = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.join(ROOT, 
 DEST = os.path.join(ROOT, "apps", "realtime", "seed-assets", "s")
 CATALOG = os.path.join(ROOT, "apps", "web", "src", "world", "avatar-presets.json")
 INDEX_TS = os.path.join(ROOT, "apps", "realtime", "src", "avatar-presets.ts")
+# Hash viejo → hash nuevo de cada avatar de serie que se vuelve a forjar: las cuentas que lo llevaban
+# pasan al mismo personaje nuevo (migración en directory.ts).
+RENAMED = os.path.join(ROOT, "apps", "realtime", "src", "avatar-presets-renamed.json")
 
 MAX_BYTES = 4 * 1024 * 1024
 MAX_TRIS = 30_000
@@ -140,14 +143,16 @@ def repack(data: bytes) -> tuple[bytes, dict]:
 
 def main() -> None:
     os.makedirs(DEST, exist_ok=True)
+    # Primero, que la forja esté entera (antes de borrar nada de la tanda anterior).
+    meta = json.load(open(os.path.join(SRC, "avatars.json"), encoding="utf-8"))
     # Borra los avatares de la tanda anterior (la carpeta la comparten con los modelos de la plaza).
-    if os.path.exists(CATALOG):
-        for old in json.load(open(CATALOG, encoding="utf-8")):
+    previous = json.load(open(CATALOG, encoding="utf-8")) if os.path.exists(CATALOG) else []
+    if previous:
+        for old in previous:
             for key in ("hash", "lite"):
                 path = os.path.join(DEST, f"{old.get(key, 'sha256:-')[7:]}.glb")
                 if old.get(key) and os.path.exists(path):
                     os.remove(path)
-    meta = json.load(open(os.path.join(SRC, "avatars.json"), encoding="utf-8"))
     catalog = []
     for aid, info in meta.items():
         data = open(os.path.join(SRC, f"{aid}.vrm"), "rb").read()
@@ -174,6 +179,21 @@ def main() -> None:
             Image.open(src).convert("RGBA").resize((192, 192), Image.LANCZOS).save(os.path.join(thumbs, f"{c['id']}.webp"), "WEBP", quality=86, method=6)
     with open(CATALOG, "w", encoding="utf-8") as f:
         json.dump(catalog, f, indent=1, ensure_ascii=False)
+        f.write("\n")
+    # Quien llevaba un avatar de serie de antes, pasa al mismo personaje nuevo (y lo ya renombrado, al último).
+    renamed = json.load(open(RENAMED, encoding="utf-8")) if os.path.exists(RENAMED) else {}
+    now = {c["id"]: c["hash"] for c in catalog}
+    for old in previous:
+        if now.get(old["id"]) and now[old["id"]] != old["hash"]:
+            renamed[old["hash"]] = now[old["id"]]
+    for k in list(renamed):
+        v, seen = renamed[k], set()
+        while v in renamed and v not in seen:
+            seen.add(v)
+            v = renamed[v]
+        renamed[k] = v
+    with open(RENAMED, "w", encoding="utf-8") as f:
+        json.dump({k: v for k, v in renamed.items() if k != v}, f, indent=1)
         f.write("\n")
     lines = [
         "// Generado por tools/avatars/pack_avatars.py. No lo edites a mano.",

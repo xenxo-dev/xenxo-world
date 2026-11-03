@@ -24,6 +24,7 @@ import { randomId } from "./auth";
 import { isAvatarPreset } from "./avatar-presets-check";
 import { assetKey } from "./assets";
 import { AVATAR_PRESETS } from "./avatar-presets";
+import renamedPresets from "./avatar-presets-renamed.json";
 import {
   b64url, CODE_TTL_MS, ACCESS_TOKEN_TTL_MS, ID_TOKEN_TTL_S, MAX_CLIENTS_PER_USER, MAX_REDIRECTS, parseScopes, REQUEST_TTL_MS,
   sha256b64url, signJwt, validChallenge, validClientName, validNonce, validRedirectUri, validState, validVerifier, withParams,
@@ -319,6 +320,11 @@ export class Directory extends DurableObject<Env> {
     // Migración: versión de las sesiones. Subirla («cerrar sesión en todos los dispositivos») deja
     // sin valor todas las sesiones anteriores de la cuenta.
     if (!ucols.includes("session_epoch")) this.sql.exec("ALTER TABLE users ADD COLUMN session_epoch INTEGER NOT NULL DEFAULT 0");
+    // Los avatares de serie se vuelven a forjar de vez en cuando (avatar-presets-renamed.json, lo escribe
+    // tools/avatars/pack_avatars.py): quien llevaba uno pasa al mismo personaje, el nuevo.
+    for (const [from, to] of Object.entries(renamedPresets as Record<string, string>)) {
+      this.sql.exec("UPDATE users SET avatar_hash = ? WHERE avatar_hash = ?", to, from);
+    }
     // Contador de números de jugador: nunca baja, así un número no se reutiliza aunque se borre la cuenta.
     this.sql.exec("INSERT OR IGNORE INTO counters (k, v) VALUES ('next_player', (SELECT COALESCE(MAX(player_no), 0) + 1 FROM users))");
     // Migración: el personaje propio que ya llevaba cada cuenta entra en su armario (una sola vez).

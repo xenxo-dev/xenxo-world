@@ -80,13 +80,13 @@ export async function buildMoving(r: Recipe): Promise<MovingFunda> {
     m.boundingSphere = sphere;
     m.geometry.boundingSphere = sphere.clone();
   }
-  // Pelo y ropa con muelles, como en el mundo (world/springs.ts).
+  // El pelo con muelles, como en el mundo (world/springs.ts).
   const body = springBodyOf(vrm);
   let springs: ReturnType<typeof addSprings> = null;
   try {
     springs = body ? addSprings(root, body) : null;
   } catch (e) {
-    console.warn("[xenxo] sin física en el pelo y la ropa", e);
+    console.warn("[xenxo] sin física en el pelo", e);
   }
   const animator = new VrmAnimator(vrm);
   let t = 0;

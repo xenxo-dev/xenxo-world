@@ -10,6 +10,7 @@ dist/
 tools/materials/.cache/
 tools/forge/out/
 tools/covers/out/
+tools/avatars/out/
 __pycache__/
 
 # Se generan con npm run build -w @xenxo/sdk
