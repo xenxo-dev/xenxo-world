@@ -23,6 +23,7 @@ import { CHUNK_SIZE } from "@xenxo/protocol";
 import { SEED_ASSETS } from "../../../realtime/src/seed-assets";
 import { assetUrl } from "../config";
 import type { Ambience, Features } from "./graphics";
+import { DISPLAY_GLSL } from "./display";
 import { SkipOnError } from "./Entities";
 import { lightweight, paintedLights } from "./materials";
 import { footTexture, PANO_TONES } from "./nexo-tones";
@@ -75,6 +76,7 @@ export function rng(seed: number) {
 }
 
 const HAZE = /* glsl */ `
+  ${DISPLAY_GLSL}
   uniform vec3 uHaze; uniform float uDensity; uniform float uNight;
   uniform float uCut; uniform sampler2D uFoot; uniform float uFootGain; uniform float uGrade;
   // El tono de la foto del nexo en la dirección de este punto (la misma vuelta que su cilindro).
@@ -93,6 +95,9 @@ const HAZE = /* glsl */ `
       // Lo propio de la ciudad, con el mismo mapeo de tonos de siempre; la foto y su tono, sin él.
       #ifdef TONE_MAPPING
         if (!mapped) col = toneMapping(col);
+      #else
+        // Con post-proceso ningún material trae el mapeo hecho (se pasa al final): aquí, a mano.
+        if (xenxoLinearOut()) col = xenxoAces(col);
       #endif
       tone = panoTone(w);
       // Gradación: el color de la foto en esa dirección, conservando el brillo de cada cosa.
@@ -123,6 +128,10 @@ const HAZE = /* glsl */ `
 const OUT = /* glsl */ `
   #ifdef TONE_MAPPING
     if (uCut < 0.5) gl_FragColor.rgb = toneMapping(gl_FragColor.rgb);
+  #else
+    // Con post-proceso, en el nexo el color ya es el que se tiene que ver (el de la foto): que el
+    // mapeo de tonos del final lo deje igual (display.ts).
+    if (uCut > 0.5) gl_FragColor.rgb = xenxoShown(gl_FragColor.rgb);
   #endif
   #include <colorspace_fragment>
 `;
@@ -563,7 +572,10 @@ function Flyers({ list, features, ambience }: { list: Car[]; features: Features;
         .replace("#include <begin_vertex>", "#include <begin_vertex>\ntransformed = turn(transformed, fDir, fRoll) + fPos;\nvFlyW = transformed;");
       shader.fragmentShader = shader.fragmentShader
         .replace("#include <common>", `#include <common>\nvarying vec3 vFlyW; varying float vFade;\n${HAZE}`)
-        .replace("#include <fog_fragment>", "#include <fog_fragment>\ngl_FragColor.rgb = mix(uHaze, hazeOf(gl_FragColor.rgb, vFlyW, true), vFade);");
+        .replace(
+          "#include <fog_fragment>",
+          "#include <fog_fragment>\ngl_FragColor.rgb = mix(uHaze, hazeOf(gl_FragColor.rgb, vFlyW, true), vFade);\nif (uCut > 0.5) gl_FragColor.rgb = xenxoShown(gl_FragColor.rgb);",
+        );
     };
     m.customProgramCacheKey = () => `nexo-flyer|${prevKey()}`;
     return m;

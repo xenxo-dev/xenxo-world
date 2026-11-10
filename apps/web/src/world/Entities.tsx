@@ -143,32 +143,49 @@ const CANDELA_PER_UNIT = 4;
 /* Charcos de luz (VR, móvil y niveles sin luces puntuales)             */
 /* ------------------------------------------------------------------ */
 
-let poolTexture: THREE.CanvasTexture | null = null;
-function poolGradient() {
-  if (poolTexture) return poolTexture;
+/** Cuánta luz queda a cada distancia del centro (0–1 del radio): fuerte bajo la farola y una cola larga y tenue. */
+const POOL_FALLOFF: [number, number][] = [[0, 1], [0.35, 0.55], [0.7, 0.14], [1, 0]];
+/**
+ * Con post-proceso el charco se suma en lineal, antes del mapeo de tonos, y sobre un suelo oscuro la
+ * misma cola se ve mucho más (el charco parecía el doble de ancho y lo lavaba todo): ahí la caída
+ * se eleva a esto, que deja en pantalla lo mismo que sin post-proceso.
+ */
+const POOL_LINEAR_GAMMA = 1.6;
+const poolTextures: [THREE.CanvasTexture | null, THREE.CanvasTexture | null] = [null, null];
+function poolGradient(linear: boolean) {
+  const have = poolTextures[linear ? 1 : 0];
+  if (have) return have;
   const n = 128;
   const c = document.createElement("canvas");
   c.width = c.height = n;
   const g = c.getContext("2d")!;
-  const grad = g.createRadialGradient(n / 2, n / 2, 0, n / 2, n / 2, n / 2);
-  grad.addColorStop(0, "rgba(255,255,255,1)");
-  grad.addColorStop(0.35, "rgba(255,255,255,0.55)");
-  grad.addColorStop(0.7, "rgba(255,255,255,0.14)");
-  grad.addColorStop(1, "rgba(255,255,255,0)");
-  g.fillStyle = grad;
-  g.fillRect(0, 0, n, n);
-  poolTexture = new THREE.CanvasTexture(c);
-  return poolTexture;
+  const img = g.createImageData(n, n);
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      const r = Math.min(1, Math.hypot(x + 0.5 - n / 2, y + 0.5 - n / 2) / (n / 2));
+      let k = 0;
+      while (k < POOL_FALLOFF.length - 2 && r > POOL_FALLOFF[k + 1]![0]) k++;
+      const [r0, a0] = POOL_FALLOFF[k]!, [r1, a1] = POOL_FALLOFF[k + 1]!;
+      const a = a0 + ((a1 - a0) * (r - r0)) / (r1 - r0);
+      const i = (y * n + x) * 4;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = 255;
+      img.data[i + 3] = Math.round(255 * (linear ? Math.pow(a, POOL_LINEAR_GAMMA) : a));
+    }
+  }
+  g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  poolTextures[linear ? 1 : 0] = t;
+  return t;
 }
 const poolGeometry = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
 const poolMaterials = new Map<string, THREE.MeshBasicMaterial>();
-function poolMaterial(color: string, strength: number) {
-  const key = `${color}|${strength.toFixed(2)}`;
+function poolMaterial(color: string, strength: number, linear: boolean) {
+  const key = `${color}|${strength.toFixed(2)}|${linear}`;
   let m = poolMaterials.get(key);
   if (!m) {
     m = new THREE.MeshBasicMaterial({
       color: new THREE.Color(color).multiplyScalar(strength),
-      map: poolGradient(),
+      map: poolGradient(linear),
       blending: THREE.AdditiveBlending,
       transparent: true,
       depthWrite: false,
@@ -229,7 +246,7 @@ const EntityView = memo(function EntityView({
     {showPool && light.success && (
       <mesh
         geometry={poolGeometry}
-        material={poolMaterial(light.data.color, Math.min(1, 0.25 + light.data.intensity * 0.35))}
+        material={poolMaterial(light.data.color, Math.min(1, 0.25 + light.data.intensity * 0.35), features.post)}
         position={[p[0] + ox, POOL_FLOOR_Y, p[2] + oz]}
         scale={[Math.min(light.data.range, 7) * 1.5, 1, Math.min(light.data.range, 7) * 1.5]}
         renderOrder={1}

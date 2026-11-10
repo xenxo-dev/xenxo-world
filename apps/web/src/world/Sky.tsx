@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
+import { DISPLAY_GLSL } from "./display";
 import type { Ambience } from "./graphics";
 
 /**
@@ -13,8 +14,11 @@ export const SKY = {
   night: { top: "#04060f", horizon: "#3a1c5c", ground: "#06070d", fog: "#120d26" },
 } as const;
 
-/** `top`: otro azul para lo alto (en el nexo, el de su panorámica). */
-export function Sky({ ambience, top }: { ambience: Ambience; top?: string }) {
+/**
+ * `top`: otro azul para lo alto (en el nexo, el de su panorámica). `pano`: este cielo continúa una
+ * foto (la del nexo) y tiene que verse igual que ella con y sin post-proceso (display.ts).
+ */
+export function Sky({ ambience, top, pano = false }: { ambience: Ambience; top?: string; pano?: boolean }) {
   const material = useMemo(
     () =>
       new THREE.ShaderMaterial({
@@ -27,6 +31,7 @@ export function Sky({ ambience, top }: { ambience: Ambience; top?: string }) {
           ground: { value: new THREE.Color() },
           night: { value: 0 },
           time: { value: 0 },
+          pano: { value: 0 },
         },
         vertexShader: /* glsl */ `
           varying vec3 vDir;
@@ -36,8 +41,9 @@ export function Sky({ ambience, top }: { ambience: Ambience; top?: string }) {
           }`,
         fragmentShader: /* glsl */ `
           uniform vec3 top; uniform vec3 horizon; uniform vec3 ground;
-          uniform float night; uniform float time;
+          uniform float night; uniform float time; uniform float pano;
           varying vec3 vDir;
+          ${DISPLAY_GLSL}
           float hash(vec3 p) {
             p = fract(p * 0.3183099 + 0.1);
             p *= 17.0;
@@ -55,6 +61,10 @@ export function Sky({ ambience, top }: { ambience: Ambience; top?: string }) {
             float star = step(0.9965, h) * smoothstep(0.05, 0.35, y);
             star *= 0.6 + 0.4 * sin(time * 1.7 + h * 91.0);
             c += night * star * vec3(1.6, 1.6, 2.0);
+            // Sin post-proceso estos números llegan tal cual a la pantalla. Con él pasan por el mapeo
+            // de tonos y salen más claros: junto a la foto del nexo se notaría el salto, así que ahí
+            // se dejan como se ven sin él.
+            if (pano > 0.5 && xenxoLinearOut()) c = xenxoShown(sRGBTransferEOTF(vec4(min(c, vec3(1.0)), 1.0)).rgb);
             gl_FragColor = vec4(c, 1.0);
           }`,
       }),
@@ -67,7 +77,8 @@ export function Sky({ ambience, top }: { ambience: Ambience; top?: string }) {
     material.uniforms.horizon!.value.set(k.horizon);
     material.uniforms.ground!.value.set(k.ground);
     material.uniforms.night!.value = ambience === "night" ? 1 : 0;
-  }, [ambience, top, material]);
+    material.uniforms.pano!.value = pano ? 1 : 0;
+  }, [ambience, top, pano, material]);
 
   // La esfera va con la cámara: si se quedara en el origen, en los distritos (256 m) parte de ella
   // quedaría más lejos que el plano lejano (400 m) y se vería recortada como una cúpula.
@@ -80,6 +91,51 @@ export function Sky({ ambience, top }: { ambience: Ambience; top?: string }) {
   return (
     <mesh ref={mesh} material={material} renderOrder={-1} frustumCulled={false}>
       <sphereGeometry args={[300, 32, 16]} />
+    </mesh>
+  );
+}
+
+/**
+ * El cielo de día de verdad (la foto de nubes) con post-proceso: una esfera que la pinta tal cual.
+ * Como fondo de la escena pasaba por el mapeo de tonos del final, igual que si fuera una superficie
+ * iluminada, y salía apagada (display.ts). La misma proyección que usa Three.js para el fondo: el
+ * sol de la foto sigue donde lo tiene la luz.
+ */
+export function PhotoSky({ map }: { map: THREE.Texture }) {
+  const material = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        side: THREE.BackSide,
+        depthWrite: false,
+        fog: false,
+        uniforms: { map: { value: map } },
+        vertexShader: /* glsl */ `
+          varying vec3 vDir;
+          void main() {
+            vDir = position;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }`,
+        fragmentShader: /* glsl */ `
+          uniform sampler2D map;
+          varying vec3 vDir;
+          ${DISPLAY_GLSL}
+          void main() {
+            vec3 d = normalize(vDir);
+            vec2 uv = vec2(atan(d.z, d.x) * 0.15915494 + 0.5, asin(clamp(d.y, -1.0, 1.0)) * 0.31830989 + 0.5);
+            // Siempre el nivel 0: en la costura (donde la u salta de 1 a 0) los mipmaps pintarían una raya.
+            gl_FragColor = vec4(xenxoShown(textureLod(map, uv, 0.0).rgb), 1.0);
+            #include <colorspace_fragment>
+          }`,
+      }),
+    [map],
+  );
+  useEffect(() => () => material.dispose(), [material]);
+  const mesh = useRef<THREE.Mesh>(null!);
+  useFrame(({ camera }) => mesh.current?.position.copy(camera.position));
+  // 200 m: también cabe entera en la foto de los reflejos de la plaza (su cámara ve hasta 320 m).
+  return (
+    <mesh ref={mesh} material={material} renderOrder={-1} frustumCulled={false}>
+      <sphereGeometry args={[200, 48, 24]} />
     </mesh>
   );
 }

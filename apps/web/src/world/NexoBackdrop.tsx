@@ -14,6 +14,7 @@ import { useEffect, useMemo, useState } from "react";
 import * as THREE from "three";
 import { CHUNK_SIZE } from "@xenxo/protocol";
 import type { Ambience } from "./graphics";
+import { DISPLAY_GLSL } from "./display";
 import { fillFoot, HORIZON, measureFoot, PANO_TONES } from "./nexo-tones";
 
 const RADIUS = 240;
@@ -47,13 +48,15 @@ const material = () =>
     fragmentShader: /* glsl */ `
       uniform sampler2D map; uniform float gain;
       varying vec2 vUv;
+      ${DISPLAY_GLSL}
       void main() {
         // Hacia el pie, la foto se desenfoca (mipmaps más bajos): ahí se funde con la ciudad en 3D.
         float soft = smoothstep(0.16, 0.0, vUv.y) * 4.0;
         vec4 c = texture2D(map, vec2(1.0 - vUv.x, vUv.y), soft);
         // La foto entera: abajo funde con la bruma del abismo y arriba con el cielo.
         float a = smoothstep(0.0, 0.05, vUv.y) * smoothstep(1.0, 0.86, vUv.y);
-        gl_FragColor = vec4(c.rgb * gain, a);
+        // Una foto: tal cual, también cuando al final de todo hay un mapeo de tonos (display.ts).
+        gl_FragColor = vec4(xenxoShown(c.rgb * gain), a);
         #include <colorspace_fragment>
       }`,
   });

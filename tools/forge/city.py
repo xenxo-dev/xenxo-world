@@ -232,10 +232,13 @@ def _tower(p: Part, b: dict, color: str, rnd: random.Random, dark: bool, detail:
     _box(p, x0 + 2.5, z0 + 2.5, x1 - 2.5, z1 - 2.5, h, h + 2.2, trim)
     lo, hi = _lo_hi((x0 + x1) / 2, (z0 + z1) / 2, (x0 + x1) / 2, (z0 + z1) / 2, 0, 0)
     p.cylinder((lo[0], lo[1], h + 2.2), 0.12, 4 + rnd.random() * 4, trim, segments=6)
-    # Anuncio vertical sin letras en la cara que da a la cruz.
+    # Anuncio vertical sin letras en la cara que da a la cruz. Su color se sortea también en el nivel
+    # ligero (que no lo lleva): si no, el azar se desfasa y las torres siguientes salen con otros
+    # colores y otra antena que en el detallado.
+    ad = rnd.choice(["#36d9ff", "#ff4fd8", "#ff4f8b"])
     if detail:
         qx = x1 - i + 0.05 if b["q"] in (0, 2) else x0 + i - 0.35
-        _box(p, qx, z0 + 3, qx + 0.3, z0 + 5, h * 0.35, h * 0.75, mat("pantalla", rnd.choice(["#36d9ff", "#ff4fd8", "#ff4f8b"])))
+        _box(p, qx, z0 + 3, qx + 0.3, z0 + 5, h * 0.35, h * 0.75, mat("pantalla", ad))
 
 
 def _voxel(p: Part, b: dict, color: str, rnd: random.Random, detail: int):
@@ -252,14 +255,19 @@ def _voxel(p: Part, b: dict, color: str, rnd: random.Random, detail: int):
         else:
             _box(p, x0 + inset, z0 + inset, x1 - inset, z1 - inset, y, y + th, m)
         _box(p, x0 + inset - 0.05, z0 + inset - 0.05, x1 - inset + 0.05, z1 - inset + 0.05, y + th - 0.4, y + th, mat("neon", color), skip=("+z", "-z"))
-        if detail and not (k == 0 and b.get("open")):
-            # Píxeles encendidos en la fachada que da a la cruz (no sobre la puerta del café).
+        if not (k == 0 and b.get("open")):
+            # Píxeles encendidos en la fachada que da a la cruz (no sobre la puerta del café). Solo en
+            # el nivel detallado, pero se sortean en los dos: si no, el azar se desfasa y cada piso
+            # sale de un color en el ligero y de otro en el detallado.
             for n in range(6):
                 px = x0 + inset + 1 + rnd.random() * (x1 - x0 - 2 * inset - 2.5)
                 py = y + 1 + rnd.random() * (th - 2.5)
+                lit = rnd.choice(tints)
+                if not detail:
+                    continue
                 # Cada píxel un centímetro más fuera que el anterior: si dos se solapan, no comparten plano.
                 face_z = z1 - inset + 0.02 + 0.01 * n if b["q"] in (0, 1) else z0 + inset - 0.12 - 0.01 * n
-                _box(p, px, face_z, px + 1.0, face_z + 0.1, py, py + 1.0, mat("neon", rnd.choice(tints)))
+                _box(p, px, face_z, px + 1.0, face_z + 0.1, py, py + 1.0, mat("neon", lit))
         y += th
         inset += 1.6
 

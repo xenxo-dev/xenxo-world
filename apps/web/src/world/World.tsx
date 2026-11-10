@@ -18,7 +18,8 @@ import { self } from "./self";
 import { setMaxAnisotropy, tickMaterials } from "./materials";
 import { Player } from "./Player";
 import { Portals } from "./Portals";
-import { Sky, SKY } from "./Sky";
+import { PhotoSky, Sky, SKY } from "./Sky";
+import { patchFog } from "./display";
 import { Skyline } from "./Skyline";
 import { NexoBackdrop } from "./NexoBackdrop";
 import { PANO_TONES } from "./nexo-tones";
@@ -51,6 +52,9 @@ export const xrStore = createXRStore({
   defaultControllerProfileId: "generic-trigger-squeeze-thumbstick",
 });
 
+// La bruma, igual con y sin post-proceso: antes de que se compile ningún material.
+patchFog();
+
 /** Los efectos de pantalla completa solo se descargan en equipos que los usan. */
 const Effects = lazy(() => import("./Effects"));
 
@@ -73,6 +77,15 @@ const LIGHTING = {
     fill: 0,
     hemi: ["#e8f0ff", "#9c8a6a", 1.25],
     sun: { color: "#fff1dc", intensity: 2.3, offset: SUN_DIR },
+    env: 0.55,
+  },
+  // La plaza de día con sombras del sol (escritorio, niveles altos): más sol y menos luz de
+  // ambiente. Con la de `day`, más la foto de los reflejos, el ambiente daba casi el doble de luz
+  // que el sol y las sombras apenas se veían (un 10 % más oscuras que el suelo al sol).
+  daySun: {
+    fill: 0,
+    hemi: ["#e8f0ff", "#9c8a6a", 0.7],
+    sun: { color: "#fff1dc", intensity: 2.9, offset: SUN_DIR },
     env: 0.55,
   },
   night: {
@@ -182,6 +195,8 @@ function loadDaySky() {
   dayTexture ??= new THREE.TextureLoader().loadAsync("/sky/day.webp").then((t) => {
     t.mapping = THREE.EquirectangularReflectionMapping;
     t.colorSpace = THREE.SRGBColorSpace;
+    // Da la vuelta entera: que el borde izquierdo siga en el derecho (la esfera de PhotoSky).
+    t.wrapS = THREE.RepeatWrapping;
     return t;
   });
   return dayTexture;
@@ -252,7 +267,7 @@ function Environment({ ambience, profile, probe, sky }: { ambience: Ambience; pr
   }, [ambience, cube, sky]);
 
   useFrame((_, dt) => {
-    scene.environmentIntensity = cube ? (ambience === "night" ? 0.55 : 1) : LIGHTING[profile].env;
+    scene.environmentIntensity = cube ? (ambience === "night" ? 0.55 : profile === "daySun" ? 0.6 : 1) : LIGHTING[profile].env;
     if (!cube) {
       scene.environment = base ?? room;
       return;
@@ -439,7 +454,7 @@ function Scene({ active }: { active: boolean }) {
   // Todos los lugares siguen el ambiente elegido (día, noche o la hora): cada distrito tiene su
   // versión de día y de noche. Los distritos usan la luz abierta del nexo.
   const ambience: Ambience = g.ambience;
-  const profile: LightProfile = inPlaza ? ambience : ambience === "day" ? "nexoDay" : "nexo";
+  const profile: LightProfile = inPlaza ? (ambience === "day" && f.shadows > 0 ? "daySun" : ambience) : ambience === "day" ? "nexoDay" : "nexo";
   // Sombras del sol solo en la plaza (hecha para ellas): en los distritos, de 256 m y con torres de
   // 60 m, el mapa de sombras no da para tanto y el suelo parpadea al andar (acné de sombra).
   const lightFeatures = useMemo(() => (inPlaza ? f : { ...f, shadows: 0 as const }), [inPlaza, f]);
@@ -453,15 +468,19 @@ function Scene({ active }: { active: boolean }) {
   const daySky = useDaySky(realSky);
   const dayEnv = daySky?.env ?? null;
   const skyReady = !!daySky;
+  // Con post-proceso la foto del cielo va en su esfera (PhotoSky): como fondo de la escena, el mapeo
+  // de tonos del final la apagaba. Sin él (gafas, móviles), el fondo de siempre.
+  const skyDome = f.post && !g.inXR;
   return (
     <>
       <XRWatcher />
       <SplashWatcher />
       {import.meta.env.DEV && <DevStats />}
       <FpsGuard />
-      {daySky ? <primitive key="sky" attach="background" object={daySky.tex} /> : <color key="color" attach="background" args={[sky.fog]} />}
+      {daySky && !skyDome ? <primitive key="sky" attach="background" object={daySky.tex} /> : <color key="color" attach="background" args={[sky.fog]} />}
+      {daySky && skyDome && <PhotoSky map={daySky.tex} />}
       <fog attach="fog" args={[sky.fog, ambience === "night" ? 45 : 70, ambience === "night" ? 230 : 260]} />
-      {!skyReady && <Sky ambience={ambience} top={inNexo ? PANO_TONES[ambience].top : undefined} />}
+      {!skyReady && <Sky ambience={ambience} top={inNexo ? PANO_TONES[ambience].top : undefined} pano={inNexo} />}
       {inPlaza && <Skyline count={f.skyline} ambience={ambience} pbr={f.pbr} />}
       {inNexo && <NexoBackdrop ambience={ambience} hd={f.textures >= 1024} />}
       {inNexo && <NexoCity ambience={ambience} density={f.nexoCity} features={f} />}
