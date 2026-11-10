@@ -558,13 +558,35 @@ function wallKick(pk: Parkour, b: Body, nx: number, nz: number, keep: number) {
 
 let _jumpWanted = false;
 
+/** Lo más largo que es un paso del parkour (s): con frames más largos se dan varios. */
+const PK_STEP = 1 / 60;
+
 /**
  * Avanza `dt` segundos: lo que se esté haciendo o, sin nada, el movimiento normal (stepBody) mirando
  * antes si empieza algo. `min`/`max`: límites del lugar en X y Z.
+ *
+ * Por debajo de 60 fps se dan varios pasos de como mucho 1/60 s: subir por una pared o correr por
+ * ella se calculan paso a paso, y con pasos largos se llegaba menos alto (a 20 fps, 15 cm menos: un
+ * borde que a 60 fps se alcanza, ya no). Así un móvil justo de fuerza juega lo mismo que un PC. Lo
+ * que se pulsa (saltar, agacharse) cuenta en el primer paso.
  */
 export function parkourStep(pk: Parkour, b: Body, inp: ParkourInput, dt: number, min: number, max: number) {
   if (!(dt > 0)) return;
   dt = Math.min(dt, 0.1);
+  const n = Math.ceil(dt / PK_STEP - 1e-6);
+  if (n <= 1) return parkourOne(pk, b, inp, dt, min, max);
+  const jump = inp.jump, crouchPressed = inp.crouchPressed;
+  for (let i = 0; i < n; i++) {
+    if (i === 1) inp.jump = inp.crouchPressed = false;
+    parkourOne(pk, b, inp, dt / n, min, max);
+    // Una caída de verdad: de eso se ocupa quien llama (people/selfPeople.ts), ya.
+    if (pk.fall) break;
+  }
+  inp.jump = jump;
+  inp.crouchPressed = crouchPressed;
+}
+
+function parkourOne(pk: Parkour, b: Body, inp: ParkourInput, dt: number, min: number, max: number) {
   _jumpWanted = inp.jump;
   if (pk.noGrab > 0) pk.noGrab -= dt;
   if (pk.airFx > 0) pk.airFx -= dt;

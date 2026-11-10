@@ -4,8 +4,9 @@
  * frenos, aire y rodadura. El mundo de Rapier se rellena con lo mismo con lo que choca el
  * personaje (las cajas y las mallas de collision.ts) y con la gente de las ciudades.
  *
- * Se carga aparte (import dinámico) solo cuando alguien saca el coche. Paso fijo de 1/60 s.
- * Nada nuevo por frame: los vectores de ida y vuelta son de módulo.
+ * Se carga aparte (import dinámico) solo cuando alguien saca el coche. Paso fijo de 1/60 s; lo que
+ * se dibuja va entre el paso anterior y el último (`state`), para que se vea fluido a cualquier tasa
+ * de frames. Nada nuevo por frame: los vectores de ida y vuelta son de módulo.
  */
 import RAPIER from "@dimforge/rapier3d-compat";
 import { CAR, type Drive } from "./car";
@@ -76,6 +77,31 @@ const STEP = 1 / 60;
 const MAX_STEPS = 4;
 const PEOPLE = 64;
 const _p = { x: 0, y: 0, z: 0 };
+
+/** Dónde está el coche tras un paso de la física: posición, giro y, por rueda, altura y vueltas. */
+interface Snap {
+  x: number;
+  y: number;
+  z: number;
+  qx: number;
+  qy: number;
+  qz: number;
+  qw: number;
+  wheelY: Float32Array;
+  wheelSpin: Float32Array;
+}
+const snap = (): Snap => ({ x: 0, y: 0, z: 0, qx: 0, qy: 0, qz: 0, qw: 1, wheelY: new Float32Array(4), wheelSpin: new Float32Array(4) });
+function copySnap(from: Snap, to: Snap) {
+  to.x = from.x;
+  to.y = from.y;
+  to.z = from.z;
+  to.qx = from.qx;
+  to.qy = from.qy;
+  to.qz = from.qz;
+  to.qw = from.qw;
+  to.wheelY.set(from.wheelY);
+  to.wheelSpin.set(from.wheelSpin);
+}
 
 let rapier: R | null = null;
 /** Carga Rapier (WASM) una sola vez. */
@@ -162,6 +188,16 @@ export class CarSim {
   private steerNow = 0;
   private lastSpeed = 0;
   private upsideDown = 0;
+  /**
+   * El coche tras el paso anterior y tras el último. La física va a 60 pasos por segundo y la pantalla
+   * a lo que vaya (90, 120, 144…): dibujando solo el último paso, a 144 Hz el coche no se movía en más
+   * de la mitad de los frames y se veía a tirones (y, con él, todo: la cámara lo sigue). `state` va
+   * entre los dos, según lo que falte para el paso siguiente.
+   */
+  private before = snap();
+  private now = snap();
+  /** Se ha colocado de golpe (al sacarlo, al enderezarlo): ese salto no se suaviza. */
+  private jumped = true;
   readonly state: CarState = {
     x: 0, y: 0, z: 0, qx: 0, qy: 0, qz: 0, qw: 1, speed: 0, steer: 0,
     wheelY: new Float32Array(4), wheelSpin: new Float32Array(4), contacts: 0, slip: 0, impact: 0,
@@ -225,6 +261,8 @@ export class CarSim {
     this.steerNow = 0;
     this.lastSpeed = 0;
     this.upsideDown = 0;
+    this.jumped = true;
+    this.capture();
     this.read();
   }
 
@@ -257,6 +295,7 @@ export class CarSim {
       impact = Math.max(impact, Math.abs(this.lastSpeed) - Math.abs(sp));
       this.lastSpeed = sp;
       this.recover(body);
+      this.capture();
     }
     this.read();
     this.state.impact = impact;
@@ -313,6 +352,7 @@ export class CarSim {
       body.setLinvel({ x: 0, y: 0, z: 0 }, true);
       body.setAngvel({ x: 0, y: 0, z: 0 }, true);
       this.upsideDown = 0;
+      this.jumped = true;
     }
   }
 
@@ -359,30 +399,61 @@ export class CarSim {
     return bang;
   }
 
+  /** Apunta dónde ha quedado el coche tras un paso (el de antes pasa a ser «el anterior»). */
+  private capture() {
+    const body = this.chassis, v = this.vehicle;
+    if (!body || !v) return;
+    const a = this.before, b = this.now;
+    copySnap(b, a);
+    const p = body.translation(), q = body.rotation();
+    b.x = p.x;
+    b.y = p.y;
+    b.z = p.z;
+    b.qx = q.x;
+    b.qy = q.y;
+    b.qz = q.z;
+    b.qw = q.w;
+    for (let i = 0; i < 4; i++) {
+      const len = v.wheelSuspensionLength(i) ?? CAR.suspensionRest;
+      b.wheelY[i] = CAR.wheels[i]!.y + CAR.suspensionRest - 0.08 - len;
+      b.wheelSpin[i] = v.wheelRotation(i) ?? 0;
+    }
+    if (this.jumped) {
+      copySnap(b, a);
+      this.jumped = false;
+    }
+  }
+
+  /** Lo que se dibuja: entre el paso anterior y el último, según lo que falte para el siguiente. */
   private read() {
     const body = this.chassis, v = this.vehicle, s = this.state;
     if (!body || !v) return;
-    const p = body.translation(), q = body.rotation();
-    s.x = p.x;
-    s.y = p.y;
-    s.z = p.z;
-    s.qx = q.x;
-    s.qy = q.y;
-    s.qz = q.z;
-    s.qw = q.w;
+    const a = this.before, b = this.now;
+    const k = Math.max(0, Math.min(1, this.acc / STEP));
+    s.x = a.x + (b.x - a.x) * k;
+    s.y = a.y + (b.y - a.y) * k;
+    s.z = a.z + (b.z - a.z) * k;
+    // Giro: mezcla lineal normalizada (entre dos pasos seguidos el giro es pequeño), por el lado corto.
+    const dot = a.qx * b.qx + a.qy * b.qy + a.qz * b.qz + a.qw * b.qw;
+    const sign = dot < 0 ? -1 : 1;
+    const qx = a.qx + (b.qx * sign - a.qx) * k, qy = a.qy + (b.qy * sign - a.qy) * k;
+    const qz = a.qz + (b.qz * sign - a.qz) * k, qw = a.qw + (b.qw * sign - a.qw) * k;
+    const ql = Math.hypot(qx, qy, qz, qw) || 1;
+    s.qx = qx / ql;
+    s.qy = qy / ql;
+    s.qz = qz / ql;
+    s.qw = qw / ql;
     s.speed = v.currentVehicleSpeed();
     s.steer = this.steerNow;
     let contacts = 0;
     for (let i = 0; i < 4; i++) {
-      const w = CAR.wheels[i]!;
-      const len = v.wheelSuspensionLength(i) ?? CAR.suspensionRest;
-      s.wheelY[i] = w.y + CAR.suspensionRest - 0.08 - len;
-      s.wheelSpin[i] = v.wheelRotation(i) ?? 0;
+      s.wheelY[i] = a.wheelY[i]! + (b.wheelY[i]! - a.wheelY[i]!) * k;
+      s.wheelSpin[i] = a.wheelSpin[i]! + (b.wheelSpin[i]! - a.wheelSpin[i]!) * k;
       if (v.wheelIsInContact(i)) contacts++;
     }
     s.contacts = contacts;
     // Derrape: la velocidad de lado (en el eje X del coche), solo con ruedas en el suelo.
-    const lv = body.linvel();
+    const lv = body.linvel(), q = body.rotation();
     const rx = 1 - 2 * (q.y * q.y + q.z * q.z), ry = 2 * (q.x * q.y + q.w * q.z), rz = 2 * (q.x * q.z - q.w * q.y);
     s.slip = contacts ? Math.abs(lv.x * rx + lv.y * ry + lv.z * rz) : 0;
   }

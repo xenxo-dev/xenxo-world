@@ -5,7 +5,9 @@
  * tono muscular se pone aquí, corrigiendo el giro relativo en cada paso. Los cuerpos no chocan entre
  * sí (ni con los de otras personas): solo con el lugar.
  *
- * Paso fijo de 1/60 s. Se carga aparte; también corre en Node (test/ragdoll.mts).
+ * Paso fijo de 1/60 s; lo que se dibuja (`pos`, `quat`) va entre el paso anterior y el último, para
+ * que una caída se vea fluida también a 90, 120 o 144 Hz (como el coche: vehicle/physics.ts). Se
+ * carga aparte; también corre en Node (test/ragdoll.mts).
  */
 import RAPIER from "@dimforge/rapier3d-compat";
 import { StaticWorld, type StaticSource } from "../vehicle/physics";
@@ -124,6 +126,12 @@ interface Joint {
 class Ragdoll implements RagdollHandle {
   pos: Float32Array;
   quat: Float32Array;
+  /** Tras el paso anterior y tras el último (lo que se dibuja va entre los dos: `blend`). */
+  private pos0: Float32Array;
+  private quat0: Float32Array;
+  private pos1: Float32Array;
+  private quat1: Float32Array;
+  private fresh = true;
   speed = 0;
   spin = 0;
   age = 0;
@@ -146,6 +154,10 @@ class Ragdoll implements RagdollHandle {
   ) {
     this.pos = new Float32Array(bodies.length * 3);
     this.quat = new Float32Array(bodies.length * 4);
+    this.pos0 = new Float32Array(bodies.length * 3);
+    this.quat0 = new Float32Array(bodies.length * 4);
+    this.pos1 = new Float32Array(bodies.length * 3);
+    this.quat1 = new Float32Array(bodies.length * 4);
     this.mass = bodies.map((b) => b.mass());
     this.inertia = bodies.map((b) => ({ ...b.principalInertia() }));
     this.inertiaFrame = bodies.map((b) => ({ ...b.principalInertiaLocalFrame() }));
@@ -290,22 +302,51 @@ class Ragdoll implements RagdollHandle {
 
   read(dt: number) {
     let speed = 0, spin = 0;
+    this.pos0.set(this.pos1);
+    this.quat0.set(this.quat1);
+    const P = this.pos1, Q = this.quat1;
     this.bodies.forEach((b, i) => {
       const t = b.translation(), r = b.rotation(), v = b.linvel(), w = b.angvel();
-      this.pos[i * 3] = t.x;
-      this.pos[i * 3 + 1] = t.y;
-      this.pos[i * 3 + 2] = t.z;
-      this.quat[i * 4] = r.x;
-      this.quat[i * 4 + 1] = r.y;
-      this.quat[i * 4 + 2] = r.z;
-      this.quat[i * 4 + 3] = r.w;
+      P[i * 3] = t.x;
+      P[i * 3 + 1] = t.y;
+      P[i * 3 + 2] = t.z;
+      Q[i * 4] = r.x;
+      Q[i * 4 + 1] = r.y;
+      Q[i * 4 + 2] = r.z;
+      Q[i * 4 + 3] = r.w;
       speed = Math.max(speed, Math.hypot(v.x, v.y, v.z));
       spin = Math.max(spin, Math.hypot(w.x, w.y, w.z));
     });
+    if (this.fresh) {
+      // Recién puesto: no hay paso anterior del que venir.
+      this.fresh = false;
+      this.pos0.set(P);
+      this.quat0.set(Q);
+      this.pos.set(P);
+      this.quat.set(Q);
+    }
     this.speed = speed;
     this.spin = spin;
     this.age += dt;
     this.still = speed < STILL && spin < 1.2 ? this.still + dt : 0;
+  }
+
+  /** Lo que se dibuja: entre el paso anterior y el último (`k`: 0 = el anterior, 1 = el último). */
+  blend(k: number) {
+    const p0 = this.pos0, p1 = this.pos1, q0 = this.quat0, q1 = this.quat1, P = this.pos, Q = this.quat;
+    for (let i = 0; i < P.length; i++) P[i] = p0[i]! + (p1[i]! - p0[i]!) * k;
+    for (let i = 0; i < Q.length; i += 4) {
+      // Mezcla lineal normalizada, por el lado corto (entre dos pasos el giro es pequeño).
+      const dot = q0[i]! * q1[i]! + q0[i + 1]! * q1[i + 1]! + q0[i + 2]! * q1[i + 2]! + q0[i + 3]! * q1[i + 3]!;
+      const s = dot < 0 ? -1 : 1;
+      const x = q0[i]! + (q1[i]! * s - q0[i]!) * k, y = q0[i + 1]! + (q1[i + 1]! * s - q0[i + 1]!) * k;
+      const z = q0[i + 2]! + (q1[i + 2]! * s - q0[i + 2]!) * k, w = q0[i + 3]! + (q1[i + 3]! * s - q0[i + 3]!) * k;
+      const l = Math.hypot(x, y, z, w) || 1;
+      Q[i] = x / l;
+      Q[i + 1] = y / l;
+      Q[i + 2] = z / l;
+      Q[i + 3] = w / l;
+    }
   }
 }
 
@@ -428,6 +469,8 @@ export class RagdollWorld implements RagdollWorldApi {
         d.read(STEP);
       }
     }
+    const k = Math.max(0, Math.min(1, this.acc / STEP));
+    for (const d of this.list) d.blend(k);
   }
 }
 

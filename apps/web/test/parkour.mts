@@ -15,6 +15,19 @@ import { world } from "../src/net/world-store";
 import { createBody, placeBody, type Body } from "../src/world/locomotion";
 import { createParkour, parkourStep, resetParkour, type Parkour, type ParkourInput } from "../src/world/parkour/moves";
 
+/**
+ * A cuántos frames por segundo se simula (HZ=30 npm run test:parkour…): el parkour tiene que salir
+ * igual en un móvil a 30 que en un monitor de 144 (CI lo pasa a 30, 60 y 144).
+ */
+const HZ = Number(process.env.HZ) || 60;
+/**
+ * Pulsar un botón es cosa de un frame: `once(n, cuándo)` es cierto la primera vez que se cumple (por
+ * cada simulación y, si se da, por cada `t0`). Con ventanas de tiempo («entre 0,10 y 0,13 s»), a 30
+ * fps a veces no caía ningún frame dentro y a 144 caían cuatro: fallaba la prueba, no el parkour.
+ */
+const shots = new Set<string>();
+const once = (n: number, when: boolean, t0 = 0) => when && !shots.has(`${n}:${t0}`) && (shots.add(`${n}:${t0}`), true);
+
 let fails = 0;
 const check = (ok: boolean, what: string) => {
   console.log(`${ok ? "  ✓" : "  ✗"} ${what}`);
@@ -57,7 +70,7 @@ interface Run {
   stuck: boolean;
 }
 
-/** Simula `secs` segundos a 60 Hz; `ctl(t, run)` dice qué se pide en cada momento. */
+/** Simula `secs` segundos a HZ frames por segundo; `ctl(t, run)` dice qué se pide en cada momento. */
 function simulate(at: [number, number, number], yaw: number, secs: number, ctl: (t: number, r: Run, i: ParkourInput) => void, warm = 0): Run {
   const b = createBody(...at);
   placeBody(b, ...at);
@@ -65,7 +78,8 @@ function simulate(at: [number, number, number], yaw: number, secs: number, ctl: 
   resetParkour(pk, b);
   const run: Run = { b, pk, moves: new Set(), maxY: b.y, stuck: false };
   const inp: ParkourInput = { wantX: 0, wantZ: 0, jump: false, crouch: false, crouchPressed: false, yaw };
-  const dt = 1 / 60;
+  const dt = 1 / HZ;
+  shots.clear();
   for (let t = -warm; t < secs; t += dt) {
     inp.jump = false;
     inp.crouchPressed = false;
@@ -128,7 +142,7 @@ scene([[0, 0.65, -4, 4, 0.65, 2]]);
   check(r.moves.has("mantle") && Math.abs(r.b.y - 1.3) < 0.05, "andando, sube empujando contra el borde un momento");
   const r2b = simulate([0, 0, -1.5], 0, 1.6, (t, _r, i) => {
     i.wantX = i.wantZ = 0;
-    if (t > 0.1 && t < 0.13) i.jump = true;
+    if (once(131, t > 0.1)) i.jump = true;
   });
   console.log(`borde 1,3 m con salto: y=${r2(r2b.b.y)} z=${r2(r2b.b.z)} [${moves(r2b)}]`);
   check(r2b.moves.has("mantle") && Math.abs(r2b.b.y - 1.3) < 0.05, "parado delante, con el salto, sube");
@@ -141,14 +155,14 @@ scene([[0, 1.5, -4, 6, 1.5, 2]]);
   let hx = 0;
   const r = simulate([0, 0, -1.6], 0, 4.6, (t, run, i) => {
     i.wantX = i.wantZ = 0;
-    if (t > 0.1 && t < 0.13) i.jump = true;
+    if (once(144, t > 0.1)) i.jump = true;
     if (run.pk.move === "hang" && hung < 0) {
       hung = t;
       hx = run.b.x;
     }
     // Colgado: un segundo a la derecha (de quien mira la pared: +X) y luego arriba.
     if (hung > 0 && t > hung + 0.3 && t < hung + 1.3) go(i, 1, 0, 2);
-    if (hung > 0 && t > hung + 1.6 && t < hung + 1.63) i.jump = true;
+    if (once(151, hung > 0 && t > hung + 1.6)) i.jump = true;
   });
   console.log(`muro de 3 m: colgado a los ${r2(hung)} s, se movió ${r2(r.b.x - hx)} m de lado, acaba y=${r2(r.b.y)} z=${r2(r.b.z)} [${moves(r)}]`);
   check(hung > 0, "salta, llega con las manos y se cuelga");
@@ -163,9 +177,9 @@ scene([[0, 1.9, -8, 6, 1.9, 2]]);
   const r = simulate([0, 0, 0], 0, 4.5, (t, run, i) => {
     if (run.pk.move === "none" && hung < 0) go(i, 0, -1, RUN);
     else i.wantX = i.wantZ = 0;
-    if (run.b.z < -5.1 && run.b.z > -5.4 && run.b.grounded) i.jump = true;
+    if (once(166, run.b.z < -5.1 && run.b.grounded)) i.jump = true;
     if (run.pk.move === "hang" && hung < 0) hung = t;
-    if (hung > 0 && t > hung + 0.4 && t < hung + 0.43) i.jump = true;
+    if (once(168, hung > 0 && t > hung + 0.4)) i.jump = true;
   });
   console.log(`muro de 3,8 m: [${moves(r)}] y=${r2(r.b.y)} max=${r2(r.maxY)}`);
   check(r.moves.has("wallup"), "corriendo y saltando de frente, sube por la pared");
@@ -180,7 +194,7 @@ scene([[1.25, 3, -10, 0.25, 3, 12]]);
   let kicked = false;
   const r = simulate([0.35, 0, 0], 0, 2.2, (t, run, i) => {
     go(i, 0, -1, RUN);
-    if (t > 0.5 && t < 0.53) i.jump = true;
+    if (once(183, t > 0.5)) i.jump = true;
     if (run.pk.move === "wallrun" && !startZ) startZ = run.b.z;
     if (run.pk.move === "wallrun") ranZ = run.b.z;
     if (run.pk.move === "wallrun" && run.pk.t > 0.6 && !kicked) {
@@ -207,7 +221,7 @@ scene([
     // Hacia la pared a la que se va; salto al tocarla.
     const toRight = run.b.vx >= 0 ? 1 : -1;
     go(i, t < 0.1 ? 1 : toRight, 0, 3);
-    if (t > 0.05 && t < 0.08) i.jump = true;
+    if (once(210, t > 0.05)) i.jump = true;
     const near = Math.abs(run.b.x) > 0.4;
     if (!run.b.grounded && near && t - last > 0.25 && run.b.vy < 1.5) {
       i.jump = true;
@@ -227,7 +241,7 @@ scene([[0, 1.3, -6, 3, 0.25, 0.2]]);
   const r = simulate([0, 0, 0], 0, 2.2, (t, _r, i) => {
     go(i, 0, -1, RUN);
     i.crouch = t > 0.62 && t < 1.4;
-    i.crouchPressed = t > 0.62 && t < 0.64;
+    i.crouchPressed = once(244, t > 0.62);
   });
   console.log(`barra: z=${r2(r.b.z)} h=${r2(r.b.h)} [${moves(r)}]`);
   check(r.moves.has("slide") && r.b.z < -7, "deslizándose pasa por debajo");
@@ -418,11 +432,11 @@ scene([[0, 1, -5, 0.1, 1, 6]]);
         if (t - t0 > 0.35) (stage = "jump"), (t0 = t);
       } else if (stage === "jump") {
         go(inp, st.dir[0], st.dir[1], 0.5);
-        if (t - t0 < 0.03) inp.jump = true;
+        if (once(421, true, t0)) inp.jump = true;
         if (run.pk.move === "hang") (stage = "hang"), (t0 = t);
         else if (t - t0 > 1.5) failed = `piso ${i}: no se cuelga (y=${r2(run.b.y)})`;
       } else if (stage === "hang") {
-        if (t - t0 > 0.4 && t - t0 < 0.43) inp.jump = true;
+        if (once(425, t - t0 > 0.4, t0)) inp.jump = true;
         if (run.b.grounded && Math.abs(run.b.y - st.top) < 0.06 && run.pk.move !== "climb") (i++, (stage = "walk"));
         else if (t - t0 > 3) failed = `piso ${i}: colgado, no sube (y=${r2(run.b.y)})`;
       }
@@ -519,7 +533,8 @@ scene([[0, 1, -5, 0.1, 1, 6]]);
     resetParkour(pk, b);
     const inp: ParkourInput = { wantX: 0, wantZ: 0, jump: false, crouch: false, crouchPressed: false, yaw: 0 };
     let i = 0, t = 0, t0 = 0, stage = "", got = 0, fail = "", falls = 0;
-    const dt = 1 / 60;
+    const dt = 1 / HZ;
+    shots.clear();
     while (t < secs && i < steps.length && !fail) {
       inp.jump = false;
       inp.crouchPressed = false;
@@ -538,11 +553,11 @@ scene([[0, 1, -5, 0.1, 1, 6]]);
         if (stage === "settle" && t - t0 > 0.3) (stage = "jump"), (t0 = t);
         if (stage === "jump") {
           go(inp, st.hang[0], st.hang[1], 0.5);
-          if (t - t0 < 0.03) inp.jump = true;
+          if (once(541, true, t0)) inp.jump = true;
           if (pk.move === "hang") (stage = "hanging"), (t0 = t);
           else if (t - t0 > 1.5) fail = `paso ${i}: no se cuelga (y=${r2(b.y)})`;
         } else if (stage === "hanging") {
-          if (t - t0 > 0.35 && t - t0 < 0.38) inp.jump = true;
+          if (once(545, t - t0 > 0.35, t0)) inp.jump = true;
           if (b.grounded && pk.move !== "climb" && pk.move !== "hang" && t - t0 > 0.5) (i++, (stage = ""));
           else if (t - t0 > 3) fail = `paso ${i}: colgado, no sube (y=${r2(b.y)})`;
         }
@@ -561,7 +576,7 @@ scene([[0, 1, -5, 0.1, 1, 6]]);
           else if (b.grounded && t - t0 > 0.6 && pk.move !== "wallup" && pk.move !== "climb") fail = `paso ${i}: no sube por la pared (y=${r2(b.y)} ${pk.move})`;
           else if (t - t0 > 3) fail = `paso ${i}: por la pared, no se cuelga`;
         } else if (stage === "hanging") {
-          if (t - t0 > 0.35 && t - t0 < 0.38) inp.jump = true;
+          if (once(564, t - t0 > 0.35, t0)) inp.jump = true;
           if (b.grounded && pk.move !== "climb" && pk.move !== "hang" && t - t0 > 0.5) (i++, (stage = ""));
           else if (t - t0 > 3) fail = `paso ${i}: colgado, no sube (y=${r2(b.y)})`;
         }
@@ -585,7 +600,7 @@ scene([[0, 1, -5, 0.1, 1, 6]]);
         else if (t - t0 > 5) fail = `paso ${i}: el salto no acaba`;
       }
       parkourStep(pk, b, inp, dt, -150, 150);
-      if (process.env.TRACE && Math.round(t * 60) % 30 === 0) console.log(`    t=${r2(t)} paso ${i} ${stage} (${r2(b.x)}, ${r2(b.y)}, ${r2(b.z)}) ${pk.move} suelo=${b.grounded} golpe=${r2(b.stun)}`);
+      if (process.env.TRACE && Math.round(t * HZ) % Math.round(HZ / 2) === 0) console.log(`    t=${r2(t)} paso ${i} ${stage} (${r2(b.x)}, ${r2(b.y)}, ${r2(b.z)}) ${pk.move} suelo=${b.grounded} golpe=${r2(b.stun)}`);
       if (pk.fall) falls++;
       if (pk.fall && !fail) fail = `paso ${i}: se cae de verdad (${pk.fall}, y=${r2(b.y)})`;
       // Los puntos, como el cliente: por orden, dentro del círculo.

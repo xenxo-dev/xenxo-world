@@ -24,12 +24,19 @@ jobs:
       - run: npm run test:vehicle -w @xenxo/web
       - run: npm run test:ragdoll -w @xenxo/web
       - run: npm run test:citizens -w @xenxo/web
+      # Andar, correr y saltar: igual a cualquier tasa de frames, sin atravesar paredes ni a empujones.
+      - run: npm run test:locomotion -w @xenxo/web
+      # El parkour a 60 Hz y, además, en un equipo ahogado (24) y en una pantalla rápida (144).
       - run: npm run test:parkour -w @xenxo/web
+      - run: HZ=24 npm run test:parkour -w @xenxo/web
+      - run: HZ=144 npm run test:parkour -w @xenxo/web
       - run: npm run test:springs -w @xenxo/web
       # Los sitios de «Qué hacer aquí» caen en huecos libres, los enlaces /d/… llevan adonde dicen.
       - run: npm run test:guide -w @xenxo/web
       # Las cámaras del modo cine hacen lo que dice su guía y no dejan la cámara en un sitio imposible.
       - run: npm run test:cine -w @xenxo/web
+      # Los gráficos: cuándo se baja de nivel porque el equipo no aguanta y qué se dibuja en cada equipo.
+      - run: npm run test:graphics -w @xenxo/web
       # El servidor de distritos (workerd en una máquina propia): que siga compilando.
       - run: npm run build:district-host
       # Y sus scripts (portátil y relevo del NAS): que al menos se lean bien.

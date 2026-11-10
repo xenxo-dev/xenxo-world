@@ -9,6 +9,12 @@ import type { Recipe } from "../fundas/recipe";
 
 export type Setter = (fn: (r: Recipe) => Recipe) => void;
 
+/**
+ * Un deslizador. Con el dedo es más alto, para acertar (el carril se queda fino), y arrastrar hacia
+ * arriba o abajo sigue moviendo la lista, no el ajuste.
+ */
+const range = "mt-1 w-full touch-pan-y accent-[var(--color-neon)] pointer-coarse:h-9";
+
 export function Section({ title, children, note }: { title: string; children: ReactNode; note?: string }) {
   return (
     <section className="mb-5">
@@ -36,7 +42,7 @@ export function Sliders({ ids, values, label, onChange }: { ids: string[]; value
             value={Math.round((values[id] ?? 0) * 100)}
             onChange={(e) => onChange(id, Number(e.target.value) / 100)}
             onDoubleClick={() => onChange(id, 0)}
-            className="mt-1 w-full accent-[var(--color-neon)]"
+            className={range}
           />
         </label>
       ))}
@@ -52,7 +58,7 @@ export function Amount({ value, onChange, label, min = 0 }: { value: number; onC
         {label ?? t("funda.amount")}
         <span className="meta text-cal/40">{Math.round(value * 100)}</span>
       </span>
-      <input type="range" min={min * 100} max={100} step={1} value={Math.round(value * 100)} onChange={(e) => onChange(Number(e.target.value) / 100)} className="mt-1 w-full accent-[var(--color-neon)]" />
+      <input type="range" min={min * 100} max={100} step={1} value={Math.round(value * 100)} onChange={(e) => onChange(Number(e.target.value) / 100)} className={range} />
     </label>
   );
 }
@@ -65,7 +71,7 @@ export function Offset({ value, onChange, label }: { value: number; onChange: (v
         {label}
         <span className="meta text-cal/40">{Math.round(value * 100)}</span>
       </span>
-      <input type="range" min={-100} max={100} step={1} value={Math.round(value * 100)} onChange={(e) => onChange(Number(e.target.value) / 100)} onDoubleClick={() => onChange(0)} className="mt-1 w-full accent-[var(--color-neon)]" />
+      <input type="range" min={-100} max={100} step={1} value={Math.round(value * 100)} onChange={(e) => onChange(Number(e.target.value) / 100)} onDoubleClick={() => onChange(0)} className={range} />
     </label>
   );
 }
@@ -75,7 +81,7 @@ export function ColorPick({ value, onPick }: { value: string | null; onPick: (c:
   return (
     <label
       title={t("funda.custom")}
-      className={`relative h-8 w-8 shrink-0 cursor-pointer rounded-full border-2 transition ${value ? "scale-110 border-neon" : "swatch-any border-cal/15 hover:border-cal/40"}`}
+      className={`relative h-8 w-8 shrink-0 cursor-pointer rounded-full border-2 transition pointer-coarse:h-9 pointer-coarse:w-9 ${value ? "scale-110 border-neon" : "swatch-any border-cal/15 hover:border-cal/40"}`}
       style={value ? { backgroundColor: value } : undefined}
     >
       <span className="sr-only">{t("funda.custom")}</span>
@@ -101,7 +107,7 @@ export function Swatches({
 }) {
   const known = colors.some((c) => c.id === value);
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
+    <div className="flex flex-wrap items-center gap-1.5 pointer-coarse:gap-2">
       {colors.map((c) => (
         <button
           key={c.id}
@@ -109,7 +115,7 @@ export function Swatches({
           aria-pressed={value === c.id}
           aria-label={c.label ?? c.color}
           title={c.label ?? c.color}
-          className={`h-8 w-8 rounded-full border-2 transition ${value === c.id ? "scale-110 border-neon" : "border-cal/15 hover:border-cal/40"}`}
+          className={`h-8 w-8 rounded-full border-2 transition pointer-coarse:h-9 pointer-coarse:w-9 ${value === c.id ? "scale-110 border-neon" : "border-cal/15 hover:border-cal/40"}`}
           style={{ backgroundColor: c.color }}
         />
       ))}
@@ -120,7 +126,7 @@ export function Swatches({
 
 export function Chip({ on, onClick, children, className = "" }: { on: boolean; onClick: () => void; children: ReactNode; className?: string }) {
   return (
-    <button onClick={onClick} aria-pressed={on} className={`rounded-full border px-3 py-1 text-xs ${on ? "border-neon/60 text-neon" : "border-cal/15 text-cal/65 hover:text-cal"} ${className}`}>
+    <button onClick={onClick} aria-pressed={on} className={`rounded-full border px-3 py-1 text-xs pointer-coarse:py-2 ${on ? "border-neon/60 text-neon" : "border-cal/15 text-cal/65 hover:text-cal"} ${className}`}>
       {children}
     </button>
   );

@@ -14,7 +14,7 @@
  */
 import * as THREE from "three";
 import { MeshBVH } from "three-mesh-bvh";
-import { ColliderV1, TransformV1 } from "@xenxo/protocol";
+import { ColliderV1, TransformV1, type Entity } from "@xenxo/protocol";
 import { world } from "../net/world-store";
 
 interface Box {
@@ -76,7 +76,7 @@ export function setMeshCollider(id: string, geometry: THREE.BufferGeometry | nul
  */
 export function solidsVersion(): number {
   refresh();
-  return version * 4096 + seenMeshVersion;
+  return version * 65536 + (seenMeshVersion % 65536);
 }
 export function forEachSolidBox(cb: (b: Readonly<Box>) => void) {
   refresh();
@@ -155,49 +155,127 @@ export const crowd = {
 /** Origen de un chunk respecto al lugar actual (que se dibuja en 0..CHUNK_SIZE). */
 const chunkOrigin = (chunkId: string) => world.offsetOf(chunkId);
 
-function refresh() {
-  const v = world.getVersion();
-  if (v === version && meshVersion === seenMeshVersion && vehicleVersion === seenVehicleVersion) return;
-  version = v;
-  seenMeshVersion = meshVersion;
-  seenVehicleVersion = vehicleVersion;
-  const out: Box[] = [];
-  for (const e of world.entities.values()) {
-    const col = ColliderV1.safeParse(e.components["collider@1"]);
-    if (!col.success || col.data.trigger) continue;
-    // Con su malla ya cargada, la caja de reserva no cuenta.
-    if (col.data.from_mesh && meshCols.has(e.entity_id)) continue;
-    const t = TransformV1.safeParse(e.components["transform@1"]);
-    if (!t.success) continue;
+/**
+ * La caja de cada entidad (o que no tiene), leída una sola vez: las entidades no se modifican, se
+ * sustituyen (world-store), así que al cambiar una solo se lee esa. Vale mientras el lugar sea el
+ * mismo (las cajas van respecto a él).
+ */
+let parsed = new WeakMap<Entity, { box: Box; fromMesh: boolean } | null>();
+let parsedIn = "";
+
+function boxOf(e: Entity): { box: Box; fromMesh: boolean } | null {
+  const had = parsed.get(e);
+  if (had !== undefined) return had;
+  let out: { box: Box; fromMesh: boolean } | null = null;
+  const col = ColliderV1.safeParse(e.components["collider@1"]);
+  const t = col.success && !col.data.trigger ? TransformV1.safeParse(e.components["transform@1"]) : null;
+  if (col.success && t?.success) {
     const [ox, oz] = chunkOrigin(e.chunk_id);
     const [qx, qy, qz, qw] = t.data.r;
     // Solo el giro horizontal (los colisionadores del mundo están derechos).
     const yaw = Math.atan2(2 * (qw * qy + qx * qz), 1 - 2 * (qy * qy + qx * qx));
     const [sx, sy, sz] = t.data.s;
     const [hx, hy, hz] = col.data.half_extents;
-    out.push({
-      x: t.data.p[0] + ox,
-      y: t.data.p[1],
-      z: t.data.p[2] + oz,
-      hx: hx * Math.abs(sx),
-      hy: hy * Math.abs(sy),
-      hz: hz * Math.abs(sz),
-      c: Math.cos(yaw),
-      s: Math.sin(yaw),
-    });
+    out = {
+      fromMesh: !!col.data.from_mesh,
+      box: {
+        x: t.data.p[0] + ox,
+        y: t.data.p[1],
+        z: t.data.p[2] + oz,
+        hx: hx * Math.abs(sx),
+        hy: hy * Math.abs(sy),
+        hz: hz * Math.abs(sz),
+        c: Math.cos(yaw),
+        s: Math.sin(yaw),
+      },
+    };
+  }
+  parsed.set(e, out);
+  return out;
+}
+
+function refresh() {
+  // Solo cuando cambian las entidades (o las mallas, o el coche aparcado): que entre o salga gente no
+  // rehace nada.
+  const v = world.getEntitiesVersion();
+  if (v === version && meshVersion === seenMeshVersion && vehicleVersion === seenVehicleVersion) return;
+  version = v;
+  seenMeshVersion = meshVersion;
+  seenVehicleVersion = vehicleVersion;
+  if (parsedIn !== world.chunkId) {
+    parsedIn = world.chunkId;
+    parsed = new WeakMap();
+  }
+  const out: Box[] = [];
+  for (const e of world.entities.values()) {
+    const b = boxOf(e);
+    // Con su malla ya cargada, la caja de reserva no cuenta.
+    if (!b || (b.fromMesh && meshCols.has(e.entity_id))) continue;
+    out.push(b.box);
   }
   if (vehicleBox) out.push(vehicleBox);
   boxes = out;
+}
+
+/** Lo más que la gente aparta a alguien en una pasada (m): menos que su radio (ver `resolveCircle`). */
+const PEOPLE_PUSH = 0.08;
+
+/** Aparta el círculo de la gente (ciudadanos, residentes y las demás personas), con tope. */
+function pushFromPeople(p: { x: number; z: number }, r: number, feet: number, head: number) {
+  let mx = 0, mz = 0;
+  // La gente de decorado: cilindros que no se atraviesan (el que se aparta es el jugador).
+  const rr = r + NPC_RADIUS;
+  const total = npcs.count + npcs.extra;
+  for (let k = 0; k < total; k++) {
+    const i = npcAt(k);
+    const ny = npcs.pos[i * 3 + 1]!;
+    if (ny > head || ny + 1.75 < feet - 0.6) continue;
+    const dx = p.x + mx - npcs.pos[i * 3]!;
+    const dz = p.z + mz - npcs.pos[i * 3 + 2]!;
+    const d2 = dx * dx + dz * dz;
+    if (d2 >= rr * rr) continue;
+    const d = Math.sqrt(d2);
+    if (d < 1e-5) {
+      mx += rr;
+      continue;
+    }
+    mx += (dx / d) * (rr - d);
+    mz += (dz / d) * (rr - d);
+  }
+  // Las demás personas: igual, cilindros de su altura.
+  const ro = r + OTHER_RADIUS;
+  for (let k = 0; k < others.count; k++) {
+    const oy = others.pos[k * 3 + 1]!;
+    if (oy > head || oy + 1.75 < feet - 0.6) continue;
+    const dx = p.x + mx - others.pos[k * 3]!;
+    const dz = p.z + mz - others.pos[k * 3 + 2]!;
+    const d2 = dx * dx + dz * dz;
+    if (d2 >= ro * ro || d2 < 1e-10) continue;
+    const d = Math.sqrt(d2);
+    mx += (dx / d) * (ro - d);
+    mz += (dz / d) * (ro - d);
+  }
+  const m = Math.hypot(mx, mz);
+  if (m < 1e-9) return;
+  const k = m > PEOPLE_PUSH ? PEOPLE_PUSH / m : 1;
+  p.x += mx * k;
+  p.z += mz * k;
 }
 
 /**
  * Empuja un círculo (centro px, pz; radio r; altura de pies y cabeza) fuera de las cajas.
  * Modifica `p` en su sitio. Dos pasadas bastan para esquinas. Con `people` en false no cuenta la
  * gente (la usan los ciudadanos: entre ellos y con el jugador se empujan con su masa, citizens.ts).
+ *
+ * En cada pasada, primero la gente y después lo que no se mueve (cajas y mallas): la última palabra
+ * la tienen las paredes. Al revés, y sin tope en el empujón, alguien que se te echaba encima cuando
+ * estabas contra una pared te sacaba por el otro lado (hasta con paredes de 40 cm). Con el tope
+ * (menor que el radio del cuerpo), el centro nunca llega a cruzar la cara de una pared.
  */
 export function resolveCircle(p: { x: number; z: number }, r: number, feet: number, head: number, people = true) {
   refresh();
   for (let pass = 0; pass < 2; pass++) {
+    if (people) pushFromPeople(p, r, feet, head);
     for (const b of boxes) {
       if (feet > b.y + b.hy || head < b.y - b.hy) continue;
       // Al espacio local de la caja (giro inverso).
@@ -236,42 +314,6 @@ export function resolveCircle(p: { x: number; z: number }, r: number, feet: numb
       const wz = -nx * b.s + nz * b.c;
       p.x += wx * push;
       p.z += wz * push;
-    }
-    if (!people) {
-      if (meshCols.size) resolveMeshes(p, r, feet, head);
-      continue;
-    }
-    // La gente: cilindros que no se atraviesan (el que se aparta es el jugador).
-    const rr = r + NPC_RADIUS;
-    const total = npcs.count + npcs.extra;
-    for (let k = 0; k < total; k++) {
-      const i = npcAt(k);
-      const ny = npcs.pos[i * 3 + 1]!;
-      if (ny > head || ny + 1.75 < feet - 0.6) continue;
-      const dx = p.x - npcs.pos[i * 3]!;
-      const dz = p.z - npcs.pos[i * 3 + 2]!;
-      const d2 = dx * dx + dz * dz;
-      if (d2 >= rr * rr) continue;
-      const d = Math.sqrt(d2);
-      if (d < 1e-5) {
-        p.x += rr;
-        continue;
-      }
-      p.x += (dx / d) * (rr - d);
-      p.z += (dz / d) * (rr - d);
-    }
-    // Las demás personas: igual, cilindros de su altura.
-    const ro = r + OTHER_RADIUS;
-    for (let k = 0; k < others.count; k++) {
-      const oy = others.pos[k * 3 + 1]!;
-      if (oy > head || oy + 1.75 < feet - 0.6) continue;
-      const dx = p.x - others.pos[k * 3]!;
-      const dz = p.z - others.pos[k * 3 + 2]!;
-      const d2 = dx * dx + dz * dz;
-      if (d2 >= ro * ro || d2 < 1e-10) continue;
-      const d = Math.sqrt(d2);
-      p.x += (dx / d) * (ro - d);
-      p.z += (dz / d) * (ro - d);
     }
     if (meshCols.size) resolveMeshes(p, r, feet, head);
   }

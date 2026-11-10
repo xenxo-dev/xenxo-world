@@ -133,6 +133,33 @@ check((hits[0]?.nz ?? 0) > 0.6, "sale despedida hacia donde va el coche");
 check(after > before * 0.85 && s2.speed > 10, "el coche pierde algo de velocidad pero no se clava");
 sim2.dispose();
 
+// 9) Fluidez: la física va a pasos fijos de 1/60 s y la pantalla, a lo que dé (72, 90 y 120 Hz en
+//    las gafas y los móviles, 144 o 240 Hz en el escritorio). Lo que se dibuja se interpola entre
+//    los dos últimos pasos: a velocidad constante, el coche avanza lo mismo en cada frame. Sin
+//    eso, a 144 Hz más de la mitad de los frames lo dejaban clavado y el resto lo hacían saltar.
+for (const hz of [50, 90, 144, 240]) {
+  sim.spawn(0, 0, -300, 0);
+  run(12, 0.5);
+  let prev = s.z, sum = 0, sum2 = 0, n = 0, stuck = 0;
+  // El reloj de un navegador nunca es exacto: cada frame dura un poco más o un poco menos.
+  let seed = 12345;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  for (let i = 0; i < hz * 4; i++) {
+    const dt = (1 / hz) * (0.94 + 0.12 * rnd());
+    sim.update(dt, { throttle: 0.5, steer: 0, handbrake: false });
+    const ratio = (s.z - prev) / (s.speed * dt);
+    prev = s.z;
+    sum += ratio;
+    sum2 += ratio * ratio;
+    n++;
+    if (ratio < 0.05) stuck++;
+  }
+  const mean = sum / n;
+  const uneven = Math.sqrt(Math.max(0, sum2 / n - mean * mean));
+  console.log(`fluidez a ${hz} Hz: avanza ×${mean.toFixed(3)} de lo que toca, irregularidad ${(uneven * 100).toFixed(2)} %, ${stuck} frame(s) sin moverse`);
+  check(stuck === 0 && uneven < 0.02 && Math.abs(mean - 1) < 0.01, `a ${hz} Hz avanza lo mismo en cada frame`);
+}
+
 version++;
 sim.dispose();
 console.log(fails ? `\n${fails} fallos` : "\nTodo bien.");

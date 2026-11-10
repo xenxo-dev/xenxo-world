@@ -62,6 +62,13 @@ class WorldStore {
   clockOffset = 0;
 
   private version = 0;
+  /**
+   * Cambia solo cuando cambian las entidades del lugar, no cada vez que entra o sale alguien. Lo caro
+   * que sale de ellas (las cajas de colisión, lo sólido de la física del coche y de las caídas, la
+   * foto de los reflejos) se rehace con esta, no con `version`: si no, en un lugar con gente yendo y
+   * viniendo había un tirón cada pocos segundos.
+   */
+  private entitiesVersion = 0;
   private listeners = new Set<() => void>();
 
   subscribe = (fn: () => void) => {
@@ -69,6 +76,7 @@ class WorldStore {
     return () => this.listeners.delete(fn);
   };
   getVersion = () => this.version;
+  getEntitiesVersion = () => this.entitiesVersion;
 
   private bump() {
     this.version++;
@@ -121,6 +129,7 @@ class WorldStore {
     // isla del nexo) puede estar fuera del chunk.
     this.walk = [-Infinity, Infinity];
     this.entities = new Map();
+    this.entitiesVersion++;
     this.peers.clear();
     this.poseBuffers.clear();
     chat.reset([]);
@@ -142,12 +151,15 @@ class WorldStore {
         this.parkour = m.payload.parkour === true;
         this.closed = m.payload.closed ?? [];
         this.clockOffset = m.payload.server_time - Date.now();
+        // El lugar puede ser otro (las entidades se colocan respecto a él).
+        this.entitiesVersion++;
         this.bump();
         break;
       case "SNAPSHOT":
         this.snapshots++;
         chat.reset(m.payload.chat ?? []);
         this.entities = new Map(m.payload.entities.map((e) => [e.entity_id, e]));
+        this.entitiesVersion++;
         this.peers = new Map(m.payload.peers.filter((p) => p.session_id !== this.sessionId).map((p) => [p.session_id, p]));
         for (const p of m.payload.poses) this.pushPose(p.session_id, this.serverNow(), p.head, p.emote, p.vehicle, p.car, p.weapon);
         this.bump();
@@ -157,6 +169,7 @@ class WorldStore {
           if (c.kind === "upsert") this.entities.set(c.entity.entity_id, c.entity);
           else this.entities.delete(c.entity_id);
         }
+        this.entitiesVersion++;
         this.bump();
         break;
       case "POSES":

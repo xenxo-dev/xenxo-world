@@ -9,7 +9,9 @@
  *   piezas) e imágenes o textos en el pecho o la espalda, proyectados sobre la prenda puesta en un
  *   cuerpo neutro (así el dibujo va «impreso» en la tela y se estira con ella).
  *
- * Cada textura se guarda en caché por lo que la define; las que dejan de usarse se liberan.
+ * Cada textura se guarda en caché por lo que la define; las que dejan de usarse se liberan. Todas las
+ * cachés tienen tope: probarse medio armario no puede dejar cientos de megas ocupados (en un móvil,
+ * la pestaña se caería).
  */
 import * as THREE from "three";
 import { computeShape, fitPart, smoothNormals, type KitData } from "./build";
@@ -26,38 +28,57 @@ const lum = (r: number, g: number, b: number) => 0.2126 * r + 0.7152 * g + 0.072
 
 // ---------- Imágenes como datos ----------
 
-const datas = new Map<string, Promise<ImageData>>();
+/**
+ * Caché pequeña: al pasar de `max`, sale lo que hace más que no se pide (y se libera, si hay con
+ * qué). Lo que se está pidiendo a la vez con la misma clave se hace una sola vez.
+ */
+export class Lru<T> {
+  private m = new Map<string, Promise<T>>();
+  constructor(
+    private max: number,
+    private drop?: (x: T) => void,
+  ) {}
+  get(key: string, make: () => Promise<T>): Promise<T> {
+    const had = this.m.get(key);
+    if (had) {
+      this.m.delete(key);
+      this.m.set(key, had);
+      return had;
+    }
+    const p = make();
+    this.m.set(key, p);
+    p.catch(() => this.m.get(key) === p && this.m.delete(key));
+    while (this.m.size > this.max) {
+      const [k, old] = this.m.entries().next().value as [string, Promise<T>];
+      this.m.delete(k);
+      if (this.drop) old.then(this.drop).catch(() => {});
+    }
+    return p;
+  }
+}
+
+/** Píxeles leídos (4 MB cada piel): los de la funda que se está montando y poco más. */
+const datas = new Lru<ImageData>(16);
 
 /** Píxeles de una imagen del kit o de una data URL, tal cual (sin gestión de color), a un tamaño. */
 export function pixels(url: string, w?: number, h?: number): Promise<ImageData> {
   const key = `${url.length > 200 ? hash(url) : url}|${w ?? ""}x${h ?? ""}`;
-  let p = datas.get(key);
-  if (!p) {
-    p = (async () => {
-      const blob = await (await fetch(url.startsWith("data:") ? url : KIT_BASE + url)).blob();
-      const bmp = await createImageBitmap(blob, { colorSpaceConversion: "none", premultiplyAlpha: "none" });
-      const c = document.createElement("canvas");
-      c.width = w ?? bmp.width;
-      c.height = h ?? bmp.height;
-      const g = c.getContext("2d", { willReadFrequently: true })!;
-      g.imageSmoothingQuality = "high";
-      g.drawImage(bmp, 0, 0, c.width, c.height);
-      bmp.close();
-      return g.getImageData(0, 0, c.width, c.height);
-    })();
-    datas.set(key, p);
-    p.catch(() => datas.delete(key));
-    // Las imágenes de la gente (data URL) no se acumulan.
-    if (url.startsWith("data:") && datas.size > 40) {
-      for (const k of datas.keys()) {
-        if (k.includes("|") && !k.startsWith("tex/")) {
-          datas.delete(k);
-          break;
-        }
-      }
-    }
-  }
-  return p;
+  return datas.get(key, async () => {
+    const r = await fetch(url.startsWith("data:") ? url : KIT_BASE + url);
+    if (!r.ok) throw new Error(`textura ${url.slice(0, 60)}: ${r.status}`);
+    const bmp = await createImageBitmap(await r.blob(), { colorSpaceConversion: "none", premultiplyAlpha: "none" });
+    const c = document.createElement("canvas");
+    c.width = w ?? bmp.width;
+    c.height = h ?? bmp.height;
+    const g = c.getContext("2d", { willReadFrequently: true })!;
+    g.imageSmoothingQuality = "high";
+    g.drawImage(bmp, 0, 0, c.width, c.height);
+    bmp.close();
+    const data = g.getImageData(0, 0, c.width, c.height);
+    // El lienzo ya no hace falta: se suelta ya (en iOS su memoria no vuelve hasta que pasa el recolector).
+    c.width = c.height = 0;
+    return data;
+  });
 }
 
 function hash(s: string): string {
@@ -82,28 +103,8 @@ function toTexture(img: ImageData, color: boolean): THREE.CanvasTexture {
   return t;
 }
 
-/** Caché pequeña de texturas: al salir una, se libera en la GPU. */
-class Lru<T extends { dispose(): void }> {
-  private m = new Map<string, Promise<T>>();
-  constructor(private max: number) {}
-  get(key: string, make: () => Promise<T>): Promise<T> {
-    const had = this.m.get(key);
-    if (had) {
-      this.m.delete(key);
-      this.m.set(key, had);
-      return had;
-    }
-    const p = make();
-    this.m.set(key, p);
-    p.catch(() => this.m.delete(key));
-    while (this.m.size > this.max) {
-      const [k, old] = this.m.entries().next().value as [string, Promise<T>];
-      this.m.delete(k);
-      old.then((x) => x.dispose()).catch(() => {});
-    }
-    return p;
-  }
-}
+/** Lo pintado se libera en la GPU al salir de su caché. */
+const release = (x: { dispose(): void }) => x.dispose();
 
 // ---------- Piel ----------
 
@@ -116,7 +117,7 @@ export interface SkinPaint {
   dispose(): void;
 }
 
-const skins = new Lru<SkinPaint>(3);
+const skins = new Lru<SkinPaint>(3, release);
 
 /** ¿La receta cambia algo de la piel tal cual viene? */
 export function plainSkin(r: Recipe): boolean {
@@ -287,7 +288,7 @@ export interface EyePaint {
   glow: THREE.Texture | null;
   dispose(): void;
 }
-const eyes = new Lru<EyePaint>(3);
+const eyes = new Lru<EyePaint>(3, release);
 
 export function paintEyes(kit: Kit, r: Recipe): Promise<EyePaint> {
   const key = JSON.stringify([r.eyes, r.iris ?? "", r.synth?.eyes ?? ""]);
@@ -399,7 +400,7 @@ function surfaceOf(d: KitData, part: KitPart, bin: Bin, base: "f" | "m", W: numb
   return s;
 }
 
-const cloths = new Lru<{ map: THREE.Texture; dispose(): void }>(6);
+const cloths = new Lru<{ map: THREE.Texture; dispose(): void }>(6, release);
 
 /** ¿Lleva estampado o imágenes esta prenda? */
 export function fancyCloth(part: KitPart, r: Recipe): boolean {

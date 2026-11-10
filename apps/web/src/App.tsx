@@ -32,6 +32,7 @@ import { Panel, type Section } from "./panel/Panel";
 import { TouchJoystick } from "./world/TouchJoystick";
 import { TouchCarControls } from "./world/TouchCarControls";
 import { ambient } from "./world/ambient-audio";
+import { graphics } from "./world/graphics";
 import { splashDone, splashProgress } from "./splash";
 import { appPath, placeRoute } from "./routes";
 import { directPlace } from "./world/guide";
@@ -54,6 +55,8 @@ function useVRSupported() {
   useEffect(() => {
     navigator.xr?.isSessionSupported("immersive-vr").then(setOk).catch(() => setOk(false));
   }, []);
+  // Los gráficos lo necesitan saber antes de crear el canvas (su suavizado en las gafas).
+  useEffect(() => graphics.setXrCapable(ok), [ok]);
   return ok;
 }
 

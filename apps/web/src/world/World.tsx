@@ -1,6 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { PerformanceMonitor } from "@react-three/drei";
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { XR, createXRStore, useXR } from "@react-three/xr";
@@ -9,10 +8,12 @@ import { usePlace, usePlaceTheme, world } from "../net/world-store";
 import { Avatars } from "./Avatars";
 import { Entities, SkipOnError } from "./Entities";
 import { graphics, useGraphics, type Ambience, type Features } from "./graphics";
+import { FpsWatch, LOADED_MS } from "./perf";
 import { attachDesktopInput, input } from "./input";
 import { PhotoTaker } from "./Photo";
 import { Recorder } from "./cine/Recorder";
 import { FRAME_PX, useCine } from "./cine/state";
+import { useCovered } from "./cover";
 import { self } from "./self";
 import { setMaxAnisotropy, tickMaterials } from "./materials";
 import { Player } from "./Player";
@@ -256,7 +257,9 @@ function Environment({ ambience, profile, probe, sky }: { ambience: Ambience; pr
       scene.environment = base ?? room;
       return;
     }
-    const v = world.getVersion();
+    // La foto de los reflejos se rehace cuando cambia el lugar (sus entidades), no cada vez que entra
+    // o sale alguien: son seis vistas más de toda la escena.
+    const v = world.getEntitiesVersion();
     if (v !== lastVersion.current) {
       lastVersion.current = v;
       dirty.current = true;
@@ -298,6 +301,58 @@ function InputBinder({ active }: { active: boolean }) {
       input.move.y = 0;
     }
   }, [active]);
+  return null;
+}
+
+/**
+ * ¿Se está descargando algo (modelos, texturas)? Se cuenta en el gestor de cargas de Three.js, por
+ * el que pasan todos los cargadores.
+ */
+const loading = { pending: 0, last: -1e9, hooked: false };
+function hookLoading() {
+  if (loading.hooked) return;
+  loading.hooked = true;
+  const m = THREE.DefaultLoadingManager;
+  const start = m.itemStart, end = m.itemEnd;
+  m.itemStart = function (this: THREE.LoadingManager, url: string) {
+    loading.pending++;
+    start.call(this, url);
+  };
+  // Acabe bien o mal, cada carga termina aquí.
+  m.itemEnd = function (this: THREE.LoadingManager, url: string) {
+    loading.pending = Math.max(0, loading.pending - 1);
+    loading.last = performance.now();
+    end.call(this, url);
+  };
+}
+
+/**
+ * Si el equipo no aguanta el nivel, un escalón menos (solo en automático: graphics.decline). Lo que
+ * cuenta como «no aguanta» está en perf.ts; aquí, cuándo no hay que medir: al cambiar de lugar, de
+ * nivel o de ambiente, mientras se descarga algo y con la pestaña escondida.
+ */
+function FpsGuard() {
+  const watch = useMemo(() => new FpsWatch(), []);
+  const seen = useRef({ place: "", tier: "", ambience: "" });
+  useEffect(() => {
+    hookLoading();
+    const hidden = () => watch.rest(performance.now(), LOADED_MS);
+    document.addEventListener("visibilitychange", hidden);
+    return () => document.removeEventListener("visibilitychange", hidden);
+  }, [watch]);
+  useFrame(() => {
+    const now = performance.now();
+    const k = seen.current;
+    const place = world.chunkId, tier = graphics.tier, ambience = graphics.ambience;
+    if (place !== k.place || tier !== k.tier || ambience !== k.ambience) {
+      k.place = place;
+      k.tier = tier;
+      k.ambience = ambience;
+      watch.rest(now);
+    }
+    const busy = splashActive() || loading.pending > 0 || now - loading.last < LOADED_MS;
+    if (watch.frame(now, busy)) graphics.decline();
+  });
   return null;
 }
 
@@ -403,7 +458,7 @@ function Scene({ active }: { active: boolean }) {
       <XRWatcher />
       <SplashWatcher />
       {import.meta.env.DEV && <DevStats />}
-      <PerformanceMonitor bounds={(hz) => (hz > 90 ? [60, 100] : [45, 58])} flipflops={3} onDecline={() => graphics.decline()} />
+      <FpsGuard />
       {daySky ? <primitive key="sky" attach="background" object={daySky.tex} /> : <color key="color" attach="background" args={[sky.fog]} />}
       <fog attach="fog" args={[sky.fog, ambience === "night" ? 45 : 70, ambience === "night" ? 230 : 260]} />
       {!skyReady && <Sky ambience={ambience} top={inNexo ? PANO_TONES[ambience].top : undefined} />}
@@ -470,6 +525,7 @@ function useWindowSize(): [number, number] {
 
 export function World({ active, paused = false }: { active: boolean; paused?: boolean }) {
   const g = useGraphics();
+  const covered = useCovered();
   const f = g.features;
   // Modo cine con encuadre (9:16, 16:9, 1:1): el canvas toma esa forma, centrado, y se dibuja a
   // tamaño de vídeo (1080p) se vea al tamaño que se vea: así lo que se graba ya es el vídeo.
@@ -480,21 +536,22 @@ export function World({ active, paused = false }: { active: boolean; paused?: bo
   // pellizco de más es para que, al redondear hacia abajo, el canvas mida justo 1080 × 1920 (o lo que sea).
   const high = px ? Math.floor(px[1] * Math.min(vw / px[0], vh / px[1])) : 0;
   const box = px ? { width: (high * px[0]) / px[1] + 0.02, height: high } : null;
-  // El MSAA del canvas no se puede cambiar en caliente: si cambia, se recrea. Nunca en VR: recrearlo
-  // mata la sesión (al entrar desde un nivel sin MSAA, o si el nivel baja solo por los FPS).
-  const aa = useRef(f.antialias);
-  if (!g.inXR) aa.current = f.antialias;
+  // El MSAA del canvas no se puede cambiar en caliente (habría que recrearlo: adiós a lo que hay en
+  // la GPU y, en VR, a la sesión). Por eso lo decide el equipo y no el nivel: graphics.canvasAA.
+  const aa = g.canvasAA;
 
   return (
     <Canvas
-      key={aa.current ? "aa" : "post"}
+      key={aa ? "aa" : "plain"}
       className={box ? "!absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 touch-none" : "!absolute inset-0 touch-none"}
       style={box ?? undefined}
       dpr={box && px ? px[1] / box.height + 1e-4 : f.dpr}
-      shadows
-      gl={{ antialias: aa.current, powerPreference: "high-performance" }}
-      // Con un juego abierto encima, el mundo no se dibuja (la GPU es para el juego).
-      frameloop={paused ? "never" : "always"}
+      // Sombras PCF (las «suaves» de antes ya no existen en Three.js: pedirlas era un aviso por frame).
+      shadows="percentage"
+      gl={{ antialias: aa, powerPreference: "high-performance" }}
+      // Con un juego abierto encima, o tapado entero por el configurador de fundas, el mundo no se
+      // dibuja (la GPU es para lo que se ve).
+      frameloop={paused || covered ? "never" : "always"}
       camera={{ fov: 70, near: 0.1, far: 400, position: [32, 14, 66] }}
     >
       <XR store={xrStore}>

@@ -4,7 +4,7 @@
  * la exporta a VRM con su receta dentro y la sube como cualquier otra.
  * Se carga aparte (Three.js y el kit) y solo cuando se abre.
  */
-import { Suspense, useEffect, useMemo, useRef, useState, type ComponentRef } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ComponentRef } from "react";
 import { createPortal } from "react-dom";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
@@ -16,11 +16,12 @@ import { removeSkin, setAvatar, uploadModel, useAccount } from "../net/account";
 import { loadKit, type Kit } from "../fundas/kit";
 import { CLOTH_COLORS, cleanRecipe, defaultRecipe, EYE_SWATCH, HAIR_COLORS, PATTERNS, type Recipe, type Slot } from "../fundas/recipe";
 import { buildPreview } from "../fundas/three";
-import { Button, input, Notice } from "./ui";
-import { PartGrid, Section, Sliders, Swatches, type Setter } from "./funda-ui";
+import { Button, Notice } from "./ui";
+import { Chip, PartGrid, Section, Sliders, Swatches, type Setter } from "./funda-ui";
 import { Customize, preset, PRESETS, SkinTab, SynthTab } from "./FundaLooks";
 import { ACTS, buildMoving, type Act, type MovingFunda } from "../fundas/motion";
-import { PlayIcon, StopIcon } from "../hud/icons";
+import { DiceIcon, PlayIcon, ResetIcon, StopIcon } from "../hud/icons";
+import { coverWorld } from "../world/cover";
 
 type Tab = "base" | "body" | "face" | "skin" | "hair" | "clothes" | "synth";
 const TABS: Tab[] = ["base", "body", "face", "skin", "hair", "clothes", "synth"];
@@ -33,6 +34,8 @@ const FACE_GROUPS: Record<string, string[]> = {
   ears: ["ear_size", "ear_out", "ear_point", "neck_width"],
 };
 const CLOTH_SLOTS: Slot[] = ["outfit", "top", "bottom", "shoes", "hat", "glasses", "gloves"];
+/** Botones cuadrados sobre la vista (acercar, alejar y, con poco sitio, al azar y neutro). */
+const viewButton = "grid h-9 w-9 place-items-center rounded-xl border border-cal/10 bg-noche/70 text-lg text-cal/85 backdrop-blur hover:text-neon";
 
 export interface FundaEditing {
   hash: string;
@@ -52,44 +55,74 @@ export default function FundaStudio({ onClose, onSaved, editing, full }: { onClo
   const [error, setError] = useState("");
   const [model, setModel] = useState<{ group: THREE.Group; tris: number; top: number } | null>(null);
   const [cam, setCam] = useState<CamCmd>({ view: "body", n: 0, zoom: 1 });
-  const [failed, setFailed] = useState(false);
+  // El kit no llega (sin él no hay nada que montar) o la última vista no salió. Las dos cosas se
+  // pueden reintentar, y la segunda se quita sola en cuanto una vista sale bien: en un móvil con
+  // mala cobertura, un archivo que falla una vez no deja el configurador roto.
+  const [kitFailed, setKitFailed] = useState(false);
+  const [buildFailed, setBuildFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   // Ver la funda en movimiento (con las animaciones del mundo).
   const [moving, setMoving] = useState(false);
   const [act, setAct] = useState<Act>("walk");
 
+  // Tapa toda la pantalla: lo de detrás (el mundo) no se dibuja mientras esté abierto.
+  useEffect(() => coverWorld(), []);
+
   useEffect(() => {
     let alive = true;
+    setKitFailed(false);
     loadKit()
       .then((k) => {
         if (!alive) return;
         setKit(k);
         setRecipe((r) => cleanRecipe(r, k));
       })
-      .catch(() => alive && setFailed(true));
+      .catch(() => alive && setKitFailed(true));
     return () => {
       alive = false;
     };
-  }, []);
+  }, [attempt]);
 
-  // La vista previa se rehace al cambiar la receta (con un respiro mientras se arrastra un ajuste).
-  const latest = useRef(0);
+  // La vista previa se rehace al cambiar la receta, con un respiro mientras se arrastra un ajuste.
+  // De una en una y siempre la última: lo que cambia mientras se monta una espera a que acabe (en un
+  // móvil, dos montándose a la vez se pisan y todo va a tirones).
+  const want = useRef<Recipe | null>(null);
+  const building = useRef(false);
+  const open = useRef(true);
+  const pump = useCallback(() => {
+    const r = want.current;
+    if (building.current || !r || !open.current) return;
+    want.current = null;
+    building.current = true;
+    buildPreview(r)
+      .then((m) => {
+        if (!open.current) return dispose(m.group);
+        setBuildFailed(false);
+        setModel((old) => {
+          if (old) dispose(old.group);
+          return m;
+        });
+      })
+      .catch(() => open.current && setBuildFailed(true))
+      .finally(() => {
+        building.current = false;
+        pump();
+      });
+  }, []);
   useEffect(() => {
     if (!kit) return;
-    const n = ++latest.current;
-    const id = window.setTimeout(() => {
-      buildPreview(recipe)
-        .then((m) => {
-          if (n !== latest.current) return dispose(m.group);
-          setModel((old) => {
-            if (old) dispose(old.group);
-            return m;
-          });
-        })
-        .catch(() => setFailed(true));
-    }, 70);
+    want.current = recipe;
+    const id = window.setTimeout(pump, 70);
     return () => window.clearTimeout(id);
-  }, [recipe, kit]);
-  useEffect(() => () => setModel((old) => (old && dispose(old.group), null)), []);
+  }, [recipe, kit, attempt, pump]);
+  useEffect(() => {
+    open.current = true;
+    return () => {
+      open.current = false;
+      want.current = null;
+      setModel((old) => (old && dispose(old.group), null));
+    };
+  }, []);
 
   useEffect(() => {
     const key = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -98,8 +131,13 @@ export default function FundaStudio({ onClose, onSaved, editing, full }: { onClo
   }, [onClose]);
 
   const set = (fn: (r: Recipe) => Recipe) => setRecipe((r) => (kit ? cleanRecipe(fn(r), kit) : fn(r)));
+  const random = () => kit && setRecipe(randomRecipe(kit, recipe.base));
+  const neutral = () => set((r) => ({ ...r, body: {}, face: {} }));
   // La pestaña elige la vista (cara para la cara y el pelo); los botones la cambian cuando se quiera.
   useEffect(() => setCam((c) => ({ ...c, view: tab === "face" || tab === "hair" || tab === "skin" ? "face" : "body" })), [tab]);
+  // Cada pestaña empieza por arriba (la lista es la misma caja para todas).
+  const list = useRef<HTMLDivElement>(null);
+  useEffect(() => void list.current?.scrollTo({ top: 0 }), [tab]);
   const zoom = (f: number) => setCam((c) => ({ ...c, n: c.n + 1, zoom: f }));
 
   const save = async () => {
@@ -126,90 +164,119 @@ export default function FundaStudio({ onClose, onSaved, editing, full }: { onClo
   };
 
   const body = (
-    <div className="fixed inset-0 z-50 flex flex-col bg-noche text-cal" role="dialog" aria-modal="true" aria-label={t("funda.title")}>
-      <header className="flex items-center gap-3 border-b border-cal/10 px-4 py-3">
-        <h2 className="display text-base font-semibold sm:text-lg">{t("funda.title")}</h2>
-        {model && <span className="meta hidden text-xs text-cal/45 sm:inline">{t("funda.tris", { tris: model.tris })}</span>}
-        <button onClick={onClose} className="ml-auto rounded-lg px-3 py-1 text-sm text-cal/70 hover:bg-cal/10 hover:text-cal">
+    // En un móvil: de pie, la vista arriba y los controles debajo; tumbado, lado a lado (`duo`). Nada
+    // puede medir más que la pantalla (columnas con mínimo 0) y se respetan la muesca y la barra de
+    // gestos del teléfono (la página ocupa toda la pantalla: viewport-fit=cover).
+    <div
+      className="fixed inset-0 z-50 flex flex-col bg-noche pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pt-[env(safe-area-inset-top)] text-cal"
+      role="dialog"
+      aria-modal="true"
+      aria-label={t("funda.title")}
+    >
+      <header className="flex shrink-0 items-center gap-3 border-b border-cal/10 px-4 py-3 tight:py-1">
+        <h2 className="display min-w-0 truncate text-base font-semibold sm:text-lg">{t("funda.title")}</h2>
+        {model && <span className="meta hidden shrink-0 text-xs text-cal/45 sm:inline">{t("funda.tris", { tris: model.tris })}</span>}
+        <button onClick={onClose} className="ml-auto shrink-0 rounded-lg px-3 py-2 text-sm text-cal/70 hover:bg-cal/10 hover:text-cal">
           {t("funda.close")}
         </button>
       </header>
-      <div className="grid min-h-0 flex-1 grid-rows-[minmax(14rem,42vh)_1fr] md:grid-cols-[minmax(0,1fr)_26rem] md:grid-rows-1">
-        {/* Vista 3D */}
-        <div className="relative min-h-0 bg-[radial-gradient(circle_at_50%_70%,rgb(62_230_255/0.12),transparent_65%)]">
-          <Canvas dpr={[1, 1.75]} camera={{ position: [0, 1.0, 4.4], fov: 28 }} gl={{ antialias: true, alpha: true }}>
-            <StudioEnv />
-            <hemisphereLight args={["#dfe9ff", "#20182c", 1.2]} />
-            <directionalLight position={[1.5, 3, 3]} intensity={2.1} />
-            <directionalLight position={[-2.5, 1.6, -1.5]} intensity={1.2} color="#9beaff" />
-            <Suspense fallback={null}>{moving ? <MovingModel r={recipe} act={act} still={model?.group ?? null} /> : model && <primitive object={model.group} />}</Suspense>
-            <Floor />
-            <CameraRig cmd={cam} top={model?.top ?? 1.7} />
-          </Canvas>
-          {!model && !failed && <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-cal/50">{t("funda.loading")}</p>}
-          {failed && <p className="absolute inset-0 flex items-center justify-center p-6 text-center text-sm text-red-200">{t("funda.error")}</p>}
-          {!moving && <p className="pointer-events-none absolute bottom-2 left-3 hidden text-xs text-cal/40 sm:block">{t("funda.dragHint")}</p>}
-          <div className="absolute left-3 top-3">
-            <button
-              onClick={() => {
-                setMoving((m) => !m);
-                setCam((c) => ({ ...c, view: "body" }));
-              }}
-              aria-pressed={moving}
-              className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs backdrop-blur ${moving ? "border-neon/60 bg-neon/15 text-neon" : "border-cal/10 bg-noche/70 text-cal/80 hover:text-neon"}`}
-            >
-              {moving ? <StopIcon /> : <PlayIcon />}
-              {moving ? t("funda.motion.stop") : t("funda.motion.start")}
-            </button>
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(10.5rem,40%)_minmax(0,1fr)] duo:grid-cols-[minmax(40%,1fr)_minmax(17rem,26rem)] duo:grid-rows-[minmax(0,1fr)]">
+        {/* Vista 3D (y, con poco sitio, los movimientos en una fila debajo, para no tapar los pies) */}
+        <div className="flex min-h-0 min-w-0 flex-col">
+          <div className="@container relative min-h-0 flex-1 bg-[radial-gradient(circle_at_50%_70%,rgb(62_230_255/0.12),transparent_65%)]">
+            <Canvas dpr={[1, 1.75]} camera={{ position: [0, 1.0, 4.4], fov: 28 }} gl={{ antialias: true, alpha: true }}>
+              <StudioEnv />
+              <hemisphereLight args={["#dfe9ff", "#20182c", 1.2]} />
+              <directionalLight position={[1.5, 3, 3]} intensity={2.1} />
+              <directionalLight position={[-2.5, 1.6, -1.5]} intensity={1.2} color="#9beaff" />
+              <Suspense fallback={null}>{moving ? <MovingModel r={recipe} act={act} still={model?.group ?? null} /> : model && <primitive object={model.group} />}</Suspense>
+              <Floor />
+              <CameraRig cmd={cam} top={model?.top ?? 1.7} />
+            </Canvas>
+            {!model && !kitFailed && !buildFailed && <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-cal/50">{t("funda.loading")}</p>}
+            {(kitFailed || buildFailed) && (
+              <div role="alert" className={`absolute inset-x-0 flex flex-col items-center gap-2 p-4 text-center text-sm text-red-200 ${model ? "bottom-10" : "inset-y-0 justify-center"}`}>
+                <p className="rounded-lg bg-noche/80 px-3 py-1.5 backdrop-blur">{t(kitFailed ? "funda.kitError" : "funda.error")}</p>
+                <Button onClick={() => setAttempt((n) => n + 1)} className="!py-1.5 text-xs">
+                  {t("funda.retry")}
+                </Button>
+              </div>
+            )}
+            {!moving && <p className="pointer-events-none absolute bottom-2 left-3 text-xs text-cal/40 tight:hidden">{t("funda.dragHint")}</p>}
+            <div className="absolute left-3 top-3">
+              <button
+                onClick={() => {
+                  setMoving((m) => !m);
+                  setCam((c) => ({ ...c, view: "body" }));
+                }}
+                aria-pressed={moving}
+                aria-label={moving ? t("funda.motion.stop") : t("funda.motion.start")}
+                className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs backdrop-blur ${moving ? "border-neon/60 bg-neon/15 text-neon" : "border-cal/10 bg-noche/70 text-cal/80 hover:text-neon"}`}
+              >
+                {moving ? <StopIcon /> : <PlayIcon />}
+                {/* Con la vista estrecha (un móvil tumbado), solo el icono: si no, pisa los botones de la derecha. */}
+                <span className="hidden @xs:inline">{moving ? t("funda.motion.stop") : t("funda.motion.start")}</span>
+              </button>
+            </div>
+            {moving && (
+              <div className="absolute inset-x-2 bottom-8 flex flex-wrap justify-center gap-1 tight:hidden" role="group" aria-label={t("funda.motion.acts")}>
+                <Acts act={act} onPick={setAct} />
+              </div>
+            )}
+            <div className="absolute right-3 top-3 flex flex-col gap-1.5">
+              {/* Con la vista muy estrecha (un móvil pequeño tumbado), una opción sobre otra: así no tapa la cabeza. */}
+              <div className="ml-auto flex overflow-hidden rounded-xl border border-cal/10 bg-noche/70 text-xs backdrop-blur @max-xs:flex-col">
+                {(["body", "face"] as const).map((v) => (
+                  <button key={v} onClick={() => setCam((c) => ({ ...c, view: v }))} aria-pressed={cam.view === v} className={`px-3 py-1.5 ${cam.view === v ? "bg-neon/15 text-neon" : "text-cal/70 hover:text-cal"}`}>
+                    {t(`funda.view.${v}` as Key)}
+                  </button>
+                ))}
+              </div>
+              <div className="ml-auto flex gap-1.5">
+                <button onClick={() => zoom(0.75)} aria-label={t("funda.zoomIn")} title={t("funda.zoomIn")} className={viewButton}>
+                  +
+                </button>
+                <button onClick={() => zoom(1.33)} aria-label={t("funda.zoomOut")} title={t("funda.zoomOut")} className={viewButton}>
+                  −
+                </button>
+              </div>
+              {/* Con poco sitio, «al azar» y «neutro» van aquí (en el pie solo queda guardar). */}
+              <div className="ml-auto hidden gap-1.5 tight:flex">
+                <button onClick={random} aria-label={t("funda.random")} title={t("funda.random")} className={viewButton}>
+                  <DiceIcon />
+                </button>
+                <button onClick={neutral} aria-label={t("funda.reset")} title={t("funda.reset")} className={viewButton}>
+                  <ResetIcon />
+                </button>
+              </div>
+            </div>
           </div>
           {moving && (
-            <div className="absolute inset-x-2 bottom-2 flex gap-1 overflow-x-auto sm:bottom-8 sm:flex-wrap sm:justify-center" role="group" aria-label={t("funda.motion.acts")}>
-              {ACTS.map((a) => (
-                <button
-                  key={a}
-                  onClick={() => setAct(a)}
-                  aria-pressed={act === a}
-                  className={`shrink-0 rounded-full border px-2.5 py-1 text-xs backdrop-blur ${act === a ? "border-neon/60 bg-neon/15 text-neon" : "border-cal/15 bg-noche/70 text-cal/75 hover:text-cal"}`}
-                >
-                  {t(`funda.motion.${a}` as Key)}
-                </button>
-              ))}
+            <div className="tab-strip hidden shrink-0 gap-1 border-t border-cal/10 p-2 pr-7 tight:flex" role="group" aria-label={t("funda.motion.acts")}>
+              <Acts act={act} onPick={setAct} />
             </div>
           )}
-          <div className="absolute right-3 top-3 flex flex-col gap-1.5">
-            <div className="flex overflow-hidden rounded-xl border border-cal/10 bg-noche/70 text-xs backdrop-blur">
-              {(["body", "face"] as const).map((v) => (
-                <button key={v} onClick={() => setCam((c) => ({ ...c, view: v }))} aria-pressed={cam.view === v} className={`px-3 py-1.5 ${cam.view === v ? "bg-neon/15 text-neon" : "text-cal/70 hover:text-cal"}`}>
-                  {t(`funda.view.${v}` as Key)}
-                </button>
-              ))}
-            </div>
-            <div className="ml-auto flex gap-1.5">
-              <button onClick={() => zoom(0.75)} aria-label={t("funda.zoomIn")} title={t("funda.zoomIn")} className="grid h-9 w-9 place-items-center rounded-xl border border-cal/10 bg-noche/70 text-lg text-cal/85 backdrop-blur hover:text-neon">
-                +
-              </button>
-              <button onClick={() => zoom(1.33)} aria-label={t("funda.zoomOut")} title={t("funda.zoomOut")} className="grid h-9 w-9 place-items-center rounded-xl border border-cal/10 bg-noche/70 text-lg text-cal/85 backdrop-blur hover:text-neon">
-                −
-              </button>
-            </div>
-          </div>
         </div>
         {/* Controles */}
-        <div className="flex min-h-0 flex-col border-t border-cal/10 md:border-l md:border-t-0">
-          <div role="tablist" className="flex gap-0.5 overflow-x-auto border-b border-cal/10 p-2">
+        <div className="flex min-h-0 min-w-0 flex-col border-t border-cal/10 duo:border-l duo:border-t-0">
+          {/* Si no caben todas, la fila se desliza con el dedo y la elegida se trae al centro. */}
+          <div role="tablist" className="tab-strip flex shrink-0 gap-0.5 border-b border-cal/10 p-2 pr-7">
             {TABS.map((id) => (
               <button
                 key={id}
                 role="tab"
                 aria-selected={tab === id}
-                onClick={() => setTab(id)}
-                className={`shrink-0 rounded-lg px-2.5 py-1.5 text-sm ${tab === id ? "bg-neon/15 text-neon" : "text-cal/65 hover:text-cal"}`}
+                onClick={(e) => {
+                  setTab(id);
+                  e.currentTarget.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
+                }}
+                className={`shrink-0 rounded-lg px-2 py-1.5 text-sm tight:px-3 tight:py-2 ${tab === id ? "bg-neon/15 text-neon" : "text-cal/65 hover:text-cal"}`}
               >
                 {t(`funda.tab.${id}` as Key)}
               </button>
             ))}
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <div ref={list} className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 tight:p-3">
             {!kit ? null : tab === "base" ? (
               <>
                 <FromPhoto kit={kit} r={recipe} set={set} />
@@ -234,9 +301,9 @@ export default function FundaStudio({ onClose, onSaved, editing, full }: { onClo
               <>
                 <div className="mb-3 flex flex-wrap gap-1">
                   {Object.keys(FACE_GROUPS).map((g) => (
-                    <button key={g} onClick={() => setGroup(g)} aria-pressed={group === g} className={`rounded-full border px-3 py-1 text-xs ${group === g ? "border-neon/60 text-neon" : "border-cal/15 text-cal/65 hover:text-cal"}`}>
+                    <Chip key={g} on={group === g} onClick={() => setGroup(g)}>
                       {t(`funda.group.${g}` as Key)}
-                    </button>
+                    </Chip>
                   ))}
                 </div>
                 <Sliders ids={FACE_GROUPS[group]!.filter((id) => kit.face.includes(id))} values={recipe.face} label={(id) => t(`funda.face.${id}` as Key)} onChange={(id, v) => set((r) => ({ ...r, face: { ...r.face, [id]: v } }))} />
@@ -247,24 +314,33 @@ export default function FundaStudio({ onClose, onSaved, editing, full }: { onClo
               <ClothesTab kit={kit} r={recipe} set={set} />
             )}
           </div>
-          <footer className="border-t border-cal/10 p-3">
-            <div className="mb-2 flex gap-2">
-              <Button onClick={() => kit && setRecipe(randomRecipe(kit, recipe.base))} className="flex-1 !py-1.5 text-xs">
+          <footer className="shrink-0 border-t border-cal/10 p-3 tight:p-2">
+            <div className="mb-2 flex gap-2 tight:hidden">
+              <Button onClick={random} className="flex-1 !py-1.5 text-xs">
                 {t("funda.random")}
               </Button>
-              <Button onClick={() => set((r) => ({ ...r, body: {}, face: {} }))} className="flex-1 !py-1.5 text-xs">
+              <Button onClick={neutral} className="flex-1 !py-1.5 text-xs">
                 {t("funda.reset")}
               </Button>
             </div>
             {user ? (
               <div className="flex items-end gap-2">
                 <div className="min-w-0 flex-1">
-                  <label htmlFor="funda-name" className="mb-1 block text-xs text-cal/60">
+                  {/* Con poco sitio, el rótulo va dentro de la casilla. */}
+                  <label htmlFor="funda-name" className="mb-1 block text-xs text-cal/60 tight:sr-only">
                     {t("funda.name")}
                   </label>
-                  <input id="funda-name" value={name} maxLength={32} onChange={(e) => setName(e.target.value)} className={input} />
+                  <input
+                    id="funda-name"
+                    value={name}
+                    maxLength={32}
+                    placeholder={t("funda.name")}
+                    enterKeyHint="done"
+                    onChange={(e) => setName(e.target.value)}
+                    className="w-full rounded-xl border border-cal/10 bg-cal/5 px-3 py-2 text-cal outline-none placeholder:text-transparent focus:border-neon tight:placeholder:text-cal/35"
+                  />
                 </div>
-                <Button variant="primary" disabled={!kit || !model || state === "saving" || (full && !editing)} onClick={() => void save()}>
+                <Button variant="primary" className="shrink-0" disabled={!kit || !model || state === "saving" || (full && !editing)} onClick={() => void save()}>
                   {state === "saving" ? t("funda.saving") : t("funda.save")}
                 </Button>
               </div>
@@ -274,13 +350,34 @@ export default function FundaStudio({ onClose, onSaved, editing, full }: { onClo
             {user && full && !editing && <Notice>{t("funda.full")}</Notice>}
             {state === "error" && <Notice tone="error">{error}</Notice>}
             {state === "saved" && <Notice tone="ok">{t("funda.saved")}</Notice>}
-            <p className="mt-2 hidden text-[11px] text-cal/35 sm:block">{t("funda.credit")}</p>
+            <p className="mt-2 text-[11px] text-cal/35 tight:hidden">{t("funda.credit")}</p>
           </footer>
         </div>
       </div>
     </div>
   );
   return createPortal(body, document.body);
+}
+
+/** Lo que se le puede ver hacer a la funda en movimiento. */
+function Acts({ act, onPick }: { act: Act; onPick: (a: Act) => void }) {
+  return (
+    <>
+      {ACTS.map((a) => (
+        <button
+          key={a}
+          onClick={(e) => {
+            onPick(a);
+            e.currentTarget.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
+          }}
+          aria-pressed={act === a}
+          className={`shrink-0 rounded-full border px-2.5 py-1 text-xs backdrop-blur pointer-coarse:py-1.5 ${act === a ? "border-neon/60 bg-neon/15 text-neon" : "border-cal/15 bg-noche/70 text-cal/75 hover:text-cal"}`}
+        >
+          {t(`funda.motion.${a}` as Key)}
+        </button>
+      ))}
+    </>
+  );
 }
 
 function dispose(g: THREE.Group) {

@@ -248,9 +248,12 @@ function Wardrobe() {
       {/* Vista previa */}
       <div className={`${card} flex flex-col overflow-hidden`}>
         <div className="relative aspect-square w-full sm:aspect-[4/5] bg-[radial-gradient(circle_at_50%_75%,rgb(62_230_255/0.14),transparent_65%)]">
-          <Suspense fallback={null}>
-            <AvatarPreview url={assetUrl(shown.hash)} pose={pose} onState={setView} />
-          </Suspense>
+          {/* Con el configurador abierto (tapa toda la pantalla), esta vista no se dibuja detrás. */}
+          {!studio && (
+            <Suspense fallback={null}>
+              <AvatarPreview url={assetUrl(shown.hash)} pose={pose} onState={setView} />
+            </Suspense>
+          )}
           {view !== "ready" && (
             <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-cal/50">
               {view === "error" ? t("wardrobe.previewError") : t("wardrobe.loading")}

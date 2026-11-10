@@ -230,6 +230,32 @@ body,
   }
 }
 
+/*
+ * El configurador de fundas en cualquier pantalla (panel/FundaStudio.tsx):
+ *  - `duo`: la vista y los controles, lado a lado (escritorio, o un móvil tumbado);
+ *  - `tight`: poco sitio (un móvil, de pie o tumbado): cabecera y pie compactos.
+ */
+@custom-variant duo {
+  @media (min-width: 768px), (orientation: landscape) and (min-width: 480px) {
+    @slot;
+  }
+}
+@custom-variant tight {
+  @media (max-width: 767px), (max-height: 560px) {
+    @slot;
+  }
+}
+
+/* Una fila de pestañas que se desliza con el dedo: sin barra, y lo que queda por ver se difumina. */
+.tab-strip {
+  overflow-x: auto;
+  scrollbar-width: none;
+  mask-image: linear-gradient(to right, transparent, #000 0.5rem, #000 calc(100% - 1.75rem), transparent);
+}
+.tab-strip::-webkit-scrollbar {
+  display: none;
+}
+
 /* Configurador de fundas: muestras de los acabados y del color libre. */
 .swatch-any {
   background: conic-gradient(#ff5a5a, #ffd23e, #58ff9a, #36d9ff, #7a5cff, #ff4fd8, #ff5a5a);

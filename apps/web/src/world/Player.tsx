@@ -11,7 +11,7 @@ import { AvatarBody, ChatBubble } from "./Avatars";
 import { createMotion, smoothSpeed } from "./motion";
 import { cameraReach, findSeat } from "./collision";
 import { boost } from "../net/activity-store";
-import { STEP_UP, createBody, placeBody, requestJump, stepBody } from "./locomotion";
+import { STEP_UP, createBody, moveScale, placeBody, requestJump, stepBody } from "./locomotion";
 import { VRMenu } from "./xr/VRMenu";
 import { placeOrigin, vr, vrFollowGround, vrStick, VR_SNAP, VR_WALK } from "./xr/vr-move";
 import { guestPreset, useAccountPreset, useChosenPreset } from "./presets";
@@ -289,8 +289,10 @@ export function Player({ active }: { active: boolean }) {
         let speed = input.run || (controls.autoRun && amount > 0.92) ? (world.parkour ? PK_RUN : RUN) : WALK;
         // Placa de impulso (boost@1): más rápido unos segundos, mientras te muevas.
         if (boost.until > performance.now()) speed = Math.max(speed, boost.speed);
-        let wantX = (_fwd.x * input.move.y + _right.x * input.move.x) * speed;
-        let wantZ = (_fwd.z * input.move.y + _right.z * input.move.x) * speed;
+        // En diagonal no se corre más (locomotion.ts → moveScale).
+        const unit = moveScale(input.move.x, input.move.y);
+        let wantX = (_fwd.x * input.move.y + _right.x * input.move.x) * unit * speed;
+        let wantZ = (_fwd.z * input.move.y + _right.z * input.move.x) * unit * speed;
 
         // Modo pelea (Q, E, R o el HUD): combinaciones de golpes; llegan a quien esté en modo pelea a
         // tu alcance o, si no hay nadie, a la gente de decorado que tengas delante (selfPeople.ts).

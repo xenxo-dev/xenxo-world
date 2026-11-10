@@ -226,7 +226,7 @@ export function Portals({ features, active }: { features: Features; active: bool
   const portals = useMemo(
     () => [...world.entities.values()].filter((e) => e.components["portal@1"] !== undefined),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [world.getVersion()],
+    [world.getEntitiesVersion()],
   );
   // Quest y móviles: portadas a 640 px (menos memoria de vídeo); escritorio, 1280.
   const coverWidth = features.lod === "detailed" ? 1280 : 640;

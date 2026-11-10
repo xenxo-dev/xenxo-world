@@ -1200,6 +1200,8 @@ const es = {
   "clip.unsupported": "Este navegador no puede grabar vídeo del mundo",
   "cine.preparing": "Preparando…",
   "clip.early": "La grabación aún no había empezado: no hay vídeo que guardar",
+  "funda.retry": "Reintentar",
+  "funda.kitError": "No se pudo cargar el configurador. Comprueba la conexión.",
 } as const;
 
 export type Key = keyof typeof es;
@@ -2396,6 +2398,8 @@ const en: Record<Key, string> = {
   "clip.unsupported": "This browser can't record video of the world",
   "cine.preparing": "Getting ready…",
   "clip.early": "Recording hadn't started yet: there's no video to save",
+  "funda.retry": "Try again",
+  "funda.kitError": "Couldn't load the designer. Check your connection.",
 };
 
 const DICTS = { es, en } satisfies Record<string, Record<Key, string>>;

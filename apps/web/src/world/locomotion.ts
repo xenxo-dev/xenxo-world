@@ -82,6 +82,16 @@ export function requestJump(b: Body) {
   b.jumpAge = 0;
 }
 
+/**
+ * Por cuánto multiplicar lo que se pide con las teclas o el joystick (x: derecha, y: adelante) para
+ * que no pase de 1: con el teclado, W+D pide (1, 1), que mide √2, y en diagonal se corría un 41 % más
+ * (en una carrera con marcador, ventaja para quien lo supiera). El joystick ya viene dentro del círculo.
+ */
+export function moveScale(x: number, y: number): number {
+  const len = Math.hypot(x, y);
+  return len > 1 ? 1 / len : 1;
+}
+
 const _p = { x: 0, z: 0 };
 
 /** Opciones de un paso: `people` (chocar con la gente; los ciudadanos se empujan aparte) y el subpaso. */

@@ -178,6 +178,26 @@ export function PlayIcon() {
   );
 }
 
+/** Dado (al azar). */
+export function DiceIcon() {
+  return (
+    <svg aria-hidden className="h-5 w-5" {...svg}>
+      <rect x="4" y="4" width="16" height="16" rx="3.5" />
+      <path d="M8.5 8.5h.01M15.5 8.5h.01M12 12h.01M8.5 15.5h.01M15.5 15.5h.01" strokeWidth={2.4} />
+    </svg>
+  );
+}
+
+/** Flecha que vuelve (dejar como estaba). */
+export function ResetIcon() {
+  return (
+    <svg aria-hidden className="h-5 w-5" {...svg}>
+      <path d="M4.5 12a7.5 7.5 0 1 0 2.4-5.5" />
+      <path d="M4 4.5v4h4" />
+    </svg>
+  );
+}
+
 /** Parar. */
 export function StopIcon() {
   return (

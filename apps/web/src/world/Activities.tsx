@@ -295,7 +295,7 @@ function Scoreboard({ entity }: { entity: Entity }) {
 export function Activities() {
   useWorldVersion();
   const list = [...world.entities.values()];
-  const key = list.length + ":" + world.getVersion();
+  const key = list.length + ":" + world.getEntitiesVersion();
   const zones = useMemo(() => zonesOf(list.filter((e) => e.components["collectible@1"] || e.components["checkpoint@1"] || e.components["boost@1"])), [key]); // eslint-disable-line react-hooks/exhaustive-deps
   const boards = list.filter((e) => e.components["scoreboard@1"]);
   const tileBoards = list.filter((e) => e.components["tiles@1"]);

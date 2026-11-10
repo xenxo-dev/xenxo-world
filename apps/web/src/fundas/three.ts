@@ -6,7 +6,7 @@
 import * as THREE from "three";
 import { bodyIndex, bodyRefs, computeShape, fitPart, partSkin, poseVertices, pushIn, smoothNormals, tPose, type KitData, type Shape } from "./build";
 import { KIT_BASE, loadBin, loadKit, partById, type Bin, type Kit, type KitPart } from "./kit";
-import { fancyCloth, isRobotHead, paintCloth, paintEyes, paintSkin, plainSkin } from "./paint";
+import { fancyCloth, isRobotHead, Lru, paintCloth, paintEyes, paintSkin, plainSkin } from "./paint";
 import { SLOTS, type Recipe } from "./recipe";
 
 let data: Promise<KitData> | null = null;
@@ -59,48 +59,57 @@ function image(path: string): Promise<HTMLImageElement> {
   return p;
 }
 
-const textures = new Map<string, THREE.Texture>();
+/**
+ * Las texturas de las últimas fundas montadas (la que se ve y unas cuantas de antes). Al salir una se
+ * libera en la GPU; si alguna funda a la vista la sigue usando, Three.js la vuelve a subir sola. Sin
+ * tope, cada pieza y cada color probados se quedaban para siempre: en un móvil, tras un rato
+ * probándose ropa, la pestaña se quedaba sin memoria.
+ */
+const textures = new Lru<THREE.Texture>(40, (t) => t.dispose());
 
-/** Textura, teñida si hace falta (cache por textura y color). */
-export async function texture(path: string, tint: string | null, alpha: boolean): Promise<THREE.Texture> {
-  const key = `${path}|${tint ?? ""}`;
-  const had = textures.get(key);
-  if (had) return had;
-  const im = await image(path);
-  const c = document.createElement("canvas");
-  c.width = im.naturalWidth;
-  c.height = im.naturalHeight;
-  const g = c.getContext("2d", { willReadFrequently: true })!;
-  g.drawImage(im, 0, 0);
-  if (tint) {
-    const data = g.getImageData(0, 0, c.width, c.height);
-    const px = data.data;
-    // Tono medio de lo que se ve (sin lo transparente) para que el color elegido sea el medio.
-    let sum = 0, cnt = 0;
-    for (let i = 0; i < px.length; i += 4) {
-      if (alpha && px[i + 3]! < 128) continue;
-      sum += 0.2126 * px[i]! + 0.7152 * px[i + 1]! + 0.0722 * px[i + 2]!;
-      cnt++;
+/** Textura, teñida si hace falta (caché por textura y color). */
+export function texture(path: string, tint: string | null, alpha: boolean): Promise<THREE.Texture> {
+  return textures.get(`${path}|${tint ?? ""}`, async () => {
+    const im = await image(path);
+    let t: THREE.Texture;
+    if (!tint) {
+      // Tal cual viene: la propia imagen, sin un lienzo de por medio (que ocuparía otro tanto).
+      t = new THREE.Texture(im);
+      t.needsUpdate = true;
+    } else {
+      const c = document.createElement("canvas");
+      c.width = im.naturalWidth;
+      c.height = im.naturalHeight;
+      const g = c.getContext("2d", { willReadFrequently: true })!;
+      g.drawImage(im, 0, 0);
+      const data = g.getImageData(0, 0, c.width, c.height);
+      const px = data.data;
+      // Tono medio de lo que se ve (sin lo transparente) para que el color elegido sea el medio.
+      let sum = 0, cnt = 0;
+      for (let i = 0; i < px.length; i += 4) {
+        if (alpha && px[i + 3]! < 128) continue;
+        sum += 0.2126 * px[i]! + 0.7152 * px[i + 1]! + 0.0722 * px[i + 2]!;
+        cnt++;
+      }
+      const mean = Math.max(8, sum / Math.max(1, cnt));
+      const col = new THREE.Color(tint);
+      const r = col.r * 255, gg = col.g * 255, b = col.b * 255;
+      for (let i = 0; i < px.length; i += 4) {
+        const l = (0.2126 * px[i]! + 0.7152 * px[i + 1]! + 0.0722 * px[i + 2]!) / mean;
+        // Algo de contraste para que no quede plano; nunca más de 1,6× el color.
+        const k = Math.min(1.6, Math.pow(l, 0.85));
+        px[i] = Math.min(255, r * k);
+        px[i + 1] = Math.min(255, gg * k);
+        px[i + 2] = Math.min(255, b * k);
+      }
+      g.putImageData(data, 0, 0);
+      t = new THREE.CanvasTexture(c);
     }
-    const mean = Math.max(8, sum / Math.max(1, cnt));
-    const col = new THREE.Color(tint);
-    const r = col.r * 255, gg = col.g * 255, b = col.b * 255;
-    for (let i = 0; i < px.length; i += 4) {
-      const l = (0.2126 * px[i]! + 0.7152 * px[i + 1]! + 0.0722 * px[i + 2]!) / mean;
-      // Algo de contraste para que no quede plano; nunca más de 1,6× el color.
-      const k = Math.min(1.6, Math.pow(l, 0.85));
-      px[i] = Math.min(255, r * k);
-      px[i + 1] = Math.min(255, gg * k);
-      px[i + 2] = Math.min(255, b * k);
-    }
-    g.putImageData(data, 0, 0);
-  }
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.flipY = false;
-  t.anisotropy = 4;
-  textures.set(key, t);
-  return t;
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.flipY = false;
+    t.anisotropy = 4;
+    return t;
+  });
 }
 
 async function materialFor(d: KitData, p: KitPart, r: Recipe): Promise<THREE.MeshStandardMaterial> {

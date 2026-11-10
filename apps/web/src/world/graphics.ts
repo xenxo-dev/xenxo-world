@@ -18,7 +18,10 @@ export const TIERS: Tier[] = ["low", "medium", "high", "ultra"];
 /** Qué hace cada nivel. Una sola tabla: si algo cambia, cambia aquí. */
 export interface Features {
   dpr: [number, number];
-  /** MSAA del propio canvas (solo cuando no hay post-proceso). */
+  /**
+   * Bordes suavizados con MSAA (×4): en el post-proceso, si lo hay (si no, SMAA); sin post-proceso,
+   * en el propio canvas. Si el canvas lleva MSAA lo decide el equipo, no el nivel (`canvasAA`).
+   */
   antialias: boolean;
   /** Materiales PBR (brillo, metal, reflejos). Si no, Lambert. */
   pbr: boolean;
@@ -169,6 +172,9 @@ function portableClamp(f: Features, xr: boolean): Features {
   return {
     ...f,
     dpr: [Math.min(f.dpr[0], 1), Math.min(f.dpr[1], xr ? 1 : 1.75)],
+    // Sus GPU dibujan por teselas: el MSAA les sale casi gratis y, sin post-proceso, es lo único que
+    // quita los dientes de sierra (en las gafas, lo que más se nota).
+    antialias: true,
     post: false,
     bloom: false,
     ao: false,
@@ -210,6 +216,10 @@ class GraphicsStore {
   private declines = 0;
   /** La VR fuerza el nivel ligero mientras dura la sesión. */
   inXR = false;
+  /** Este equipo puede entrar en VR (lo dice el navegador al arrancar: `setXrCapable`). */
+  private xrCapable = false;
+  /** Lo que da `portableClamp` para cada nivel (el mismo objeto cada vez: ver `features`). */
+  private clamped = new Map<string, Features>();
   private version = 0;
   private listeners = new Set<() => void>();
   private clock: ReturnType<typeof setInterval> | null = null;
@@ -235,9 +245,35 @@ class GraphicsStore {
     return t;
   }
 
+  /**
+   * Lo que se dibuja en este equipo. Siempre el mismo objeto mientras no cambie el nivel: media
+   * escena lo lleva en sus dependencias (cada modelo, cada entidad), y uno nuevo en cada lectura la
+   * rehacía entera cada vez que algo volvía a pintar la escena (en gafas y móviles, cada minuto).
+   */
   get features(): Features {
-    const f = FEATURES[this.tier];
-    return detectGpu().portable || this.inXR ? portableClamp(f, this.inXR) : f;
+    const tier = this.tier;
+    const f = FEATURES[tier];
+    if (!detectGpu().portable && !this.inXR) return f;
+    const key = `${tier}|${this.inXR}`;
+    let c = this.clamped.get(key);
+    if (!c) this.clamped.set(key, (c = portableClamp(f, this.inXR)));
+    return c;
+  }
+
+  /**
+   * ¿El canvas se crea con MSAA? No se puede cambiar en caliente (habría que recrearlo, y con él todo
+   * lo que hay en la GPU), así que lo decide el equipo y no el nivel: gafas y móviles, siempre (no
+   * tienen post-proceso); un escritorio, solo si puede entrar en VR (dentro de las gafas no hay
+   * post-proceso y el MSAA del canvas es el único suavizado; fuera, el suyo lo pone el post-proceso).
+   */
+  get canvasAA(): boolean {
+    return detectGpu().portable || this.xrCapable;
+  }
+
+  setXrCapable(on: boolean) {
+    if (this.xrCapable === on) return;
+    this.xrCapable = on;
+    this.bump();
   }
 
   get ambience(): Ambience {

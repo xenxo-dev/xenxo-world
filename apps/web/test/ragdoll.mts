@@ -352,5 +352,35 @@ const lowest = (d: RagdollHandle) => Math.min(...Array.from({ length: 12 }, (_, 
   check(sim.active === 0, "se quitan del mundo");
 }
 
+// 7) Fluidez: la física va a pasos fijos de 1/60 s y la pantalla, a lo que dé. Un cuerpo por el aire
+//    a velocidad constante avanza lo mismo en cada frame dibujado (se dibuja entre los dos últimos
+//    pasos); sin eso, a 144 Hz más de la mitad de los frames lo dejaban quieto.
+for (const hz of [50, 90, 144]) {
+  const s = spec(-40, 0, [0, -1], 4, 0, 0.75, 0.04);
+  // Por el aire (a 40 m del suelo) y sin golpe: todo el cuerpo a la misma velocidad.
+  for (const p of s.parts) p.pos = [p.pos[0], p.pos[1] + 40, p.pos[2]];
+  for (const j of s.joints) j.anchor = [j.anchor[0], j.anchor[1] + 40, j.anchor[2]];
+  s.impulses = [];
+  const d = sim.spawn(s)!;
+  run(0.25);
+  let seed = 4321;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  const v: number[] = [];
+  let prev = d.pos[2]!;
+  for (let i = 0; i < hz / 2; i++) {
+    // El reloj de un navegador nunca es exacto.
+    const dt = (1 / hz) * (0.94 + 0.12 * rnd());
+    sim.step(dt);
+    v.push((prev - d.pos[2]!) / dt);
+    prev = d.pos[2]!;
+  }
+  const mean = v.reduce((a, b) => a + b, 0) / v.length;
+  const worst = Math.max(...v.map((x) => Math.abs(x / mean - 1)));
+  const stuck = v.filter((x) => x < mean * 0.05).length;
+  console.log(`fluidez a ${hz} Hz: ${r2(mean)} m/s, el frame que más se aparta ${(worst * 100).toFixed(1)} %, ${stuck} frame(s) sin moverse`);
+  check(stuck === 0 && worst < 0.06, `a ${hz} Hz avanza lo mismo en cada frame`);
+  d.remove();
+}
+
 console.log(fails ? `\n${fails} comprobación(es) fallida(s)` : "\ntodo bien");
 process.exit(fails ? 1 : 0);

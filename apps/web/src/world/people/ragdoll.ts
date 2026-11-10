@@ -66,7 +66,7 @@ export interface RagdollSpec {
 }
 
 export interface RagdollHandle {
-  /** Posición (3 por sólido) y giro (4 por sólido), en el mundo, tras el último paso. */
+  /** Posición (3 por sólido) y giro (4 por sólido), en el mundo: lo que se dibuja (entre dos pasos de la física). */
   readonly pos: Float32Array;
   readonly quat: Float32Array;
   /** Lo más rápido que se mueve algún sólido (m/s) y su giro (rad/s). */

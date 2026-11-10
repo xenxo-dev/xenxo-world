@@ -13,9 +13,11 @@
     "test:vehicle": "tsx test/vehicle.mts",
     "test:ragdoll": "tsx test/ragdoll.mts",
     "test:citizens": "tsx test/citizens.mts",
+    "test:locomotion": "esbuild test/locomotion.mts --bundle --platform=node --format=esm --define:import.meta.env={} --log-level=warning --outfile=node_modules/.cache/xenxo/locomotion.mjs && node node_modules/.cache/xenxo/locomotion.mjs",
     "test:parkour": "esbuild test/parkour.mts --bundle --platform=node --format=esm --define:import.meta.env={} --log-level=warning --outfile=node_modules/.cache/xenxo/parkour.mjs && node node_modules/.cache/xenxo/parkour.mjs",
     "test:springs": "tsx test/springs.mts",
     "test:guide": "tsx test/guide.mts",
+    "test:graphics": "esbuild test/graphics.mts --bundle --platform=node --format=esm --define:import.meta.env={} --log-level=warning --outfile=node_modules/.cache/xenxo/graphics.mjs && node node_modules/.cache/xenxo/graphics.mjs",
     "test:cine": "esbuild test/cine.mts --bundle --platform=node --format=esm --define:import.meta.env={} --log-level=warning --outfile=node_modules/.cache/xenxo/cine.mjs && node node_modules/.cache/xenxo/cine.mjs"
   },
   "dependencies": {
