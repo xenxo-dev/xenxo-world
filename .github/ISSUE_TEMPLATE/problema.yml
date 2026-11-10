@@ -1,0 +1,29 @@
+name: "Problema · Bug"
+description: "Algo falla o no se ve bien · Something is broken or looks wrong"
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Gracias por avisar. Si es un fallo de **seguridad**, no lo cuentes aquí: mira `SECURITY.md`.
+        Thanks for telling us. If it is a **security** problem, don't describe it here: see `SECURITY.md`.
+  - type: textarea
+    id: que
+    attributes:
+      label: "¿Qué ha pasado? · What happened?"
+      description: "Y qué esperabas que pasara. · And what you expected instead."
+    validations:
+      required: true
+  - type: textarea
+    id: pasos
+    attributes:
+      label: "Pasos para repetirlo · Steps to reproduce"
+      placeholder: |
+        1. Entro en Vertical…
+        2. …
+  - type: textarea
+    id: equipo
+    attributes:
+      label: "Equipo · Device"
+      description: "El enlace «Informar de un problema» de xenxo.io lo rellena solo (navegador, pantalla y los últimos errores). Revísalo antes de publicar: es público. · xenxo.io's “Report a problem” link fills this in (browser, screen and the latest errors). Check it before posting: it is public."
+      render: text

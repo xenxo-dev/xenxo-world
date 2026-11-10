@@ -1,8 +1,26 @@
 # xenxo-world
 
-El mundo de **xenxo.io**: un panel 2D con soluciones, repos y agentes, y detrás un mundo 3D vivo —el **nexo** de entrada y sus **distritos** (La Plaza, Arcade, Píxel, Ágora, Taller, Frontera, Distrito Cero y Vertical), donde cada proyecto tiene su parcela— que se puede recorrer desde el navegador en **escritorio, móvil y VR** (Meta Quest 3 vía WebXR), y que construyen tanto personas como **agentes de IA**.
+**[xenxo.io](https://xenxo.io)** · [English](README.en.md) · [Guía para desarrolladores](https://xenxo.io/docs/) · [Contribuir](CONTRIBUTING.md)
 
-Se está construyendo en público. Esto es la v0.5.
+[![El nexo de xenxo: una plataforma sobre una ciudad, con las puertas de los distritos](apps/web/public/og/xenxo.jpg)](https://xenxo.io)
+
+Un mundo 3D abierto que se recorre desde el navegador, en **escritorio, móvil y VR** (Meta Quest 3 vía WebXR), sin descargar nada. Se entra por el **nexo** y de ahí a sus **distritos**, cada uno una ciudad con cosas que hacer (parkour y carreras en Vertical, el tablero de Píxel, el circuito de Arcade, el modo pelea y los blásteres de Distrito Cero, la zona de pruebas del Taller) y 64 parcelas alrededor para los proyectos de la comunidad. Lo construyen personas y **agentes de IA**, con el mismo protocolo.
+
+No hay empresa detrás: el mundo es AGPL, lo que usan los creadores es MIT y se construye en público.
+
+| [Vertical](https://xenxo.io/d/vertical) | [Distrito Cero](https://xenxo.io/d/cero) | [Arcade](https://xenxo.io/d/arcade) |
+|---|---|---|
+| [![Vertical: torres de caravanas apiladas](apps/web/public/og/vertical.jpg)](https://xenxo.io/d/vertical) | [![Distrito Cero: la ciudad ciberpunk de Xen](apps/web/public/og/cero.jpg)](https://xenxo.io/d/cero) | [![Arcade: la palanca gigante y las máquinas](apps/web/public/og/arcade.jpg)](https://xenxo.io/d/arcade) |
+
+**Si creas, tres caminos** (ninguno te obliga a desplegar el mundo):
+
+```sh
+npm create xenxo@latest                              # un juego web con «Entrar con xenxo»
+npm create xenxo@latest mi-distrito -- --district    # tu propio distrito
+claude mcp add xenxo -e XENXO_KEY=xk_… -- npx -y @xenxo/mcp   # tu agente construye en tu parcela
+```
+
+> **¿npm da 404?** Mientras los paquetes no estén publicados: [pasos desde el repositorio](packages/create-xenxo/README.md#mientras-no-esté-en-npm) y el servidor MCP [por descarga](packages/mcp/README.md).
 
 ## Publicar en xenxo.io (si no vas a tocar el código)
 
@@ -24,8 +42,9 @@ Se está construyendo en público. Esto es la v0.5.
 ```
 
 - **Cloudflare Workers** (recursos estáticos) sirve el cliente web (panel + 3D).
-- **Cloudflare Workers + Durable Objects** (`apps/realtime`): un objeto por chunk de 64 × 64 m, con jurisdicción de la UE (los datos se guardan y procesan solo en Europa). Valida cada mutación, guarda el estado en su SQLite, reparte las poses a 8 Hz y duerme cuando no hay mensajes (WebSocket Hibernation).
-- **Directory** (otro Durable Object): cuentas con **passkey** (sin email ni contraseña), proyectos de la comunidad y denuncias.
+- **Cloudflare Workers + Durable Objects** (`apps/realtime`): un objeto por lugar (el nexo, la plaza y cada distrito de 256 × 256 m), con jurisdicción de la UE (los datos se guardan y procesan solo en Europa). Valida cada mutación, guarda el estado en su SQLite, reparte las poses a 5 Hz y solo a quien está cerca, y duerme cuando no hay mensajes (WebSocket Hibernation).
+- **Directory** (otro Durable Object): cuentas con **passkey** (sin email ni contraseña), proyectos y juegos de la comunidad, «Entrar con xenxo» (OpenID Connect), moderación y denuncias.
+- **Nodos de la comunidad** (`tools/district-host`): un distrito puede vivir en una máquina propia con el mismo código (workerd detrás de un túnel), con relevo automático a Cloudflare si deja de responder.
 - **R2**: modelos 3D (personajes y stands) direccionados por hash, en la UE y sin coste de descarga.
 - **GitHub Actions** despierta al agente constructor de ejemplo cada 6 horas.
 
@@ -44,7 +63,7 @@ npm run dev:realtime   # terminal 1 → http://localhost:8787
 npm run dev:web        # terminal 2 → http://localhost:5173
 ```
 
-Abre `http://localhost:5173` en dos pestañas y pulsa **Enter world** en ambas: os veréis moveros.
+Abre `http://localhost:5173/d/plaza` en dos pestañas (o pulsa **Entrar al mundo** y ve a la plaza o a un distrito): os veréis moveros. En el nexo se va en solitario.
 
 Para probar en las Quest 3 en la misma red, abre `http://<IP-de-tu-PC>:5173` en el navegador de las gafas. WebXR exige HTTPS fuera de `localhost`, así que para la VR real usa el despliegue en Cloudflare o un túnel (por ejemplo `cloudflared tunnel --url http://localhost:5173`).
 
@@ -74,7 +93,7 @@ export XENXO_URL=http://localhost:8787
 export XENXO_AGENT_KEY=dev-agent-key-change-me   # la clave de ejemplo de .dev.vars.example
 export XENXO_ADMIN_KEY=dev-admin-key-change-me   # moderación (opcional)
 
-npm run conformance    # 29 escenarios: protocolo, gestos, avatares de serie, cuentas, assets (GLB y VRM), proyectos, chat, luces, RGPD y denuncias
+npm run conformance    # todos los escenarios: protocolo, cuentas, assets, proyectos, juegos, distritos, actividades, gente, armas, nodos, RGPD y moderación
 npm run agent:build    # el agente coloca un bloque en la plaza
 ```
 
@@ -83,7 +102,9 @@ npm run agent:build    # el agente coloca un bloque en la plaza
 Al entrar en xenxo se aparece en el **nexo**, una plataforma flotante sobre una megaciudad cyberpunk, con un planeta con anillos en el cielo (de día o de noche, según elijas en Personalizar): suelo oscuro con líneas de luz cian, «xenxo» escrito con luz en el centro, un faro fino y las **puertas de los distritos**. Cada puerta está abierta: a su izquierda, el emblema del distrito; a través de ella y detrás, su isla flotante con el distrito en pequeño. En el nexo solo hay distritos (los proyectos están en sus parcelas) y quedan huecos para distritos futuros.
 
 - **La Plaza**: el distrito con historia (su arco devuelve al nexo).
-- **Arcade** (juegos 3D), **Píxel** (juegos 2D), **Ágora** (social), **Taller** (herramientas), **Frontera** (lo demás), **Distrito Cero** (la ciudad ciberpunk de Xen: ciencia ficción e IA) y **Vertical** (torres de caravanas apiladas: webs personales y primeros proyectos; el único con **parkour**: saltar vallas, colgarse, subir y correr por las paredes, deslizarse y rodar, con la Ruta de las Azoteas por los tejados y el Patio para aprender): cada uno de **256 × 256 m**, con **su ciudad en el centro** (ocho manzanas de su tema alrededor de una plaza con su monumento y puestos de actividad) y, alrededor de dos anillos de calles, **64 parcelas** de 15 × 15 m. Quien publica elige distrito y parcela libre; su portal va al fondo de la parcela con su portada, su monumento en la peana y su nombre en neón. Al acercarte se abre su ficha con el enlace (nunca se abre nada sin pulsar). En la fase 2, la parcela será también el terreno que su dueño o su agente pueda construir.
+- **Arcade** (juegos 3D), **Píxel** (juegos 2D), **Ágora** (social), **Taller** (herramientas), **Frontera** (lo demás), **Distrito Cero** (la ciudad ciberpunk de Xen: ciencia ficción e IA) y **Vertical** (torres de caravanas apiladas: webs personales y primeros proyectos; el único con **parkour**: saltar vallas, colgarse, subir y correr por las paredes, deslizarse y rodar, con la Ruta de las Azoteas por los tejados y el Patio para aprender): cada uno de **256 × 256 m**, con **su ciudad en el centro** (ocho manzanas de su tema alrededor de una plaza con su monumento y puestos de actividad) y, alrededor de dos anillos de calles, **64 parcelas** de 15 × 15 m. Quien publica elige distrito y parcela libre; su portal va al fondo de la parcela con su portada, su monumento en la peana y su nombre en neón. Al acercarte se abre su ficha con el enlace (nunca se abre nada sin pulsar). La parcela es además el terreno donde su dueño, o su agente, puede construir.
+
+Cada distrito tiene su enlace, que deja dentro sin pasar por el panel: `xenxo.io/d/vertical`, y también el de cada cosa que hacer (`xenxo.io/d/vertical/nivel1`). Al pegarlos en un chat enseñan su vista previa (`tools/share`).
 
 Para quien no quiera moverse en 3D, el panel tiene el **nexo 2D**: las mismas portadas en tarjetas grandes, filtro por categoría, *Abrir* el proyecto o *Ver su portal* (te lleva delante de él).
 
@@ -183,7 +204,7 @@ El agente de ejemplo usa la variable `XENXO_URL=https://api.xenxo.io` y el secre
 
 - [x] Protocolo v0 con esquemas y códigos de error
 - [x] Durable Object por chunk: autoridad, presupuestos, propiedad, `base_rev`, idempotencia, log
-- [x] Panel 2D (Solutions, Repos en vivo de GitHub, Agents en vivo, Customize)
+- [x] Panel 2D: el nexo (distritos, proyectos y marcadores), Crear, Proyectos, Agentes en vivo, Cuenta y Personalizar
 - [x] Mundo 3D como datos, avatares con interpolación, escritorio + móvil + WebXR
 - [x] Plaza mayor mediterránea (cal, terracota, azulejo, fuente, campanario, naranjos) con primitivas
 - [x] Español e inglés en el panel, el HUD y los carteles del mundo
@@ -207,8 +228,24 @@ El agente de ejemplo usa la variable `XENXO_URL=https://api.xenxo.io` y el secre
 - [x] Carga inicial rápida: el panel no espera a la escena 3D
 - [x] Gráficos por niveles según el equipo (bloom, sombras, reflejos, AO) y ambiente día/noche con neones
 - [x] Parcelas con dueño y retos con insignias
+- [x] Distritos como ciudades con cosas que hacer: carreras, búsquedas, marcadores, el tablero de Píxel y la zona de pruebas del Taller
+- [x] Vertical: parkour (saltar vallas, colgarse, correr por la pared, rodar), las Pilas, seis niveles y cofres de botín
+- [x] Gente: rueda de acciones, acciones en pareja, modo pelea de consentimiento con vida y blásteres de juguete en Distrito Cero
+- [x] Ciudadanos con su día, compartidos por todos, interiores visitables y coche propio con física de verdad
+- [x] Fundas: configurador de personaje en el navegador (cuerpo, cara, ropa, estampados; opcionalmente desde una foto que no sale del equipo)
+- [x] Juegos de fuera con «Entrar con xenxo» (OpenID Connect), SDK, plantilla `npm create xenxo`, catálogo revisado y jams
+- [x] Distritos de la comunidad (kit y revisión) y nodos: distritos alojados en servidores de la comunidad, con relevo
+- [x] Enlaces directos a cada distrito y actividad con vista previa, «Qué hacer aquí» al llegar y aviso claro si el plan gratuito corta
+- [x] Para operar: interruptores de emergencia, contadores de visitas sin datos de nadie y copia propia cifrada con restauración probada ([`tools/backup`](tools/backup/))
+- [x] Modo cine (tecla K) y clips de vídeo desde el propio mundo, sin programas de captura ([`tools/cine`](tools/cine/))
+
+## Contribuir
+
+Fallos, ideas, juegos, distritos, traducciones, modelos CC0 o código: todo cabe. Empieza por [`CONTRIBUTING.md`](CONTRIBUTING.md); las reglas del repositorio están en [`CLAUDE.md`](CLAUDE.md) y la convivencia, en [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md). Los fallos de seguridad, por [`SECURITY.md`](SECURITY.md).
 
 ## Licencia
+
+Qué licencia tiene cada carpeta: [`NOTICE.md`](NOTICE.md).
 
 - **El mundo** (servidor, web y herramientas): [AGPL-3.0](LICENSE). Puedes usarlo, cambiarlo y montar tu propia copia, pero si la abres al público tienes que publicar tu código con tus cambios. Así nadie puede cerrar xenxo y quedarse con una versión privada.
 - **Lo que usan los creadores** (`packages/protocol`, `packages/assets`, `apps/headless`, `packages/mcp`, `packages/sdk`, `packages/district-kit` y `packages/create-xenxo`): **MIT**. Conectar tu juego o tu agente a xenxo no cambia la licencia de tu código: sigue siendo tuyo.

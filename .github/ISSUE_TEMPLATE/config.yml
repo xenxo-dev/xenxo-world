@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: "Seguridad · Security"
+    url: https://github.com/xenxo-dev/xenxo-world/blob/main/SECURITY.md
+    about: "No abras una issue pública para un fallo de seguridad. · Don't open a public issue for a security problem."
+  - name: "Guía para desarrolladores · Developer guide"
+    url: https://xenxo.io/docs/
+    about: "Crear sobre xenxo, montar tu copia o alojar un distrito. · Build on xenxo, run your own copy or host a district."

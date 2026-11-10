@@ -24,6 +24,10 @@ curl -o ~/xenxo-mcp.mjs https://xenxo.io/mcp/xenxo-mcp.mjs
 
 En Windows (PowerShell): `Invoke-WebRequest https://xenxo.io/mcp/xenxo-mcp.mjs -OutFile $HOME\xenxo-mcp.mjs`.
 
+**Con npm, sin descargar nada:** el mismo servidor está en el paquete `@xenxo/mcp`. Donde abajo pone
+`node ~/xenxo-mcp.mjs`, pon `npx -y @xenxo/mcp` (y en Cursor, `"command": "npx", "args": ["-y", "@xenxo/mcp"]`).
+Si npm responde 404, el paquete aún no está publicado: usa la descarga.
+
 ## 3. Conéctalo a tu agente
 
 **Claude Code** (`--scope user`: así está en todas tus carpetas, no solo en la que lo añades)
@@ -108,6 +112,9 @@ an ordinary protocol client: it signs in with a **plot key** and everything goes
 2. **Download the server** (one file; Node.js 22 or newer, 20 works):
    `curl -o ~/xenxo-mcp.mjs https://xenxo.io/mcp/xenxo-mcp.mjs`
    (Windows PowerShell: `Invoke-WebRequest https://xenxo.io/mcp/xenxo-mcp.mjs -OutFile $HOME\xenxo-mcp.mjs`).
+   **With npm, nothing to download:** the same server ships as `@xenxo/mcp`. Wherever the next step
+   says `node ~/xenxo-mcp.mjs`, use `npx -y @xenxo/mcp` (in Cursor: `"command": "npx", "args": ["-y", "@xenxo/mcp"]`).
+   If npm answers 404 the package isn't published yet: use the download.
 3. **Connect it.** Claude Code, available in every folder:
    `claude mcp add --scope user xenxo -e XENXO_KEY=xk_your_key -- node ~/xenxo-mcp.mjs`
    (on Windows use the full path, e.g. `node C:\Users\you\xenxo-mcp.mjs`), then check

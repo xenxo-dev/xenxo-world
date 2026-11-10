@@ -15,6 +15,8 @@ import { optimizeGlb } from "@xenxo/assets/optimize";
 import type { Components } from "@xenxo/protocol";
 import { z } from "zod";
 import { Parcel, type V3 } from "./world";
+// La versión, la del paquete (esbuild la mete en el archivo único).
+import pkg from "../package.json";
 
 const key = process.env.XENXO_KEY ?? "";
 const baseUrl = process.env.XENXO_URL ?? "https://api.xenxo.io";
@@ -69,7 +71,7 @@ async function readModelFile(path: string): Promise<Uint8Array> {
 }
 
 const parcel = new Parcel(baseUrl, key);
-const server = new McpServer({ name: "xenxo", version: "0.1.0" });
+const server = new McpServer({ name: "xenxo", version: pkg.version });
 
 const COORDS =
   "Coordinates are in metres, local to your parcel: x from 0 (left) to its width (right) as seen from the street, " +

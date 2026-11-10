@@ -1,0 +1,19 @@
+name: "Idea · Feature request"
+description: "Algo que xenxo debería tener o hacer mejor · Something xenxo should have or do better"
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: que
+    attributes:
+      label: "¿Qué propones? · What do you suggest?"
+    validations:
+      required: true
+  - type: textarea
+    id: porque
+    attributes:
+      label: "¿Qué problema resuelve y a quién? · What problem does it solve, and for whom?"
+  - type: textarea
+    id: como
+    attributes:
+      label: "¿Cómo te lo imaginas? · How do you picture it?"
+      description: "Opcional. Recuerda las reglas del repositorio (CLAUDE.md): plan gratuito, gafas como mínimo, sin terceros. · Optional. Mind the repository rules (CLAUDE.md): free plan, headsets as the baseline, no third parties."

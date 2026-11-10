@@ -1,9 +1,25 @@
 {
   "name": "@xenxo/mcp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "license": "MIT",
   "type": "module",
   "description": "Servidor MCP de xenxo: tu agente (Claude Code, Cursor…) construye en la parcela de tu proyecto",
+  "keywords": [
+    "xenxo",
+    "mcp",
+    "model-context-protocol",
+    "claude",
+    "cursor",
+    "metaverse",
+    "webxr",
+    "agents"
+  ],
+  "homepage": "https://xenxo.io",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xenxo-dev/xenxo-world.git",
+    "directory": "packages/mcp"
+  },
   "bin": {
     "xenxo-mcp": "dist/xenxo-mcp.mjs"
   },
@@ -15,19 +31,22 @@
   "scripts": {
     "start": "tsx src/index.ts",
     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/xenxo-mcp.mjs --alias:sharp=./src/no-sharp.ts --banner:js=\"import { createRequire as __xenxoRequire } from 'node:module'; const require = __xenxoRequire(import.meta.url);\"",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "prepack": "npm run build"
   },
-  "dependencies": {
+  "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
+    "@types/node": "^22.10.0",
     "@xenxo/assets": "*",
     "@xenxo/headless": "*",
     "@xenxo/protocol": "*",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.20.0",
     "zod": "^4.1.0"
   },
-  "devDependencies": {
-    "@types/node": "^22.10.0",
-    "esbuild": "^0.28.2",
-    "tsx": "^4.20.0"
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "engines": {
     "node": ">=20"
