@@ -5,14 +5,15 @@ import { t } from "../i18n";
 import { input, onPhoto, setTouchCrouch, subscribeView, view } from "../world/input";
 import { setAmbientSound, useAmbientSound } from "../world/ambient-audio";
 import { useWorldVersion, world } from "../net/world-store";
+import { ClipButton } from "./CineBar";
 import { CrouchIcon, EyeIcon, hudIconButton, JumpIcon, PersonIcon, SoundIcon } from "./icons";
 
 const hudBox = "rounded-xl border border-cal/10 bg-noche/70 backdrop-blur";
 const small = "grid h-9 w-9 place-items-center rounded-lg text-[#f4f7ff] transition hover:bg-cal/10 hover:text-neon active:scale-95";
 
 /**
- * Arriba a la derecha: VR (si hay gafas), foto (P) y pantalla completa (F). El destello y el aviso
- * de la foto también salen de aquí.
+ * Arriba a la derecha: VR (si hay gafas), sonido, foto (P), clip de vídeo y pantalla completa (F).
+ * El destello y el aviso de la foto también salen de aquí.
  */
 export function TopTools({ onVR }: { onVR: (() => void) | null }) {
   const full = useFullscreen();
@@ -65,6 +66,7 @@ export function TopTools({ onVR }: { onVR: (() => void) | null }) {
         <button title={`${t("tools.photo")} (P)`} aria-label={t("tools.photo")} onClick={() => (input.photo = true)} className={small}>
           <CameraIcon />
         </button>
+        <ClipButton className={small} />
         {canFull && (
           <button
             title={`${t(full ? "tools.exitFullscreen" : "tools.fullscreen")} (F)`}

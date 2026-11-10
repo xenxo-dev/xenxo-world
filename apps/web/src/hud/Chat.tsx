@@ -3,7 +3,7 @@ import { BUDGETS } from "@xenxo/protocol";
 import { placeName, t, type Key } from "../i18n";
 import { useAccount } from "../net/account";
 import { sendChat } from "../net/session";
-import { chat, useChatVersion, world } from "../net/world-store";
+import { chat, useChatVersion, useWorldVersion, world } from "../net/world-store";
 import { ReportForm } from "../panel/ReportButton";
 
 const box = "rounded-xl border border-cal/10 bg-noche/75 backdrop-blur";
@@ -15,7 +15,10 @@ const NOTICE_MS = 4000;
  */
 export function Chat({ touch, onSignup }: { touch: boolean; onSignup: () => void }) {
   useChatVersion();
+  useWorldVersion();
   const user = useAccount();
+  // Cerrado por moderación (interruptor de emergencia): se lee lo que había, no se escribe.
+  const closed = world.closed.includes("chat");
   const [open, setOpen] = useState(!touch);
   const [text, setText] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -118,7 +121,9 @@ export function Chat({ touch, onSignup }: { touch: boolean; onSignup: () => void
       )}
       {notice && <p className="px-3 pb-1 text-xs text-ocre">{t(`chat.notice.${notice}` as Key)}</p>}
       <div className="border-t border-cal/10 p-2">
-        {user ? (
+        {closed ? (
+          <p className="text-xs text-ocre">{t("chat.closed")}</p>
+        ) : user ? (
           <form
             className="flex gap-2"
             onSubmit={(e) => {
@@ -148,7 +153,7 @@ export function Chat({ touch, onSignup }: { touch: boolean; onSignup: () => void
             </button>
           </p>
         )}
-        {user && !touch && <p className="mt-1 text-[11px] text-cal/35">{t("chat.hint")}</p>}
+        {user && !touch && !closed && <p className="mt-1 text-[11px] text-cal/35">{t("chat.hint")}</p>}
       </div>
     </section>
   );

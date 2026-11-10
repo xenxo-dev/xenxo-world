@@ -42,6 +42,8 @@ import { ModelPicker } from "./ModelPicker";
 import { Block, Button, card, input, Label, Notice, Segmented } from "./ui";
 import { recipeInGlb } from "../fundas/recipe";
 import type { FundaEditing } from "./FundaStudio";
+import { InAppNotice } from "./InAppNotice";
+import { useFlags } from "../net/boot";
 
 export interface CustomizeProps {
   guestName: string;
@@ -65,6 +67,7 @@ export function AccountSection(props: CustomizeProps) {
     <>
       <Block title={t("account.title")}>
         {props.authNotice && <Notice tone={props.authNotice.tone}>{props.authNotice.text}</Notice>}
+        {!user && <InAppNotice />}
         {user ? <SignedIn /> : <SignedOut />}
       </Block>
 
@@ -462,6 +465,8 @@ export function SignedOut() {
 
   const google = useGoogleEnabled();
   const passkeys = passkeysSupported();
+  // Altas cerradas por moderación (interruptor de emergencia): quien ya tiene cuenta entra igual.
+  const signups = useFlags().signups;
   if (!passkeys && !google) return <Notice tone="error">{t("account.noPasskeys")}</Notice>;
 
   const run = async (fn: () => Promise<void>) => {
@@ -505,15 +510,16 @@ export function SignedOut() {
             </a>
           </span>
         </label>
+        {!signups && <Notice>{t("account.signupsClosed")}</Notice>}
         <div className="mt-4 flex flex-wrap gap-2">
           {passkeys && (
-            <Button type="submit" variant="primary" disabled={busy || !age || !terms || name.trim().length < 2}>
+            <Button type="submit" variant="primary" disabled={busy || !signups || !age || !terms || name.trim().length < 2}>
               {t("account.create")}
             </Button>
           )}
           {google && (
             <Button
-              disabled={busy || !age || !terms || name.trim().length < 2}
+              disabled={busy || !signups || !age || !terms || name.trim().length < 2}
               onClick={() => void googleStart("register", { name: name.trim(), age, terms })}
             >
               {t("account.createGoogle")}

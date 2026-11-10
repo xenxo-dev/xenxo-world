@@ -4,6 +4,7 @@ import { errorText, getLang, t, type Key } from "../i18n";
 import { avatarMode, type Project } from "../net/account";
 import { modHide, modLog, modQueue, modReport, modReview, modSyncShowcase, modClearSandbox, myRoles, type LogEntry, type Report } from "../net/games";
 import { gameName, openGame } from "../games/state";
+import { EmergencySwitches, VisitStats } from "./Ops";
 import { Button, card, input, Notice } from "./ui";
 
 /** ¿Modera esta persona? (el fundador siempre). */
@@ -87,6 +88,8 @@ export function Moderation() {
           {t("mod.clearSandbox")}
         </Button>
       </div>
+      <EmergencySwitches />
+      <VisitStats />
 
       <h3 className="text-sm font-medium text-cal/80">{t("mod.pending", { n: pending?.length ?? 0 })}</h3>
       {pending?.length === 0 && <p className="text-sm text-cal/45">{t("mod.nothing")}</p>}

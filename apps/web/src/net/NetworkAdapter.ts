@@ -8,8 +8,11 @@ import { parseServerMessage, type ClientMessage, type ServerMessage } from "@xen
 export type ConnectionStatus = "idle" | "connecting" | "open" | "closed";
 
 export interface NetworkAdapter {
-  /** `url`: dónde conectar si el chunk vive en otro servidor (lo da su pase); si no, aquí con el token. */
-  connect(chunkId: string, token: string, url?: string): void;
+  /**
+   * `url`: dónde conectar si el chunk vive en otro servidor (lo da su pase); si no, aquí con el token.
+   * `src`: la etiqueta del enlace por el que se llegó (net/campaign.ts), para el contador de entradas.
+   */
+  connect(chunkId: string, token: string, url?: string, src?: string | null): void;
   send(m: ClientMessage): void;
   onMessage(fn: (m: ServerMessage) => void): () => void;
   onStatus(fn: (s: ConnectionStatus) => void): () => void;
@@ -23,12 +26,13 @@ export class WebSocketAdapter implements NetworkAdapter {
 
   constructor(private baseUrl: string) {}
 
-  connect(chunkId: string, token: string, remote?: string) {
+  connect(chunkId: string, token: string, remote?: string, src?: string | null) {
     this.close();
     const url = new URL(remote ?? `/chunk/${chunkId}/ws`, this.baseUrl);
     if (!remote) {
       url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
       url.searchParams.set("token", token);
+      if (src) url.searchParams.set("src", src);
     }
     this.emitStatus("connecting");
     const ws = new WebSocket(url);

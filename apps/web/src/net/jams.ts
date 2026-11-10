@@ -2,6 +2,7 @@
  * Jams: convocatorias con tema y fechas. Lectura pública; apuntar, quitar y votar, con cuenta;
  * crear, cambiar o sacar un juego, moderación.
  */
+import { loadBoot } from "./boot";
 import { REALTIME_URL } from "../config";
 import { accountToken, ApiError, type Project } from "./account";
 
@@ -54,8 +55,10 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 
 const s = (slug: string) => encodeURIComponent(slug);
 
-export async function listJams(): Promise<Jam[]> {
-  return (await call<{ jams: Jam[] }>("GET", "/jams")).jams;
+/** Las convocatorias: las del arranque (net/boot.ts) o, con `fresh`, las de ahora mismo (moderación, tras cambiar una). */
+export async function listJams(fresh = false): Promise<Jam[]> {
+  const boot = fresh ? null : await loadBoot();
+  return boot ? boot.jams : (await call<{ jams: Jam[] }>("GET", "/jams")).jams;
 }
 
 export function jamDetail(slug: string) {

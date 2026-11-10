@@ -228,3 +228,25 @@ export function LockIcon({ className = "h-4 w-4" }: { className?: string }) {
     </svg>
   );
 }
+
+/** Brújula: «Qué hacer aquí» (hud/GuideCard.tsx). */
+export function GuideIcon({ className = "h-5 w-5" }: { className?: string }) {
+  return (
+    <svg aria-hidden className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M15.6 8.4l-2.1 5.1-5.1 2.1 2.1-5.1z" />
+    </svg>
+  );
+}
+
+/** Compartir: tres puntos unidos. */
+export function ShareIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg aria-hidden className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="6" cy="12" r="2.4" />
+      <circle cx="18" cy="6" r="2.4" />
+      <circle cx="18" cy="18" r="2.4" />
+      <path d="M8.1 10.9l7.8-3.8M8.1 13.1l7.8 3.8" />
+    </svg>
+  );
+}

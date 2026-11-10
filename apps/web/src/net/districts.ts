@@ -1,11 +1,13 @@
 /**
- * Distritos y parcelas (GET /districts): para elegir dónde publicar, para el nexo 2D y para
- * llevar a alguien delante del portal de un proyecto.
+ * Distritos y parcelas: para elegir dónde publicar, para el nexo 2D y para llevar a alguien delante
+ * del portal de un proyecto. Llegan con el arranque (GET /boot, net/boot.ts); cuando hace falta lo
+ * de ahora mismo (qué parcelas quedan libres al publicar), de GET /districts.
  */
 import { useSyncExternalStore } from "react";
 import layout from "../../../realtime/src/districts.json";
 import { REALTIME_URL } from "../config";
 import { registerPlaceName } from "../i18n";
+import { loadBoot, onBoot } from "./boot";
 
 export interface ParcelInfo {
   id: string;
@@ -57,25 +59,36 @@ let pending: Promise<DistrictInfo[]> | null = null;
 let version = 0;
 const listeners = new Set<() => void>();
 
+function adopt(districts: DistrictInfo[]): DistrictInfo[] {
+  const sorted = byImportance(districts);
+  cache = sorted;
+  loadedAt = Date.now();
+  for (const d of districts) registerPlaceName(d.chunk_id, d.name);
+  version++;
+  for (const fn of listeners) fn();
+  return sorted;
+}
+
+/**
+ * Los distritos. Sin `force`, los del arranque (como mucho de hace un minuto, sin otra petición);
+ * con `force`, los de ahora mismo (para publicar: qué parcelas quedan libres).
+ */
 export function refreshDistricts(force = false): Promise<DistrictInfo[]> {
-  if (!force && cache && Date.now() - loadedAt < 15_000) return Promise.resolve(cache);
+  if (!force) {
+    if (cache && Date.now() - loadedAt < 60_000) return Promise.resolve(cache);
+    return loadBoot().then((b) => (b ? (cache ?? adopt(b.districts)) : refreshDistricts(true)));
+  }
   pending ??= fetch(new URL("/districts", REALTIME_URL))
     .then((r) => (r.ok ? (r.json() as Promise<{ districts: DistrictInfo[] }>) : Promise.reject(new Error(String(r.status)))))
-    .then(({ districts }) => {
-      const sorted = byImportance(districts);
-      cache = sorted;
-      loadedAt = Date.now();
-      for (const d of districts) registerPlaceName(d.chunk_id, d.name);
-      version++;
-      for (const fn of listeners) fn();
-      return sorted;
-    })
+    .then(({ districts }) => adopt(districts))
     .catch(() => cache ?? [])
     .finally(() => {
       pending = null;
     });
   return pending;
 }
+
+onBoot((b) => void adopt(b.districts));
 
 export function useDistricts(): DistrictInfo[] | null {
   useSyncExternalStore(

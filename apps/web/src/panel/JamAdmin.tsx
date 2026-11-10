@@ -30,7 +30,7 @@ export function JamAdmin() {
   const [done, setDone] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const load = () => listJams().then(setJams).catch((e) => setError(errorText(e)));
+  const load = () => listJams(true).then(setJams).catch((e) => setError(errorText(e)));
   useEffect(() => {
     void load();
   }, []);

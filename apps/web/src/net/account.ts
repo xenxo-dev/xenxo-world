@@ -7,7 +7,8 @@ import { startAuthentication, startRegistration } from "@simplewebauthn/browser"
 import { checkBudget, COVER_BUDGET, inspectGlb, type AssetKind, type BudgetProblem, type GlbReport } from "@xenxo/assets";
 import type { ProjectCategory } from "@xenxo/protocol";
 import { REALTIME_URL, assetUrl, loadPref, savePref } from "../config";
-import { reconnect } from "./session";
+import { campaign, withCampaign } from "./campaign";
+import { guestToken, reconnect } from "./session";
 
 export const TERMS_VERSION = "2026-10";
 
@@ -198,7 +199,8 @@ export async function register(displayName: string, ageConfirmed: boolean, accep
     { display_name: displayName, age_confirmed: ageConfirmed, accept_terms: acceptTerms ? TERMS_VERSION : null },
   );
   const response = await startRegistration({ optionsJSON: options });
-  adopt(await api("POST", "/auth/passkey/register/verify", { flow_id, response }));
+  // `src`: la etiqueta del enlace por el que se llegó (campaign.ts), para el contador de cuentas del día.
+  adopt(await api("POST", "/auth/passkey/register/verify", { flow_id, response, ...(campaign() ? { src: campaign() } : {}) }));
 }
 
 export async function login() {
@@ -263,6 +265,7 @@ export async function googleStart(mode: "login" | "register", reg?: { name: stri
     u.searchParams.set("name", reg.name);
     if (reg.age) u.searchParams.set("age", "1");
     if (reg.terms) u.searchParams.set("terms", TERMS_VERSION);
+    withCampaign(u);
   }
   location.assign(u.toString());
 }
@@ -575,7 +578,7 @@ export async function createProject(p: {
   cover_hash: string;
   mesh_hash: string;
 }) {
-  return api<{ project: Project; stand: { ok: boolean; message?: string } }>("POST", "/projects", p);
+  return api<{ project: Project; stand: { ok: boolean; message?: string } }>("POST", "/projects", { ...p, ...(campaign() ? { src: campaign() } : {}) });
 }
 
 export async function deleteProject(id: string) {
@@ -608,11 +611,6 @@ export async function report(
     const data = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
     throw new ApiError(data.error ?? "unknown", data.message ?? "report failed");
   }
-}
-
-async function guestToken(): Promise<string> {
-  const r = await fetch(new URL("/auth/guest", REALTIME_URL), { method: "POST" });
-  return ((await r.json()) as { token: string }).token;
 }
 
 /* --- Carné de jugador --- */

@@ -4,6 +4,16 @@
  */
 import type { Lang } from "./i18n";
 
+/** El repositorio: el enlace «Código» del panel (AGPL §13), «Informar de un problema» y la pestaña Crear. */
+export const SOURCE_URL = "https://github.com/xenxo-dev/xenxo-world";
+
+/**
+ * ¿Están ya en npm create-xenxo, @xenxo/sdk, @xenxo/district-kit y @xenxo/mcp? Mientras no lo estén,
+ * la pestaña Crear avisa del 404 y enseña el servidor MCP por descarga. Al publicarlos (Actions →
+ * «Publicar en npm»), ponlo a true.
+ */
+export const NPM_PUBLISHED = false;
+
 type Text = Record<Lang, string>;
 
 export interface Solution {

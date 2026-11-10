@@ -25,6 +25,7 @@ export function ActivityHud() {
   let text = "";
   if (toast?.kind === "collected") text = toast.complete ? t("activity.complete", { total: toast.total }) : t("activity.collected", { count: toast.count, total: toast.total });
   else if (toast?.kind === "guest") text = t("activity.guest");
+  else if (toast?.kind === "wait") text = t("activity.wait");
   else if (toast?.kind === "badge") text = t("activity.badge", { name: toast.name[lang] ?? toast.name.en ?? "" });
   else if (toast?.kind === "tiles") text = toast.state === "won" ? t(accountToken() ? "activity.tilesWon" : "activity.tilesWonGuest") : t("activity.tilesLost");
   else if (toast?.kind === "race") {

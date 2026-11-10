@@ -23,15 +23,16 @@ function goToParcel(districtId: string | null, parcelId: string | null): boolean
   return true;
 }
 
-export function NexoSection({ onEnter }: { onEnter: () => void }) {
+export function NexoSection({ onEnter, onCreate }: { onEnter: () => void; onCreate: () => void }) {
   const lang = useLang();
   const projects = useProjects();
   const districts = useDistricts();
   const [filter, setFilter] = useState<string>("all");
   const staff = useRoles(useAccount()?.id).moderator;
   useEffect(() => {
-    void refreshProjects(true);
-    void refreshDistricts(true);
+    // Los del arranque (net/boot.ts): sin peticiones propias.
+    void refreshProjects();
+    void refreshDistricts();
   }, []);
   const shown = (projects ?? []).filter((p) => filter === "all" || p.district === filter);
   const name = (d: DistrictInfo) => d.name[lang] ?? d.name.en!;
@@ -57,6 +58,19 @@ export function NexoSection({ onEnter }: { onEnter: () => void }) {
 
   return (
     <>
+      {/* Lo primero: qué es esto y los dos caminos (jugar o crear). */}
+      <section className="mb-8">
+        <h1 className="display text-[26px] font-bold leading-tight text-cal sm:text-[30px]">{t("hero.title")}</h1>
+        <p className="mt-2 max-w-prose text-[15px] leading-relaxed text-soft">{t("hero.text")}</p>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button onClick={onEnter} className="neon-tube display rounded-full px-5 py-2.5 text-[15px] font-semibold">
+            {t("hero.play")}
+          </button>
+          <button onClick={onCreate} className="btn-ghost rounded-full px-5 py-2.5 text-[15px] font-medium">
+            {t("hero.create")} →
+          </button>
+        </div>
+      </section>
       <JamBlock />
       <Block title={t("nav.nexo")}>
         <p className="-mt-2 mb-5 max-w-prose text-[15px] leading-relaxed text-soft">{t("nexo.intro")}</p>

@@ -48,6 +48,8 @@ class WorldStore {
   theme: { id: string; color: string } | null = null;
   /** Aquí se hace parkour (WELCOME.parkour: Vertical): world/parkour. */
   parkour = false;
+  /** Lo que moderación tiene cerrado aquí ahora (WELCOME.closed): "chat", "sandbox". */
+  closed: readonly string[] = [];
   status: ConnectionStatus = "idle";
   lastError: string | null = null;
   /** El nodo que lleva este distrito no responde: se avisa y se sigue intentando (nodes.ts del servidor). */
@@ -112,6 +114,7 @@ class WorldStore {
     this.big = false;
     this.theme = null;
     this.parkour = false;
+    this.closed = [];
     this.unavailable = false;
     this.host = null;
     // Sin límites hasta que el lugar diga los suyos en WELCOME: el punto de llegada (p. ej. una
@@ -137,6 +140,7 @@ class WorldStore {
         this.big = !this.solo && (this.walk[0] < 0 || this.walk[1] > CHUNK_SIZE);
         this.theme = m.payload.theme ?? null;
         this.parkour = m.payload.parkour === true;
+        this.closed = m.payload.closed ?? [];
         this.clockOffset = m.payload.server_time - Date.now();
         this.bump();
         break;
@@ -192,7 +196,21 @@ class WorldStore {
       case "ERROR":
         // Los avisos de actividad (demasiado lejos, fuera de orden…), de gente y de la gente de las
         // ciudades (npc-store.ts) no son errores para el chat.
-        if (m.payload.ref?.startsWith(ACTIVITY_REF) || m.payload.ref?.startsWith(PEOPLE_REF) || m.payload.ref?.startsWith(NPC_REF)) break;
+        if (m.payload.ref?.startsWith(ACTIVITY_REF)) {
+          // Salvo el de «acabas de llegar»: ese lo enseña el HUD de actividades (activity-store.ts).
+          activity.apply(m);
+          break;
+        }
+        if (m.payload.ref?.startsWith(PEOPLE_REF) || m.payload.ref?.startsWith(NPC_REF)) break;
+        // Cerrado por moderación mientras se estaba dentro (interruptores de emergencia): se apunta
+        // para que el chat o la zona de pruebas lo enseñen sin esperar a volver a entrar.
+        if ((m.payload.detail as { reason?: string } | undefined)?.reason === "closed") {
+          const what = m.payload.ref?.startsWith(SANDBOX_REF) ? "sandbox" : "chat";
+          if (!this.closed.includes(what)) this.closed = [...this.closed, what];
+          if (what === "sandbox") sandbox.error(m.payload.ref!, "closed", m.payload.message);
+          this.bump();
+          break;
+        }
         // Los de la zona de pruebas, a su panel.
         if (m.payload.ref?.startsWith(SANDBOX_REF)) {
           sandbox.error(m.payload.ref, m.payload.code, m.payload.message);

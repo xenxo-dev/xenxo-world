@@ -11,13 +11,17 @@ import { useDrive } from "./world/vehicle/drive-state";
 import { People } from "./hud/People";
 import { PortalCard, TravelToast } from "./hud/PortalCard";
 import { Unavailable } from "./hud/Unavailable";
+import { Capacity } from "./hud/Capacity";
 import { ActivityHud } from "./hud/ActivityHud";
 import { LootCard } from "./hud/WeaponHud";
 import { SandboxTools } from "./hud/SandboxTools";
+import { GuideButton, GuideCard, NexoTip, TouchHint } from "./hud/GuideCard";
+import { CineBar, RecNotice } from "./hud/CineBar";
+import { useCine } from "./world/cine/state";
 import { errorText, placeName, t, useLang } from "./i18n";
-import { setGuestName as setSessionGuestName, startSession, travel } from "./net/session";
+import { setGuestName as setSessionGuestName, startSession, teleport, travel } from "./net/session";
 import { completeGoogleReturn, refreshSession, useAccount } from "./net/account";
-import { districtOf, parcelArrival, refreshDistricts } from "./net/districts";
+import { DISTRICT_SPAWN, districtOf, parcelArrival, refreshDistricts } from "./net/districts";
 import { useWorldVersion, world } from "./net/world-store";
 import { Consent, pendingConsent } from "./panel/Consent";
 import { Gate } from "./games/Gate";
@@ -29,6 +33,9 @@ import { TouchJoystick } from "./world/TouchJoystick";
 import { TouchCarControls } from "./world/TouchCarControls";
 import { ambient } from "./world/ambient-audio";
 import { splashDone, splashProgress } from "./splash";
+import { appPath, placeRoute } from "./routes";
+import { directPlace } from "./world/guide";
+import "./net/campaign";
 
 /**
  * La escena 3D (Three.js, WebXR, cargadores de modelos) se descarga aparte:
@@ -121,14 +128,32 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    void startSession(name);
+    // xenxo.io/d/<distrito>[/<sitio>]: directo allí. Los distritos del sistema y la plaza se saben
+    // sin preguntar (se entra sin pasar por el nexo); los de la comunidad, al llegar la lista.
+    const place = placeRoute();
+    const direct = place ? directPlace(place.district, place.spot) : null;
+    if (place) history.replaceState(history.state, "", `/${location.search}${location.hash}`);
+    if (direct && direct !== "soon") {
+      teleport(direct.p, direct.yaw);
+      world.beginTravel(direct.chunk);
+      setInWorld(true);
+      void startSession(name, direct.chunk);
+    } else void startSession(name);
+    if (place && !direct) {
+      void refreshDistricts().then((list) => {
+        const d = list.find((x) => x.id === place.district && x.community);
+        if (!d) return;
+        travel(d.chunk_id, DISTRICT_SPAWN, 0);
+        setInWorld(true);
+      });
+    }
     // xenxo.io/j/<juego>: delante de su portal y con su aviso previo abierto.
-    const slug = gameRoute(location.pathname);
+    const slug = gameRoute(appPath());
     if (slug) {
       history.replaceState(history.state, "", `/${location.search}${location.hash}`);
       void gameBySlug(slug).then(async (p) => {
         if (!p) return setAuthNotice({ tone: "error", text: t("gate.notFound") });
-        const districts = await refreshDistricts(true);
+        const districts = await refreshDistricts();
         const d = districts.find((x) => x.id === p.district);
         const parcel = d?.parcels.find((x) => x.project_id === p.id);
         if (d && parcel) {
@@ -146,7 +171,7 @@ export function App() {
       q.delete("volver");
       history.replaceState(history.state, "", `${location.pathname}${q.size ? `?${q}` : ""}${location.hash}`);
       if (/^[A-Za-z0-9_-]{4,40}$/.test(back)) {
-        void refreshDistricts(true).then((districts) => {
+        void refreshDistricts().then((districts) => {
           for (const d of districts) {
             const parcel = d.parcels.find((p) => p.project_id === back);
             if (!parcel || !districtOf(d.id)) continue;
@@ -160,6 +185,9 @@ export function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Modo cine (tecla K): el HUD se cambia por la barra de rodaje.
+  const cineOn = useCine().on;
 
   const setName = (n: string) => {
     setNameState(n);
@@ -199,8 +227,16 @@ export function App() {
         />
       )}
 
-      {inWorld && (
+      {/* Modo cine (tecla K): sin HUD, solo la barra de rodaje. */}
+      {inWorld && cineOn && (
         <div className="pointer-events-none absolute inset-0">
+          <CineBar />
+          <RecNotice />
+        </div>
+      )}
+      {inWorld && !cineOn && (
+        <div className="pointer-events-none absolute inset-0">
+          <RecNotice />
           <div className={`pointer-events-auto absolute left-4 top-[max(1rem,env(safe-area-inset-top))] flex items-center gap-3 px-3 py-2 text-sm ${hudBox}`}>
             <button onClick={() => setInWorld(false)} className="text-cal/80 hover:text-cal" aria-label={t("hud.backLabel")}>
               {t("hud.back")}
@@ -226,9 +262,14 @@ export function App() {
           <PortalCard />
           <TravelToast />
           <Unavailable />
+          <Capacity />
           <ActivityHud />
           <LootCard />
           <SandboxTools />
+          <GuideButton />
+          <GuideCard />
+          <NexoTip />
+          {touch && !driving.on && <TouchHint />}
           {/* Primera persona y gestos en una fila; en táctil, por encima del botón de saltar (o del
               joystick, si va a la derecha). */}
           <div

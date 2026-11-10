@@ -1,11 +1,11 @@
 /**
- * Marcadores de los distritos: los textos (comunes al marcador del mundo y al panel) y la consulta
- * de `/scores` para el panel (el servidor la guarda un minuto en la caché).
+ * Marcadores de los distritos: los textos (comunes al marcador del mundo y al panel) y los del
+ * panel, que llegan con el arranque (GET /boot, net/boot.ts; el servidor los guarda cinco minutos).
  */
 import { useEffect, useState } from "react";
-import { REALTIME_URL } from "../config";
 import { t } from "../i18n";
 import { formatRaceTime } from "./activity-store";
+import { loadBoot } from "./boot";
 
 export interface ScoreRow {
   name: string;
@@ -45,10 +45,7 @@ export function useScores() {
   const [data, setData] = useState<DistrictBoards[] | null | "error">(null);
   useEffect(() => {
     let alive = true;
-    fetch(new URL("/scores", REALTIME_URL))
-      .then((r) => (r.ok ? (r.json() as Promise<{ districts: DistrictBoards[] }>) : Promise.reject()))
-      .then((d) => alive && setData(d.districts))
-      .catch(() => alive && setData("error"));
+    void loadBoot(5 * 60_000).then((b) => alive && setData(b ? b.scores.districts : "error"));
     return () => {
       alive = false;
     };

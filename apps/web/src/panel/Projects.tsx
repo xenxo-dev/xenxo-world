@@ -23,6 +23,8 @@ import { GameCard } from "./GameCard";
 import { MyGames } from "./Games";
 import { ModelPicker } from "./ModelPicker";
 import { ReportButton } from "./ReportButton";
+import { SOURCE_URL } from "../content";
+import { SolutionsBlock } from "./Solutions";
 import { Block, Button, card, input, Label, Notice } from "./ui";
 
 interface Repo {
@@ -35,18 +37,20 @@ interface Repo {
 
 function useRepos() {
   const [repos, setRepos] = useState<Repo[] | null>(null);
-  const [owner, setOwner] = useState("");
   useEffect(() => {
-    // A través del servidor: el navegador del visitante no habla con GitHub.
-    fetch(new URL("/github/repos", REALTIME_URL))
-      .then((r) => (r.ok ? r.json() : { repos: [], owner: "" }))
-      .then((d: { repos: Repo[]; owner: string }) => {
-        setRepos(d.repos);
-        setOwner(d.owner);
-      })
+    // El navegador del visitante no habla con GitHub: la lista se hace al desplegar y va con la web
+    // (repos.json, tools/repos/fetch.mjs). Si no está, se le pregunta al servidor, como antes.
+    type List = { repos: Repo[] };
+    const read = (r: Response): Promise<List | null> =>
+      r.ok && (r.headers.get("content-type") ?? "").includes("json") ? (r.json() as Promise<List>) : Promise.resolve(null);
+    fetch("/repos.json")
+      .then(read)
+      .catch(() => null)
+      .then((d) => (d?.repos?.length ? d : fetch(new URL("/github/repos", REALTIME_URL)).then(read)))
+      .then((d) => setRepos(d?.repos ?? []))
       .catch(() => setRepos([]));
   }, []);
-  return { repos, owner };
+  return repos;
 }
 
 export function ProjectsSection({ onGoToAccount }: { onGoToAccount: () => void }) {
@@ -54,7 +58,7 @@ export function ProjectsSection({ onGoToAccount }: { onGoToAccount: () => void }
   const user = useAccount();
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [publishing, setPublishing] = useState(false);
-  const { repos, owner } = useRepos();
+  const repos = useRepos();
 
   const [own, setOwn] = useState<Project[]>([]);
   const mine = new Set(own.map((p) => p.id));
@@ -182,13 +186,14 @@ export function ProjectsSection({ onGoToAccount }: { onGoToAccount: () => void }
       <Block title={t("projects.xenxo")}>
         {repos === null && <p className="text-sm text-cal/50">{t("repos.loading")}</p>}
         {repos?.length === 0 && (
-          <p className="text-sm text-cal/50">
-            {t("repos.empty")}{" "}
-            <a className="text-azulejo-claro underline" href={`https://github.com/${owner || "xenxo-dev"}`}>
-              github.com/{owner || "xenxo-dev"}
-            </a>
-            .
-          </p>
+          // Sin lista (GitHub no contestó): al menos, el código de xenxo.
+          <a href={SOURCE_URL} target="_blank" rel="noreferrer" className={`${card} flex items-center gap-4 p-4 transition hover:border-cal/25`}>
+            <div className="min-w-0 flex-1">
+              <p className="font-medium text-cal">xenxo-world</p>
+              <p className="mt-0.5 text-sm text-cal/60">{t("repos.source")}</p>
+            </div>
+            <span className="text-cal/40">↗</span>
+          </a>
         )}
         <ul className="flex flex-col gap-2">
           {repos?.map((r) => (
@@ -205,6 +210,8 @@ export function ProjectsSection({ onGoToAccount }: { onGoToAccount: () => void }
           ))}
         </ul>
       </Block>
+
+      <SolutionsBlock />
     </>
   );
 }

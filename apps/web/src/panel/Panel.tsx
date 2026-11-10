@@ -1,25 +1,21 @@
-import { useEffect, useState } from "react";
-import { REALTIME_URL } from "../config";
-import { ACCENTS, SOLUTIONS } from "../content";
+import { useEffect } from "react";
+import { SOURCE_URL } from "../content";
+import { issueUrl } from "../errors";
+import { loadBoot, useBoot, type LiveState } from "../net/boot";
+import { world } from "../net/world-store";
 import { LANGS, legalPath, setLang, t, useLang, type Key } from "../i18n";
-import { PLACES } from "@xenxo/protocol";
 import { AccountSection, CustomizeSection, type CustomizeProps } from "./Account";
+import { CreateSection } from "./Create";
+import { CapacityBanner } from "../hud/Capacity";
 import { NexoSection } from "./Nexo";
 import { ProjectsSection } from "./Projects";
 import { Block, card, Stat } from "./ui";
 
-export type Section = "nexo" | "solutions" | "projects" | "agents" | "account" | "customize";
-
-interface LiveState {
-  online: number;
-  agents_online: number;
-  entities: number;
-  recent_events: { ts: number; actor: string; op: string; entity_id: string }[];
-}
+export type Section = "nexo" | "create" | "projects" | "agents" | "account" | "customize";
 
 const SECTIONS: { id: Section; label: Key; icon: string }[] = [
   { id: "nexo", label: "nav.nexo", icon: "◎" },
-  { id: "solutions", label: "nav.solutions", icon: "◇" },
+  { id: "create", label: "nav.create", icon: "◇" },
   { id: "projects", label: "nav.projects", icon: "⌥" },
   { id: "agents", label: "nav.agents", icon: "◉" },
   { id: "account", label: "nav.account", icon: "◈" },
@@ -33,38 +29,21 @@ export interface PanelProps extends CustomizeProps {
   onEnterVR: (() => void) | null;
 }
 
-function useLiveState() {
-  const [state, setState] = useState<LiveState | null>(null);
+/**
+ * Cuánta gente hay en el mundo (el nexo y la plaza juntos) y qué ha cambiado: llega con el arranque
+ * (GET /boot), que el panel vuelve a pedir cada minuto mientras está a la vista. Es una petición del
+ * plan gratuito por minuto y panel abierto; dentro del mundo (sin panel) no se pide nada.
+ */
+function useLiveState(): LiveState | null {
+  const boot = useBoot();
   useEffect(() => {
-    let alive = true;
-    // El nexo y la plaza juntos: cuánta gente hay en el mundo y qué ha cambiado.
-    const one = (chunk: string) =>
-      fetch(new URL(`/chunk/${chunk}/state`, REALTIME_URL))
-        .then((r) => (r.ok ? (r.json() as Promise<LiveState>) : null))
-        .catch(() => null);
-    const load = () =>
-      Promise.all([one(PLACES.nexo), one(PLACES.plaza)]).then((list) => {
-        const ok = list.filter((s): s is LiveState => !!s);
-        if (!alive) return;
-        if (!ok.length) return setState(null);
-        setState({
-          online: ok.reduce((n, s) => n + s.online, 0),
-          agents_online: ok.reduce((n, s) => n + s.agents_online, 0),
-          entities: ok.reduce((n, s) => n + s.entities, 0),
-          recent_events: ok.flatMap((s) => s.recent_events).sort((a, b) => b.ts - a.ts).slice(0, 10),
-        });
-      });
-    load();
-    // Cada 30 s y solo con la pestaña a la vista: cada consulta es una petición del plan gratuito.
+    void loadBoot();
     const id = setInterval(() => {
-      if (!document.hidden) void load();
-    }, 30_000);
-    return () => {
-      alive = false;
-      clearInterval(id);
-    };
+      if (!document.hidden) void loadBoot(30_000);
+    }, 60_000);
+    return () => clearInterval(id);
   }, []);
-  return state;
+  return boot?.live ?? null;
 }
 
 function ago(ts: number) {
@@ -77,7 +56,7 @@ function ago(ts: number) {
 
 export function Panel(props: PanelProps) {
   const { section, onSection: setSection } = props;
-  const lang = useLang();
+  useLang();
   const live = useLiveState();
 
   return (
@@ -117,26 +96,9 @@ export function Panel(props: PanelProps) {
         </header>
 
         <main className="min-h-0 flex-1 overflow-y-auto p-5 sm:p-7">
-          {section === "nexo" && <NexoSection onEnter={props.onEnter} />}
-
-          {section === "solutions" && (
-            <Block title={t("nav.solutions")}>
-              <p className="-mt-2 mb-5 max-w-prose text-[15px] leading-relaxed text-soft">{t("solutions.intro")}</p>
-              <ul className="divide-y divide-cal/[0.07] border-y border-cal/[0.07]">
-                {SOLUTIONS.map((s) => (
-                  <li key={s.tag.en}>
-                    <a href={s.href} className="group flex flex-col gap-2 py-4 sm:grid sm:grid-cols-[6rem_1fr] sm:items-baseline sm:gap-4">
-                      <span className={`justify-self-start rounded-md border px-2 py-0.5 text-xs ${ACCENTS[s.accent]}`}>{s.tag[lang]}</span>
-                      <span>
-                        <span className="display block text-[17px] font-semibold text-cal transition group-hover:text-neon-suave">{s.title[lang]}</span>
-                        <span className="mt-1 block max-w-prose text-sm leading-relaxed text-muted">{s.summary[lang]}</span>
-                      </span>
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </Block>
-          )}
+          <CapacityBanner />
+          {section === "nexo" && <NexoSection onEnter={props.onEnter} onCreate={() => setSection("create")} />}
+          {section === "create" && <CreateSection onProjects={() => setSection("projects")} />}
 
           {section === "projects" && <ProjectsSection onGoToAccount={() => setSection("account")} />}
 
@@ -242,12 +204,24 @@ function LegalLinks() {
         {t("legal.docs")}
       </a>
       {/* AGPL §13: quien usa xenxo por la red puede llegar a su código. */}
-      <a href="https://github.com/xenxo-dev/xenxo-world" target="_blank" rel="noreferrer" className="hover:text-cal/70">
+      <a href={SOURCE_URL} target="_blank" rel="noreferrer" className="hover:text-cal/70">
         {t("legal.source")}
       </a>
       {/* Atribución de lo que no es CC0 (el coche, CC BY 4.0) y del resto de recursos. */}
-      <a href="https://github.com/xenxo-dev/xenxo-world/blob/main/CREDITS.md" target="_blank" rel="noreferrer" className="hover:text-cal/70">
+      <a href={`${SOURCE_URL}/blob/main/CREDITS.md`} target="_blank" rel="noreferrer" className="hover:text-cal/70">
         {t("legal.credits")}
+      </a>
+      {/* Sin telemetría: quien ve un fallo lo cuenta en una issue ya rellenada (errors.ts). */}
+      <a
+        href={issueUrl({ lugar: world.chunkId })}
+        // La dirección se rehace al pulsar: lleva los errores que haya habido hasta ese momento.
+        onClick={(e) => (e.currentTarget.href = issueUrl({ lugar: world.chunkId }))}
+        target="_blank"
+        rel="noreferrer"
+        title={t("report.note")}
+        className="hover:text-cal/70"
+      >
+        {t("report.problem")}
       </a>
     </p>
   );

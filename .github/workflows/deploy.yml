@@ -119,6 +119,15 @@ jobs:
             --secrets-file "$RUNNER_TEMP/secrets.env"
           rm -f "$RUNNER_TEMP/secrets.env"
 
+      # Los repos del panel, como archivo estático (tools/repos): solo lectura de datos públicos con el
+      # token de este flujo, que no llega al paso de compilar.
+      - name: Lista de repositorios para el panel
+        if: env.SKIP != '1'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_OWNER: ${{ github.repository_owner }}
+        run: node tools/repos/fetch.mjs
+
       # Compilar, sin secretos a la vista.
       - name: Compilar la web, el MCP y los juegos de ejemplo
         if: env.SKIP != '1'

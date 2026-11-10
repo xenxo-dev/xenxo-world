@@ -19,7 +19,9 @@ export type ActivityToast =
   | { kind: "tiles"; state: "won" | "lost"; at: number }
   | { kind: "badge"; name: Record<string, string>; at: number }
   | { kind: "guest"; at: number }
-  | { kind: "far"; at: number };
+  | { kind: "far"; at: number }
+  /** Acabas de llegar de un salto (un «Ir» de la guía, un viaje): las actividades tardan unos segundos en contar. */
+  | { kind: "wait"; at: number };
 
 class ActivityStore {
   /** Objetos ya recogidos por esta cuenta en este lugar (no se dibujan). */
@@ -97,6 +99,16 @@ class ActivityStore {
         this.scores.set(m.payload.entity_id, m.payload.rows);
         this.bump();
         return;
+      case "ERROR": {
+        // El servidor no deja empezar nada justo después de un salto (JUMP_COOLDOWN_MS): se dice,
+        // para que quien acaba de llegar a una salida con «Ir» sepa que enseguida empieza.
+        const reason = (m.payload.detail as { reason?: string } | undefined)?.reason;
+        if (m.payload.ref?.startsWith(ACTIVITY_REF) && reason === "jump" && !this.race) {
+          this.toast = { kind: "wait", at: now };
+          this.bump();
+        }
+        return;
+      }
       case "TILES": {
         const prev = this.tiles.get(m.payload.entity_id);
         this.tiles = new Map(this.tiles).set(m.payload.entity_id, { ...m.payload, at: now });

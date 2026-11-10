@@ -1,9 +1,10 @@
 /**
  * Proyectos de la comunidad (lectura pública), compartidos por el nexo 2D y las fichas de los
- * portales. Una sola petición cada 30 s como mucho: el servidor ya los cachea 10 s.
+ * portales. Llegan con el arranque (GET /boot, net/boot.ts); tras publicar o borrar, de GET /projects.
  */
 import { useSyncExternalStore } from "react";
 import { listProjects, type Project } from "./account";
+import { loadBoot, onBoot } from "./boot";
 
 let cache: Project[] | null = null;
 let loadedAt = 0;
@@ -16,21 +17,29 @@ function emit() {
   for (const fn of listeners) fn();
 }
 
+function adopt(list: Project[]): Project[] {
+  cache = list;
+  loadedAt = Date.now();
+  emit();
+  return list;
+}
+
+/** Sin `force`, los del arranque (como mucho de hace un minuto); con `force`, los de ahora mismo. */
 export function refreshProjects(force = false): Promise<Project[]> {
-  if (!force && cache && Date.now() - loadedAt < 30_000) return Promise.resolve(cache);
+  if (!force) {
+    if (cache && Date.now() - loadedAt < 60_000) return Promise.resolve(cache);
+    return loadBoot().then((b) => (b ? (cache ?? adopt(b.projects)) : refreshProjects(true)));
+  }
   pending ??= listProjects()
-    .then((list) => {
-      cache = list;
-      loadedAt = Date.now();
-      emit();
-      return list;
-    })
+    .then(adopt)
     .catch(() => cache ?? [])
     .finally(() => {
       pending = null;
     });
   return pending;
 }
+
+onBoot((b) => void adopt(b.projects));
 
 export function projectById(id: string): Project | null {
   return cache?.find((p) => p.id === id) ?? null;

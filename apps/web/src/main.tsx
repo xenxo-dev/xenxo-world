@@ -3,6 +3,8 @@ import { splashDone, splashProgress } from "./splash";
 import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { cardRoute } from "./net/card";
+import { appPath } from "./routes";
+import { Crash } from "./Crash";
 // Tipografías autoalojadas (sin CDN): Space Grotesk para titulares y carteles, Inter para el texto
 // y IBM Plex Mono para los datos técnicos.
 import "@fontsource-variable/inter";
@@ -12,7 +14,7 @@ import "@fontsource/ibm-plex-mono/500.css";
 import "./index.css";
 
 // xenxo.io/p/<n>: el carné público, sin cargar el mundo ni el panel.
-const cardNo = cardRoute(location.pathname);
+const cardNo = cardRoute(appPath());
 const App = lazy(() =>
   import("./App").then((m) => {
     splashProgress(0.3);
@@ -29,7 +31,9 @@ const CardPage = lazy(() =>
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <Suspense fallback={null}>{cardNo === null ? <App /> : <CardPage no={cardNo} />}</Suspense>
+    <Crash>
+      <Suspense fallback={null}>{cardNo === null ? <App /> : <CardPage no={cardNo} />}</Suspense>
+    </Crash>
   </StrictMode>,
 );
 

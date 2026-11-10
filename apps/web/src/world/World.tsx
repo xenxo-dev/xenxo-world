@@ -11,6 +11,8 @@ import { Entities, SkipOnError } from "./Entities";
 import { graphics, useGraphics, type Ambience, type Features } from "./graphics";
 import { attachDesktopInput, input } from "./input";
 import { PhotoTaker } from "./Photo";
+import { Recorder } from "./cine/Recorder";
+import { FRAME_PX, useCine } from "./cine/state";
 import { self } from "./self";
 import { setMaxAnisotropy, tickMaterials } from "./materials";
 import { Player } from "./Player";
@@ -444,6 +446,7 @@ function Scene({ active }: { active: boolean }) {
       {g.inXR && <VRTeleport />}
       <InputBinder active={active} />
       <PhotoTaker />
+      <Recorder fps={f.clipFps} />
       <MaterialClock />
       {f.post && !g.inXR && (
         <Suspense fallback={null}>
@@ -454,9 +457,29 @@ function Scene({ active }: { active: boolean }) {
   );
 }
 
+/** El tamaño de la ventana (para encajar el encuadre del modo cine). */
+function useWindowSize(): [number, number] {
+  const [size, setSize] = useState<[number, number]>([window.innerWidth, window.innerHeight]);
+  useEffect(() => {
+    const on = () => setSize([window.innerWidth, window.innerHeight]);
+    window.addEventListener("resize", on);
+    return () => window.removeEventListener("resize", on);
+  }, []);
+  return size;
+}
+
 export function World({ active, paused = false }: { active: boolean; paused?: boolean }) {
   const g = useGraphics();
   const f = g.features;
+  // Modo cine con encuadre (9:16, 16:9, 1:1): el canvas toma esa forma, centrado, y se dibuja a
+  // tamaño de vídeo (1080p) se vea al tamaño que se vea: así lo que se graba ya es el vídeo.
+  const c = useCine();
+  const [vw, vh] = useWindowSize();
+  const px = c.on && c.frame !== "free" && active && !g.inXR ? FRAME_PX[c.frame] : null;
+  // El alto, en píxeles enteros de pantalla; el ancho, el que le toca (puede llevar decimales). El
+  // pellizco de más es para que, al redondear hacia abajo, el canvas mida justo 1080 × 1920 (o lo que sea).
+  const high = px ? Math.floor(px[1] * Math.min(vw / px[0], vh / px[1])) : 0;
+  const box = px ? { width: (high * px[0]) / px[1] + 0.02, height: high } : null;
   // El MSAA del canvas no se puede cambiar en caliente: si cambia, se recrea. Nunca en VR: recrearlo
   // mata la sesión (al entrar desde un nivel sin MSAA, o si el nivel baja solo por los FPS).
   const aa = useRef(f.antialias);
@@ -465,8 +488,9 @@ export function World({ active, paused = false }: { active: boolean; paused?: bo
   return (
     <Canvas
       key={aa.current ? "aa" : "post"}
-      className="!absolute inset-0 touch-none"
-      dpr={f.dpr}
+      className={box ? "!absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 touch-none" : "!absolute inset-0 touch-none"}
+      style={box ?? undefined}
+      dpr={box && px ? px[1] / box.height + 1e-4 : f.dpr}
       shadows
       gl={{ antialias: aa.current, powerPreference: "high-performance" }}
       // Con un juego abierto encima, el mundo no se dibuja (la GPU es para el juego).

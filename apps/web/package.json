@@ -7,14 +7,16 @@
   "description": "Cliente web: panel 2D + plaza 3D (desktop, móvil y WebXR)",
   "scripts": {
     "dev": "vite",
-    "build": "node ../../tools/docs/build.mjs && npm run build -w @xenxo/sdk && tsc -p tsconfig.json && vite build",
+    "build": "node ../../tools/docs/build.mjs && npm run build -w @xenxo/sdk && tsc -p tsconfig.json && vite build && node ../../tools/share/build.mjs",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json",
     "test:vehicle": "tsx test/vehicle.mts",
     "test:ragdoll": "tsx test/ragdoll.mts",
     "test:citizens": "tsx test/citizens.mts",
     "test:parkour": "esbuild test/parkour.mts --bundle --platform=node --format=esm --define:import.meta.env={} --log-level=warning --outfile=node_modules/.cache/xenxo/parkour.mjs && node node_modules/.cache/xenxo/parkour.mjs",
-    "test:springs": "tsx test/springs.mts"
+    "test:springs": "tsx test/springs.mts",
+    "test:guide": "tsx test/guide.mts",
+    "test:cine": "esbuild test/cine.mts --bundle --platform=node --format=esm --define:import.meta.env={} --log-level=warning --outfile=node_modules/.cache/xenxo/cine.mjs && node node_modules/.cache/xenxo/cine.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "0.19.3",

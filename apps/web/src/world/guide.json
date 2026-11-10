@@ -1,0 +1,28 @@
+{
+  "$comment": "Qué hacer en cada distrito (la tarjeta del HUD, hud/GuideCard.tsx, y los enlaces /d/<distrito>/<sitio>). Cada sitio dice dónde se aparece: `at` (punto y giro en grados, como la cámara: 0 = mirando al norte), `race` (la salida de esa carrera de district-activities.json, mirando a su primer punto), `cabinet`, `board` o `label` (delante de esa máquina, marcador o cartel, por su posición en la lista) y `levels` (una fila de carreras; cada una es además un sitio). Los textos van en i18n.ts: `guide.<distrito>.<sitio>` y `guide.<distrito>.<sitio>.text`; `guide.<distrito>.tip` es la nota del pie. `npm run test:guide -w @xenxo/web` comprueba que cada sitio existe, cae en un hueco libre y tiene sus textos.",
+  "vertical": [
+    { "id": "patio", "at": [32, 0, 37.6], "yaw": 0 },
+    { "id": "niveles", "levels": ["nivel1", "nivel2", "nivel3", "nivel4", "nivel5", "nivel6"] },
+    { "id": "azoteas", "race": "azoteas" },
+    { "id": "mirador", "at": [0.9, 43.2, -0.3], "yaw": 90 }
+  ],
+  "arcade": [
+    { "id": "circuito", "race": "circuito" },
+    { "id": "maquinas", "cabinet": 0 },
+    { "id": "palanca", "at": [32, 0, 38], "yaw": 0 }
+  ],
+  "pixel": [
+    { "id": "tablero", "at": [32, 0, 32], "yaw": 0 },
+    { "id": "maquinas", "cabinet": 0 }
+  ],
+  "cero": [
+    { "id": "rastro", "at": [32, 0, 131], "yaw": 0 },
+    { "id": "torre", "at": [32, 0, 52], "yaw": 0 },
+    { "id": "club", "at": [75, 0, 8.8], "yaw": 0 }
+  ],
+  "taller": [
+    { "id": "zona", "at": [32, 0, 55], "yaw": 180 },
+    { "id": "paneles", "label": 0 },
+    { "id": "agentes", "board": 0 }
+  ]
+}

@@ -4,6 +4,8 @@
  */
 import { controls } from "../controls";
 import { toggleFullscreen } from "../fullscreen";
+import { toggleRecording } from "./cine/recorder";
+import { cine, nextCineCam, setCine, toggleCine } from "./cine/state";
 
 export const input = {
   /** Movimiento en ejes locales: x = derecha, y = adelante. Rango -1..1. */
@@ -138,6 +140,15 @@ export function attachDesktopInput(el: HTMLElement) {
     if (e.code === "KeyX" && !e.repeat) input.crouchPressed = true;
     if (e.code === "KeyZ" && !e.repeat) input.firePressed = true;
     if (e.code === "KeyT" && !e.repeat) input.nextWeapon = true;
+    // Modo cine (world/cine): K entra y sale; dentro, N cambia de cámara, L graba, B quita o pone
+    // al personaje y H esconde la barra.
+    if (e.code === "KeyK" && !e.repeat) toggleCine();
+    if (cine.on && !e.repeat) {
+      if (e.code === "KeyN") nextCineCam();
+      if (e.code === "KeyL") toggleRecording("cine");
+      if (e.code === "KeyB") setCine({ hideSelf: !cine.hideSelf });
+      if (e.code === "KeyH") setCine({ bar: !cine.bar });
+    }
     updateFromKeys();
   };
   const up = (e: KeyboardEvent) => {

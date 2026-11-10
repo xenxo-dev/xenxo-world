@@ -29,6 +29,8 @@ import { preloadParkour, UPPER_EMOTES } from "./animation";
 import { createParkour, parkourStep, resetParkour } from "./parkour/moves";
 import { gun, gunFrame, resetGun, SELF_GUN } from "./people/guns";
 import { HeldWeapon } from "./people/HeldWeapon";
+import { cineCamera } from "./cine/camera";
+import { cine } from "./cine/state";
 
 const WALK = 2.1; // m/s
 const RUN = 5.4;
@@ -112,7 +114,8 @@ export function Player({ active }: { active: boolean }) {
   const cam3 = useRef({ dist: CAM_DIST, y: spawn.p[1] });
   /** Altura a la que se dibuja el cuerpo: sube y baja los escalones con suavidad (la física salta). */
   const visY = useRef(spawn.p[1]);
-  const bodyYaw = useRef(0);
+  // Al llegar por un enlace directo (/d/<distrito>/<sitio>) ya se sabe hacia dónde se mira.
+  const bodyYaw = useRef(spawn.yaw);
   const emoteUntil = useRef(0);
   const lastEmote = useRef<string | null>(null);
   const inXR = useXR((s) => s.session != null);
@@ -171,6 +174,8 @@ export function Player({ active }: { active: boolean }) {
   useFrame((state, dt) => {
     const cam = state.camera;
     const l = look.current;
+    /** ¿Lleva la cámara este frame un plano del modo cine? (world/cine) */
+    let cineCam = false;
     /** Quién manda este frame: el personaje, la secuencia del coche o el volante (vehicle/drive.ts). */
     let mode: ReturnType<typeof carFrame> = "free";
 
@@ -456,6 +461,8 @@ export function Player({ active }: { active: boolean }) {
           cam.position.y += camKick.y * k;
           cam.position.z += camKick.z * k;
         }
+        // Modo cine: la cámara del plano (órbita, grúa, trípode, travelling) manda sobre la de siempre.
+        cineCam = cineCamera(cam as THREE.PerspectiveCamera, body.x, c3.y, body.z, l.yaw, state.clock.elapsedTime);
         }
       } else {
         // Detrás del panel 2D: paseo lento de cámara por dentro de la plaza, alrededor de la fuente.
@@ -489,8 +496,9 @@ export function Player({ active }: { active: boolean }) {
       self.driving = mode === "drive" || mode === "seated";
       self.fight = !!motion.fight;
       if (mode === "drive") self.wx = self.wz = 0;
-      // En primera persona no se dibuja el propio cuerpo (taparía la vista); en coche, tampoco.
-      avatar.current.visible = active && !view.firstPerson;
+      // En primera persona no se dibuja el propio cuerpo (taparía la vista); en coche, tampoco. Con
+      // una cámara de cine se ve desde fuera (salvo que el plano sea sin personaje).
+      avatar.current.visible = active && (cine.on ? !cine.hideSelf && (cineCam || !view.firstPerson) : !view.firstPerson);
 
       if (mode === "seated" || mode === "drive") {
         // Los pies (más la altura de los ojos) donde está sentado; el coche va aparte (`car`).

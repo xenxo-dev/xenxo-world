@@ -46,9 +46,11 @@ async function networkFirst(event) {
   try {
     const res = await fetch(event.request);
     // La SPA es siempre el mismo index.html: con una copia basta (solo rutas de la app, sin
-    // extensión, y solo si es HTML).
+    // extensión, y solo si es HTML). Las páginas de /d/… y /en son la misma aplicación con otra
+    // vista previa para las redes (tools/share): no se guardan como «la portada».
     const html = (res.headers.get("content-type") || "").includes("text/html");
-    if (res.ok && html && !/\.[a-z0-9]+$/i.test(new URL(event.request.url).pathname)) event.waitUntil(put(SHELL, "/", res.clone()));
+    const path = new URL(event.request.url).pathname;
+    if (res.ok && html && !/\.[a-z0-9]+$/i.test(path) && !/^\/(d|en)(\/|$)/.test(path)) event.waitUntil(put(SHELL, "/", res.clone()));
     return res;
   } catch {
     return (await caches.match("/", { cacheName: SHELL })) ?? Response.error();

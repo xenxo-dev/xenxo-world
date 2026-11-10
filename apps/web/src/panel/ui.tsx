@@ -1,5 +1,6 @@
 /** Piezas de interfaz compartidas por las secciones del panel. */
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { t } from "../i18n";
 
 export const card = "rounded-2xl border border-cal/10 bg-noche-2/70";
 export const input =
@@ -104,5 +105,26 @@ export function Label({ htmlFor, children }: { htmlFor: string; children: ReactN
     <label htmlFor={htmlFor} className="mb-1.5 mt-4 block text-sm text-cal/70 first:mt-0">
       {children}
     </label>
+  );
+}
+
+/** Un comando o un trozo de configuración, con su botón de copiar. */
+export function CopyBlock({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="relative mt-1">
+      <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-lg border border-cal/10 bg-noche/70 p-3 pr-16 font-mono text-xs text-cal/85">{text}</pre>
+      <button
+        onClick={() => {
+          void navigator.clipboard?.writeText(text).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          });
+        }}
+        className="absolute right-2 top-2 rounded-md bg-cal/10 px-2 py-0.5 text-xs text-cal/70 hover:text-cal"
+      >
+        {copied ? t("agentKeys.copied") : t("agentKeys.copy")}
+      </button>
+    </div>
   );
 }

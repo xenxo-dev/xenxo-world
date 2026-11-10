@@ -38,6 +38,8 @@ export function SandboxTools() {
     return () => clearInterval(id);
   }, [zone]);
   if (!zone || !inside) return null;
+  // Cerrada por moderación (interruptor de emergencia): lo puesto se queda, no se pone nada nuevo.
+  if (world.closed.includes("sandbox")) return <div className={`${box} pointer-events-auto absolute bottom-24 left-1/2 -translate-x-1/2 px-4 py-2 text-sm text-ocre`}>{t("sandbox.closed")}</div>;
   if (!user) return <div className={`${box} pointer-events-auto absolute bottom-24 left-1/2 -translate-x-1/2 px-4 py-2 text-sm text-cal`}>{t("sandbox.signIn")}</div>;
 
   const me = `usr_${user.id}`;

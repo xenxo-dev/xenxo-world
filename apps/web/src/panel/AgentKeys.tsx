@@ -2,32 +2,12 @@ import { useEffect, useState } from "react";
 import { REALTIME_URL } from "../config";
 import { errorText, t } from "../i18n";
 import { createAgentKey, listAgentKeys, revokeAgentKey, type AgentKey } from "../net/account";
-import { Button, card, input, Label, Notice } from "./ui";
+import { Button, card, CopyBlock, input, Label, Notice } from "./ui";
 
 /** Dónde se descarga el servidor MCP (un solo archivo, servido por la propia web). */
 const MCP_URL = `${typeof location !== "undefined" ? location.origin : "https://xenxo.io"}/mcp/xenxo-mcp.mjs`;
 /** Solo hace falta decir el servidor si no es el de producción. */
 const URL_ENV = REALTIME_URL === "https://api.xenxo.io" ? null : REALTIME_URL;
-
-function CopyBlock({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <div className="relative mt-1">
-      <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-lg border border-cal/10 bg-noche/70 p-3 pr-16 font-mono text-xs text-cal/85">{text}</pre>
-      <button
-        onClick={() => {
-          void navigator.clipboard?.writeText(text).then(() => {
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1500);
-          });
-        }}
-        className="absolute right-2 top-2 rounded-md bg-cal/10 px-2 py-0.5 text-xs text-cal/70 hover:text-cal"
-      >
-        {copied ? t("agentKeys.copied") : t("agentKeys.copy")}
-      </button>
-    </div>
-  );
-}
 
 /**
  * «Construir con tu agente»: claves de parcela de un proyecto (crear, ver cómo conectarla con
