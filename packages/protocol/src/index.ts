@@ -762,6 +762,12 @@ export const WelcomeMsg = envelope(
      * las cuentas, las de su inventario). Sin el campo, aquí no hay armas.
      */
     weapons: z.array(WeaponIdSchema).optional(),
+    /**
+     * Lo que moderación tiene cerrado aquí ahora mismo (interruptores de emergencia): `chat` (nadie
+     * escribe) y `sandbox` (no se ponen piezas en la zona de pruebas). Quien lo intente recibe
+     * `forbidden` con `detail.reason = "closed"`. Sin el campo, todo abierto.
+     */
+    closed: z.array(z.enum(["chat", "sandbox"])).optional(),
   }),
 );
 

@@ -2,11 +2,12 @@
  * Banco de conformidad del protocolo v0.
  *
  *   XENXO_URL=http://localhost:8787 XENXO_AGENT_KEY=... npm run conformance
+ *   XENXO_ONLY=chat npm run conformance     (solo los escenarios con «chat» en el nombre)
  *
  * Sale con código 1 si algún escenario falla. Es la red de seguridad para que
  * cualquier cambio (tuyo o de una IA) no rompa el contrato.
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { AVATAR_PRESETS } from "../../realtime/src/avatar-presets";
 import { BUDGETS, Emote, EMOTES, GameManifest, isWeaponId, LabelV1, msg, PLACES, WEAPON_IDS, WEAPONS } from "@xenxo/protocol";
@@ -38,7 +39,10 @@ async function freeSpot(order = ["arcade", "pixel", "cero", "taller"]): Promise<
 }
 
 let failed = 0;
+/** XENXO_ONLY=<texto>: solo los escenarios cuyo nombre lo contenga (para repetir uno mientras se trabaja en él). */
+const only = process.env.XENXO_ONLY?.toLowerCase();
 async function scenario(name: string, fn: () => Promise<void>, timeoutMs = 15_000) {
+  if (only && !name.toLowerCase().includes(only)) return;
   try {
     await Promise.race([
       fn(),
@@ -54,6 +58,8 @@ function assert(cond: unknown, why: string): asserts cond {
   if (!cond) throw new Error(why);
 }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** El código HTTP de una llamada de `Api` (200 si fue bien). */
+const httpStatus = (r: { ok: boolean }) => (r.ok ? 200 : (r as unknown as { status: number }).status);
 
 /**
  * Ir andando (o corriendo) de `from` a `to` mandando poses cada `stepMs`: el servidor no admite
@@ -2542,6 +2548,227 @@ await scenario("Entrar con xenxo dentro de xenxo: el permiso viaja por postMessa
   const bad = await new Api(baseUrl).call<{ error: string }>("GET", `/oidc/request/${loc.searchParams.get("autorizar")}`);
   assert(bad.ok && bad.data.error === "invalid_request", "web_message fuera de xenxo → invalid_request");
   await dev.call("DELETE", `/projects/${projectId}`);
+});
+
+await scenario("arranque: GET /boot trae en una petición lo que el panel pedía en seis (distritos, proyectos, jams, marcadores, quién hay e interruptores)", async () => {
+  const r = await fetch(new URL("/boot", baseUrl));
+  assert(r.ok, `GET /boot (${r.status})`);
+  assert(/max-age=\d+/.test(r.headers.get("Cache-Control") ?? ""), "se puede guardar en la caché unos segundos");
+  const b = (await r.json()) as {
+    districts: { id: string; chunk_id: string; parcels: unknown[] }[];
+    projects: { id: string }[];
+    jams: unknown[];
+    scores: { districts: { id: string; boards: unknown[] }[] };
+    live: { online: number; agents_online: number; entities: number; recent_events: unknown[] } | null;
+    flags: Record<string, boolean>;
+    at: number;
+  };
+  const d = (await (await fetch(new URL("/districts", baseUrl))).json()) as { districts: { id: string }[] };
+  assert(b.districts.length > 0 && d.districts.every((x) => b.districts.some((y) => y.id === x.id)), "los mismos distritos que /districts");
+  assert(Array.isArray(b.projects) && Array.isArray(b.jams), "proyectos y jams");
+  assert(b.scores.districts.some((x) => x.boards.length > 0), "los marcadores de los distritos");
+  assert(b.live !== null && Number.isInteger(b.live.online) && b.live.entities > 0, "cuánta gente hay y qué hay construido");
+  assert(["signups", "chat", "sandbox"].every((k) => typeof b.flags[k] === "boolean"), "los interruptores de emergencia");
+  assert(!JSON.stringify(b).includes("usr_") || !/usr_[A-Za-z0-9_-]{6,}/.test(JSON.stringify(b)), "sin ids internos de nadie");
+});
+
+await scenario("contadores de visitas: sumas por día de visitas, entradas, lugares y cuentas, con la etiqueta del enlace; solo los ve moderación", async () => {
+  const guest = new Api(baseUrl, ((await (await fetch(new URL("/auth/guest", baseUrl), { method: "POST" })).json()) as { token: string }).token);
+  const denied = await guest.call("GET", "/mod/stats");
+  assert(!denied.ok && denied.status === 403, "sin moderación, nada");
+  if (!adminKey) return console.log("    (sin XENXO_ADMIN_KEY: se omite)");
+  const admin = new Api(baseUrl);
+  await admin.agentToken(adminKey);
+  type Rows = { rows: { day: string; event: string; tag: string; n: number }[] };
+  const count = async (event: string, tag: string) => {
+    const s = await admin.call<Rows>("GET", "/mod/stats?days=1");
+    assert(s.ok, "GET /mod/stats");
+    return s.data.rows.filter((r) => r.event === event && r.tag === tag).reduce((n, r) => n + r.n, 0);
+  };
+  const tag = `conf-${randomUUID().slice(0, 8)}`;
+  // Lo que hayan dejado contado los escenarios de antes termina de apuntarse antes de mirar.
+  await sleep(1200);
+  const before = { odd: await count("visit", "-"), plaza: await count("place", "plaza") };
+  // Una visita con su etiqueta, otra con una etiqueta que no vale (cae en «sin etiqueta») y una que no es la primera.
+  assert((await fetch(new URL(`/boot?first=1&src=${tag}`, baseUrl))).ok, "visita con etiqueta");
+  assert((await fetch(new URL(`/boot?first=1&src=${encodeURIComponent("<script>")}`, baseUrl))).ok, "visita con etiqueta rara");
+  assert((await fetch(new URL(`/boot?src=${tag}`, baseUrl))).ok, "un refresco no es otra visita");
+  // Entra en la plaza (cuenta la entrada, con la etiqueta, y el lugar) y crea una cuenta.
+  const c = await XenxoClient.connect({ baseUrl, src: tag });
+  const opts = await new Api(baseUrl).call<{ flow_id: string; options: never }>("POST", "/auth/passkey/register/options", { display_name: `conf ${tag.slice(5)}`, age_confirmed: true, accept_terms: "2026-10" });
+  assert(opts.ok, "alta: opciones");
+  const made = await new Api(baseUrl).call("POST", "/auth/passkey/register/verify", { flow_id: opts.data.flow_id, response: await new SoftwarePasskey("http://localhost:5173").create(opts.data.options), src: tag });
+  assert(made.ok, "alta con etiqueta");
+  c.close();
+  // El Worker junta lo contado unos segundos antes de apuntarlo (en local, medio segundo).
+  let visits = 0;
+  for (let i = 0; i < 40 && visits < 1; i++) {
+    await sleep(500);
+    visits = await count("visit", tag);
+  }
+  assert(visits === 1, `una visita con la etiqueta (hay ${visits})`);
+  assert((await count("visit", "-")) === before.odd + 1, "la etiqueta rara cuenta como visita sin etiqueta");
+  assert((await count("enter", tag)) === 1, "una entrada al mundo con la etiqueta");
+  assert((await count("place", "plaza")) === before.plaza + 1, "y en la plaza");
+  assert((await count("signup", tag)) === 1, "una cuenta nueva con la etiqueta");
+  const all = await admin.call<Rows>("GET", "/mod/stats?days=1");
+  const raw = JSON.stringify(all.ok ? all.data : null);
+  assert(!/usr_|g_[A-Za-z0-9_-]{6,}/.test(raw), "son sumas: ni cuentas ni sesiones");
+});
+
+await scenario("interruptores de emergencia: moderación cierra al momento el chat, la zona de pruebas y las altas (y los vuelve a abrir); queda en el registro", async () => {
+  const guest = new Api(baseUrl, ((await (await fetch(new URL("/auth/guest", baseUrl), { method: "POST" })).json()) as { token: string }).token);
+  const denied = await guest.call("PUT", "/mod/flags", { chat: false });
+  assert(!denied.ok && denied.status === 403, "sin moderación, nada");
+  if (!adminKey) return console.log("    (sin XENXO_ADMIN_KEY: se omite)");
+  const admin = new Api(baseUrl);
+  await admin.agentToken(adminKey);
+  type Info = { flags: Record<string, boolean>; closed_at: Record<string, number>; changed?: string[] };
+  const api = new Api(baseUrl);
+  await api.register(`conf ${randomUUID().slice(0, 6)}`);
+  const T = (p: [number, number, number]) => ({ p, r: [0, 0, 0, 1], s: [1, 1, 1], parent: null });
+  const piece = { "transform@1": T([30, 0.5, 66]), "primitive@1": { shape: "box", size: [1, 1, 1], color: "#4fa3ff" } };
+  try {
+    const bad = await admin.call("PUT", "/mod/flags", { chat: "no" });
+    assert(!bad.ok && bad.status === 400, "true o false, nada más");
+    const shut = await admin.call<Info>("PUT", "/mod/flags", { chat: false, sandbox: false, signups: false, note: "prueba de conformidad" });
+    assert(shut.ok && !shut.data.flags.chat && !shut.data.flags.sandbox && !shut.data.flags.signups, `cerrados (${JSON.stringify(shut)})`);
+    assert(shut.data.changed?.length === 3 && shut.data.closed_at.chat! > Date.now() - 60_000, "dice qué ha cambiado y desde cuándo");
+    // Chat: quien entra lo sabe (WELCOME.closed) y quien escribe recibe forbidden con su motivo.
+    const me = await XenxoClient.connect({ baseUrl, token: api.token });
+    assert(me.welcome.closed?.includes("chat"), `WELCOME.closed en la plaza (${JSON.stringify(me.welcome.closed)})`);
+    const said = await me.chat("¿hay alguien?");
+    assert(said.type === "ERROR" && said.payload.code === "forbidden" && (said.payload.detail as { reason?: string } | undefined)?.reason === "closed", `chat cerrado (${JSON.stringify(said.payload)})`);
+    me.close();
+    // Zona de pruebas (Taller): no se pone nada.
+    const w = await XenxoClient.connect({ baseUrl, chunkId: "c_0_-1", token: api.token });
+    assert(w.welcome.closed?.includes("sandbox"), "WELCOME.closed en el Taller");
+    const put = await w.mutate({ op: "SPAWN", components: piece });
+    assert(put.type === "ERROR" && put.payload.code === "forbidden" && (put.payload.detail as { reason?: string } | undefined)?.reason === "closed", `zona de pruebas cerrada (${JSON.stringify(put.payload)})`);
+    w.close();
+    // El nexo no tiene ni chat ni zona de pruebas: no dice nada.
+    const n = await XenxoClient.connect({ baseUrl, chunkId: PLACES.nexo });
+    assert(!n.welcome.closed, "en el nexo no hay nada que cerrar");
+    n.close();
+    // Altas: ni empezar una. Entrar con una cuenta que ya existe, sí.
+    const reg = await new Api(baseUrl).call("POST", "/auth/passkey/register/options", { display_name: "conf cerrada", age_confirmed: true, accept_terms: "2026-10" });
+    assert(!reg.ok && reg.status === 403 && reg.error === "signups_closed", `altas cerradas (${JSON.stringify(reg)})`);
+    assert((await api.call("GET", "/me")).ok, "quien ya tiene cuenta sigue dentro");
+    // El panel lo sabe por el arranque.
+    let flags: Record<string, boolean> = {};
+    for (let i = 0; i < 10 && flags.signups !== false; i++) {
+      await sleep(300);
+      flags = ((await (await fetch(new URL("/boot", baseUrl))).json()) as { flags: Record<string, boolean> }).flags;
+    }
+    assert(flags.signups === false && flags.chat === false, "GET /boot dice lo que hay cerrado");
+  } finally {
+    await admin.call("PUT", "/mod/flags", { chat: true, sandbox: true, signups: true });
+  }
+  const open = await admin.call<Info>("GET", "/mod/flags");
+  assert(open.ok && open.data.flags.chat && open.data.flags.sandbox && open.data.flags.signups && !Object.keys(open.data.closed_at).length, "abiertos otra vez");
+  const me = await XenxoClient.connect({ baseUrl, token: api.token });
+  assert(!me.welcome.closed, "WELCOME sin nada cerrado");
+  const said = await me.chat("ya se puede");
+  assert(said.type === "CHAT_MSG", "el chat vuelve");
+  me.close();
+  const w = await XenxoClient.connect({ baseUrl, chunkId: "c_0_-1", token: api.token });
+  const put = await w.mutate({ op: "SPAWN", components: piece });
+  assert(put.type === "ACK", `la zona de pruebas vuelve (${JSON.stringify(put.payload)})`);
+  await w.mutate({ op: "DESPAWN", entity_id: put.payload.entity_id, base_rev: 1 });
+  w.close();
+  const log = await admin.call<{ log: { action: string; target_type: string; target_id: string; note: string | null }[] }>("GET", "/mod/log");
+  assert(log.ok && log.data.log.some((l) => l.action === "flag_close" && l.target_id === "chat" && l.note === "prueba de conformidad") && log.data.log.some((l) => l.action === "flag_open" && l.target_id === "chat"), "cada cambio, en el registro de moderación");
+}, 30_000);
+
+await scenario("copia propia: con su permiso, el Directory sale por páginas (sin claves privadas) y cada lugar con lo de la gente; lo restaurado se comprueba", async () => {
+  const guest = new Api(baseUrl, ((await (await fetch(new URL("/auth/guest", baseUrl), { method: "POST" })).json()) as { token: string }).token);
+  const denied = await guest.call("GET", "/admin/backup");
+  assert(!denied.ok && denied.status === 403, "un invitado no ve la copia");
+  assert(!(await new Api(baseUrl).call("GET", "/admin/backup/directory/users")).ok, "sin clave, tampoco");
+  const user = new Api(baseUrl);
+  await user.register(`conf ${randomUUID().slice(0, 6)}`);
+  assert(httpStatus(await user.call("GET", "/admin/backup")) === 403 && httpStatus(await user.call("POST", "/admin/restore/directory/users", { rows: [] })) === 403, "una cuenta cualquiera, tampoco");
+  if (!adminKey) return console.log("    (sin XENXO_ADMIN_KEY: se omite)");
+  const admin = new Api(baseUrl);
+  await admin.agentToken(adminKey);
+  const man = await admin.call<{ directory: { table: string; rows: number }[]; chunks: string[] }>("GET", "/admin/backup");
+  // Fuera de local, la clave de administración no sirve para esto: hace falta una con el permiso `backup`.
+  if (!man.ok && man.status === 403) return console.log("    (esta clave no tiene el permiso backup: se omite)");
+  assert(man.ok, "GET /admin/backup");
+  const tables = man.data.directory.map((t) => t.table);
+  assert(tables.includes("users") && tables.includes("projects") && tables.includes("oidc_secrets"), "las tablas con lo de la gente");
+  assert(!tables.some((t) => ["oidc_keys", "node_key", "flows", "oidc_pending"].includes(t)), "sin claves privadas ni lo que caduca solo");
+  assert(man.data.chunks.includes(PLACES.plaza) && man.data.chunks.includes(PLACES.nexo), "y todos los lugares");
+  assert(httpStatus(await admin.call("GET", "/admin/backup/directory/oidc_keys")) === 404, "una tabla que no va en la copia no se puede pedir");
+  // Por páginas, sin repetir filas.
+  type Page = { rows: { id: string }[]; next: number | null };
+  const p1 = await admin.call<Page>("GET", "/admin/backup/directory/users?limit=2");
+  assert(p1.ok && p1.data.rows.length === 2 && p1.data.next !== null, "primera página");
+  const p2 = await admin.call<Page>("GET", `/admin/backup/directory/users?after=${p1.data.next}&limit=2`);
+  assert(p2.ok && p2.data.rows.length > 0 && !p2.data.rows.some((r) => p1.data.rows.some((q) => q.id === r.id)), "la siguiente sigue donde quedó");
+  // Un lugar: lo que ha puesto la gente (nada del sistema).
+  const dump = await admin.call<{ chunk: string; entities: { owner: string }[]; stands: unknown[]; chat: unknown[] }>("GET", `/admin/backup/chunk/${PLACES.plaza}`);
+  assert(dump.ok && dump.data.chunk === PLACES.plaza && Array.isArray(dump.data.chat) && dump.data.entities.every((e) => e.owner !== "system"), "el volcado de la plaza");
+  assert(httpStatus(await admin.call("GET", "/admin/backup/chunk/c_77_77")) === 404, "un lugar inventado no existe");
+  // Restaurar: filas (solo tablas y columnas de la copia), un archivo (se comprueba su hash y se mide) y un lugar.
+  const day = "2000-01-01";
+  const row = { day, event: "visit", tag: `conf-${randomUUID().slice(0, 6)}`, n: 7, columna_inventada: "x" };
+  const put = await admin.call<{ written: number }>("POST", "/admin/restore/directory/stats", { rows: [row] });
+  assert(put.ok && put.data.written === 1, `restaurar una fila (${JSON.stringify(put)})`);
+  let found = false;
+  for (let after = 0, i = 0; i < 50 && !found; i++) {
+    const page = await admin.call<{ rows: { day: string; tag: string; n: number }[]; next: number | null }>("GET", `/admin/backup/directory/stats?after=${after}`);
+    assert(page.ok, "leer stats");
+    found = page.data.rows.some((r) => r.day === day && r.tag === row.tag && r.n === 7);
+    if (page.data.next === null) break;
+    after = page.data.next;
+  }
+  assert(found, "la fila restaurada está");
+  assert(httpStatus(await admin.call("POST", "/admin/restore/directory/oidc_keys", { rows: [] })) === 404, "no se restaura una tabla que no va en la copia");
+  assert(httpStatus(await admin.call("POST", "/admin/restore/directory/stats", { rows: [{ day, event: "visit", tag: { $ne: 1 }, n: 1 }] })) === 400, "un valor que no es texto ni número, no");
+  const glb = await makeBoxGlb({ color: [Math.random(), Math.random(), Math.random(), 1] });
+  const hex = createHash("sha256").update(glb).digest("hex");
+  const asset = (h: string, kind: string) =>
+    fetch(new URL(`/admin/restore/asset/${h}`, baseUrl), {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${admin.token}`, "Content-Type": "model/gltf-binary", "X-Asset-Meta": encodeURIComponent(JSON.stringify({ kind, tris: "999999" })) },
+      body: glb as Uint8Array<ArrayBuffer>,
+    });
+  assert((await asset("0".repeat(64), "model")).status === 422, "un archivo que no es el de su hash, no");
+  assert((await asset(hex, "virus")).status === 400, "ni uno sin saber para qué era");
+  assert((await asset(hex, "model")).status === 201, "el archivo vuelve");
+  const meta = (await (await fetch(new URL(`/assets/${hex}/meta`, baseUrl))).json()) as { customMetadata: { tris: string; kind: string } };
+  assert(meta.customMetadata.kind === "model" && meta.customMetadata.tris !== "999999" && Number(meta.customMetadata.tris) > 0, "y sus medidas las pone el servidor, no la copia");
+  const wrong = await admin.call("POST", `/admin/restore/chunk/${PLACES.plaza}`, { ...dump.data, chunk: "c_0_-1" });
+  assert(!wrong.ok && wrong.status === 400, "la copia de otro lugar no entra aquí");
+  const back = await admin.call<{ entities: number }>("POST", `/admin/restore/chunk/${PLACES.plaza}`, dump.data);
+  assert(back.ok && back.data.entities === dump.data.entities.length, "la plaza, restaurada con lo mismo que tenía");
+  const again = await admin.call<{ entities: unknown[] }>("GET", `/admin/backup/chunk/${PLACES.plaza}`);
+  assert(again.ok && again.data.entities.length === dump.data.entities.length, "y queda igual");
+  assert((await admin.call("POST", "/admin/restore/finish", {})).ok, "al acabar se vuelve a colocar el escaparate");
+}, 30_000);
+
+await scenario("día de corte: cuando el plan gratuito corta, la API contesta 503 over_capacity y /health lo dice (en local, simulado)", async () => {
+  const h0 = (await (await fetch(new URL("/health", baseUrl))).json()) as { ok: boolean; capacity?: string };
+  assert(h0.ok && h0.capacity === undefined, "en un día normal, /health no dice nada de cupos");
+  if (!adminKey) return console.log("    (sin XENXO_ADMIN_KEY: se omite)");
+  const admin = new Api(baseUrl);
+  await admin.agentToken(adminKey);
+  const on = await admin.call("POST", "/admin/capacity", { full: true });
+  if (!on.ok) return console.log("    (solo se simula en local: se omite)");
+  try {
+    const h = (await (await fetch(new URL("/health", baseUrl))).json()) as { capacity?: string; until?: number };
+    assert(h.capacity === "full" && h.until! > Date.now() && h.until! <= Date.now() + 86_400_000, `/health dice que está lleno y hasta cuándo (${JSON.stringify(h)})`);
+    const g = await fetch(new URL("/auth/guest", baseUrl), { method: "POST" });
+    const body = (await g.json()) as { error: string; until: number };
+    assert(g.status === 503 && body.error === "over_capacity" && body.until === h.until, "las peticiones contestan 503 over_capacity");
+    assert(Number(g.headers.get("Retry-After")) >= 60, "con Retry-After");
+    assert((await fetch(new URL("/boot", baseUrl))).status === 503, "también el arranque");
+  } finally {
+    await admin.call("POST", "/admin/capacity", { full: false });
+  }
+  const h1 = (await (await fetch(new URL("/health", baseUrl))).json()) as { capacity?: string };
+  assert(h1.capacity === undefined && (await fetch(new URL("/auth/guest", baseUrl), { method: "POST" })).ok, "y al volver, todo sigue");
 });
 
 await scenario("limpieza: lo subido que nada usa se borra pasados 7 días; lo que se usa, no", async () => {

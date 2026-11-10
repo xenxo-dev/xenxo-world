@@ -207,6 +207,42 @@ export async function forgetAssets(bucket: R2Bucket, reqUrl: string, hashes: str
   }
 }
 
+/**
+ * Restaurar una copia (tools/backup): vuelve a poner un archivo que ya estuvo aquí. Como al subirlo,
+ * el servidor no se fía de lo que le digan: comprueba que el contenido es el de ese hash y lo mide
+ * otra vez; de la copia solo toma para qué era (`kind`). No aplica los presupuestos de hoy (se
+ * aceptó en su día), pero sí la inspección: lo que no sea un GLB o una imagen de verdad no entra.
+ */
+export async function restoreAsset(bucket: R2Bucket, hex: string, bytes: Uint8Array, kind: unknown): Promise<UploadOutcome> {
+  const hash = await sha256Hash(bytes);
+  if (hash !== `sha256:${hex}`) return { ok: false, status: 422, error: "hash_mismatch", message: "el contenido no es el de ese hash" };
+  const cache = { cacheControl: "public, max-age=31536000, immutable" };
+  if (kind === "cover" || kind === "portrait") {
+    const media = sniffImage(bytes);
+    const dims = media ? imageSize(bytes) : null;
+    if (!media || !dims) return { ok: false, status: 422, error: "bad_image", message: "debe ser una imagen WebP, JPEG o PNG" };
+    await bucket.put(assetKey(hash), bytes, {
+      httpMetadata: { contentType: media, ...cache },
+      customMetadata: { kind, format: "image", bytes: String(bytes.byteLength), width: String(dims[0]), height: String(dims[1]) },
+    });
+    return { ok: true, data: { hash, kind, format: "image", media, triangles: 0, bytes: bytes.byteLength, bounds: null, existed: false } };
+  }
+  if (kind !== "avatar" && kind !== "model" && kind !== "monument") return { ok: false, status: 400, error: "bad_kind", message: "kind debe ser avatar, model, monument, cover o portrait" };
+  let report;
+  try {
+    report = inspectGlb(bytes);
+  } catch (e) {
+    if (e instanceof GlbError) return { ok: false, status: 422, error: e.code, message: e.message, detail: e.detail };
+    throw e;
+  }
+  const format = report.isVrm ? "vrm" : "glb";
+  await bucket.put(assetKey(hash), bytes, {
+    httpMetadata: { contentType: GLB_MEDIA, ...cache },
+    customMetadata: { kind, format, tris: String(report.triangles), bytes: String(report.bytes), bounds: JSON.stringify(report.bounds) },
+  });
+  return { ok: true, data: { hash, kind, format, media: GLB_MEDIA, triangles: report.triangles, bytes: report.bytes, bounds: report.bounds, existed: false } };
+}
+
 /** Metadatos guardados al subir (los usa el Directory para validar avatares y proyectos). */
 export async function assetMeta(bucket: R2Bucket, hash: string) {
   const head = await bucket.head(assetKey(hash));

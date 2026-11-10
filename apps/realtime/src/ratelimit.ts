@@ -14,10 +14,11 @@ export interface RateLimiter {
   limit(o: { key: string }): Promise<{ success: boolean }>;
 }
 
-export type LimitKind = "auth" | "guest" | "report" | "oidc" | "upload";
+export type LimitKind = "auth" | "guest" | "report" | "oidc" | "upload" | "visit";
 
 /** Peticiones por minuto y dirección de red (el respaldo en memoria; el binding lleva las suyas). */
-const PER_MINUTE: Record<LimitKind, number> = { auth: 30, guest: 20, report: 10, oidc: 60, upload: 30 };
+// `visit` no corta nada: decide si una visita se suma al contador (nadie lo infla a base de recargar).
+const PER_MINUTE: Record<LimitKind, number> = { auth: 30, guest: 20, report: 10, oidc: 60, upload: 30, visit: 6 };
 
 const memory = new Map<string, { n: number; until: number }>();
 

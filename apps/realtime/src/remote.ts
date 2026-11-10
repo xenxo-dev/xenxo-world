@@ -126,4 +126,4 @@ export function chunkList(v: string | undefined): { has(id: string): boolean } {
 }
 
 /** Métodos del chunk que el Worker puede llamar en otro servidor (y nada más). */
-export const REMOTE_METHODS = new Set(["stateRev", "placeStand", "removeStand", "purgeOwner", "kick", "chatMessage", "chatOf", "hideChat", "dumpState", "loadState", "installDistrict", "activityOf", "syncCabinets", "syncBillboards", "clearSandbox", "boardsOf"]);
+export const REMOTE_METHODS = new Set(["stateRev", "placeStand", "removeStand", "purgeOwner", "kick", "chatMessage", "chatOf", "hideChat", "dumpState", "loadState", "installDistrict", "activityOf", "syncCabinets", "syncBillboards", "clearSandbox", "setFlags", "boardsOf"]);

@@ -38,6 +38,10 @@ import type { DistrictSubmission } from "@xenxo/protocol";
 import { BADGES, badgeInfo } from "./badges";
 import { badJamDates, JAM_SCHEMA, jamPhase, jamRanking, jamText, jamTime, MAX_ENTRIES_PER_USER, validJamSlug, type Jam, type JamResult } from "./jam";
 import type { GameManifest } from "@xenxo/protocol";
+import {
+  BACKUP_PAGE_BYTES, BACKUP_PAGE_ROWS, BACKUP_TABLES, FLAG_NAMES, isBackupTable, OTHER_TAG, STAT_EVENTS, STATS_KEEP_DAYS, STATS_TAGS_PER_DAY, statsDay, statTag,
+  type FlagName, type Flags, type StatEvent,
+} from "./ops";
 
 export const TERMS_VERSION = "2026-10";
 const FLOW_TTL_MS = 5 * 60 * 1000;
@@ -278,6 +282,12 @@ export class Directory extends DurableObject<Env> {
     `);
     // Distritos de la comunidad (ver community.ts).
     this.sql.exec(COMMUNITY_SCHEMA);
+    // Operar (ops.ts): interruptores de emergencia (una fila por lo que está cerrado) y contadores
+    // de visitas por día (sumas: nunca quién).
+    this.sql.exec(`
+      CREATE TABLE IF NOT EXISTS flags (k TEXT PRIMARY KEY, at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS stats (day TEXT NOT NULL, event TEXT NOT NULL, tag TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (day, event, tag));
+    `);
     // Migración: tamaño de cada subida (para los topes de almacenamiento).
     const cols = this.sql.exec<{ name: string }>("PRAGMA table_info(uploads)").toArray().map((c) => c.name);
     if (!cols.includes("bytes")) this.sql.exec("ALTER TABLE uploads ADD COLUMN bytes INTEGER NOT NULL DEFAULT 0");
@@ -366,7 +376,7 @@ export class Directory extends DurableObject<Env> {
     return n;
   }
 
-  private createUser(id: string, name: string, now: number) {
+  private createUser(id: string, name: string, now: number, src?: unknown) {
     this.sql.exec(
       "INSERT INTO users (id, display_name, created_at, terms_version, age_confirmed, player_no) VALUES (?, ?, ?, ?, 1, ?)",
       id,
@@ -375,6 +385,13 @@ export class Directory extends DurableObject<Env> {
       TERMS_VERSION,
       this.takePlayerNo(),
     );
+    // Cuántas cuentas nacen cada día y de qué enlace venían (una suma: no queda con la cuenta).
+    this.bumpStat("signup", src);
+  }
+
+  /** Altas cerradas por moderación (interruptor de emergencia): quien ya tiene cuenta entra igual. */
+  private signupsClosed(): Fail | null {
+    return this.flags().signups ? null : fail(403, "signups_closed", "ahora mismo no se pueden crear cuentas nuevas; vuelve a intentarlo más tarde");
   }
 
   /**
@@ -430,6 +447,8 @@ export class Directory extends DurableObject<Env> {
     if (!name) return badName(body.display_name);
     if (body.age_confirmed !== true) return fail(400, "age_required", "hace falta tener 14 años o más para crear una cuenta");
     if (body.accept_terms !== TERMS_VERSION) return fail(400, "terms_required", "acepta las condiciones y la política de privacidad vigentes", { terms_version: TERMS_VERSION });
+    const closed = this.signupsClosed();
+    if (closed) return closed;
     const busy = this.flowsBusy();
     if (busy) return busy;
 
@@ -448,9 +467,11 @@ export class Directory extends DurableObject<Env> {
     return ok({ flow_id: flow, options });
   }
 
-  async registerVerify(body: { flow_id?: unknown; response?: unknown }): Promise<Result<UserRow>> {
+  async registerVerify(body: { flow_id?: unknown; response?: unknown; src?: unknown }): Promise<Result<UserRow>> {
     const flow = this.takeFlow(body.flow_id, "register");
     if (!flow || !flow.user_id || !flow.display_name) return fail(400, "flow_expired", "el alta caducó; vuelve a empezar");
+    const closed = this.signupsClosed();
+    if (closed) return closed;
     let verification;
     try {
       verification = await verifyRegistrationResponse({
@@ -467,7 +488,7 @@ export class Directory extends DurableObject<Env> {
     const { credential } = verification.registrationInfo;
     const now = Date.now();
     this.ctx.storage.transactionSync(() => {
-      this.createUser(flow.user_id!, flow.display_name!, now);
+      this.createUser(flow.user_id!, flow.display_name!, now, body.src);
       this.sql.exec(
         "INSERT INTO credentials (id, user_id, public_key, counter, transports, created_at) VALUES (?, ?, ?, ?, ?, ?)",
         credential.id,
@@ -609,6 +630,8 @@ export class Directory extends DurableObject<Env> {
      * con un enlace (ni vincular su Google a la cuenta de otro).
      */
     bind_hash?: unknown;
+    /** Etiqueta del enlace por el que llegó (?v=…): solo para el contador de cuentas nuevas. */
+    src?: unknown;
   }): Promise<Result<{ state: string; nonce: string; code_challenge: string }>> {
     const mode = input.mode;
     if (mode !== "login" && mode !== "register" && mode !== "link") return fail(400, "bad_message", "mode: login, register o link");
@@ -623,6 +646,8 @@ export class Directory extends DurableObject<Env> {
       if (!name) return badName(input.display_name);
       if (input.age_confirmed !== true) return fail(400, "age_required", "hace falta tener 14 años o más para crear una cuenta");
       if (input.accept_terms !== TERMS_VERSION) return fail(400, "terms_required", "acepta las condiciones y la política de privacidad vigentes");
+      const closed = this.signupsClosed();
+      if (closed) return closed;
     }
     if (mode === "link" && (!input.userId || !this.user(input.userId))) return fail(401, "unauthorized", "inicia sesión para vincular Google");
     const state = randomId("g_", 24);
@@ -633,7 +658,7 @@ export class Directory extends DurableObject<Env> {
     this.insertFlow(
       state,
       "google",
-      JSON.stringify({ verifier, nonce, mode, origin: input.origin, bind: input.bind_hash }),
+      JSON.stringify({ verifier, nonce, mode, origin: input.origin, bind: input.bind_hash, ...(mode === "register" ? { src: statTag(input.src) } : {}) }),
       mode === "link" ? input.userId! : null,
       name,
     );
@@ -660,7 +685,7 @@ export class Directory extends DurableObject<Env> {
   googleFlow(state: unknown) {
     const f = this.takeFlow(state, "google");
     if (!f) return null;
-    const data = JSON.parse(f.challenge) as { verifier: string; nonce: string; mode: "login" | "register" | "link"; origin: string; bind?: string };
+    const data = JSON.parse(f.challenge) as { verifier: string; nonce: string; mode: "login" | "register" | "link"; origin: string; bind?: string; src?: string };
     return { ...data, user_id: f.user_id, display_name: f.display_name };
   }
 
@@ -671,7 +696,7 @@ export class Directory extends DurableObject<Env> {
    * que empezó el viaje.
    */
   async googleComplete(
-    flow: { mode: "login" | "register" | "link"; user_id: string | null; display_name: string | null; bind?: string },
+    flow: { mode: "login" | "register" | "link"; user_id: string | null; display_name: string | null; bind?: string; src?: string },
     googleSub: string,
   ): Promise<Result<{ code: string; link: boolean }>> {
     const subject = await sha256Hex(`xenxo-google:${googleSub}`);
@@ -688,9 +713,11 @@ export class Directory extends DurableObject<Env> {
     if (owner) {
       userId = owner;
     } else if (flow.mode === "register" && flow.display_name) {
+      const closed = this.signupsClosed();
+      if (closed) return closed;
       userId = randomId("", 12);
       this.ctx.storage.transactionSync(() => {
-        this.createUser(userId, flow.display_name!, now);
+        this.createUser(userId, flow.display_name!, now, flow.src);
         this.sql.exec("INSERT INTO logins (provider, subject, user_id, created_at) VALUES ('google', ?, ?, ?)", subject, userId, now);
       });
     } else {
@@ -1089,6 +1116,8 @@ export class Directory extends DurableObject<Env> {
       const now = Date.now();
       this.sql.exec("DELETE FROM reports WHERE status != 'open' AND ts < ?", now - 365 * 86_400_000);
       this.sql.exec("DELETE FROM moderation_log WHERE ts < ?", now - 5 * 365 * 86_400_000);
+      // Los contadores de visitas: medio año.
+      this.sql.exec("DELETE FROM stats WHERE day < ?", statsDay(now - STATS_KEEP_DAYS * 86_400_000));
     } finally {
       await this.ctx.storage.setAlarm(Date.now() + CLEANUP_EVERY_MS);
     }
@@ -1110,15 +1139,16 @@ export class Directory extends DurableObject<Env> {
    * quitados (dejan de contar en la cuota; la subida sigue contando para el límite diario) y se
    * devuelven los que ya nadie tiene, para borrarlos de R2. Los modelos de agentes no se tocan:
    * pueden estar en el mundo, y eso solo lo sabe cada chunk.
+   *
+   * Se recorren todas las subidas por orden, por páginas: antes se miraban solo las mil primeras, y
+   * con más de mil archivos en uso (siempre los mismos, los más viejos) los nuevos sin usar no se
+   * llegaban a ver nunca. Si una pasada no termina (hay muchísimas), la siguiente sigue donde quedó.
    */
   findOrphans(now: number, limit = 200): { marked: number; deleteFromR2: string[] } {
-    const rows = this.sql
-      .exec<{ hash: string; uploader: string; kind: string }>(
-        `SELECT hash, uploader, kind FROM uploads
-         WHERE uploader LIKE 'usr_%' AND kind IN ('avatar', 'cover', 'monument', 'model', 'portrait') AND ts < ? LIMIT ?`,
-        now - ORPHAN_GRACE_MS, limit * 5,
-      )
-      .toArray();
+    const PAGE = 1000;
+    const MAX_PAGES = 40;
+    const cutoff = now - ORPHAN_GRACE_MS;
+    type Row = { id: number; hash: string; uploader: string; kind: string };
     const used = (r: { hash: string; uploader: string; kind: string }) => {
       const uid = r.uploader.slice(4);
       if (r.kind === "avatar") {
@@ -1132,7 +1162,29 @@ export class Directory extends DurableObject<Env> {
       if (this.sql.exec("SELECT 1 FROM community_files WHERE hash = ? LIMIT 1", r.hash).toArray().length > 0) return true;
       return this.sql.exec(`SELECT 1 FROM projects WHERE ${col} = ?`, r.hash).toArray().length > 0;
     };
-    const orphans = rows.filter((r) => !used(r)).slice(0, limit);
+    let cursor = this.sql.exec<{ v: number }>("SELECT v FROM counters WHERE k = 'cleanup_cursor'").toArray()[0]?.v ?? 0;
+    const orphans: Row[] = [];
+    let finished = false;
+    for (let page = 0; page < MAX_PAGES && orphans.length < limit && !finished; page++) {
+      const rows = this.sql
+        .exec<Row>(
+          `SELECT rowid AS id, hash, uploader, kind FROM uploads
+           WHERE rowid > ? AND uploader LIKE 'usr_%' AND kind IN ('avatar', 'cover', 'monument', 'model', 'portrait') AND ts < ?
+           ORDER BY rowid LIMIT ?`,
+          cursor, cutoff, PAGE,
+        )
+        .toArray();
+      let seen = 0;
+      for (const r of rows) {
+        cursor = r.id;
+        seen++;
+        if (!used(r)) orphans.push(r);
+        if (orphans.length >= limit) break;
+      }
+      finished = rows.length < PAGE && seen === rows.length;
+    }
+    // Al llegar al final, la próxima pasada empieza de nuevo; si no, sigue donde quedó esta.
+    this.sql.exec("INSERT INTO counters (k, v) VALUES ('cleanup_cursor', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v", finished ? 0 : cursor);
     const deleteFromR2: string[] = [];
     for (const r of orphans) {
       this.sql.exec("UPDATE uploads SET kind = 'removed', bytes = 0 WHERE hash = ? AND uploader = ?", r.hash, r.uploader);
@@ -1291,8 +1343,10 @@ export class Directory extends DurableObject<Env> {
     return ok(this.project(id)!);
   }
 
-  setInWorld(projectId: string, inWorld: boolean) {
+  /** `src`: al publicar, la etiqueta del enlace por el que llegó su autor (para el contador de proyectos). */
+  setInWorld(projectId: string, inWorld: boolean, src?: unknown) {
     this.sql.exec("UPDATE projects SET in_world = ? WHERE id = ?", inWorld ? 1 : 0, projectId);
+    if (inWorld && src !== undefined) this.bumpStat("project", src);
   }
 
   /** Proyectos con sus datos públicos (y la nota de revisión si `withNote`). */
@@ -2506,6 +2560,168 @@ export class Directory extends DurableObject<Env> {
 
   hideProject(id: string): boolean {
     return this.sql.exec("UPDATE projects SET status = 'hidden', in_world = 0 WHERE id = ?", id).rowsWritten > 0;
+  }
+
+
+  /* ---------------------------------------------------------------- */
+  /* Operar: interruptores de emergencia, visitas y copia (ops.ts)      */
+  /* ---------------------------------------------------------------- */
+
+  private flagsMem: Flags | null = null;
+
+  /** Qué está abierto ahora (true) y qué ha cerrado moderación (false). */
+  flags(): Flags {
+    if (!this.flagsMem) {
+      const closed = new Set(this.sql.exec<{ k: string }>("SELECT k FROM flags").toArray().map((r) => r.k));
+      this.flagsMem = { signups: !closed.has("signups"), chat: !closed.has("chat"), sandbox: !closed.has("sandbox") };
+    }
+    return this.flagsMem;
+  }
+
+  /** Para el panel de moderación: los interruptores y desde cuándo está cerrado cada uno. */
+  flagsInfo(): { flags: Flags; closed_at: Partial<Record<FlagName, number>> } {
+    const closed_at: Partial<Record<FlagName, number>> = {};
+    for (const r of this.sql.exec<{ k: string; at: number }>("SELECT k, at FROM flags").toArray()) {
+      if ((FLAG_NAMES as readonly string[]).includes(r.k)) closed_at[r.k as FlagName] = r.at;
+    }
+    return { flags: this.flags(), closed_at };
+  }
+
+  /**
+   * Cierra o abre interruptores: `{ chat: false }` cierra el chat; `{ chat: true }` lo abre. Cada
+   * cambio queda en el registro de moderación, con su motivo si se da (`note`).
+   */
+  setFlags(moderator: string, body: Record<string, unknown>): Result<{ flags: Flags; changed: FlagName[] }> {
+    const note = typeof body.note === "string" ? body.note.trim().slice(0, 500) || null : null;
+    const now = this.flags();
+    const changed: FlagName[] = [];
+    for (const name of FLAG_NAMES) {
+      const want = body[name];
+      if (want === undefined) continue;
+      if (typeof want !== "boolean") return fail(400, "bad_message", `${name}: true (abierto) o false (cerrado)`);
+      if (want !== now[name]) changed.push(name);
+    }
+    this.ctx.storage.transactionSync(() => {
+      for (const name of changed) {
+        const open = body[name] === true;
+        if (open) this.sql.exec("DELETE FROM flags WHERE k = ?", name);
+        else this.sql.exec("INSERT OR REPLACE INTO flags (k, at) VALUES (?, ?)", name, Date.now());
+        this.logDecision(moderator, open ? "flag_open" : "flag_close", "flag", name, note);
+      }
+    });
+    this.flagsMem = null;
+    return ok({ flags: this.flags(), changed });
+  }
+
+  /** Suma a un contador del día. La etiqueta se limpia aquí; con demasiadas distintas en un día, a «otros». */
+  private bumpStat(event: StatEvent, rawTag: unknown, n = 1) {
+    const day = statsDay();
+    let tag = statTag(rawTag);
+    const known = this.sql.exec("SELECT 1 FROM stats WHERE day = ? AND event = ? AND tag = ?", day, event, tag).toArray().length > 0;
+    if (!known) {
+      const tags = this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM stats WHERE day = ? AND event = ?", day, event).one().n;
+      if (tags >= STATS_TAGS_PER_DAY) tag = OTHER_TAG;
+    }
+    this.sql.exec(
+      "INSERT INTO stats (day, event, tag, n) VALUES (?, ?, ?, ?) ON CONFLICT(day, event, tag) DO UPDATE SET n = n + excluded.n",
+      day, event, tag, Math.max(1, Math.min(10_000, Math.floor(n))),
+    );
+  }
+
+  /** Lo que ha contado el Worker en los últimos segundos (visitas, entradas y lugares), todo junto. */
+  statsAdd(batch: unknown): void {
+    if (!Array.isArray(batch)) return;
+    for (const it of batch.slice(0, 200) as { event?: unknown; tag?: unknown; n?: unknown }[]) {
+      if (!it || typeof it.event !== "string" || !(STAT_EVENTS as readonly string[]).includes(it.event)) continue;
+      // Las cuentas y los proyectos los cuenta el propio Directory al crearlos: de fuera no se aceptan.
+      if (it.event === "signup" || it.event === "project") continue;
+      this.bumpStat(it.event as StatEvent, it.tag, typeof it.n === "number" && Number.isFinite(it.n) ? it.n : 1);
+    }
+  }
+
+  /** Los contadores de los últimos días (para moderación): una fila por día, contador y etiqueta. */
+  statsOf(rawDays: unknown): { from: string; to: string; rows: { day: string; event: string; tag: string; n: number }[] } {
+    const days = Math.max(1, Math.min(STATS_KEEP_DAYS, Math.floor(Number(rawDays) || 30)));
+    const to = statsDay();
+    const from = statsDay(Date.now() - (days - 1) * 86_400_000);
+    const rows = this.sql
+      .exec<{ day: string; event: string; tag: string; n: number }>("SELECT day, event, tag, n FROM stats WHERE day >= ? ORDER BY day DESC, event, n DESC", from)
+      .toArray();
+    return { from, to, rows };
+  }
+
+  /**
+   * Todo lo que el panel necesita al abrirse (GET /boot), en una sola llamada. De paso apunta lo
+   * que el Worker tuviera contado, para no gastar otra petición en ello.
+   */
+  bootData(pending: unknown = []) {
+    this.statsAdd(pending);
+    return { districts: this.districts(), community: this.communityDistricts(), projects: this.listProjects(), jams: this.listJams(), flags: this.flags() };
+  }
+
+  /** Copia propia: qué tablas hay y cuántas filas tiene cada una. */
+  backupManifest(): { table: string; rows: number }[] {
+    return BACKUP_TABLES.map((table) => ({ table, rows: this.sql.exec<{ n: number }>(`SELECT COUNT(*) AS n FROM ${table}`).one().n }));
+  }
+
+  /** Copia propia: una página de una tabla, por orden de fila. `next` es desde dónde seguir (null = no hay más). */
+  backupRows(table: string, rawAfter: unknown, rawLimit: unknown): Result<{ rows: Record<string, unknown>[]; next: number | null }> {
+    if (!isBackupTable(table)) return fail(404, "not_found", "esa tabla no va en la copia");
+    const after = Math.max(0, Math.floor(Number(rawAfter) || 0));
+    const limit = Math.max(1, Math.min(BACKUP_PAGE_ROWS, Math.floor(Number(rawLimit) || BACKUP_PAGE_ROWS)));
+    const rows: Record<string, unknown>[] = [];
+    let last = after;
+    let size = 0;
+    let cut = false;
+    for (const r of this.sql.exec<Record<string, SqlStorageValue>>(`SELECT rowid AS __rowid, * FROM ${table} WHERE rowid > ? ORDER BY rowid LIMIT ?`, after, limit)) {
+      const { __rowid, ...row } = r;
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(row)) out[k] = v instanceof ArrayBuffer ? { $b64: isoBase64URL.fromBuffer(new Uint8Array(v)) } : v;
+      rows.push(out);
+      last = Number(__rowid);
+      size += JSON.stringify(out).length;
+      if (size > BACKUP_PAGE_BYTES) {
+        cut = true;
+        break;
+      }
+    }
+    return ok({ rows, next: cut || rows.length === limit ? last : null });
+  }
+
+  /**
+   * Restaurar una copia: mete filas en una tabla (con `truncate`, la vacía antes). Solo las tablas
+   * de la copia y solo sus columnas de ahora; lo que la copia traiga de más se ignora.
+   */
+  restoreRows(table: string, rows: unknown, truncate: boolean): Result<{ written: number }> {
+    if (!isBackupTable(table)) return fail(404, "not_found", "esa tabla no va en la copia");
+    if (!Array.isArray(rows) || rows.length > 500) return fail(400, "bad_message", "rows: una lista de hasta 500 filas");
+    const cols = new Set(this.sql.exec<{ name: string }>(`PRAGMA table_info(${table})`).toArray().map((c) => c.name));
+    let written = 0;
+    try {
+      this.ctx.storage.transactionSync(() => {
+        if (truncate) this.sql.exec(`DELETE FROM ${table}`);
+        for (const raw of rows as unknown[]) {
+          if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("cada fila es un objeto");
+          const keys = Object.keys(raw).filter((k) => cols.has(k));
+          if (!keys.length) continue;
+          const values = keys.map((k) => {
+            const v = (raw as Record<string, unknown>)[k];
+            if (v === null || typeof v === "string" || typeof v === "number") return v;
+            if (v && typeof v === "object" && typeof (v as { $b64?: unknown }).$b64 === "string") return isoBase64URL.toBuffer((v as { $b64: string }).$b64).buffer as ArrayBuffer;
+            throw new Error(`valor no válido en ${k}`);
+          });
+          this.sql.exec(`INSERT OR REPLACE INTO ${table} (${keys.join(", ")}) VALUES (${keys.map(() => "?").join(", ")})`, ...values);
+          written++;
+        }
+      });
+    } catch (e) {
+      return fail(400, "bad_message", `no se pudo restaurar ${table}: ${(e as Error).message}`);
+    }
+    // Lo que se llevaba en memoria ya no vale.
+    this.flagsMem = null;
+    this.liveFlows = null;
+    this.storedCache = null;
+    return ok({ written });
   }
 
   /* ---------------------------------------------------------------- */

@@ -2,7 +2,7 @@ import { ASSET_BUDGETS } from "@xenxo/assets";
 import { checkDistrict, ChunkId, describeDistrictProblem, DistrictSubmission, isWeaponId, PARCEL_BUDGETS, PLACES, WEAPON_DEFAULT } from "@xenxo/protocol";
 import { communityContent, communitySystem, isCommunityChunk, submissionFiles, type ModelInfo } from "./community";
 import { SEED_ASSETS } from "./seed-assets";
-import { assetMeta, assetKey, forgetAssets, handleGet, handleUpload } from "./assets";
+import { assetMeta, assetKey, forgetAssets, handleGet, handleUpload, restoreAsset } from "./assets";
 import { isAvatarPreset } from "./avatar-presets-check";
 import { randomId, resolveAgent, signToken, verifyToken, type Principal } from "./auth";
 import { CALL_TTL_MS, REMOTE_METHODS, sha256B64, signRemote, TICKET_TTL_MS } from "./remote";
@@ -13,8 +13,9 @@ import { notify, notifyConfigured } from "./notify";
 import { billboardSlots, cabinetSlots, DISTRICTS, districtById, parcelIndex, parcelSpawn } from "./districts";
 import { communityGates, SHOWCASE_SLOTS, type CommunityGate } from "./nexo";
 import { fetchDevManifest, fetchManifest } from "./games";
-import { defaultAvatarFor, MAX_AGENT_KEYS_PER_PROJECT, MAX_SKINS, type ChunkHostRow, type Directory, type UserRow } from "./directory";
+import { defaultAvatarFor, MAX_AGENT_KEYS_PER_PROJECT, MAX_SKINS, type ChunkHostRow, type CommunityDistrict, type Directory, type UserRow } from "./directory";
 import { allowed, type LimitKind, type RateLimiter } from "./ratelimit";
+import { statTag, type Flags, type StatItem } from "./ops";
 
 export { ChunkRoom } from "./chunk-room";
 export { Directory } from "./directory";
@@ -79,6 +80,116 @@ function withoutExampleKeys(keys: string | undefined): string | undefined {
     .join(",");
 }
 const SLOW_DOWN = { error: "rate_limited", message: "demasiadas peticiones seguidas; espera un minuto" };
+
+/* ------------------------------------------------------------------ */
+/* El día de corte: el plan gratuito ha llegado a su tope diario        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * En el plan gratuito, al pasar un límite diario de los Durable Objects sus llamadas fallan hasta
+ * las 00:00 UTC. En vez de un «error interno» se dice: 503 `over_capacity`, y /health lo cuenta
+ * (`capacity: "full"`) para que la web avise con la hora a la que vuelve (web: net/outage.ts). Se
+ * recuerda unos minutos en esta instancia y en la caché del centro de datos; cada fallo lo renueva.
+ * Si el corte es el de las peticiones al Worker, este código ni se ejecuta: contesta Cloudflare.
+ */
+const CAPACITY_KEY = "https://xenxo-cache.local/capacity";
+const CAPACITY_MEMO_MS = 5 * 60_000;
+let capacityUntil = 0;
+/** Solo en local: simula el corte para probar la web y el banco de conformidad (POST /admin/capacity). */
+let capacitySim = false;
+
+function nextUtcMidnight(now = Date.now()): number {
+  const d = new Date(now);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1);
+}
+
+/** ¿Es el error con el que Cloudflare corta los Durable Objects del plan gratuito al pasar su cupo diario? */
+function isCapacityError(e: unknown): boolean {
+  return /free tier|exceeded allowed|exceeded (its|the|your) daily|daily (request |usage )?limit/i.test(String((e as Error | null)?.message ?? e ?? ""));
+}
+
+function noteCapacity(ctx: ExecutionContext) {
+  capacityUntil = Date.now() + CAPACITY_MEMO_MS;
+  const cache = edgeCache();
+  if (cache) ctx.waitUntil(cache.put(CAPACITY_KEY, new Response("1", { headers: { "Cache-Control": `public, max-age=${CAPACITY_MEMO_MS / 1000}` } })).catch(() => {}));
+}
+
+async function capacityFull(): Promise<boolean> {
+  if (capacitySim || Date.now() < capacityUntil) return true;
+  const hit = await edgeCache()?.match(CAPACITY_KEY).catch(() => undefined);
+  if (!hit) return false;
+  capacityUntil = Date.now() + 60_000;
+  return true;
+}
+
+function overCapacity(h: Record<string, string>): Response {
+  const until = nextUtcMidnight();
+  return json(
+    { error: "over_capacity", message: "xenxo ha llegado hoy al tope de su plan gratuito; vuelve a abrir a las 00:00 UTC", until },
+    503,
+    { ...h, "Cache-Control": "no-store", "Retry-After": String(Math.max(60, Math.min(3600, Math.ceil((until - Date.now()) / 1000)))) },
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Contadores de visitas (ops.ts): sumas por día, nunca quién           */
+/* ------------------------------------------------------------------ */
+
+/** Lo contado se junta unos segundos y va al Directory en una sola llamada (o con la de /boot). */
+const STATS_FLUSH_MS = 10_000;
+const statQueue = new Map<string, number>();
+let statFlushing = false;
+
+function takeStats(): StatItem[] {
+  const batch = [...statQueue].map(([k, n]) => {
+    const [event, tag] = k.split("|") as [StatItem["event"], string];
+    return { event, tag, n };
+  });
+  statQueue.clear();
+  return batch;
+}
+
+function countStat(env: Env, ctx: ExecutionContext, event: "visit" | "enter" | "place", tag: string) {
+  const k = `${event}|${tag}`;
+  statQueue.set(k, (statQueue.get(k) ?? 0) + 1);
+  if (statFlushing) return;
+  statFlushing = true;
+  ctx.waitUntil(
+    new Promise<void>((done) => setTimeout(done, env.RP_ID === "localhost" ? 300 : STATS_FLUSH_MS))
+      .then(() => {
+        statFlushing = false;
+        const batch = takeStats();
+        return batch.length ? directory(env).statsAdd(batch) : undefined;
+      })
+      .catch(() => {
+        statFlushing = false;
+      }),
+  );
+}
+
+/** Para no contar dos veces la misma sesión: se recuerda un rato en esta instancia (no se guarda en ningún sitio). */
+const counted = new Map<string, number>();
+function firstTime(key: string, ttlMs: number): boolean {
+  const now = Date.now();
+  const t = counted.get(key);
+  if (t !== undefined && now - t < ttlMs) return false;
+  if (counted.size > 5000) for (const [k, v] of counted) if (now - v > 30 * 60_000) counted.delete(k);
+  counted.set(key, now);
+  return true;
+}
+
+function placeTag(chunkId: string): string {
+  if (chunkId === PLACES.nexo) return "nexo";
+  if (chunkId === PLACES.plaza) return "plaza";
+  return DISTRICTS.find((d) => d.chunk === chunkId)?.id ?? "comunidad";
+}
+
+/** Una persona (no un agente) entra en un lugar: cuenta su entrada al mundo y el lugar, una vez por sesión. */
+function countEntry(env: Env, ctx: ExecutionContext, p: Principal, chunkId: string, src: string | null) {
+  if (p.kind === "agent") return;
+  if (firstTime(`e:${p.sub}`, 30 * 60_000)) countStat(env, ctx, "enter", statTag(src));
+  if (firstTime(`p:${p.sub}:${chunkId}`, 10 * 60_000)) countStat(env, ctx, "place", placeTag(chunkId));
+}
 
 /* ------------------------------------------------------------------ */
 /* Entrar con Google (OpenID Connect, flujo de código + PKCE)           */
@@ -617,6 +728,7 @@ async function moveChunk(env: Env, id: string, to: unknown, moderator: string): 
     if (!host) return { ok: true, data: { chunk: id, to: "cloudflare", unchanged: true } };
     const dump = fromNode ? ((await source.dumpState()) as ChunkDumpOf) : null;
     const r = dump ? await localChunk(env, id).loadState(dump) : null;
+    if (dump) await teachFlags(env, localChunk(env, id));
     await dir.setChunkHost(moderator, id, null, "node");
     await forgetRoutes();
     return { ok: true, data: { chunk: id, to: "cloudflare", ...(r ?? {}) } };
@@ -631,6 +743,7 @@ async function moveChunk(env: Env, id: string, to: unknown, moderator: string): 
   const target = remoteChunk(env, id, node);
   const dump = (await source.dumpState()) as ChunkDumpOf;
   const r = await target.loadState(dump);
+  await teachFlags(env, target);
   await env.ASSETS.put(snapshotKey(id), JSON.stringify(dump), { httpMetadata: { contentType: "application/json" } });
   await dir.setChunkHost(moderator, id, node.id, "node");
   await dir.snapshotSaved(id, (await target.stateRev()) as string);
@@ -642,6 +755,7 @@ async function moveChunk(env: Env, id: string, to: unknown, moderator: string): 
 async function fallbackChunk(env: Env, host: ChunkHostRow, moderator: string | null, reason: string): Promise<void> {
   const obj = await env.ASSETS.get(snapshotKey(host.chunk_id));
   if (obj) await localChunk(env, host.chunk_id).loadState(JSON.parse(await obj.text()) as ChunkDumpOf);
+  await teachFlags(env, localChunk(env, host.chunk_id));
   await directory(env).setChunkHost(moderator, host.chunk_id, host.node_id, "fallback", obj ? reason : `${reason} (sin copia)`);
 }
 
@@ -693,6 +807,170 @@ function directory(env: Env) {
   const ns = inJurisdiction(env, env.DIRECTORY);
   return ns.get(ns.idFromName("directory")) as unknown as Api<Directory>;
 }
+
+/**
+ * Los distritos como los ve la web: los del sistema y, detrás, los de la comunidad aprobados (sin
+ * parcelas, de momento, y sin el contacto de su autor). `remote`: vive en un nodo (hay que pedir
+ * pase para entrar) y quién lo aloja.
+ */
+function districtsView(env: Env, fixed: Awaited<ReturnType<Directory["districts"]>>, approved: CommunityDistrict[]) {
+  const community = approved.map((d) => ({
+    id: d.slug,
+    chunk_id: d.chunk_id,
+    category: "community",
+    color: d.manifest.color,
+    name: d.manifest.name,
+    desc: d.manifest.description,
+    theme: d.manifest.theme,
+    cover: d.manifest.cover,
+    emblem: d.manifest.emblem,
+    author: d.author,
+    parcels: [],
+    community: true,
+  }));
+  return [...fixed, ...community].map((d) => {
+    const node = nodeFor(env, d.chunk_id);
+    return node ? { ...d, remote: true, host: node.name } : d;
+  });
+}
+
+/* --- Lo que el panel pide al abrirse: una petición (GET /boot) en vez de seis ------------------ */
+
+/** La respuesta entera, en la caché del centro de datos: una ráfaga de visitas no despierta nada. */
+const BOOT_KEY = "https://xenxo-cache.local/boot";
+const BOOT_TTL_S = 20;
+/** Lo del Directory (distritos, proyectos, jams e interruptores): cambia poco, y lo que lo cambia lo borra de aquí. */
+const BOOT_DIR_KEY = "https://xenxo-cache.local/boot-dir";
+const BOOT_DIR_TTL_S = 90;
+/** Los marcadores de los distritos para el panel: cinco minutos (dentro del mundo van en vivo, por el WebSocket). */
+const SCORES_KEY = "https://xenxo-cache.local/scores";
+const SCORES_TTL_S = 300;
+/** Lo que cambia lo que enseña /boot: al terminar bien, se saca de la caché de este centro de datos. */
+const BOOT_CHANGERS = /^\/(?:projects|mod|admin|me\/district)(?:\/|$)/;
+
+async function purgeBoot() {
+  const cache = edgeCache();
+  await Promise.all([cache?.delete(BOOT_KEY), cache?.delete(BOOT_DIR_KEY)]).catch(() => undefined);
+}
+
+/** El estado público de un lugar (cuánta gente hay y lo último que ha cambiado), 15 s en la caché. */
+async function chunkState(env: Env, ctx: ExecutionContext, chunkId: string): Promise<{ status: number; body: string } | null> {
+  const cache = edgeCache();
+  const key = new Request(`https://xenxo-cache.local/state/${chunkId}`);
+  const hit = await cache?.match(key);
+  if (hit) return { status: 200, body: await hit.text() };
+  let r: Response;
+  try {
+    r = await chunk(env, chunkId).fetch(new Request("https://do/state", { headers: { "X-Chunk-Id": chunkId } }));
+  } catch (e) {
+    if (isCapacityError(e)) throw e;
+    return null;
+  }
+  if (r.status >= 500) return null;
+  const body = await r.text();
+  if (r.ok && cache) ctx.waitUntil(cache.put(key, new Response(body, { headers: { "Cache-Control": "public, max-age=15" } })));
+  return { status: r.status, body };
+}
+
+/** Los marcadores del sistema de cada distrito abierto (JSON), en la caché cinco minutos. */
+async function scoresText(env: Env, ctx: ExecutionContext): Promise<string> {
+  const cache = edgeCache();
+  const key = new Request(SCORES_KEY);
+  const hit = await cache?.match(key);
+  if (hit) return hit.text();
+  const districts = [];
+  for (const d of DISTRICTS.filter((x) => !x.soon)) {
+    let boards: unknown[] = [];
+    try {
+      const r = await chunk(env, d.chunk).fetch(new Request("https://do/boards", { headers: { "X-Chunk-Id": d.chunk } }));
+      if (r.ok) boards = (await r.json()) as unknown[];
+    } catch (e) {
+      if (isCapacityError(e)) throw e;
+    }
+    if (Array.isArray(boards) && boards.length) districts.push({ id: d.id, name: d.name, color: d.color, boards });
+  }
+  const body = JSON.stringify({ districts, at: Date.now() });
+  if (cache) ctx.waitUntil(cache.put(key, new Response(body, { headers: { "Cache-Control": `public, max-age=${SCORES_TTL_S}` } })));
+  return body;
+}
+
+type BootDir = Awaited<ReturnType<Directory["bootData"]>>;
+
+async function bootDir(env: Env, ctx: ExecutionContext): Promise<BootDir> {
+  const cache = edgeCache();
+  const key = new Request(BOOT_DIR_KEY);
+  const hit = await cache?.match(key);
+  if (hit) return (await hit.json()) as BootDir;
+  // De paso se lleva lo que hubiera contado (visitas y entradas): no gasta otra llamada.
+  const data = await directory(env).bootData(takeStats());
+  if (cache) ctx.waitUntil(cache.put(key, new Response(JSON.stringify(data), { headers: { "Cache-Control": `public, max-age=${BOOT_DIR_TTL_S}` } })));
+  return data;
+}
+
+type LiveState = { online: number; agents_online: number; entities: number; recent_events: { ts: number }[] };
+
+async function bootResponse(env: Env, ctx: ExecutionContext): Promise<Response> {
+  const cache = edgeCache();
+  const key = new Request(BOOT_KEY);
+  const hit = await cache?.match(key);
+  if (hit) return hit;
+  const d = await bootDir(env, ctx);
+  const [scores, ...states] = await Promise.all([scoresText(env, ctx), chunkState(env, ctx, PLACES.nexo), chunkState(env, ctx, PLACES.plaza)]);
+  // El nexo y la plaza juntos: cuánta gente hay en el mundo y qué ha cambiado.
+  const live = states.flatMap((x) => (x && x.status === 200 ? [JSON.parse(x.body) as LiveState] : []));
+  const body = JSON.stringify({
+    districts: districtsView(env, d.districts, d.community),
+    projects: d.projects,
+    jams: d.jams,
+    flags: d.flags,
+    scores: JSON.parse(scores) as unknown,
+    live: live.length
+      ? {
+          online: live.reduce((n, x) => n + x.online, 0),
+          agents_online: live.reduce((n, x) => n + x.agents_online, 0),
+          entities: live.reduce((n, x) => n + x.entities, 0),
+          recent_events: live.flatMap((x) => x.recent_events).sort((a, b) => b.ts - a.ts).slice(0, 10),
+        }
+      : null,
+    at: Date.now(),
+  });
+  const res = new Response(body, { headers: { "Content-Type": "application/json", ...SECURITY_HEADERS, "Cache-Control": `public, max-age=${BOOT_TTL_S}` } });
+  if (cache) ctx.waitUntil(cache.put(key, res.clone()));
+  return res;
+}
+
+/* --- Interruptores de emergencia (ops.ts) ------------------------------------------------------- */
+
+/** Dice a los lugares lo que moderación tiene cerrado (el chat y la zona de pruebas). Devuelve los que no contestaron. */
+async function pushFlags(env: Env, flags: Flags, only?: string[]): Promise<string[]> {
+  // El nexo no tiene ni chat ni zona de pruebas.
+  const places = only ?? (await allChatChunks(env)).filter((c) => c !== PLACES.nexo);
+  const failed: string[] = [];
+  for (const c of places) {
+    await chunk(env, c)
+      .setFlags({ chat: flags.chat, sandbox: flags.sandbox })
+      .catch((e: Error) => {
+        failed.push(c);
+        console.warn("interruptores:", c, e.message);
+      });
+  }
+  return failed;
+}
+
+/** Un lugar recién traído o montado (traslado, relevo, distrito nuevo) aprende lo que hay cerrado ahora. */
+async function teachFlags(env: Env, room: { setFlags(f: { chat: boolean; sandbox: boolean }): Promise<unknown> }) {
+  try {
+    const f = await directory(env).flags();
+    await room.setFlags({ chat: f.chat, sandbox: f.sandbox });
+  } catch (e) {
+    console.warn("interruptores:", (e as Error).message);
+  }
+}
+
+/** Cuerpos de la restauración (tools/backup/restore.mjs): páginas de filas, el volcado de un lugar y un archivo. */
+const RESTORE_PAGE_BYTES = 2 * 1024 * 1024;
+const RESTORE_CHUNK_BYTES = 16 * 1024 * 1024;
+const RESTORE_ASSET_BYTES = 32 * 1024 * 1024;
 
 function cors(req: Request, env: Env): Record<string, string> {
   const origin = req.headers.get("Origin") ?? "";
@@ -826,7 +1104,7 @@ async function reissue(from: Principal, u: UserRow, env: Env) {
 
 const userIdOf = (p: Principal) => (p.kind === "user" ? p.sub.replace(/^usr_/, "") : null);
 
-export default {
+const worker = {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
     const path = url.pathname;
@@ -848,6 +1126,16 @@ export default {
     }
 
     try {
+      // Solo en local: simular el día de corte, para ver cómo lo cuenta la web y para el banco de conformidad.
+      if (env.RP_ID === "localhost") {
+        if (path === "/admin/capacity" && req.method === "POST") {
+          const p = await bearer(req, env);
+          if (!p?.scopes.includes("admin")) return json({ error: "forbidden" }, 403, h);
+          capacitySim = (await readJson(req)).full === true;
+          return json({ full: capacitySim }, 200, h);
+        }
+        if (capacitySim && path !== "/health" && !path.startsWith("/assets/") && !path.startsWith("/s/")) return overCapacity(h);
+      }
       // Dónde vive cada distrito (nodos): en memoria 30 s, luego la caché del centro de datos.
       if (path !== "/health" && !path.startsWith("/assets/") && !path.startsWith("/s/")) await routes(env);
       // La clave pública con la que los nodos comprueban lo que firma este Worker (no es secreta).
@@ -857,7 +1145,11 @@ export default {
         const k = priv ? publicJwk(priv) : null;
         return k ? new Response(JSON.stringify(k), { headers: { ...h, "Content-Type": "application/json", "Cache-Control": "public, max-age=300" } }) : json({ error: "not_found" }, 404, h);
       }
-      if (path === "/health") return json({ ok: true, protocol: 0 }, 200, h);
+      // `capacity: "full"`: hoy se ha pasado un límite diario del plan gratuito (la web lo avisa).
+      if (path === "/health") {
+        const full = await capacityFull();
+        return json({ ok: true, protocol: 0, ...(full ? { capacity: "full", until: nextUtcMidnight() } : {}) }, 200, { ...h, "Cache-Control": "no-store" });
+      }
 
       if (path === "/github/repos" && req.method === "GET") {
         const r = await githubRepos(env, ctx);
@@ -945,6 +1237,7 @@ export default {
           accept_terms: q.get("terms"),
           origin,
           bind_hash: q.get("b"),
+          src: q.get("src"),
         });
         if (!r.ok) return back(origin, { auth_error: r.error });
         // El state queda atado a este navegador: un enlace de vuelta de Google que no empezó aquí no vale.
@@ -1019,29 +1312,16 @@ export default {
         return json(r.data, 201, h);
       }
 
+      /* --- El arranque del panel: distritos, proyectos, jams, marcadores y quién hay, en una petición --- */
+      if (path === "/boot" && req.method === "GET") {
+        // La primera de cada visita se suma al contador del día (con la etiqueta de su enlace, ?v=…, si la traía).
+        if (url.searchParams.get("first") === "1" && (await limit(env, "visit", req))) countStat(env, ctx, "visit", statTag(url.searchParams.get("src")));
+        return withHeaders(await bootResponse(env, ctx), h);
+      }
+
       /* --- Distritos y parcelas (lectura pública) --- */
       if (path === "/districts" && req.method === "GET") {
-        // `remote`: el distrito vive en el servidor de distritos (hay que pedir pase para entrar).
-        // Los de la comunidad aprobados van detrás, sin parcelas (de momento) y sin el contacto de su autor.
-        const community = (await dir.communityDistricts()).map((d) => ({
-          id: d.slug,
-          chunk_id: d.chunk_id,
-          category: "community",
-          color: d.manifest.color,
-          name: d.manifest.name,
-          desc: d.manifest.description,
-          theme: d.manifest.theme,
-          cover: d.manifest.cover,
-          emblem: d.manifest.emblem,
-          author: d.author,
-          parcels: [],
-          community: true,
-        }));
-        const list = [...(await dir.districts()), ...community].map((d) => {
-          const node = nodeFor(env, d.chunk_id);
-          return node ? { ...d, remote: true, host: node.name } : d;
-        });
-        return json({ districts: list }, 200, { ...h, "Cache-Control": "public, max-age=10" });
+        return json({ districts: districtsView(env, await dir.districts(), await dir.communityDistricts()) }, 200, { ...h, "Cache-Control": "public, max-age=10" });
       }
 
       /* --- Proyectos (lectura pública) --- */
@@ -1081,20 +1361,9 @@ export default {
         return withHeaders(res, h);
       }
 
-      /* --- Marcadores de los distritos (para el panel): en la caché un minuto --- */
+      /* --- Marcadores de los distritos (para el panel): en la caché cinco minutos --- */
       if (path === "/scores" && req.method === "GET") {
-        const cache = edgeCache();
-        const key = new Request(new URL("/scores", req.url).toString());
-        const hit = await cache?.match(key);
-        if (hit) return withHeaders(hit, h);
-        const districts = [];
-        for (const d of DISTRICTS.filter((x) => !x.soon)) {
-          const boards = await chunk(env, d.chunk).boardsOf().catch(() => []);
-          if (boards.length) districts.push({ id: d.id, name: d.name, color: d.color, boards });
-        }
-        const res = json({ districts, at: Date.now() }, 200, { "Cache-Control": "public, max-age=60" });
-        if (cache) ctx.waitUntil(cache.put(key, res.clone()));
-        return withHeaders(res, h);
+        return new Response(await scoresText(env, ctx), { headers: { "Content-Type": "application/json", ...SECURITY_HEADERS, "Cache-Control": "public, max-age=60", ...h } });
       }
 
       /* --- Denuncias: cualquiera con un token, también invitados --- */
@@ -1324,6 +1593,8 @@ export default {
             meta: { id: d.id, name: { es: c.sub.name.es, en: c.sub.name.en }, color: c.sub.color, theme: c.sub.theme, system: communitySystem(d.id, c.sub) },
             content: communityContent(d.id, c.sub, c.models, d.portals),
           });
+          // Un lugar nuevo no sabe lo que moderación tiene cerrado ahora (interruptores de emergencia).
+          await teachFlags(env, chunk(env, d.chunk_id));
           // Si estaba aprobado, vuelve a borrador: su puerta sale del nexo hasta que se apruebe otra vez.
           ctx.waitUntil(syncCommunityGates(env, dir));
           return json({ district: d }, 200, h);
@@ -1386,7 +1657,8 @@ export default {
 
       if (path === "/projects" && req.method === "POST") {
         if (!uid) return json({ error: "unauthorized", message: "inicia sesión para publicar un proyecto" }, 401, h);
-        const r = await dir.createProject(uid, await readJson(req));
+        const body = await readJson(req);
+        const r = await dir.createProject(uid, body);
         if (!r.ok) return failure(r, h);
         const project = r.data;
         const meta = await assetMeta(env.ASSETS, project.mesh_hash!);
@@ -1409,7 +1681,8 @@ export default {
           const status = code === "parcel_taken" || code === "district_full" ? 409 : code === "monument_too_big" ? 422 : 400;
           return json({ error: code, message: placed.message }, status, h);
         }
-        await dir.setInWorld(project.id, true);
+        // `src`: la etiqueta del enlace por el que llegó (?v=…), solo para el contador de proyectos del día.
+        await dir.setInWorld(project.id, true, body.src ?? null);
         ctx.waitUntil(syncShowcase(env, dir));
         ctx.waitUntil(notify(env, { event: "project.pending", id: project.id, title: project.title, district: project.district ?? null }));
         return json({ project: { ...project, in_world: true }, stand: placed }, 201, h);
@@ -1568,6 +1841,17 @@ export default {
           }
           return json({ error: "not_found" }, 404, h);
         }
+        // Interruptores de emergencia (ops.ts): cerrar o abrir las altas, el chat y la zona de pruebas.
+        if (path === "/mod/flags" && req.method === "GET") return json(await dir.flagsInfo(), 200, { ...h, "Cache-Control": "no-store" });
+        if (path === "/mod/flags" && req.method === "PUT") {
+          const r = await dir.setFlags(modId, await readJson(req));
+          if (!r.ok) return failure(r, h);
+          // El chat y la zona de pruebas los corta cada lugar: se les dice ahora (también a los de los nodos).
+          const failed = r.data.changed.some((n) => n !== "signups") ? await pushFlags(env, r.data.flags) : [];
+          return json({ ...(await dir.flagsInfo()), changed: r.data.changed, ...(failed.length ? { failed } : {}) }, 200, { ...h, "Cache-Control": "no-store" });
+        }
+        // Cuánta gente viene (ops.ts): sumas por día, por etiqueta de enlace y por lugar. Nunca quién.
+        if (path === "/mod/stats" && req.method === "GET") return json(await dir.statsOf(url.searchParams.get("days")), 200, { ...h, "Cache-Control": "no-store" });
         if (path === "/mod/queue" && req.method === "GET") return json(await dir.moderationQueue(), 200, { ...h, "Cache-Control": "no-store" });
         if (path === "/mod/log" && req.method === "GET") return json({ log: await dir.moderationLog() }, 200, { ...h, "Cache-Control": "no-store" });
         // Quién modera: lo ve moderación; nombrar y retirar, solo el fundador (o la clave de administración).
@@ -1615,6 +1899,92 @@ export default {
           const b = await readJson(req);
           const r = await dir.moderateReport(modId, Number(mrep[1]), b.status, b.note);
           return r.ok ? json(r.data, 200, h) : failure(r, h);
+        }
+        return json({ error: "not_found" }, 404, h);
+      }
+
+      /* --- Copia propia (tools/backup): leerla pide una clave con el permiso `backup`; restaurar, `restore` --- */
+      if (path === "/admin/backup" || path.startsWith("/admin/backup/") || path.startsWith("/admin/restore/")) {
+        const scope = path.startsWith("/admin/restore/") ? "restore" : "backup";
+        // Cada cosa, su clave: la de administración no sirve para esto (solo en local, para las pruebas).
+        if (!principal?.scopes.includes(scope) && !(env.RP_ID === "localhost" && isAdmin)) {
+          return json({ error: principal ? "forbidden" : "unauthorized", message: `hace falta una clave con el permiso ${scope}` }, principal ? 403 : 401, h);
+        }
+        const noStore = { ...h, "Cache-Control": "no-store" };
+        const placeOf = async (raw: string) => {
+          const id = decodeURIComponent(raw);
+          return ChunkId.safeParse(id).success && (await knownChunk(env, id)) ? id : null;
+        };
+        if (path === "/admin/backup" && req.method === "GET") {
+          communityCache = null;
+          return json({ version: 1, at: Date.now(), directory: await dir.backupManifest(), chunks: await allChatChunks(env) }, 200, noStore);
+        }
+        const bt = path.match(/^\/admin\/backup\/directory\/([a-z_]{2,40})$/);
+        if (bt && req.method === "GET") {
+          const r = await dir.backupRows(bt[1]!, url.searchParams.get("after"), url.searchParams.get("limit"));
+          return r.ok ? json(r.data, 200, noStore) : failure(r, h);
+        }
+        const bc = path.match(/^\/admin\/backup\/chunk\/([^/]+)$/);
+        if (bc && req.method === "GET") {
+          const id = await placeOf(bc[1]!);
+          if (!id) return json({ error: "not_found", message: "ese lugar no existe" }, 404, h);
+          return json(await chunk(env, id).dumpState(), 200, noStore);
+        }
+        const rt = path.match(/^\/admin\/restore\/directory\/([a-z_]{2,40})$/);
+        if (rt && req.method === "POST") {
+          let rows: unknown;
+          try {
+            rows = (JSON.parse(await readCapped(req, RESTORE_PAGE_BYTES)) as { rows?: unknown }).rows;
+          } catch (e) {
+            if ((e as Error).message === "too_large") throw e;
+            return json({ error: "bad_message", message: "el cuerpo no es JSON" }, 400, h);
+          }
+          const r = await dir.restoreRows(rt[1]!, rows, url.searchParams.get("truncate") === "1");
+          // Lo que este Worker recordaba (lugares, nodos, su clave) puede haber cambiado.
+          communityCache = null;
+          nodeKeyMem = null;
+          await forgetRoutes();
+          return r.ok ? json(r.data, 200, noStore) : failure(r, h);
+        }
+        const rc = path.match(/^\/admin\/restore\/chunk\/([^/]+)$/);
+        if (rc && req.method === "POST") {
+          communityCache = null;
+          const id = await placeOf(rc[1]!);
+          if (!id) return json({ error: "not_found", message: "ese lugar no existe aquí (restaura antes el Directory)" }, 404, h);
+          let dump: ChunkDumpOf;
+          try {
+            dump = JSON.parse(await readCapped(req, RESTORE_CHUNK_BYTES)) as ChunkDumpOf;
+          } catch (e) {
+            if ((e as Error).message === "too_large") throw e;
+            return json({ error: "bad_message", message: "el cuerpo no es JSON" }, 400, h);
+          }
+          if (!dump || dump.chunk !== id || !Array.isArray(dump.entities) || !Array.isArray(dump.stands) || !Array.isArray(dump.chat)) {
+            return json({ error: "bad_message", message: "eso no es la copia de este lugar" }, 400, h);
+          }
+          return json(await chunk(env, id).loadState(dump), 200, noStore);
+        }
+        const ra = path.match(/^\/admin\/restore\/asset\/([0-9a-f]{64})$/);
+        if (ra && req.method === "PUT") {
+          if (Number(req.headers.get("Content-Length") ?? 0) > RESTORE_ASSET_BYTES) throw new Error("too_large");
+          const bytes = new Uint8Array(await req.arrayBuffer());
+          if (bytes.byteLength > RESTORE_ASSET_BYTES) throw new Error("too_large");
+          let kind: unknown;
+          try {
+            kind = (JSON.parse(decodeURIComponent(req.headers.get("X-Asset-Meta") ?? "%7B%7D")) as { kind?: unknown }).kind;
+          } catch {
+            /* sin metadatos: restoreAsset dirá que falta para qué era */
+          }
+          const r = await restoreAsset(env.ASSETS, ra[1]!, bytes, kind);
+          return r.ok ? json(r.data, 201, noStore) : failure(r, h);
+        }
+        // Al terminar de restaurar: lo que el mundo saca de las cuentas (escaparate del nexo, máquinas,
+        // anuncios, puertas de la comunidad) y lo que moderación tenía cerrado.
+        if (path === "/admin/restore/finish" && req.method === "POST") {
+          communityCache = null;
+          await syncShowcase(env, dir);
+          await syncCommunityGates(env, dir);
+          const failed = await pushFlags(env, await dir.flags());
+          return json({ synced: true, ...(failed.length ? { failed } : {}) }, 200, noStore);
         }
         return json({ error: "not_found" }, 404, h);
       }
@@ -1682,6 +2052,8 @@ export default {
         // En un nodo que no responde no se da pase: el visitante ve «no disponible» en vez de esperar.
         const node = nodeFor(env, chunkId);
         if (node && !(await nodeAlive(node.id, node.url)).ok) return json(UNAVAILABLE, 503, { ...h, "Cache-Control": "no-store", "Retry-After": "30" });
+        // A un nodo se entra sin pasar más por aquí: la entrada se cuenta con el pase. (Aquí, al abrir el WebSocket.)
+        if (node) countEntry(env, ctx, p, chunkId, url.searchParams.get("src"));
         return json({ url: await socketFor(env, req, chunkId, p, raw), remote: !!node, ...(node ? { host: node.name } : {}) }, 200, { ...h, "Cache-Control": "no-store" });
       }
 
@@ -1694,18 +2066,11 @@ export default {
         const headers = new Headers({ "X-Chunk-Id": chunkId });
 
         if (m[2] === "state") {
-          // Lectura pública y ligera para el panel 2D (no abre WebSocket). Se guarda 15 s en la caché
-          // del centro de datos: el chunk se despierta como mucho una vez cada 15 s, mire quien mire.
-          const cache = (globalThis as unknown as { caches?: { default?: Cache } }).caches?.default;
-          const key = new Request(`https://xenxo-cache.local/state/${chunkId}`);
-          const hit = await cache?.match(key);
-          const out = { ...h, "Content-Type": "application/json", "Cache-Control": "public, max-age=15" };
-          if (hit) return new Response(hit.body, { status: 200, headers: out });
-          const r = await stub.fetch(new Request("https://do/state", { headers })).catch(() => null);
-          if (!r || r.status >= 500) return json(UNAVAILABLE, 503, { ...h, "Cache-Control": "no-store" });
-          const body = await r.text();
-          if (r.ok && cache) ctx.waitUntil(cache.put(key, new Response(body, { headers: { "Cache-Control": "public, max-age=15" } })));
-          return new Response(body, { status: r.status, headers: out });
+          // Lectura pública y ligera (no abre WebSocket). Se guarda 15 s en la caché del centro de
+          // datos: el chunk se despierta como mucho una vez cada 15 s, mire quien mire.
+          const st = await chunkState(env, ctx, chunkId);
+          if (!st) return json(UNAVAILABLE, 503, { ...h, "Cache-Control": "no-store" });
+          return new Response(st.body, { status: st.status, headers: { ...h, "Content-Type": "application/json", "Cache-Control": "public, max-age=15" } });
         }
 
         if (m[2] === "ws" && isRemote(env, chunkId)) {
@@ -1723,6 +2088,7 @@ export default {
         }
         if (!(await sessionAlive(env, p))) return json({ error: "session_expired", message: "tu sesión ha caducado; vuelve a entrar" }, 401, h);
         if (await closedFor(env, chunkId, p)) return json(SOON, 403, h);
+        countEntry(env, ctx, p, chunkId, url.searchParams.get("src"));
         headers.set("X-Principal", JSON.stringify(p));
         headers.set("Upgrade", "websocket");
         return stub.fetch(new Request("https://do/ws", { headers }));
@@ -1732,6 +2098,11 @@ export default {
     } catch (e) {
       if ((e as Error).message === "too_large") return json({ error: "too_large" }, 413, h);
       if ((e as Error).message === "session_expired") return json({ error: "session_expired", message: "tu sesión ha caducado; vuelve a entrar" }, 401, h);
+      // El plan gratuito ha cortado los Durable Objects por hoy: se dice, y /health lo recuerda.
+      if (isCapacityError(e)) {
+        noteCapacity(ctx);
+        return overCapacity(h);
+      }
       console.error(e);
       return json({ error: "internal", message: "error interno" }, 500, h);
     }
@@ -1740,4 +2111,14 @@ export default {
   async scheduled(_c: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(runNodeChecks(env).then(() => undefined).catch((e) => console.warn("nodos:", (e as Error).message)));
   },
+} satisfies ExportedHandler<Env>;
+
+export default {
+  async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const res = await worker.fetch(req, env, ctx);
+    // Lo que cambia lo que enseña el panel (publicar, revisar, interruptores…) saca /boot de la caché de aquí.
+    if (req.method !== "GET" && req.method !== "OPTIONS" && res.status < 400 && BOOT_CHANGERS.test(new URL(req.url).pathname)) ctx.waitUntil(purgeBoot());
+    return res;
+  },
+  scheduled: worker.scheduled,
 } satisfies ExportedHandler<Env>;

@@ -58,6 +58,7 @@ import { at, portalEntities, r3, yaw, type Seeded } from "./places";
 /** Pantalla de la máquina recreativa (tools/models/generated/arcade_cabinet): centro y tamaño. */
 const CABINET_SCREEN = { y: 1.18, z: 0.34, size: [0.56, 0.5] as [number, number] };
 import { isCommunityChunk, type CommunityMeta } from "./community";
+import type { PlaceFlags } from "./ops";
 import { fitsZone, localBox, worldBox, type Zone } from "./zone";
 import { assetKey } from "./assets";
 import { ACTIVITY_SCHEMA, activityKey, ARRIVALS_FREE, ARRIVALS_WINDOW_MS, isoWeek, JUMP_COOLDOWN_MS, weekStart, minRaceMs, MOVE_BURST, FOOT_BURST, near, POSE_MAX_AGE_MS, RACE_TIMEOUT_MS, SCORES_LIMIT, stepMove, unitQuat, type Move, type RaceRun } from "./activities";
@@ -232,6 +233,8 @@ export interface ChunkDump {
   activities?: { collected: Record<string, unknown>[]; hunts: Record<string, unknown>[]; races: Record<string, unknown>[]; points?: Record<string, unknown>[]; race_weeks?: Record<string, unknown>[]; loot?: Record<string, unknown>[] };
   /** Distrito de la comunidad: lo que es (con lo del sistema que lleva). Ausente en los demás. */
   community?: string | null;
+  /** Zona de pruebas: de quién es cada pieza y de qué día (sin esto no se vaciaría sola al cambiar de servidor). */
+  sandbox?: { entity_id: string; owner: string; day: string; light: number }[];
 }
 
 export class ChunkRoom extends DurableObject<Env> {
@@ -333,6 +336,8 @@ export class ChunkRoom extends DurableObject<Env> {
     const path = new URL(req.url).pathname;
 
     if (path === "/state") return Response.json(this.publicState());
+    // Los marcadores para el panel: por fetch (una sola petición al objeto, sin bind delante).
+    if (path === "/boards") return Response.json(await this.boardsOf());
 
     if (path === "/ws") {
       const principal = JSON.parse(req.headers.get("X-Principal") ?? "null") as Principal | null;
@@ -572,6 +577,7 @@ export class ChunkRoom extends DurableObject<Env> {
           ...(this.fightStyle ? { fight: this.fightStyle } : {}),
           ...(this.parkour ? { parkour: true } : {}),
           ...(this.weaponsHere ? { weapons: this.weaponsOf(att) } : {}),
+          ...(this.closedHere().length ? { closed: this.closedHere() } : {}),
         }));
         // En solitario (el nexo) nadie ve a nadie: ni gente, ni poses, ni chat.
         if (this.solo) {
@@ -846,6 +852,8 @@ export class ChunkRoom extends DurableObject<Env> {
       // Primero quién puede y cuánto: nada de leer R2 (ni pedir medidas fuera) por quien no construye.
       if (!att.principal.scopes.includes("build") && !sandbox) throw new MutationError("forbidden", "esta sesión no tiene permiso de construcción");
       if (sandbox && p.mutation.op !== "DESPAWN" && p.mutation.components["mesh@1"]) throw new MutationError("forbidden", "en la zona de pruebas solo hay piezas básicas");
+      // Cerrada por moderación: no se pone ni se cambia nada (quitar lo propio, sí).
+      if (sandbox && p.mutation.op !== "DESPAWN" && this.isClosed("sandbox")) throw new MutationError("forbidden", "la zona de pruebas está cerrada por ahora", { reason: "closed" });
       if (zone && zone.chunk_id !== this.chunkId) {
         throw new MutationError("forbidden", `esta clave solo construye en su parcela (${zone.district} ${zone.parcel})`, { zone });
       }
@@ -909,6 +917,48 @@ export class ChunkRoom extends DurableObject<Env> {
     this.sql.exec("DELETE FROM sandbox WHERE day != ?", today);
     this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('sandbox_day', ?)", today);
     return out;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Interruptores de emergencia (moderación; ops.ts)                   */
+  /* ---------------------------------------------------------------- */
+
+  /** Lo que moderación ha cerrado aquí (meta 'closed'); se lee una vez al despertar. */
+  private closedMem: Set<string> | null = null;
+
+  private isClosed(what: "chat" | "sandbox"): boolean {
+    if (!this.closedMem) {
+      const raw = this.sql.exec<{ v: string }>("SELECT v FROM meta WHERE k = 'closed'").toArray()[0]?.v;
+      let list: unknown = [];
+      try {
+        list = raw ? JSON.parse(raw) : [];
+      } catch {
+        /* dato roto: nada cerrado */
+      }
+      this.closedMem = new Set(Array.isArray(list) ? list.filter((x): x is string => typeof x === "string") : []);
+    }
+    return this.closedMem.has(what);
+  }
+
+  /** Lo cerrado que le importa a quien entra aquí (WELCOME.closed): sin chat en el nexo, sin zona de pruebas donde no la hay. */
+  private closedHere(): ("chat" | "sandbox")[] {
+    const out: ("chat" | "sandbox")[] = [];
+    if (!this.solo && this.isClosed("chat")) out.push("chat");
+    if (this.isClosed("sandbox") && this.sandboxRect()) out.push("sandbox");
+    return out;
+  }
+
+  /**
+   * Moderación cierra o abre el chat y la zona de pruebas de este lugar (true = abierto). Lo llama
+   * el Worker al cambiar un interruptor (/mod/flags) y al traer el lugar de otro servidor.
+   */
+  async setFlags(f: PlaceFlags): Promise<{ closed: string[] }> {
+    this.ensureChunk(null);
+    const closed = [...(f.chat === false ? ["chat"] : []), ...(f.sandbox === false ? ["sandbox"] : [])];
+    if (closed.length) this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('closed', ?)", JSON.stringify(closed));
+    else this.sql.exec("DELETE FROM meta WHERE k = 'closed'");
+    this.closedMem = new Set(closed);
+    return { closed };
   }
 
   /** Vacía la zona de pruebas (moderación). */
@@ -1343,6 +1393,7 @@ export class ChunkRoom extends DurableObject<Env> {
       stands: this.sql.exec<ChunkDump["stands"][number]>("SELECT project_id, slot FROM stands").toArray(),
       chat: this.sql.exec<ChunkDump["chat"][number]>("SELECT id, ts, sender, kind, display_name, session_id, text, hidden FROM chat").toArray(),
       community: this.sql.exec<{ v: string }>("SELECT v FROM meta WHERE k = 'community'").toArray()[0]?.v ?? null,
+      sandbox: this.sql.exec<NonNullable<ChunkDump["sandbox"]>[number]>("SELECT entity_id, owner, day, light FROM sandbox").toArray(),
       activities: {
         collected: this.sql.exec("SELECT * FROM act_collected").toArray(),
         hunts: this.sql.exec("SELECT * FROM act_hunt_done").toArray(),
@@ -1414,6 +1465,10 @@ export class ChunkRoom extends DurableObject<Env> {
         for (const r of (d.activities.loot ?? []) as { sub: string; weapon: string; race_key: string; ts: number }[]) {
           this.sql.exec("INSERT INTO act_loot (sub, weapon, race_key, ts) VALUES (?, ?, ?, ?)", r.sub, r.weapon, r.race_key, r.ts);
         }
+      }
+      if (d.sandbox) {
+        this.sql.exec("DELETE FROM sandbox");
+        for (const r of d.sandbox) this.sql.exec("INSERT OR REPLACE INTO sandbox (entity_id, owner, day, light) VALUES (?, ?, ?, ?)", r.entity_id, r.owner, r.day, r.light);
       }
       if (d.community) {
         this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('community', ?)", d.community);
@@ -1572,6 +1627,7 @@ export class ChunkRoom extends DurableObject<Env> {
   private handleChat(ws: WebSocket, att: Attachment, ref: string | undefined, raw: string) {
     const kind = att.principal.kind;
     if (kind === "guest") return this.sendError(ws, ref, "forbidden", "crea una cuenta para escribir en el chat");
+    if (this.isClosed("chat")) return this.sendError(ws, ref, "forbidden", "el chat está cerrado por ahora", { reason: "closed" });
     // Sin caracteres de control ni de formato ni espacios de más (cleanText). Los enlaces se muestran
     // como texto, nunca clicables.
     const text = cleanText(raw, BUDGETS.maxChatChars);

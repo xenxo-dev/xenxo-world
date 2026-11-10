@@ -7,6 +7,7 @@
  *   GET  /health                       → "ok"
  *   GET  /node                         → { id, chunks }: quién es este nodo (lo comprueba el Worker)
  *   GET  /chunk/<id>/state             → estado público del chunk
+ *   GET  /chunk/<id>/boards            → sus marcadores (para el panel)
  *   GET  /chunk/<id>/ws?ticket=<pase>  → WebSocket del chunk (el pase dice quién entra)
  *   POST /rpc/<id>/<método>            → llamada firmada del Worker (cabecera X-Xenxo-Call)
  *
@@ -59,13 +60,13 @@ export default {
     // Sin NODE_ID no se acepta nada firmado: así un nodo mal configurado no sirve lo de otro.
     if (!nodeId) return json({ error: "no_node_id", message: "falta NODE_ID en la configuración del nodo" }, 503);
 
-    const c = path.match(/^\/chunk\/([^/]+)\/(ws|state)$/);
+    const c = path.match(/^\/chunk\/([^/]+)\/(ws|state|boards)$/);
     if (c) {
       const id = decodeURIComponent(c[1]!);
       if (!hosted.has(id)) return json({ error: "not_found", message: "este servidor no tiene ese chunk" }, 404);
       const headers = new Headers({ "X-Chunk-Id": id });
-      if (c[2] === "state") {
-        const r = await stubOf(env, id).fetch(new Request("https://do/state", { headers }));
+      if (c[2] === "state" || c[2] === "boards") {
+        const r = await stubOf(env, id).fetch(new Request(`https://do/${c[2]}`, { headers }));
         return new Response(r.body, { status: r.status, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=15" } });
       }
       if (req.headers.get("Upgrade") !== "websocket") return json({ error: "se esperaba WebSocket" }, 426);

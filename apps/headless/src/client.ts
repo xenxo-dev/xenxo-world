@@ -25,6 +25,8 @@ export interface ConnectOptions {
   avatar?: { hash: string; format: "vrm" };
   /** Se ofrece a llevar a los ciudadanos del distrito para los demás (HELLO `capabilities.npc_host`, §9 nonies). */
   npcHost?: boolean;
+  /** Etiqueta del enlace por el que se llega (`?v=` en la web): el servidor la suma a sus contadores del día. */
+  src?: string;
 }
 
 export class XenxoClient {
@@ -60,11 +62,18 @@ export class XenxoClient {
     let url = new URL(`/chunk/${chunkId}/ws`, o.baseUrl);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     url.searchParams.set("token", token);
+    if (o.src) url.searchParams.set("src", o.src);
     // Un distrito puede vivir en otro servidor: el pase dice dónde conectar (servidores antiguos no
     // tienen /ticket: entonces, aquí). La plaza y el nexo siempre están en el servidor principal.
     if (chunkId !== "c_0_0" && chunkId !== "c_0_-1000") {
-      const t = await fetch(new URL(`/chunk/${chunkId}/ticket`, o.baseUrl), { method: "POST", headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
-      if (t?.ok) url = new URL(((await t.json()) as { url: string }).url);
+      const ticket = new URL(`/chunk/${chunkId}/ticket`, o.baseUrl);
+      if (o.src) ticket.searchParams.set("src", o.src);
+      const t = await fetch(ticket, { method: "POST", headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
+      if (t?.ok) {
+        url = new URL(((await t.json()) as { url: string }).url);
+        // Aquí mismo (no en un nodo): la etiqueta va con el WebSocket.
+        if (o.src && url.searchParams.has("token")) url.searchParams.set("src", o.src);
+      }
       else if (t && t.status !== 404) throw new Error(`ticket ${chunkId} → HTTP ${t.status}`);
     }
 

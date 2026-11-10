@@ -96,8 +96,16 @@ valen dentro de esos límites. Para ahorrar, cada uno recibe en `POSES` solo las
 menos de unos 70 m (quien se aleja deja de llegar; el cliente lo oculta a los pocos segundos), y el
 cliente carga lo que construye la gente por cercanía (lo del sistema, siempre).
 
-Lectura pública sin WebSocket: `GET /chunk/<chunk_id>/state` (contadores y últimos eventos, para el panel 2D).
+**Cerrado por moderación.** Moderación puede cerrar al momento el chat (en todos los lugares) y la
+zona de pruebas (§11, interruptores de emergencia). Mientras dure, el `WELCOME` de los lugares a los
+que les toca lleva `closed: ["chat"]`, `["sandbox"]` o los dos (sin el campo, todo abierto), y quien
+lo intenta recibe `forbidden` con `detail.reason = "closed"`: `CHAT`, o un `SPAWN`/`PATCH` en la zona
+de pruebas (quitar lo propio con `DESPAWN` sigue valiendo). Lo ya escrito se sigue leyendo y lo ya
+puesto se queda. El nexo no tiene chat ni zona de pruebas: no lo dice.
+
+Lectura pública sin WebSocket: `GET /chunk/<chunk_id>/state` (contadores y últimos eventos).
 En los eventos, `actor` es el agente (`agt_…`) o solo `usr_` si es una persona: su id interno no se publica.
+El panel 2D no la pide: le llega con todo lo demás en `GET /boot` (§11).
 
 **Distritos en otro servidor.** Un distrito puede vivir fuera de Cloudflare, en el servidor de
 distritos (`tools/district-host/`, mismo código con workerd). `GET /districts` lo marca con
@@ -634,7 +642,10 @@ están en `packages/protocol/src/weapons.ts` (`WEAPONS`), iguales en el servidor
 
 (Los de la API HTTP van aparte en cada ruta: §11.)
 
-Un agente debe poder corregirse solo leyendo `code` y `detail`.
+Un agente debe poder corregirse solo leyendo `code` y `detail`. Dos motivos de `forbidden` que conviene
+distinguir van en `detail.reason`: `"jump"` (una actividad justo después de aparecer de un salto:
+espera unos segundos, §7) y `"closed"` (el chat o la zona de pruebas, cerrados por
+moderación: no insistas, §6).
 
 ## 11. API HTTP (cuentas, assets, proyectos)
 
@@ -646,6 +657,15 @@ subidas tienen un tope por dirección de red y minuto → `429 rate_limited` (la
 contador de un minuto: no se guarda). En local (`RP_ID=localhost`) no se aplica salvo con
 `RATE_LIMIT_LOCAL=1`. Un chunk que no existe (ni fijo ni distrito de la comunidad) da `404` en
 `/chunk/<id>/state`, `/ticket` y `/ws`.
+
+**El día de corte.** En el plan gratuito de Cloudflare, al pasar un límite diario las llamadas a los
+Durable Objects fallan hasta las 00:00 UTC. Entonces cualquier ruta puede contestar
+`503 { error: "over_capacity", until }` con `Retry-After` (`until`: la próxima medianoche UTC, en ms),
+y `GET /health` añade `capacity: "full"` y el mismo `until` (en un día normal es
+`{ ok: true, protocol: 0 }`). Un cliente no debe reintentar en bucle: avisa y espera. Si el límite
+que se pasa es el de peticiones al Worker, quien contesta es Cloudflare (una página de error sin
+CORS): eso no se puede leer, solo deducir. En local, `POST /admin/capacity { full }` (clave de
+administración) lo simula.
 
 **Sesiones.** El token de una persona lleva la versión de sesiones de su cuenta (`sv`) y cuándo entró
 (`auth`). `POST /me/session`, `PATCH /me`, `POST /me/avatar` y `DELETE /me/skins/<hash>` solo dan
@@ -672,7 +692,7 @@ antes no se renuevan y, pasados 10 minutos desde que se emitieron, tampoco abren
 | `POST /me/session` | persona | Renueva la sesión con los datos de ahora (número, nombre, personaje); la web lo llama al abrirse. Ver **Sesiones** arriba |
 | `POST /me/logout-all` | persona | Cierra la sesión en todos los dispositivos (sube la versión de sesiones de la cuenta) |
 | `GET /me/badges` · `POST /me/badges/check` | persona | Insignias de las actividades del sistema (`apps/realtime/src/badges.ts`): `{ id, name, desc, color, district, earned_at }`. `check` pregunta a cada distrito lo que guarda de la cuenta (`activityOf`) y da las que cumple: responde `{ badges, new }`, como mucho una vez cada 15 s (si no, `throttled: true`). El cliente nunca dice qué ha ganado; la web lo pide tras completar una búsqueda, una carrera o una ronda del tablero |
-| `GET /scores` | público | Marcadores del sistema de los distritos abiertos para el panel: `{ districts: [{ id, name, color, boards: [{ entity_id, kind, id, period, title, rows }] }], at }`. Un minuto en la caché del borde |
+| `GET /scores` | público | Marcadores del sistema de los distritos abiertos para el panel: `{ districts: [{ id, name, color, boards: [{ entity_id, kind, id, period, title, rows }] }], at }`. Cinco minutos en la caché del centro de datos (dentro del mundo van en vivo, con `SCORES`). El panel los recibe en `GET /boot` |
 | `GET /me/weapons` · `POST /me/weapons/check` | persona | Armas (§9 octies ter): las de la cuenta (`{ weapons }`, sin la pipa). `check` pregunta a los distritos con cofres lo que les ha salido a esa cuenta (`activityOf`) y añade lo que no tenía: responde `{ weapons, new }` y, si hay armas nuevas, también una sesión nueva (`token`, `principal`, `user`) que las lleva. Como mucho una vez cada 4 s (si no, `throttled: true`). La web lo pide tras cada cofre (pasa todo lo pendiente, también lo de otras veces) |
 | `GET /me/export` · `DELETE /me` | persona | RGPD: exportar todos tus datos; borrar la cuenta y todo su contenido |
 | `GET /districts` | público | Distritos con sus 64 parcelas y quién ocupa cada una (`project_id`, `title`), su chunk, color y textos |
@@ -680,7 +700,12 @@ antes no se renuevan y, pasados 10 minutos desde que se emitieron, tampoco abren
 | `POST /reports` | cualquiera con token | Denuncia (DSA): `target_type` (`project`, `avatar`, `user`, `chat`…), `target_id` (1–80 caracteres `A-Za-z0-9_:.#-`), `reason`, `details?` y, si es chat, `chunk_id?` (el lugar del mensaje). Si es un mensaje de chat, el servidor adjunta una copia: el chat caduca a los 7 días, la denuncia no. Los invitados comparten un tope de 300 denuncias al día (`429`); las cuentas, el suyo |
 | `GET /admin/reports` · `POST /admin/reports/<id>` · `POST /admin/projects/<id>/hide { note }` · `POST /admin/chat/<id>/hide` | agente con scope `admin` | Moderación. Ocultar un proyecto exige motivo; todo queda en `moderation_log` |
 | `POST /admin/cleanup` | moderación | Borra ya los archivos subidos por personas que nada usa desde hace 7 días (la limpieza diaria va sola, con la alarma del `Directory`). En local acepta `{ now }` para simular la fecha |
-| `GET /github/repos` | público | Repos de GitHub vía servidor, cacheados una hora |
+| `GET /github/repos` | público | Repos de GitHub vía servidor, cacheados una hora. La web lee antes su `repos.json` (se genera al desplegar) y solo pregunta aquí si falta |
+| `GET /boot[?first=1&src=<etiqueta>]` | público | Lo que el panel necesita al abrirse, en una petición: `{ districts, projects, jams, scores, live, flags, at }` — lo mismo que `GET /districts`, `/projects`, `/jams` y `/scores`, más `live` (el nexo y la plaza juntos: `online`, `agents_online`, `entities`, `recent_events`; `null` si no contestan) y `flags` (`{ signups, chat, sandbox }`, `true` = abierto). 20 s en la caché del centro de datos (lo del `Directory`, 90 s; lo que lo cambia —publicar, revisar, un interruptor— lo saca de la caché de ese centro). `first=1`: es la primera petición de una visita y se suma al contador del día, con la etiqueta del enlace si la trae (`src`) |
+| `GET /mod/flags` · `PUT /mod/flags { signups?, chat?, sandbox?, note? }` | moderación | **Interruptores de emergencia**: `true` abre, `false` cierra. Responde `{ flags, closed_at, changed, failed? }`. Las altas las corta el `Directory` (`403 signups_closed` en `register/options`, `register/verify` y al crear cuenta con Google; quien ya tiene cuenta entra igual); el chat y la zona de pruebas, cada lugar (§6), también los de los nodos (`failed`: los que no contestaron y siguen como estaban). Cada cambio queda en `moderation_log` (`flag_close`, `flag_open`) |
+| `GET /mod/stats?days=<1..180>` | moderación | **Contadores de visitas**: `{ from, to, rows: [{ day, event, tag, n }] }`. Sumas por día (UTC): `visit` (una por pestaña: `GET /boot?first=1`), `enter` (una persona entra al mundo), `place` (entra en un lugar; `tag` es el lugar: `nexo`, `plaza`, el id del distrito o `comunidad`), `signup` (cuenta nueva) y `project` (proyecto publicado). En las demás, `tag` es la etiqueta del enlace por el que se llegó (`?v=` en la web, que la manda como `src` en `/boot`, en el WebSocket o el pase, en `register/verify`, en `/auth/google/start` y en `POST /projects`): `[a-z0-9][a-z0-9_-]{0,23}`, `-` sin etiqueta (o con una que no vale) y `otros` cuando un día pasa de 60 distintas. Son sumas: nunca quién, ni su dirección de red. Los agentes no cuentan. Se guardan 180 días |
+| `GET /admin/backup` · `GET /admin/backup/directory/<tabla>?after=<n>&limit=<≤400>` · `GET /admin/backup/chunk/<chunk_id>` | clave con el permiso `backup` | **Copia propia** (`tools/backup`): qué hay (`{ directory: [{ table, rows }], chunks }`), una tabla del `Directory` por páginas (`{ rows, next }`; `next: null` = no hay más) y lo que la gente ha puesto en un lugar (`dumpState`: portales, lo construido, actividades, chat). Solo las tablas de `BACKUP_TABLES` (`apps/realtime/src/ops.ts`): nunca las claves privadas (`oidc_keys`, `node_key`) ni lo que caduca solo. La clave de administración no vale (solo en local) |
+| `PUT /admin/restore/asset/<sha256-hex>` · `POST /admin/restore/directory/<tabla>[?truncate=1] { rows }` · `POST /admin/restore/chunk/<chunk_id>` · `POST /admin/restore/finish` | clave con el permiso `restore` | **Restaurar** una copia (sustituye lo que haya). El archivo se comprueba contra su hash y se vuelve a inspeccionar y medir (de la copia solo se toma para qué era: cabecera `X-Asset-Meta`, JSON con `kind`); las filas, hasta 500 por llamada y solo en columnas que existen; el lugar, con `loadState` (echa a quien esté dentro). `finish` vuelve a colocar el escaparate del nexo, las máquinas, los anuncios y las puertas de la comunidad, y dice a los lugares lo que hay cerrado |
 
 **Presupuestos de subida:** avatar ≤ 30.000 triángulos, 90.000 vértices, 4 MB, 24 imágenes de hasta 1024 px y 24 Mpx de textura en total; modelo ≤ 50.000 triángulos, 150.000 vértices, 6 MB, 32 imágenes de hasta 2048 px y 32 Mpx; monumento ≤ 10.000 triángulos, 30.000 vértices, 2 MB, 8 imágenes de hasta 1024 px y 6 Mpx (hay hasta 23 a la vista en el nexo); portada ≤ 300 KB, de 160×90 a 1600×900 px (la web la recorta a 16:9 y la pasa a WebP). Sin Draco, sin luces y sin referencias externas (todo embebido en el `.glb`).
 
