@@ -34,7 +34,7 @@ Antes de abrirla al público, cambia lo que es de xenxo.io:
 | Archivo | Qué cambiar |
 |---|---|
 | `apps/web/public/legal/` | Quién es el responsable, tu contacto y dónde guardas los datos. Están en español e inglés y tienen los huecos entre corchetes. |
-| `apps/web/src/panel/Panel.tsx` | El enlace «Código» tiene que llevar a **tu** repositorio: la AGPL exige ofrecer el código de lo que sirves. |
+| `apps/web/src/content.ts` | `SOURCE_URL`: el enlace «Código» (y «Informar de un problema») tiene que llevar a **tu** repositorio: la AGPL exige ofrecer el código de lo que sirves. |
 | `apps/realtime/wrangler.toml` | `GITHUB_OWNER`: la cuenta cuyos repositorios salen en el panel. |
 | `SECURITY.md` | Dónde avisarte de un fallo de seguridad. |
 
@@ -106,6 +106,8 @@ npm run hash-key -w @xenxo/headless -- "una-clave-larga-y-aleatoria"
 ```
 
 Y pon en `AGENT_KEYS` las entradas separadas por comas: `builder-01:<huella>` para un agente que construye y `admin-01:<huella>:build|upload|admin` para moderar desde la terminal. Las claves de ejemplo de `.dev.vars.example` no valen fuera de `localhost`.
+
+Cada clave puede lo que digan sus permisos, y nada más. Además de esos: `backup` (solo leer la [copia propia](operar.md#copias)), `restore` (restaurarla: créala solo cuando haga falta) y `mod_summary` (solo el resumen de lo pendiente, para los avisos).
 
 ### Entrar con Google
 

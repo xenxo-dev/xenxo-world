@@ -1,0 +1,35 @@
+{
+  "url": "http://localhost:5173",
+  "out": "videos",
+  "fps": 30,
+  "quality": "medium",
+  "ambience": "night",
+  "settle": 30,
+  "shots": [
+    {
+      "name": "arcade-orbita",
+      "place": "/d/arcade",
+      "at": [32, 0, 56],
+      "yaw": 0,
+      "cam": "orbit",
+      "frame": "9x16",
+      "seconds": 6,
+      "actions": [{ "t": 1, "press": "Digit1" }]
+    },
+    {
+      "name": "vertical-grua",
+      "place": "/d/vertical/patio",
+      "cam": "crane",
+      "frame": "9x16",
+      "seconds": 9
+    },
+    {
+      "name": "cero-paseo",
+      "place": "/d/cero/torre",
+      "cam": "tripod",
+      "frame": "16x9",
+      "seconds": 6,
+      "actions": [{ "t": 0.5, "hold": "KeyW", "for": 5 }]
+    }
+  ]
+}

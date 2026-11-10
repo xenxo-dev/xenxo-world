@@ -18,6 +18,8 @@ Una lista corta. Todo lo que falte aquí es trabajo tuyo, no de xenxo.
 - [ ] **Doble factor** en tus cuentas de GitHub y Cloudflare, y el token de Cloudflare limitado a tu cuenta y tu zona.
 - [ ] **`SECURITY.md`** con tu forma de recibir avisos de fallos.
 - [ ] En Cloudflare, **HSTS** activado en la zona (*SSL/TLS → Edge Certificates*) y **avisos de uso** de Workers y Durable Objects (*Notifications*).
+- [ ] **La copia diaria** a un equipo tuyo en marcha, y una restauración probada ([Copias](#copias)).
+- [ ] Sabes dónde están los **interruptores de emergencia** y quién más modera ([abajo](#interruptores-de-emergencia)).
 
 ## Qué ya hace xenxo por ti
 
@@ -52,20 +54,40 @@ Cómo se ha medido, en [`docs/LIMITES-CLOUDFLARE.md`](../../../docs/LIMITES-CLOU
 > [!CAUTION]
 > No abras varias cuentas gratuitas para repartir la carga: las condiciones de Cloudflare prohíben usar el servicio para saltarse sus límites y pueden suspenderlo todo.
 
+**Qué ve la gente si se corta.** La web lo dice claro en vez de quedarse «conectando…»: «xenxo está lleno por hoy» y la hora a la que vuelve a abrir (medianoche UTC, en la hora de quien mira), con un botón para reintentar. Cuando el corte es de los Durable Objects, lo sabe seguro (el servidor lo dice en `/health`: `capacity: "full"`); cuando es de las peticiones al Worker, Cloudflare contesta con una página de error que la web no puede leer, y lo da como lo más probable. La visita ya gasta menos: el panel arranca con una sola petición (`GET /boot`, 20 s en la caché) en vez de seis y se refresca cada minuto.
+
 ## Copias
 
 | Qué | Dónde está | Cómo copiarlo |
 |---|---|---|
 | El código | Tu repositorio | Cualquier clon sirve; `git bundle create copia.bundle --all` lo deja en un solo archivo |
 | Los distritos en tu servidor | `/var/lib/xenxo-distritos/datos` | Lo hace solo cada 15 minutos ([guía](servidor.md#7-el-dia-a-dia)) |
-| Cuentas, proyectos y lugares en Cloudflare | Durable Objects | Cada persona puede descargar sus datos desde *Cuenta*; xenxo no tiene hoy una copia completa propia |
-| Modelos y portadas subidos | R2 | Direccionados por hash: se pueden volver a subir |
+| Cuentas, proyectos y lugares en Cloudflare | Durable Objects | [`tools/backup`](../../../tools/backup/): una copia diaria **cifrada** a un equipo tuyo, con su restauración. Además, cada persona puede descargar sus datos desde *Cuenta* |
+| Modelos y portadas subidos | R2 | La misma copia los baja por su hash (solo los nuevos) |
+
+La copia la pide un equipo tuyo (un NAS, el servidor de distritos) con una clave que **solo puede leerla** (permiso `backup` en `AGENT_KEYS`); restaurar pide otra (`restore`). Las claves privadas de xenxo no salen nunca: tras restaurar se crean de nuevo. Como lleva datos de personas, dilo en tu política de privacidad (dónde se guarda y cuánto tiempo) y guarda la frase de cifrado fuera de ese equipo. Los pasos, en [`tools/backup/README.md`](../../../tools/backup/README.md).
 
 ## Moderación
 
 - Con `FOUNDER_USER_ID` moderas siempre y nombras a más moderación desde el panel.
 - Las denuncias llegan al panel; ocultar o rechazar exige un motivo que ve su autor y queda en el registro de moderación (lo pide la DSA europea).
 - Los avisos a n8n (opcionales) te escriben cuando hay algo por revisar, sin datos de quién denuncia: [`tools/n8n`](../../../tools/n8n/).
+
+### Interruptores de emergencia
+
+En *Cuenta → Moderación → Interruptores de emergencia* se cierran, al momento y sin desplegar:
+
+| Interruptor | Qué corta | Qué sigue |
+|---|---|---|
+| **Altas** | Crear cuentas nuevas (passkey y Google) | Quien ya tiene cuenta entra igual; los invitados juegan |
+| **Chat** | Escribir en el chat de todos los lugares | Leer lo que había, gestos y todo lo demás |
+| **Zona de pruebas** | Poner piezas en la zona de pruebas del Taller | Lo ya puesto se queda hasta que la vacíes |
+
+Cada cambio queda en el registro de moderación. Úsalos si algo se desmadra (una oleada de cuentas, insultos en el chat) mientras revisas con calma; vuelve a abrir cuando pase.
+
+### Cuánta gente viene
+
+En *Cuenta → Moderación → Visitas* hay totales por día: visitas, entradas a un lugar (y a cuál), cuentas creadas y proyectos publicados. Si a un enlace le añades `?v=<etiqueta>` (`tudominio.com/d/vertical?v=tiktok-12`), salen también por etiqueta: sirve para saber qué vídeo o publicación trae gente. Son sumas: no se guarda quién, ni su dirección, ni nada que identifique a nadie.
 
 ## Actualizar
 
@@ -91,3 +113,5 @@ Lo que usan los creadores (protocolo, SDK, MCP, kit de distritos y plantilla) es
 | Errores 1027 o picos de peticiones | *Workers & Pages → xenxo-realtime → Metrics* |
 | El túnel de los distritos se cae | *Notifications → Tunnel health* en Cloudflare |
 | Despliegues fallidos | La pestaña *Actions* de tu repositorio |
+| La web dice «xenxo está lleno por hoy» | Has pasado un límite diario: vuelve solo a las 00:00 UTC. Si se repite, lleva los distritos a tu servidor |
+| Alguien te cuenta un fallo | Las issues del repositorio: el enlace «Informar de un problema» del panel las abre con el navegador y el error ya puestos |

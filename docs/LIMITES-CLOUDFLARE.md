@@ -81,6 +81,54 @@ por ahora.
 - **Si se cae un día:** a las 00:00 UTC (01:00 o 02:00 en España) vuelve solo. La web estática sigue
   sirviéndose; lo que cae es el mundo y las cuentas.
 
+## 6. Revisión del 10-11-2026 (antes de pedir a la gente que venga)
+
+Medido otra vez con un navegador real, contra producción (antes) y contra `npm run dev:realtime` (ahora).
+
+**La primera visita.** Abrir el panel pedía 14 cosas al Worker en 45 s: `/districts`, `/projects`,
+`/jams`, `/scores`, el estado de dos lugares, el token de invitado, el WebSocket, cuatro portadas y
+dos refrescos del estado. Ahora son **unas 7**: `GET /boot` (todo lo del panel en una respuesta),
+el token de invitado, el WebSocket y las portadas. Y el panel abierto pide **una por minuto** (antes
+cuatro), solo con la pestaña a la vista; dentro del mundo, ninguna.
+
+| | Antes | Ahora |
+|---|---|---|
+| Peticiones al Worker al abrir el panel | 14 | ~7 |
+| Con el panel abierto | 240 por hora | 60 por hora |
+| Al viajar de un lugar a otro (invitado) | token nuevo + pase + WebSocket | pase + WebSocket (el token se guarda 50 min) |
+| Llamadas a Durable Objects por `/boot` | — | 0 si alguien lo pidió en los últimos 20 s en ese centro de datos; si no, como mucho 1 al `Directory` (cada 90 s), 2 de estado (cada 15 s) y 5 de marcadores (cada 5 min) |
+
+Los marcadores del panel eran lo más caro sin que se notara: cada minuto con alguna visita, diez
+llamadas a los distritos (dos por distrito). Ahora es una por distrito (`/boards` por `fetch`, sin
+`bind`) y como mucho cada cinco minutos.
+
+**Lo nuevo que gasta, y cuánto.**
+
+- *Contadores de visitas* (`/mod/stats`): el Worker junta lo contado diez segundos y lo apunta en
+  una llamada al `Directory`; si en ese rato alguien pide `/boot` sin caché, va con esa. Como mucho
+  dos o tres llamadas por visita; menos que lo ahorrado.
+- *Copia propia* (`tools/backup`): alrededor de un centenar de peticiones por copia (una al día).
+- *Interruptores de emergencia*: una llamada por lugar al cambiar uno. Casi nunca.
+
+**Qué ve la gente el día que se corta.** Antes, «conectando…» sin fin. Ahora:
+
+- Si se acaban las llamadas a los Durable Objects, el Worker sigue vivo: contesta
+  `503 over_capacity` y `GET /health` dice `capacity: "full"`. La web enseña «xenxo está lleno por
+  hoy» con la hora a la que vuelve (medianoche UTC, en la hora de quien mira).
+- Si se acaban las peticiones al Worker, contesta Cloudflare con una página de error que la web no
+  puede leer (no lleva CORS). La web comprueba que alguien responde y lo da como lo más probable:
+  «el mundo no responde», con la misma hora.
+- Sin red en el dispositivo, lo dice tal cual.
+
+En los tres casos sigue intentándolo sola, hay un botón para reintentar, y la guía y el código
+siguen a mano (son estáticos: no gastan cupo).
+
+**Cuánto aguanta ahora.** El cuello de botella sigue siendo el mismo: **unas 100 horas de gente
+moviéndose al día** entre todos los lugares que viven en Cloudflare (900 llamadas por persona y
+hora). Lo de alrededor (panel, arranque, viajes) ya casi no cuenta. La única forma de subir ese
+techo sin pagar es la prevista: llevar los distritos a un nodo propio (`docs/ALOJAMIENTO-DISTRITOS.md`),
+que no gasta cupo. Hoy todos siguen en Cloudflare.
+
 ## Fuentes
 
 - [Durable Objects: precios y plan gratuito](https://developers.cloudflare.com/durable-objects/platform/pricing)

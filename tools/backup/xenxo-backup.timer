@@ -1,0 +1,12 @@
+[Unit]
+Description=Copia diaria de xenxo
+
+[Timer]
+# Cada día a las 04:30 (hora del equipo), con hasta 20 minutos de margen. Si el equipo estaba
+# apagado a esa hora, la hace al encender.
+OnCalendar=*-*-* 04:30:00
+RandomizedDelaySec=20min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

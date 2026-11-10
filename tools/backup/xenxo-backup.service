@@ -1,0 +1,16 @@
+[Unit]
+Description=Copia de xenxo (cuentas, proyectos, lugares y archivos subidos)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/xenxo-backup.env
+ExecStart=/usr/bin/env node /opt/xenxo-world/tools/backup/backup.mjs
+Nice=10
+# La copia no necesita nada más del equipo.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ReadWritePaths=/mnt

@@ -18,6 +18,8 @@ A short list. Anything missing here is your job, not xenxo's.
 - [ ] **Two-factor authentication** on your GitHub and Cloudflare accounts, and the Cloudflare token limited to your account and zone.
 - [ ] **`SECURITY.md`** with how you receive vulnerability reports.
 - [ ] On Cloudflare, **HSTS** enabled on the zone (*SSL/TLS → Edge Certificates*) and **usage notifications** for Workers and Durable Objects (*Notifications*).
+- [ ] **The daily backup** to a machine of yours is running, and you have tested a restore ([Backups](#backups)).
+- [ ] You know where the **emergency switches** are and who else moderates ([below](#emergency-switches)).
 
 ## What xenxo already does for you
 
@@ -52,20 +54,40 @@ How this was measured: [`docs/LIMITES-CLOUDFLARE.md`](../../../docs/LIMITES-CLOU
 > [!CAUTION]
 > Don't open several free accounts to spread the load: Cloudflare's terms forbid using the service to get around its limits and they can suspend everything.
 
+**What people see if it cuts off.** The web says so plainly instead of sitting on “connecting…”: “xenxo is full for today” and the time it opens again (midnight UTC, in the viewer's local time), with a retry button. When the Durable Objects limit is the one hit, it knows for sure (the server says so in `/health`: `capacity: "full"`); when it is Worker requests, Cloudflare answers with an error page the web cannot read, so it is shown as the most likely cause. A visit already costs less: the panel starts with a single request (`GET /boot`, cached for 20 s) instead of six, and refreshes once a minute.
+
 ## Backups
 
 | What | Where it is | How to back it up |
 |---|---|---|
 | The code | Your repository | Any clone will do; `git bundle create backup.bundle --all` puts it in a single file |
 | Districts on your server | `/var/lib/xenxo-distritos/datos` | It's done automatically every 15 minutes ([guide](servidor.md#7-day-to-day)) |
-| Accounts, projects and places on Cloudflare | Durable Objects | Each person can download their data from *Account*; xenxo has no full copy of its own today |
-| Uploaded models and covers | R2 | Addressed by hash: they can be uploaded again |
+| Accounts, projects and places on Cloudflare | Durable Objects | [`tools/backup`](../../../tools/backup/): a daily **encrypted** copy to a machine of yours, with its restore. Each person can also download their data from *Account* |
+| Uploaded models and covers | R2 | The same backup fetches them by hash (new ones only) |
+
+A machine of yours (a NAS, the district server) pulls the backup with a key that **can only read it** (`backup` permission in `AGENT_KEYS`); restoring needs a different one (`restore`). xenxo's private keys never leave: after a restore they are created again. Because it holds personal data, say so in your privacy policy (where it is kept and for how long) and keep the encryption passphrase off that machine. Steps in [`tools/backup/README.md`](../../../tools/backup/README.md) (in Spanish).
 
 ## Moderation
 
 - With `FOUNDER_USER_ID` you always moderate and can appoint more moderators from the panel.
 - Reports reach the panel; hiding or rejecting requires a reason the author can see, and it stays in the moderation log (the EU's DSA asks for it).
 - The n8n notices (optional) write to you when something needs review, without data on who reported: [`tools/n8n`](../../../tools/n8n/).
+
+### Emergency switches
+
+Under *Account → Moderation → Emergency switches* you can close, instantly and without deploying:
+
+| Switch | What it stops | What keeps working |
+|---|---|---|
+| **Sign-ups** | Creating new accounts (passkey and Google) | People with an account still sign in; guests still play |
+| **Chat** | Writing in the chat of every place | Reading what was there, gestures and everything else |
+| **Sandbox** | Placing pieces in the Workshop's sandbox | What is already there stays until you clear it |
+
+Every change is recorded in the moderation log. Use them when something gets out of hand (a wave of accounts, abuse in the chat) while you review calmly; open again once it passes.
+
+### How many people come
+
+*Account → Moderation → Visits* shows daily totals: visits, entries into a place (and which one), accounts created and projects published. If you add `?v=<tag>` to a link (`yourdomain.com/d/vertical?v=tiktok-12`) they are also broken down by tag: that tells you which video or post brings people. They are sums: nothing about who, their address or anything that identifies anyone is stored.
 
 ## Updating
 
@@ -91,3 +113,5 @@ What creators use (protocol, SDK, MCP, district kit and template) is MIT. This i
 | 1027 errors or request spikes | *Workers & Pages → xenxo-realtime → Metrics* |
 | The districts' tunnel goes down | *Notifications → Tunnel health* on Cloudflare |
 | Failed deploys | The *Actions* tab of your repository |
+| The web says “xenxo is full for today” | You went over a daily limit: it comes back on its own at 00:00 UTC. If it keeps happening, move the districts to your server |
+| Someone reports a bug | The repository's issues: the panel's “Report a problem” link opens one with the browser and the error already filled in |

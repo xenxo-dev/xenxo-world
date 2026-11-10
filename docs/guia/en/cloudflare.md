@@ -34,7 +34,7 @@ Before opening it to the public, change what belongs to xenxo.io:
 | File | What to change |
 |---|---|
 | `apps/web/public/legal/` | Who the controller is, your contact and where you keep data. They exist in Spanish and English and have the gaps in square brackets. |
-| `apps/web/src/panel/Panel.tsx` | The “Source code” link must lead to **your** repository: the AGPL requires offering the source of what you serve. |
+| `apps/web/src/content.ts` | `SOURCE_URL`: the “Source code” link (and “Report a problem”) must lead to **your** repository: the AGPL requires offering the source of what you serve. |
 | `apps/realtime/wrangler.toml` | `GITHUB_OWNER`: the account whose repositories appear in the panel. |
 | `SECURITY.md` | Where to report a security issue to you. |
 
@@ -106,6 +106,8 @@ npm run hash-key -w @xenxo/headless -- "a-long-random-key"
 ```
 
 Then put comma-separated entries in `AGENT_KEYS`: `builder-01:<fingerprint>` for an agent that builds and `admin-01:<fingerprint>:build|upload|admin` to moderate from the terminal. The example keys in `.dev.vars.example` don't work outside `localhost`.
+
+Each key can do what its permissions say, and nothing else. Besides those: `backup` (read-only access to your [own backup](operar.md#backups)), `restore` (restoring it: create it only when you need it) and `mod_summary` (just the summary of what's pending, for alerts).
 
 ### Sign in with Google
 
