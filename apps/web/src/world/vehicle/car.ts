@@ -108,6 +108,14 @@ export const CAR = {
   loopSideGrip: 0.15,
   loopAlign: 6,
   loopAlignBlend: 0.25,
+  /**
+   * La salida del looping: desde lo alto hasta volver al llano, la velocidad de lado (respecto a
+   * la dirección de la pista) se pierde a este ritmo (1/s). El looping cambia de carril: sin esto el
+   * coche salía cruzado (8° hacia el otro lado, lo que le había dado el quitamiedos a media vuelta)
+   * y, si no se corregía a tiempo, iba rozando el quitamiedos hasta el salto y caía sobre él. Así
+   * baja pegado al quitamiedos de fuera y sale recto por su carril.
+   */
+  loopExitGrip: 5,
   /** Placas de turbo: lo que suman de golpe (m/s) y hasta qué velocidad (m/s). */
   turboKick: 7,
   turboMax: 38,

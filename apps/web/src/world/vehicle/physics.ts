@@ -200,6 +200,14 @@ export class CarSim {
   private touching = 0;
   private stuck = 0;
   /**
+   * La salida del looping: `exiting` = segundos que lleva bajando (0 = no está en ello), `flatFor` =
+   * los que lleva ya en llano (ahí se acaba la ayuda) y `lane`, hacia dónde va la pista (en planta).
+   */
+  private laneX = 0;
+  private laneZ = 0;
+  private exiting = 0;
+  private flatFor = 0;
+  /**
    * Se ha quitado o puesto algo sólido (el coche mismo al sacarlo, lo sólido del lugar al cambiar)
    * y el mundo aún no ha dado un paso. Los rayos de las ruedas buscan en un índice que solo se pone
    * al día al dar el paso: si se lanzan antes, pueden dar con lo que ya no está (al sacar el coche
@@ -305,6 +313,8 @@ export class CarSim {
     this.upsideDown = 0;
     this.stuck = 0;
     this.touching = 0;
+    this.exiting = 0;
+    this.flatFor = 0;
     this.jumped = true;
     this.capture();
     this.read();
@@ -376,13 +386,40 @@ export class CarSim {
     const fx = 2 * (q.x * q.z + q.w * q.y), fy = 2 * (q.y * q.z - q.w * q.x), fz = 1 - 2 * (q.x * q.x + q.y * q.y);
     const ux = 2 * (q.x * q.y - q.w * q.z), upY = 1 - 2 * (q.x * q.x + q.z * q.z), uz = 2 * (q.y * q.z + q.w * q.x);
     const looping = this.touching >= 2 && (Math.abs(fy) > 0.5 || upY < 0.2);
+    // La salida del looping (CAR.loopExitGrip). Empieza pasado lo alto (del revés y con el morro ya
+    // hacia abajo) y se acaba al volver al llano. El rumbo de la pista sale del propio looping:
+    // bajando, el suelo del coche mira hacia delante (hacia el centro de la vuelta), así que su
+    // parte horizontal es la dirección del carril, entre por donde entre y venga como venga.
+    const flat = this.touching >= 2 && Math.abs(fy) < 0.12 && upY > 0.95;
+    if (this.exiting > 0) {
+      this.exiting += STEP;
+      this.flatFor = flat ? this.flatFor + STEP : 0;
+      const h = Math.hypot(ux, uz);
+      if (h > 0.35 && fy < 0 && this.touching >= 2) {
+        // Suavizado: el balanceo de la carrocería (un toque con el quitamiedos) no lo tuerce.
+        const lx = this.laneX + (ux / h - this.laneX) * 0.1, lz = this.laneZ + (uz / h - this.laneZ) * 0.1;
+        const l = Math.hypot(lx, lz) || 1;
+        this.laneX = lx / l;
+        this.laneZ = lz / l;
+      }
+      const turned = upY > 0.5 && fx * this.laneX + fz * this.laneZ < 0.3;
+      if (this.flatFor > 0.3 || this.exiting > 8 || Math.abs(fwd) < 3 || turned) this.exiting = 0;
+    } else if (looping && upY < -0.3 && fy < -0.05) {
+      // Arriba va del revés: su morro mira hacia atrás (más o menos: lo afina la bajada).
+      const h = Math.hypot(fx, fz) || 1;
+      this.laneX = -fx / h;
+      this.laneZ = -fz / h;
+      this.exiting = STEP;
+      this.flatFor = 0;
+    }
+    const exiting = this.exiting > 0;
     let touching = 0;
     for (let i = 0; i < 4; i++) {
       const front = CAR.wheels[i]!.front;
       // En el looping las ruedas casi no agarran de lado: al coche lo llevan los quitamiedos (la
       // pista se va desplazando hacia el otro carril), sin que los neumáticos se empeñen en seguir
       // recto y acabe haciendo un trompo contra ellos.
-      v.setWheelSideFrictionStiffness(i, looping ? CAR.loopSideGrip : 1);
+      v.setWheelSideFrictionStiffness(i, looping || exiting ? CAR.loopSideGrip : 1);
       v.setWheelSteering(i, front ? this.steerNow : 0);
       v.setWheelEngineForce(i, front ? 0 : engine);
       const hand = drive.handbrake && !front;
@@ -416,9 +453,19 @@ export class CarSim {
       const f = CAR.mass * CAR.loopPush * Math.min(1, (CAR.loopHold - fwd) / 3);
       body.addForce({ x: fx * f, y: fy * f, z: fz * f }, true);
     }
+    // Bajando del looping: lo que lleve de lado respecto al rumbo con que entró se va perdiendo (el
+    // quitamiedos de fuera lo sigue llevando al otro carril, y al acabar sale recto).
+    if (exiting && touching >= 2) {
+      const ax = -this.laneZ, az = this.laneX;
+      // Ya en llano (los últimos metros), más deprisa: que no se lleve lo que le queda de lado.
+      const cut = (lv.x * ax + lv.z * az) * (1 - Math.exp(-CAR.loopExitGrip * (flat ? 3 : 1) * STEP));
+      lv.x -= ax * cut;
+      lv.z -= az * cut;
+      body.setLinvel(lv, true);
+    }
     // Y el morro, hacia donde va de verdad (lo que mandan los quitamiedos): gira sobre su propio eje
     // vertical hasta mirar a su velocidad. Sin esto saldría del looping mirando hacia un lado.
-    if (looping && touching >= 2 && sp > 4) {
+    if ((looping || exiting) && touching >= 2 && sp > 4) {
       // La velocidad, sobre el suelo del coche.
       const along = lv.x * ux + lv.y * upY + lv.z * uz;
       let vx = lv.x - ux * along, vy = lv.y - upY * along, vz = lv.z - uz * along;

@@ -414,27 +414,52 @@ const settle = (secs = 1) => {
 }
 
 // e) Sin tocar el volante: entre por donde entre (pegado a un lado, por el centro), los quitamiedos
-//    lo meten en el looping, lo llevan al otro carril y sale hacia el salto. (Antes se salía donde la
-//    pista se estrecha, o se enganchaba en un quitamiedos y se caía desde arriba.)
+//    lo meten en el looping, lo llevan al otro carril y sale recto hacia el salto: cae al otro lado
+//    y pasa por la meta y bajo el pórtico sin tocar nada. Con sus turbos, como en el juego. (Antes se
+//    salía donde la pista se estrecha, o se enganchaba en un quitamiedos y se caía desde arriba; y
+//    después salía del looping cruzado, rozaba el quitamiedos hasta el salto, caía sobre él y acababa
+//    contra un poste de la meta.)
 {
   const land = at(track.marks.land! + 6)[0];
+  const lane = race.finish.p[2]!;
+  const pads = (acts.boosts as { p: number[]; radius: number; circuit?: boolean }[]).filter((b) => b.circuit);
   const done: string[] = [], bad: string[] = [];
+  let worst = { off: 0, yaw: 0, drop: 0 };
   for (const side of [1, 0.5, 0, -0.5, -1]) {
-    const p0 = at(track.marks.loop! - 12);
+    const p0 = at(track.marks.loop! - 28);
     sim.spawn(p0[0], p0[1], p0[2] + side * 3.3, Math.PI / 2);
     settle();
-    let t = 0, top = 0, slow = false, moving = false;
-    for (; t < 14 && st.x < land; t += 1 / 60) {
+    const inPad = new Set<number[]>();
+    let t = 0, top = 0, slow = false, moving = false, landed = false, prev = 0, drop = 0, off = 0, wheels = 0;
+    for (; t < 20 && st.x < 112; t += 1 / 60) {
       sim.update(1 / 60, { throttle: 1, steer: 0, handbrake: false });
+      for (const b of pads) {
+        const on = Math.hypot(st.x - b.p[0]!, st.z - b.p[2]!) <= b.radius && Math.abs(st.y - b.p[1]!) < 6;
+        if (on && !inPad.has(b.p)) sim.turbo();
+        if (on) inPad.add(b.p);
+        else inPad.delete(b.p);
+      }
+      const v = Math.abs(st.speed);
       top = Math.max(top, st.y);
-      if (Math.abs(st.speed) > 6) moving = true;
-      if (moving && Math.abs(st.speed) < 3) slow = true;
+      if (v > 6) moving = true;
+      if (moving && v < 3) slow = true;
+      if (!landed && st.x >= land) landed = st.y > 0.5;
+      // Del looping en adelante (ya abajo): ni un golpe, y por dentro de la pista.
+      if (top > 17 && st.y < 6 && st.x > -6) {
+        drop = Math.max(drop, prev - v);
+        if (st.x > 0) off = Math.max(off, Math.abs(st.z - lane));
+        if (st.x > race.finish.p[0]! - 1 && st.x < race.finish.p[0]! + 1) wheels = Math.max(wheels, st.contacts);
+      }
+      prev = v;
     }
-    const ok = top > 17 && !slow && st.x >= land && st.y > 0.5;
+    const yaw = Math.atan2(2 * (st.qw * st.qy + st.qx * st.qz), 1 - 2 * (st.qy * st.qy + st.qx * st.qx)) - Math.PI / 2;
+    worst = { off: Math.max(worst.off, off), yaw: Math.max(worst.yaw, Math.abs(yaw)), drop: Math.max(worst.drop, drop) };
+    const ok = top > 17 && !slow && landed && st.x >= 112 && drop < 3 && off < 3 && Math.abs(yaw) < 0.07 && wheels === 4;
     (ok ? done : bad).push(`${side > 0 ? "+" : ""}${side}: ${r1(t)} s`);
   }
   console.log(`  sin volante, entrando a ±3,3 m del centro: ${done.join(", ")}${bad.length ? `; fallan ${bad.join(", ")}` : ""}`);
-  check(bad.length === 0, "sin tocar el volante, entre por donde entre: da la vuelta al looping, cambia de carril y cae al otro lado del salto");
+  console.log(`  tras el looping: como mucho a ${r1(worst.off)} m del centro del carril y ${r1((worst.yaw * 180) / Math.PI)}° cruzado; el mayor frenazo, ${r1(worst.drop)} m/s`);
+  check(bad.length === 0, "sin tocar el volante, entre por donde entre: da la vuelta al looping, sale recto por el otro carril, cae al otro lado del salto y pasa por la meta sin tocar nada");
 }
 
 // f) Sacar el coche otra vez (otro sitio, con el anterior recién quitado) no rompe la física: los
