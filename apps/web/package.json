@@ -17,7 +17,7 @@
     "test:parkour": "esbuild test/parkour.mts --bundle --platform=node --format=esm --define:import.meta.env={} --log-level=warning --outfile=node_modules/.cache/xenxo/parkour.mjs && node node_modules/.cache/xenxo/parkour.mjs",
     "test:springs": "tsx test/springs.mts",
     "test:race": "tsx test/race.mts && tsx test/vertigo.mts",
-    "test:guide": "tsx test/guide.mts",
+    "test:guide": "tsx test/guide.mts && esbuild test/arrive.mts --bundle --platform=node --format=esm --define:import.meta.env={} --log-level=warning --outfile=node_modules/.cache/xenxo/arrive.mjs && node node_modules/.cache/xenxo/arrive.mjs",
     "test:graphics": "esbuild test/graphics.mts --bundle --platform=node --format=esm --define:import.meta.env={} --log-level=warning --outfile=node_modules/.cache/xenxo/graphics.mjs && node node_modules/.cache/xenxo/graphics.mjs",
     "test:netplay": "esbuild test/netplay.mts --bundle --platform=node --format=esm --define:import.meta.env={} --log-level=warning --outfile=node_modules/.cache/xenxo/netplay.mjs && node node_modules/.cache/xenxo/netplay.mjs",
     "test:cine": "esbuild test/cine.mts --bundle --platform=node --format=esm --define:import.meta.env={} --log-level=warning --outfile=node_modules/.cache/xenxo/cine.mjs && node node_modules/.cache/xenxo/cine.mjs"

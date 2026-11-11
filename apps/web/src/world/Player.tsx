@@ -273,8 +273,9 @@ export function Player({ active }: { active: boolean }) {
 
     if (inXR) {
       vr.origin = origin.current;
-      // Paredes y suelo de verdad (escaleras, pasarelas, interiores): xr/vr-move.ts.
-      const feet = vrFollowGround(cam, dt);
+      // Paredes y suelo de verdad (escaleras, pasarelas, interiores): xr/vr-move.ts. Hasta que llega
+      // la foto del lugar no hay ni unas ni otro: la habitación espera donde está.
+      const feet = world.arrived ? vrFollowGround(cam, dt) : origin.current.position.y;
       cam.getWorldPosition(_headP);
       cam.getWorldQuaternion(_headQ);
       body.x = _headP.x;
@@ -410,9 +411,10 @@ export function Player({ active }: { active: boolean }) {
         }
         // Sentado no hay físicas: el banco es una caja y nos subiría encima.
         // En el nexo (en solitario) se camina más allá del chunk: por las pasarelas hasta las islas.
-        // Mientras se viaja (aún sin WELCOME ni suelo del lugar nuevo) el cuerpo espera quieto: si
-        // diera pasos, los límites y el suelo del lugar anterior lo dejarían fuera de lo caminable.
-        if (free && !_pf.drawn && motion.emote !== "sit" && world.status === "open") {
+        // Mientras se viaja (aún sin la foto ni el suelo del lugar nuevo: world.walkable) el cuerpo
+        // espera quieto donde va a aparecer: si diera pasos, caería por donde aún no hay suelo (quien
+        // llega a un sitio en alto acababa en la calle) o se saldría de lo caminable.
+        if (free && !_pf.drawn && motion.emote !== "sit" && world.walkable) {
           if (parkour) {
             _pkIn.wantX = wantX;
             _pkIn.wantZ = wantZ;

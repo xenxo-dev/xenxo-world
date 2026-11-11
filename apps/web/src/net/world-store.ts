@@ -64,6 +64,12 @@ class WorldStore {
   host: string | null = null;
   /** Cuántas fotos completas del lugar (SNAPSHOT) han llegado: la pantalla de carga espera a la primera. */
   snapshots = 0;
+  /**
+   * ¿Ha llegado ya la foto (SNAPSHOT) del lugar en que estamos? Al viajar se vacía lo del anterior y,
+   * hasta que llega la del nuevo, aquí no hay suelo ni paredes. (Al reconectar en el mismo lugar se
+   * sigue con lo que había.)
+   */
+  arrived = false;
   /** La hora del servidor vista desde aquí y el retraso con que se dibuja a cada persona (playout.ts). */
   private clock = new ServerClock();
   private playouts = new Map<string, PeerPlayout>();
@@ -86,6 +92,16 @@ class WorldStore {
   };
   getVersion = () => this.version;
   getEntitiesVersion = () => this.entitiesVersion;
+
+  /**
+   * ¿Se puede andar ya por aquí? Con la conexión abierta **y** la foto del lugar recibida. La conexión
+   * se abre un viaje de ida y vuelta antes de que llegue la foto (HELLO → WELCOME y SNAPSHOT): si el
+   * cuerpo diera pasos en ese rato, caería por donde aún no hay suelo. A ras de calle no se nota; quien
+   * llega a un sitio en alto (la parrilla del Circuito Vértigo, a 26 m) acababa en la calle de debajo.
+   */
+  get walkable(): boolean {
+    return this.status === "open" && this.arrived;
+  }
 
   private bump() {
     this.version++;
@@ -167,6 +183,7 @@ class WorldStore {
     this.walk = [-Infinity, Infinity];
     this.entities = new Map();
     this.entitiesVersion++;
+    this.arrived = false;
     this.peers.clear();
     this.poseBuffers.clear();
     this.playouts.clear();
@@ -199,6 +216,7 @@ class WorldStore {
         break;
       case "SNAPSHOT":
         this.snapshots++;
+        this.arrived = true;
         chat.reset(m.payload.chat ?? []);
         this.entities = new Map(m.payload.entities.map((e) => [e.entity_id, e]));
         this.entitiesVersion++;

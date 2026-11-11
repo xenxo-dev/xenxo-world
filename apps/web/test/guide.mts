@@ -3,7 +3,8 @@
  * (src/world/guide.json) existen, caen en un hueco libre de la ciudad de verdad
  * (district-cities.json y lo que ponen las actividades) y tienen sus textos en los dos idiomas; los
  * enlaces /d/<distrito>/<sitio> llevan adonde dicen; y los navegadores integrados de las apps se
- * reconocen (net/inapp.ts).
+ * reconocen (net/inapp.ts). Que quien llega se quede donde llega (con el cuerpo y las colisiones de
+ * verdad) lo comprueba test/arrive.mts, que corre con esta.
  *
  *   npm run test:guide -w @xenxo/web
  *
@@ -30,14 +31,16 @@ const check = (ok: boolean, what: string) => {
 
 type Box = [number, number, number, number, number, number];
 const CITY = (cities as unknown as { cities: Record<string, number[][]> }).cities;
-const ACTS = activities as unknown as Record<string, { props?: { p: number[]; half?: number[] }[] } | undefined>;
+const ACTS = activities as unknown as Record<string, { props?: { p: number[]; half?: number[] }[]; solids?: { p: number[]; half: number[] }[] } | undefined>;
 const [B0, B1] = (layout as unknown as { bounds: [number, number] }).bounds;
 
 /** Las cajas del distrito: su ciudad (edificios, muebles, barandillas) y lo que colocan las actividades. */
 function boxesOf(district: string): Box[] {
   const city = (CITY[district] ?? []).map((b) => b.slice(0, 6) as Box);
   const props = (ACTS[district]?.props ?? []).filter((p) => p.half && p.half.some((h) => h > 0)).map((p) => [p.p[0]!, p.p[1]! + p.half![1]!, p.p[2]!, p.half![0]!, p.half![1]!, p.half![2]!] as Box);
-  return [...city, ...props];
+  // Las cajas de apoyo (bajo la parrilla del cielo de Arcade): su `p` es el centro.
+  const solids = (ACTS[district]?.solids ?? []).map((b) => [...b.p, ...b.half] as Box);
+  return [...city, ...props, ...solids];
 }
 
 /** ¿Cabe una persona de pie (0,35 m de radio, 1,7 m de alto) con los pies en ese punto? */
