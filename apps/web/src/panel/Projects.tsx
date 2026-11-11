@@ -35,6 +35,14 @@ interface Repo {
   language: string | null;
 }
 
+/**
+ * El enlace de un proyecto es https. En local (la web servida en localhost) vale también un juego en
+ * localhost: el servidor de pruebas lee su ficha de ahí (games.ts → fetchDevManifest), y así el camino
+ * entero de un creador se puede probar en un equipo, sin publicar nada.
+ */
+const URL_PATTERN = ["localhost", "127.0.0.1"].includes(globalThis.location?.hostname ?? "") ? "(https://|http://(localhost|127\\.0\\.0\\.1)(:|/)).*" : "https://.*";
+const URL_OK = new RegExp(`^(?:${URL_PATTERN})$`);
+
 function useRepos() {
   const [repos, setRepos] = useState<Repo[] | null>(null);
   useEffect(() => {
@@ -234,7 +242,7 @@ function PublishForm({ onDone }: { onDone: () => void }) {
   const [state, setState] = useState<"idle" | "sending" | "error">("idle");
   const [message, setMessage] = useState("");
   useEffect(() => () => (cover ? URL.revokeObjectURL(cover.preview) : undefined), [cover]);
-  const ready = title.trim().length >= 3 && /^https:\/\/.+/.test(url) && !!district && !!parcel && !!cover && !!model;
+  const ready = title.trim().length >= 3 && URL_OK.test(url) && url.length > 8 && !!district && !!parcel && !!cover && !!model;
 
   return (
     <form
@@ -262,7 +270,7 @@ function PublishForm({ onDone }: { onDone: () => void }) {
       <Label htmlFor="pj-title">{t("projects.title")}</Label>
       <input id="pj-title" required minLength={3} maxLength={60} value={title} onChange={(e) => setTitle(e.target.value)} className={input} />
       <Label htmlFor="pj-url">{t("projects.url")}</Label>
-      <input id="pj-url" required type="url" pattern="https://.*" maxLength={300} value={url} onChange={(e) => setUrl(e.target.value)} className={input} placeholder="https://…" />
+      <input id="pj-url" required type="url" pattern={URL_PATTERN} maxLength={300} value={url} onChange={(e) => setUrl(e.target.value)} className={input} placeholder="https://…" />
       <p className="mb-1.5 mt-4 text-sm text-cal/70">{t("projects.district")}</p>
       <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label={t("projects.district")}>
         {districts?.filter((d) => !d.community).map((d) => {

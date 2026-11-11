@@ -8,6 +8,8 @@
  * - **Cada sitio tiene suelo con lo que manda el servidor** (la siembra del distrito, districts.ts) y
  *   antes de que cargue ninguna malla (las pistas de los circuitos lo son): el cuerpo y las colisiones de
  *   verdad (world/locomotion.ts sobre world/collision.ts).
+ * - **Lo que no llega a la primera se vuelve a pedir** (world/retry.ts): un corte de red de un momento no
+ *   deja un lugar sin su suelo ni su gente; un 404 no se reintenta.
  *
  *   npm run test:guide -w @xenxo/web   (corre detrás de test/guide.mts)
  */
@@ -17,6 +19,7 @@ import { DISTRICT_BOUNDS, DISTRICTS, districtSeed } from "../../realtime/src/dis
 import { world } from "../src/net/world-store";
 import { directPlace, GUIDED, spotIds, spotOf } from "../src/world/guide";
 import { createBody, stepBody, STEP_UP, type Body } from "../src/world/locomotion";
+import { failedUrl, gone, RETRY_MS, retryIn } from "../src/world/retry";
 
 let fails = 0;
 const check = (ok: boolean, what: string) => {
@@ -119,6 +122,19 @@ console.log("Cada sitio tiene suelo con lo que manda el servidor (sin mallas)");
     const bad = doors.map((pt) => ({ p: pt.to.p, b: arrive(id, pt.to.p, 0) })).filter((r) => !stays(r.b, r.p));
     check(bad.length === 0, `${id}: sus ${doors.length} puertas dejan en un sitio con suelo${bad.length ? ` — ${bad.map((r) => `[${r.p.join(", ")}] → ${fmt(r.b)}`).join("; ")}` : ""}`);
   }
+}
+
+console.log("Lo que no llega a la primera (un modelo, un personaje)");
+{
+  const U = "https://api.xenxo.io/s/0123abcd.glb";
+  const cut = new Error(`Could not load ${U}: Failed to fetch`);
+  const http = (code: number, text: string) => new Error(`Could not load ${U}: fetch for "${U}" responded with ${code}: ${text}`);
+  check(failedUrl(cut) === U && failedUrl(http(404, "Not Found")) === U && failedUrl(new Error("otra cosa")) === null, "el error dice qué modelo era");
+  check(!gone(cut) && RETRY_MS.every((ms, i) => retryIn(cut, i) === ms) && retryIn(cut, RETRY_MS.length) === undefined, `un corte de red se vuelve a pedir ${RETRY_MS.length} veces (a los ${RETRY_MS.map((ms) => ms / 1000).join(", ")} s) y después se da por perdido`);
+  check(RETRY_MS.every((ms, i) => i === 0 || ms > RETRY_MS[i - 1]!), "cada vez más espaciado");
+  check(gone(http(404, "Not Found")) && gone(http(403, "Forbidden")) && retryIn(http(404, "Not Found"), 0) === undefined, "lo que ya no está (404) o no se puede (403) no se reintenta");
+  check(!gone(http(429, "Too Many Requests")) && !gone(http(408, "Request Timeout")) && !gone(http(503, "Service Unavailable")) && retryIn(http(503, ""), 0) === RETRY_MS[0], "un 429, un 408 o un 503 sí: pasan solos");
+  check(!gone("Failed to fetch") && !gone(null) && !gone(undefined), "y un error sin código, también");
 }
 
 console.log(fails ? `\n${fails} fallos` : "\nTodo bien");

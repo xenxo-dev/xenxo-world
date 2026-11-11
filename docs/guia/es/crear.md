@@ -25,7 +25,7 @@ Elige 2D o 3D (y `--multi` si quieres una sala multijugador en tu cuenta de Clou
 1. `npm run dev`: el simulador hace de jugador.
 2. `npm run check`: comprueba la ficha con las mismas reglas que xenxo.
 3. `npm run deploy`: lo publica en tu cuenta de Cloudflare (`npx wrangler login` la primera vez).
-4. En xenxo.io, publica tu proyecto, registra el juego en *Proyectos → «Entrar con xenxo» en tu juego* y pega el `clientId` en tu código.
+4. En xenxo.io, publica tu proyecto, registra el juego en *Proyectos → «Entrar con xenxo» en tu juego* (con su dirección exacta como dirección de vuelta) y pega lo que te da en `public/xenxo.json`: `"xenxo": { "clientId": "xg_…", "project": "…" }`. Vuelve a publicar.
 5. En la ficha del proyecto, *Leer su xenxo.json*: tu juego queda en `xenxo.io/j/<nombre>`.
 
 Todo el detalle en [`packages/create-xenxo`](../../../packages/create-xenxo/README.md) y el SDK en [`packages/sdk`](../../../packages/sdk/README.md). Necesita Node.js 22.12 o más nuevo.

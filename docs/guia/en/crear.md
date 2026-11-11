@@ -25,7 +25,7 @@ Choose 2D or 3D (and `--multi` if you want a multiplayer room on your Cloudflare
 1. `npm run dev`: the simulator plays the player.
 2. `npm run check`: checks the card with the same rules as xenxo.
 3. `npm run deploy`: publishes it to your Cloudflare account (`npx wrangler login` the first time).
-4. On xenxo.io, publish your project, register the game in *Projects → “Sign in with xenxo” in your game* and paste the `clientId` into your code.
+4. On xenxo.io, publish your project, register the game in *Projects → “Sign in with xenxo” in your game* (with its exact address as the return address) and paste what it gives you into `public/xenxo.json`: `"xenxo": { "clientId": "xg_…", "project": "…" }`. Deploy again.
 5. On the project's card, *Read its xenxo.json*: your game is now at `xenxo.io/j/<name>`.
 
 Full details in [`packages/create-xenxo`](../../../packages/create-xenxo/README.md) and the SDK in [`packages/sdk`](../../../packages/sdk/README.md). Needs Node.js 22.12 or newer.

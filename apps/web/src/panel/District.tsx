@@ -14,6 +14,7 @@ import {
   type UploadStep,
 } from "../net/community";
 import { travel } from "../net/session";
+import { Npm404 } from "./Create";
 import { Button, card, input, Notice } from "./ui";
 
 const STATUS_KEY: Record<DistrictStatus, Key> = {
@@ -108,6 +109,7 @@ export function MyDistrict({ onEnter }: { onEnter?: () => void }) {
       <pre className="overflow-x-auto rounded-lg border border-cal/10 bg-noche/70 p-3 font-mono text-xs text-cal/85">
         {`npm create xenxo@latest ${lang === "es" ? "mi-distrito" : "my-district"} -- --district${lang === "es" ? "" : " --lang en"}\nnpm run validate`}
       </pre>
+      <Npm404 />
 
       {d && m && (
         <div className={`${card} p-4`} style={{ borderColor: `${m.color}55` }}>

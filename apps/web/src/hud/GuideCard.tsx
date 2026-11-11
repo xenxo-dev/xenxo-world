@@ -2,16 +2,17 @@
  * «Qué hacer aquí»: al llegar por primera vez a un distrito, una tarjeta con lo que hay (sus
  * actividades, de world/guide.ts) y un botón «Ir» que te deja en cada sitio: las ciudades están a
  * más de 60 m de la entrada y nada decía qué había. Se vuelve a abrir con el botón «Qué hacer aquí»,
- * bajo la fila de arriba. En el nexo, la primera vez, una nota: cada puerta lleva a un distrito. Y en táctil, las
+ * bajo la fila de arriba. En el nexo, la primera vez, una nota: cada puerta lleva a un distrito, y un
+ * atajo para quien no sabe por dónde empezar (a la parrilla del Gran Premio de Arcade). Y en táctil, las
  * primeras veces, cómo se mueve uno. Todo se recuerda en este navegador; nada va al servidor.
  */
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { loadPref, savePref } from "../config";
 import { hasKey, placeName, t, useLang } from "../i18n";
-import { teleport } from "../net/session";
+import { teleport, travel } from "../net/session";
 import { usePlace, useWorldVersion, world } from "../net/world-store";
 import { placeLink } from "../routes";
-import { districtIdOfChunk, guideOf, type GuideSpot } from "../world/guide";
+import { directPlace, districtIdOfChunk, guideOf, type GuideSpot } from "../world/guide";
 import { useDrive } from "../world/vehicle/drive-state";
 import { GuideIcon, ShareIcon } from "./icons";
 
@@ -166,25 +167,47 @@ export function GuideCard() {
   );
 }
 
-/** En el nexo, la primera vez: qué son las puertas. */
+/** Adónde lleva el atajo de la primera visita: lo más vistoso para empezar (el Gran Premio de Arcade). */
+const FIRST_STOP = { district: "arcade", spot: "gp" } as const;
+/** En táctil no hay tecla C: el coche se llama con su botón. */
+const TOUCH = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
+
+/**
+ * En el nexo, la primera vez: qué son las puertas. Y, para quien no sabe por dónde empezar, un atajo:
+ * el nexo se recorre a solas y la primera puerta está a medio minuto andando; quien ha pulsado «Jugar
+ * ahora» quiere jugar ya. Quien prefiera explorar, que explore.
+ */
 export function NexoTip() {
   useLang();
   useWorldVersion();
   const [gone, setGone] = useState(() => seen("nexo"));
   if (gone || !world.solo || world.status !== "open") return null;
+  const first = directPlace(FIRST_STOP.district, FIRST_STOP.spot);
+  const done = () => {
+    markSeen("nexo");
+    setGone(true);
+  };
   return (
     <section role="status" className={`${place} ${box} px-4 py-3`}>
       <h2 className="display text-[15px] font-semibold text-cal">{t("guide.nexo.title")}</h2>
       <p className="mt-1 text-sm leading-snug text-soft">{t("guide.nexo.text")}</p>
-      <button
-        onClick={() => {
-          markSeen("nexo");
-          setGone(true);
-        }}
-        className="btn-ghost mt-3 rounded-lg px-3 py-1.5 text-sm"
-      >
-        {t("guide.nexo.ok")}
-      </button>
+      {first && first !== "soon" && <p className="mt-2 text-sm leading-snug text-soft">{t(TOUCH ? "guide.nexo.first.touch" : "guide.nexo.first")}</p>}
+      <div className="mt-3 flex flex-wrap gap-2">
+        {first && first !== "soon" && (
+          <button
+            onClick={() => {
+              done();
+              travel(first.chunk, first.p, first.yaw);
+            }}
+            className="neon-tube rounded-lg px-3 py-1.5 text-sm font-medium"
+          >
+            {t("guide.nexo.go")}
+          </button>
+        )}
+        <button onClick={done} className="btn-ghost rounded-lg px-3 py-1.5 text-sm">
+          {t("guide.nexo.ok")}
+        </button>
+      </div>
     </section>
   );
 }

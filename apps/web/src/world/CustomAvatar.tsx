@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { holdSkeletons, loadAvatar, withoutShadows, type LoadedAvatar } from "./avatar-model";
 import type { Motion } from "./motion";
+import { retryIn } from "./retry";
 
 /**
  * Personaje propio. Mientras carga (o si falla), devuelve `fallback`:
@@ -15,20 +16,33 @@ export function CustomAvatar({ url, fallback, motion, extra = false, onLoad }: {
     if (!url) return;
     let alive = true;
     let loaded: LoadedAvatar | null = null;
-    loadAvatar(url, { decor: extra })
-      .then((a) => {
-        if (alive) {
-          if (extra) withoutShadows(a.object);
-          // El frame que no le toca (o sin verse), su esqueleto se queda como estaba.
-          holdSkeletons(a.object, () => !!(motion.hidden || motion.skip));
-          loaded = a;
-          setAvatar(a);
-          onLoad?.(true);
-        } else a.dispose();
-      })
-      .catch((e) => console.warn("[xenxo] no se pudo cargar el personaje", url, e));
+    let tries = 0;
+    let again: ReturnType<typeof setTimeout> | null = null;
+    const load = () => {
+      again = null;
+      loadAvatar(url, { decor: extra })
+        .then((a) => {
+          if (alive) {
+            if (extra) withoutShadows(a.object);
+            // El frame que no le toca (o sin verse), su esqueleto se queda como estaba.
+            holdSkeletons(a.object, () => !!(motion.hidden || motion.skip));
+            loaded = a;
+            setAvatar(a);
+            onLoad?.(true);
+          } else a.dispose();
+        })
+        .catch((e) => {
+          // Un corte de red de un momento no deja a nadie sin su personaje (ni la ciudad sin su gente):
+          // se vuelve a pedir unas cuantas veces (world/retry.ts).
+          const wait = alive ? retryIn(e, tries++) : undefined;
+          console.warn(wait ? `[xenxo] no se pudo cargar el personaje: se vuelve a pedir en ${wait / 1000} s` : "[xenxo] no se pudo cargar el personaje", url, e);
+          if (wait !== undefined) again = setTimeout(load, wait);
+        });
+    };
+    load();
     return () => {
       alive = false;
+      if (again) clearTimeout(again);
       setAvatar(null);
       onLoad?.(false);
       if (loaded?.rig && motion.fx?.rig === loaded.rig) motion.fx.rig = null;

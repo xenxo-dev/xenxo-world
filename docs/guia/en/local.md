@@ -55,6 +55,7 @@ All of xenxo runs on your machine with two processes: the real-time server (`wra
 - **Create an account:** *Account → Create account* with a passkey. They work locally because the passkey domain is `localhost` (`RP_ID` in `.dev.vars`).
 - **Be player #0 and moderate:** download your data (*Account → Download my data*), copy your `id` and add `FOUNDER_USER_ID=<id>` to `apps/realtime/.dev.vars`. Restart the server.
 - **Test keys:** `dev-agent-key-change-me` builds and uploads models; `dev-admin-key-change-me` also moderates. Outside `localhost` the server rejects them.
+- **Try a creator's whole path:** locally you can publish a game served on your machine (link `http://localhost:<port>/`; xenxo reads its `xenxo.json` from there) and, in the game, sign in against this server with `issuer: "http://localhost:8787"`. The MCP server file the panel points to (`/mcp/xenxo-mcp.mjs`) is there after `npm run build -w @xenxo/mcp`.
 - **Start from scratch:** stop the server and delete `apps/realtime/.wrangler/state`. On start, the nexus, plaza and districts are seeded again.
 
 ## The test bench

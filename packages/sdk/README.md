@@ -68,7 +68,9 @@ o, sin instalar nada, `import { xenxo } from "https://xenxo.io/sdk/xenxo.mjs"`.
 | `guest` | Invitado de xenxo: nombre, pero sin cuenta ni número |
 | `simulated` | Jugador del simulador local |
 
-`redirectUri` es opcional: por defecto, la página actual sin parámetros (`origen + ruta`).
+`redirectUri` es opcional: por defecto, la página actual sin parámetros (`origen + ruta`). `issuer`
+también: es el xenxo contra el que se entra (por defecto, `https://api.xenxo.io`); cámbialo solo si tu
+juego es para otra instancia de xenxo (o para la de tu equipo: `http://localhost:8787`).
 
 `xenxo.error` dice por qué no entró (`access_denied` si dijo que no). `xenxo.logout()` lo olvida
 en tu página (el permiso se retira en xenxo → Cuenta → Juegos conectados).
@@ -164,7 +166,8 @@ backButton.onclick = () => xenxo.back();                 // back to xenxo, in fr
 
 `player` has `id` (only valid in your game), `name`, `playerNo`, `avatar` (`{ url, format, hash }`),
 `picture` (256 px portrait), `idToken`, `signatureChecked`, `guest` and `simulated`. `redirectUri`
-defaults to the current page (origin + path). `xenxo.error` says why sign-in failed
+defaults to the current page (origin + path); `issuer` defaults to `https://api.xenxo.io` (change it
+only for another xenxo instance, or a local one: `http://localhost:8787`). `xenxo.error` says why sign-in failed
 (`access_denied` if they said no); `xenxo.lang` is the person's language.
 
 **Simulator:** on `localhost` without a `clientId`, `connect()` returns a test player ("Jugador de

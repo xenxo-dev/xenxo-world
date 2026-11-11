@@ -35,8 +35,32 @@ function mediapipeWasm(): Plugin {
   };
 }
 
+/**
+ * El servidor MCP (un solo archivo) se sirve desde la web: en producción lo copia el despliegue a
+ * /mcp/xenxo-mcp.mjs; en desarrollo sale de packages/mcp/dist (tras `npm run build -w @xenxo/mcp`),
+ * para que la orden que enseña el panel («curl … /mcp/xenxo-mcp.mjs») valga también en local.
+ */
+function mcpFile(): Plugin {
+  const file = join(__dirname, "..", "..", "packages", "mcp", "dist", "xenxo-mcp.mjs");
+  return {
+    name: "xenxo-mcp-file",
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (!/^\/mcp\/xenxo-mcp\.mjs(\?.*)?$/.test(req.url ?? "")) return next();
+        if (!existsSync(file)) {
+          res.statusCode = 404;
+          res.setHeader("Content-Type", "text/plain; charset=utf-8");
+          return void res.end("Aún no está compilado: npm run build -w @xenxo/mcp\n");
+        }
+        res.setHeader("Content-Type", "text/javascript");
+        createReadStream(file).pipe(res);
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss(), mediapipeWasm()],
+  plugins: [react(), tailwindcss(), mediapipeWasm(), mcpFile()],
   server: { host: true, port: 5173 },
   build: { target: "es2022", chunkSizeWarningLimit: 1500 },
 });

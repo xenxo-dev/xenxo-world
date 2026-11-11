@@ -75,6 +75,17 @@ expect(state.data?.pieces.length === 4, `4 piezas (suelo, rótulo, modelo y su c
 expect((await call("remove_pieces", { all: true })).ok, "quitar todo");
 expect((await call("get_parcel")).data?.pieces.length === 0, "parcela vacía");
 await client.close();
+
+// Otra sesión (el agente retoma el trabajo otro día): lo primero que hace es colocar algo, sin pasar
+// por get_parcel. Tiene que valer igual: la parcela se sabe al conectar, no al preguntar por ella.
+const again = new Client({ name: "e2e-otra-sesion", version: "1.0.0" });
+await again.connect(new StdioClientTransport({ command: "node", args: [bundle], cwd: dir, env: { ...process.env, XENXO_KEY: k.data.key, XENXO_URL: baseUrl } as Record<string, string> }));
+const direct = (await again.callTool({ name: "place_shape", arguments: { size: [1, 1, 1], position: [2, 0, 2], color: "#22cc88" } })) as { isError?: boolean; content: { text: string }[] };
+console.log(`${direct.isError ? "✗" : "✓"} place_shape sin get_parcel antes: ${direct.content.map((c) => c.text).join(" ").slice(0, 140).replace(/\s+/g, " ")}`);
+expect(!direct.isError, "colocar algo nada más conectar, sin get_parcel");
+const wiped = (await again.callTool({ name: "remove_pieces", arguments: { all: true } })) as { isError?: boolean };
+expect(!wiped.isError, "y quitarlo");
+await again.close();
 await api.call("DELETE", `/projects/${p.data.project.id}`);
 console.log(failures ? `\n${failures} fallo(s).` : "\nMCP conforme.");
 process.exit(failures ? 1 : 0);

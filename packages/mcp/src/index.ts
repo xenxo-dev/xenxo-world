@@ -92,6 +92,10 @@ const ok = (data: unknown) => ({ content: [{ type: "text" as const, text: typeof
 const fail = (e: unknown) => ({ isError: true, content: [{ type: "text" as const, text: e instanceof Error ? e.message : String(e) }] });
 async function guard<T>(fn: () => Promise<T>) {
   try {
+    // La parcela (dónde está, hacia dónde mira, sus presupuestos) se sabe al conectar, y toda herramienta
+    // la necesita para pasar de metros de parcela a metros del mundo. Un agente que retoma su sesión no
+    // siempre empieza por get_parcel: sin esto, lo primero que colocaba fallaba con un error ilegible.
+    await parcel.connect();
     return ok(await fn());
   } catch (e) {
     return fail(e);

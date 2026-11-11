@@ -11,6 +11,7 @@ import { useCollected } from "../net/activity-store";
 import { FONT_URL, NEON_FONT_URL, SIGN_FONT_URL } from "./font";
 import type { Ambience, Features } from "./graphics";
 import { useFrame } from "@react-three/fiber";
+import { failedUrl, RETRY_MS, retryIn } from "./retry";
 import { haloMaterial, hologramMaterial, lightweight, libraryMaterial, neonGlow, paintedLights, parseLibraryName, tickHolograms } from "./materials";
 
 /** Origen de un chunk respecto al lugar actual (que se dibuja en 0..CHUNK_SIZE). */
@@ -21,15 +22,58 @@ const chunkOrigin = (chunkId: string) => world.offsetOf(chunkId);
  * render": un cliente nativo tendría su propia versión y el mundo no cambiaría.
  * Lo que no reconoce, no lo dibuja (compatibilidad hacia delante).
  */
-/** Si un modelo no carga (borrado, red), la entidad simplemente no lo dibuja; el resto del mundo sigue. */
-export class SkipOnError extends Component<{ children: ReactNode }, { failed: boolean }> {
+/** Los que han fallado y nadie ha vuelto a pedir aún (varias entidades comparten modelo: lo suelta la primera). */
+const failedUrls = new Set<string>();
+
+/**
+ * Si un modelo no carga (borrado, red), la entidad simplemente no lo dibuja; el resto del mundo sigue.
+ * Pero un corte de red de un momento (un móvil con mala cobertura) no puede dejar un lugar sin su suelo
+ * o sin la pista de un circuito hasta que se recargue la página: se vuelve a pedir unas cuantas veces
+ * (world/retry.ts). Qué modelo era lo dice `url` o, si no, el propio error. Un 404 no se reintenta.
+ */
+export class SkipOnError extends Component<{ children: ReactNode; url?: string }, { failed: boolean }> {
   state = { failed: false };
+  private tries = 0;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  /** El intento que hay pendiente: qué modelo y cuándo toca (reloj de la página). */
+  private pending: { url: string; due: number } | null = null;
   static getDerivedStateFromError() {
     return { failed: true };
   }
   componentDidCatch(e: unknown) {
-    console.warn("[xenxo] modelo no disponible", e);
+    const url = this.props.url ?? failedUrl(e);
+    const wait = url ? retryIn(e, this.tries) : undefined;
+    console.warn(wait ? `[xenxo] modelo no disponible: se vuelve a pedir en ${wait / 1000} s` : "[xenxo] modelo no disponible", e);
+    if (!url || wait === undefined) return;
+    this.tries++;
+    failedUrls.add(url);
+    this.pending = { url, due: performance.now() + wait };
+    this.arm();
   }
+  // Cuando un Suspense de más arriba esconde esto (otra pieza suya está cargando), React lo «desmonta» y
+  // luego lo vuelve a «montar»: el intento pendiente no se pierde, se retoma al volver.
+  componentDidMount() {
+    this.arm();
+  }
+  componentWillUnmount() {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+  }
+  private arm() {
+    if (!this.pending || this.timer) return;
+    this.timer = setTimeout(this.again, Math.max(0, this.pending.due - performance.now()));
+  }
+  private again = () => {
+    this.timer = null;
+    const p = this.pending;
+    this.pending = null;
+    if (!p) return;
+    // useGLTF guarda también los fallos: se suelta una vez (si otra pieza ya lo ha vuelto a pedir, vale su intento).
+    const first = failedUrls.delete(p.url);
+    if (first) useGLTF.clear(p.url);
+    console.info(`[xenxo] modelo: nuevo intento (${this.tries} de ${RETRY_MS.length})${first ? "" : ", ya pedido por otra pieza"}`, p.url);
+    this.setState({ failed: false });
+  };
   render() {
     return this.state.failed ? null : this.props.children;
   }
@@ -237,7 +281,7 @@ const EntityView = memo(function EntityView({
   return (
     <>
     {colLod && colLod.tris <= MAX_COLLISION_TRIS && (
-      <SkipOnError>
+      <SkipOnError url={assetUrl(colLod.hash)}>
         <Suspense fallback={null}>
           <MeshCollider id={entity.entity_id} hash={colLod.hash} x={p[0] + ox} y={p[1]} z={p[2] + oz} r={r} s={s} rev={entity.rev} />
         </Suspense>
@@ -264,7 +308,7 @@ const EntityView = memo(function EntityView({
       )}
       {lod && (
         <Spin on={entity.components["collectible@1"] !== undefined}>
-          <SkipOnError>
+          <SkipOnError url={assetUrl(lod.hash)}>
             <Suspense fallback={null}>
               <MeshAsset hash={lod.hash} features={features} ambience={ambience} holo={holo} dim={dim} />
             </Suspense>

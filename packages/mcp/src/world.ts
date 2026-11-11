@@ -102,7 +102,7 @@ export class Parcel {
     const c = await this.connect();
     const r = await c.mutate(mutation);
     if (r.type === "ERROR") {
-      const d = r.payload.detail ? ` ${JSON.stringify(r.payload.detail)}` : "";
+      const d = r.payload.detail ? ` ${JSON.stringify(this.localDetail(r.payload.detail))}` : "";
       throw new Error(`${r.payload.code}: ${r.payload.message}${d}`);
     }
     const id = r.payload.entity_id;
@@ -136,6 +136,39 @@ export class Parcel {
     const dx = x! - (Z.x0 + Z.x1) / 2, dz = z! - (Z.z0 + Z.z1) / 2;
     const u = dx * c - dz * s, w = dx * s + dz * c;
     return [r3(u + (Z.x1 - Z.x0) / 2), r3(y!), r3((Z.z1 - Z.z0) / 2 - w)];
+  }
+
+  /** Un rectángulo del mundo (x0, z0, x1, z1), en metros de la parcela. */
+  private rectToParcel(x0: number, z0: number, x1: number, z1: number) {
+    const a = this.toParcel([x0, 0, z0]), b = this.toParcel([x1, 0, z1]);
+    return { x: [Math.min(a[0], b[0]), Math.max(a[0], b[0])], z: [Math.min(a[2], b[2]), Math.max(a[2], b[2])] };
+  }
+
+  /**
+   * El detalle de un rechazo del servidor viene en metros del mundo, y el agente trabaja en metros de su
+   * parcela (los de get_parcel): se pasa a los suyos, para que sepa hacia dónde y cuánto mover la pieza.
+   */
+  localDetail(detail: unknown): unknown {
+    if (!detail || typeof detail !== "object" || Array.isArray(detail)) return detail;
+    const num = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+    const v3 = (v: unknown): v is number[] => Array.isArray(v) && v.length === 3 && v.every(num);
+    const out: Record<string, unknown> = {};
+    let moved = false;
+    for (const [k, v] of Object.entries(detail as Record<string, unknown>)) {
+      const o = v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+      if (o && num(o.x0) && num(o.z0) && num(o.x1) && num(o.z1)) {
+        // Una zona (la parcela, lo reservado para el portal): sus otros datos (alturas) se quedan.
+        const { x0, z0, x1, z1, ...rest } = o;
+        out[k] = { ...this.rectToParcel(x0 as number, z0 as number, x1 as number, z1 as number), ...rest };
+        moved = true;
+      } else if (o && v3(o.min) && v3(o.max)) {
+        // La caja de la pieza.
+        out[k] = { ...this.rectToParcel(o.min[0]!, o.min[2]!, o.max[0]!, o.max[2]!), y: [o.min[1]!, o.max[1]!] };
+        moved = true;
+      } else out[k] = v;
+    }
+    if (moved) out.units = "parcel metres, as in get_parcel: [from, to] on each axis";
+    return out;
   }
 
   /** Cuaternión del giro: el de la parcela más el de la pieza. */

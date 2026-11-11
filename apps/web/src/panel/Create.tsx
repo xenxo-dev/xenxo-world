@@ -27,7 +27,7 @@ function Path({ n, title, text, children }: { n: string; title: string; text: st
 }
 
 /** Mientras los paquetes no estén en npm: el aviso del 404 con los pasos desde el repositorio. */
-function Npm404() {
+export function Npm404() {
   if (NPM_PUBLISHED) return null;
   return (
     <p className="mt-2 text-xs text-muted">

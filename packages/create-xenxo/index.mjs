@@ -12,7 +12,7 @@
  * Licencia MIT: lo que crees con ella es tuyo.
  */
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 
@@ -43,10 +43,10 @@ const T = {
     yes: /^(s|si|sí|y|yes)$/i,
     exists: (d) => `\n  La carpeta «${d}» ya existe y no está vacía. Elige otra.\n`,
     badName: "\n  Nombre no válido: usa letras minúsculas, números y guiones (p. ej. mi-juego).\n",
-    done: (d, k, m) => `\n  Listo: juego ${k.toUpperCase()}${m ? " multijugador" : ""} en ./${d}\n`,
+    done: (d, k, m) => `\n  Listo: juego ${k.toUpperCase()}${m ? " multijugador" : ""} en ${d}\n`,
     nextMulti: "  Multijugador: en otra terminal, npm run sala (la sala en tu equipo). README.md → Multijugador.\n",
-    district: (d) =>
-      `\n  Listo: distrito en ./${d}\n\n  Siguientes pasos:\n\n    cd ${d}\n    npm install\n    npm run validate\n\n` +
+    district: (l, d) =>
+      `\n  Listo: distrito en ${l}\n\n  Siguientes pasos:\n\n    cd ${d}\n    npm install\n    npm run validate\n\n` +
       "  Cambia xenxo-district.json y los modelos (o pídeselo a tu IA: lee AGENTS.md).\n" +
       "  Cuando pase la comprobación, súbelo desde xenxo.io → Cuenta → Tu distrito.\n",
     next: (d) =>
@@ -81,10 +81,10 @@ const T = {
     yes: /^(y|yes|s|si|sí)$/i,
     exists: (d) => `\n  Folder "${d}" already exists and isn't empty. Pick another one.\n`,
     badName: "\n  Invalid name: use lowercase letters, numbers and dashes (e.g. my-game).\n",
-    done: (d, k, m) => `\n  Done: ${k.toUpperCase()}${m ? " multiplayer" : ""} game in ./${d}\n`,
+    done: (d, k, m) => `\n  Done: ${k.toUpperCase()}${m ? " multiplayer" : ""} game in ${d}\n`,
     nextMulti: "  Multiplayer: in another terminal, npm run sala (the room on your machine). README.md → Multiplayer.\n",
-    district: (d) =>
-      `\n  Done: district in ./${d}\n\n  Next steps:\n\n    cd ${d}\n    npm install\n    npm run validate\n\n` +
+    district: (l, d) =>
+      `\n  Done: district in ${l}\n\n  Next steps:\n\n    cd ${d}\n    npm install\n    npm run validate\n\n` +
       "  Edit xenxo-district.json and the models (or ask your AI: it reads AGENTS.md).\n" +
       "  Once it passes, upload it from xenxo.io → Account → Your district.\n",
     next: (d) =>
@@ -229,9 +229,9 @@ async function main() {
     };
     walk(target);
 
-    const shown = relative(process.cwd(), target) || ".";
-    console.log(t.done(shown, kind, multi));
-    console.log(t.next(shown));
+    const at = shownPath(target);
+    console.log(t.done(at.label, kind, multi));
+    console.log(t.next(at.cd));
     if (multi) console.log(t.nextMulti);
   } finally {
     rl?.close();
@@ -275,7 +275,19 @@ async function district(rl) {
     for (const [k, v] of Object.entries(vars)) s = s.split(k).join(v);
     writeFileSync(p, s);
   }
-  console.log(t.district(relative(process.cwd(), target) || "."));
+  const at = shownPath(target);
+  console.log(t.district(at.label, at.cd));
+}
+
+/**
+ * Cómo se enseña la carpeta creada: «./mi-juego» (y `cd mi-juego`) si cuelga de donde se está; si se
+ * pidió con una ruta de fuera (como ~/mi-juego desde el repositorio), la ruta entera: una relativa del
+ * tipo «./../../../home/…» no hay quien la lea ni quien la copie.
+ */
+function shownPath(target) {
+  const rel = relative(process.cwd(), target) || ".";
+  const outside = rel.startsWith("..") || isAbsolute(rel);
+  return { label: outside ? target : `./${rel}`, cd: outside ? target : rel };
 }
 
 main().catch((e) => {
