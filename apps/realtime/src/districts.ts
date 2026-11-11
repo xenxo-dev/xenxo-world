@@ -17,7 +17,12 @@ interface DistrictActivities {
   /** `mesh_collider`: se choca con la forma del modelo (collider@1.from_mesh; `half` es la caja de reserva). */
   props?: { piece: string; p: V3; yaw: number; half: V3; mesh_collider?: boolean }[];
   labels?: { text: { es: string; en: string }; p: V3; yaw: number; size: number; flat?: boolean; style?: string; width?: number; max_distance?: number }[];
-  races?: { id: string; radius: number; start: { p: V3; radius: number }; cps: V3[]; finish: { p: V3; radius: number } }[];
+  /**
+   * `vehicle`, `mode`, `laps`, `grid` (los cajones de la parrilla, que también pinta la forja) y
+   * `lights` (el semáforo) van en la salida (checkpoint@1); `start.yaw`: hacia dónde se sale (grados,
+   * como las placas de impulso).
+   */
+  races?: { id: string; radius: number; start: { p: V3; radius: number; yaw?: number }; cps: V3[]; finish: { p: V3; radius: number }; vehicle?: "car"; mode?: "grid"; laps?: number; grid?: V3[]; lights?: V3 }[];
   boosts?: { p: V3; yaw: number; speed?: number; seconds?: number; radius?: number }[];
   cabinets?: { p: V3; yaw: number }[];
   /** Anuncios de fachada (Distrito Cero): centro, giro y medida; los llena el Worker (syncBillboards). */
@@ -58,6 +63,8 @@ export interface District {
   parkour?: boolean;
   /** Armas en el modo pelea (WELCOME.weapons; §9 octies ter). */
   weapons?: boolean;
+  /** Coches: aquí se puede sacar el coche y sus poses se reparten (hoy, solo Arcade, que tiene circuito). */
+  cars?: boolean;
   /** Carreras con cofre al llegar a la meta: su tabla de botín (LOOT_TABLES del protocolo), por id de carrera. */
   loot?: Record<string, string>;
   /** Próximamente: su isla está en el nexo con la puerta cerrada; solo entra moderación y no se publica en él. */
@@ -309,9 +316,15 @@ export function districtSeed(d: District, toNexo: { p: V3; yaw: number }): Seede
   });
   /* --- Carreras: salida, puntos en orden y meta (checkpoint@1); placas de impulso (boost@1) --- */
   for (const rc of acts?.races ?? []) {
-    const cp = (id: string, p: V3, role: "start" | "cp" | "finish", order: number, radius: number) =>
-      out.push({ id, components: { "transform@1": { p, r: [0, 0, 0, 1], s: [1, 1, 1], parent: null }, "checkpoint@1": { race: rc.id, role, order, radius } } as Components });
-    cp(`${d.id}_${rc.id}_start`, rc.start.p, "start", 0, rc.start.radius);
+    const cp = (id: string, p: V3, role: "start" | "cp" | "finish", order: number, radius: number, extra: Record<string, unknown> = {}, r: number[] = [0, 0, 0, 1]) =>
+      out.push({ id, components: { "transform@1": { p, r, s: [1, 1, 1], parent: null }, "checkpoint@1": { race: rc.id, role, order, radius, ...extra } } as Components });
+    // En la salida va cómo es la carrera: en coche, con parrilla (salida conjunta), a cuántas vueltas
+    // y sus cajones, que miran hacia donde mira la salida.
+    cp(
+      `${d.id}_${rc.id}_start`, rc.start.p, "start", 0, rc.start.radius,
+      { ...(rc.vehicle ? { vehicle: rc.vehicle } : {}), ...(rc.mode ? { mode: rc.mode } : {}), ...(rc.laps ? { laps: rc.laps } : {}), ...(rc.grid?.length ? { grid: rc.grid } : {}), ...(rc.lights ? { lights: rc.lights } : {}) },
+      yaw(rc.start.yaw ?? 0),
+    );
     rc.cps.forEach((p, n) => cp(`${d.id}_${rc.id}_cp${n + 1}`, p, "cp", n + 1, rc.radius));
     cp(`${d.id}_${rc.id}_finish`, rc.finish.p, "finish", 0, rc.finish.radius);
   }

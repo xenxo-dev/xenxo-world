@@ -4,12 +4,15 @@
  * aviso corto y la velocidad para el velocímetro.
  */
 import { useSyncExternalStore } from "react";
-import districts from "../../../../realtime/src/districts.json";
 import type { Key } from "../../i18n";
 import type { CarSim } from "./physics";
 
-/** Los distritos (donde hay calles para conducir). */
-export const DISTRICT_CHUNKS = new Set((districts.districts as { chunk: string }[]).map((d) => d.chunk));
+/**
+ * El cajón de la parrilla que me ha tocado (una carrera de salida conjunta: lo pone el sensor de
+ * Activities con lo que dice el servidor): mientras dura la cuenta atrás, el coche va solo hasta él
+ * y espera allí. `yaw` como el del coche (0 = +Z).
+ */
+export const gridSpot = { on: false, x: 0, z: 0, yaw: 0 };
 
 /**
  * Fases, como en GTA: ir hasta la puerta (`walk`), abrirla (`open`), sentarse (`in`), cerrarla

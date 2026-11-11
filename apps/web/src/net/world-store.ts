@@ -52,6 +52,8 @@ class WorldStore {
   theme: { id: string; color: string } | null = null;
   /** Aquí se hace parkour (WELCOME.parkour: Vertical): world/parkour. */
   parkour = false;
+  /** Aquí hay coches (WELCOME.cars: Arcade): world/vehicle. */
+  cars = false;
   /** Lo que moderación tiene cerrado aquí ahora (WELCOME.closed): "chat", "sandbox". */
   closed: readonly string[] = [];
   status: ConnectionStatus = "idle";
@@ -156,6 +158,7 @@ class WorldStore {
     this.big = false;
     this.theme = null;
     this.parkour = false;
+    this.cars = false;
     this.closed = [];
     this.unavailable = false;
     this.host = null;
@@ -184,7 +187,10 @@ class WorldStore {
         this.big = !this.solo && (this.walk[0] < 0 || this.walk[1] > CHUNK_SIZE);
         this.theme = m.payload.theme ?? null;
         this.parkour = m.payload.parkour === true;
+        this.cars = m.payload.cars === true;
         this.closed = m.payload.closed ?? [];
+        // Sesión nueva: si corría en una ronda, era con la anterior.
+        activity.dropRound();
         // Otro lugar puede ser otro servidor (un nodo de la comunidad), con otro reloj.
         this.clock.reset(m.payload.server_time, performance.now());
         // El lugar puede ser otro (las entidades se colocan respecto a él).
@@ -237,6 +243,11 @@ class WorldStore {
         break;
       case "CHAT_REMOVED":
         chat.remove(m.payload.id);
+        break;
+      case "ROUND":
+        // Trae la hora del servidor: afina el reloj (la salida es a una hora suya) aunque no haya nadie más.
+        this.clock.sample(m.payload.now, performance.now());
+        activity.applyRound(m.payload, this.sessionId, this.serverNow());
         break;
       case "PROGRESS":
       case "COLLECTED":
@@ -376,6 +387,11 @@ export function useChatVersion() {
 /** Re-renderiza solo cuando cambia de lugar (nexo, plaza…). */
 export function usePlace(): string {
   return useSyncExternalStore(world.subscribe, () => world.chunkId);
+}
+
+/** ¿Hay coches en este lugar? (Lo dice el servidor al llegar: WELCOME.cars.) */
+export function useCars(): boolean {
+  return useSyncExternalStore(world.subscribe, () => world.cars);
 }
 
 /** La ciudad de fondo del lugar (cambia al llegar a un distrito). */

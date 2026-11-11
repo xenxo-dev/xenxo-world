@@ -1,4 +1,4 @@
-import { Suspense, useMemo, useRef } from "react";
+import { Suspense, useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { XROrigin, useXR, useXRControllerLocomotion } from "@react-three/xr";
 import * as THREE from "three";
@@ -8,9 +8,9 @@ import { world } from "../net/world-store";
 import type { AvatarRef } from "@xenxo/protocol";
 import { useAccount } from "../net/account";
 import { AvatarBody, ChatBubble } from "./Avatars";
-import { createMotion, smoothSpeed } from "./motion";
+import { createMotion, smoothSpeed, type Motion } from "./motion";
 import { cameraReach, findSeat } from "./collision";
-import { boost } from "../net/activity-store";
+import { boost, poseFlush } from "../net/activity-store";
 import { STEP_UP, createBody, moveScale, placeBody, requestJump, stepBody } from "./locomotion";
 import { VRMenu } from "./xr/VRMenu";
 import { placeOrigin, vr, vrFollowGround, vrStick, VR_SNAP, VR_WALK } from "./xr/vr-move";
@@ -70,11 +70,42 @@ const _headQ = new THREE.Quaternion();
 const _euler = new THREE.Euler(0, 0, 0, "YXZ");
 const _lastP = new THREE.Vector3(Infinity, 0, 0);
 const _lastQ = new THREE.Quaternion();
-/** El arma que se vio en la última pose enviada (cambiarla también es moverse). */
+/** El gesto, la fase del coche y el arma de la última pose enviada (cambiarlos también es moverse). */
+let lastEmote: string | null = null;
+let lastPhase = "none";
 let lastWeapon: string | null = null;
+
+/** Manda la pose de ahora (la cabeza de este frame, el gesto, el arma y el coche) y apunta lo mandado. */
+function sendPose(now: number, motion: Motion) {
+  // Lo que se ve de la persona: el parkour que esté haciendo, o su gesto.
+  const shown = motion.pk ?? motion.emote;
+  const held = motion.weapon ?? null;
+  _lastP.copy(_headP);
+  _lastQ.copy(_headQ);
+  lastEmote = shown;
+  lastPhase = drive.phase;
+  lastWeapon = held;
+  net.send(
+    msg("POSE", {
+      // La hora de este equipo en que se tomó (el servidor solo usa las diferencias): con ella
+      // los demás ven el movimiento a velocidad uniforme aunque la red la entregue a rachas.
+      t: Math.round(now),
+      head: { p: [_headP.x, _headP.y, _headP.z], r: [_headQ.x, _headQ.y, _headQ.z, _headQ.w] },
+      ...(shown ? { emote: shown } : {}),
+      ...(held && isWeaponId(held) ? { weapon: held } : {}),
+      ...carForPose(),
+    }) as ClientMessage,
+  );
+}
 const _yawE = new THREE.Euler();
 const _carQ = new THREE.Quaternion();
 const _seat = new THREE.Vector3();
+const _camUp = new THREE.Vector3();
+const _rigAt = new THREE.Vector3();
+const _rigCam = new THREE.Vector3();
+/** Al volante: cuánto va la cámara con el coche (0 = con el mundo; 1 = en el looping) y hacia dónde se mira respecto a él. */
+let carTilt = 0;
+let carRel = Math.PI;
 const _pkIn = { wantX: 0, wantZ: 0, jump: false, crouch: false, crouchPressed: false, yaw: 0 };
 /** Lo del parkour (clips y física de las caídas) ya está pedido. */
 let pkReady = false;
@@ -116,12 +147,22 @@ export function Player({ active }: { active: boolean }) {
   // Al llegar por un enlace directo (/d/<distrito>/<sitio>) ya se sabe hacia dónde se mira.
   const bodyYaw = useRef(spawn.yaw);
   const emoteUntil = useRef(0);
-  const lastEmote = useRef<string | null>(null);
   const inXR = useXR((s) => s.session != null);
   const driving = useDrive();
   const carHandle = useRef(createCarHandle()).current;
-  const lastPhase = useRef("none");
   const seqCtx = useRef({ body, motion, bodyYaw }).current;
+  // Justo antes de avisar al servidor de «estoy aquí» (un punto de carrera, algo que se recoge) sale
+  // la pose de ahora, fuera de su turno: en coche, la de hace 200 ms está a seis metros.
+  useEffect(() => {
+    poseFlush.now = () => {
+      if (world.status !== "open" || !world.sessionId || world.solo) return;
+      const now = performance.now();
+      if (sender.force(now)) sendPose(now, motion);
+    };
+    return () => {
+      poseFlush.now = null;
+    };
+  }, [motion]);
   const peopleCtx = useRef({ body, motion, bodyYaw, avatar: null as unknown as THREE.Group }).current;
   const gunCtx = useRef({ body, motion, bodyYaw, look: look.current }).current;
 
@@ -136,30 +177,58 @@ export function Player({ active }: { active: boolean }) {
     c3.y = ground;
     playerBulk.r = CAR.length / 2;
     const speed = drive.sim?.state.speed ?? 0;
-    if (Math.abs(speed) > 1.5) {
-      let d = carYaw + Math.PI - l.yaw;
-      d = Math.atan2(Math.sin(d), Math.cos(d));
-      l.yaw += d * Math.min(1, dt * 2.4);
+    // En el looping (el suelo del coche deja de mirar hacia abajo) la cámara va con el coche: detrás
+    // y encima suyos y con su horizonte, como en una montaña rusa. Con la cámara de siempre, arriba
+    // del todo quedaba por encima de la pista, mirando el distrito, y el coche ni se veía.
+    // (Solo rodando: volcado en el suelo o cayendo por el aire, la de siempre.)
+    const upY = 1 - 2 * (q.x * q.x + q.z * q.z);
+    const rolling = (drive.sim?.state.contacts ?? 0) >= 2;
+    carTilt += ((!rolling || upY > 0.86 ? 0 : upY < 0.55 ? 1 : (0.86 - upY) / 0.31) - carTilt) * Math.min(1, dt * 6);
+    if (carTilt < 0.02) {
+      if (Math.abs(speed) > 1.5) {
+        let d = carYaw + Math.PI - l.yaw;
+        d = Math.atan2(Math.sin(d), Math.cos(d));
+        l.yaw += d * Math.min(1, dt * 2.4);
+      }
+      // Hacia dónde se mira respecto al coche (π = desde detrás), para cuando se incline.
+      carRel = l.yaw - carYaw;
+    } else {
+      // Inclinado, su rumbo de brújula no dice nada (del revés se da la vuelta): se mira respecto a él.
+      carRel += Math.atan2(Math.sin(Math.PI - carRel), Math.cos(Math.PI - carRel)) * Math.min(1, dt * 2.4);
+      l.yaw = carYaw + carRel;
     }
     playerLook.yaw = l.yaw;
     if (view.firstPerson) {
       _seat.copy(DRIVER_EYE).applyQuaternion(q).add(carPose.p);
       cam.position.copy(_seat);
-      _carQ.setFromEuler(_euler.set(l.pitch, l.yaw - carYaw, 0));
+      _carQ.setFromEuler(_euler.set(l.pitch, carRel, 0));
       cam.quaternion.copy(q).multiply(_carQ);
       return;
     }
     const dist = Math.max(4.2, c3.dist * 1.75);
+    const cp = Math.cos(l.pitch), sp = Math.sin(l.pitch);
     _camTarget.set(carPose.p.x, ground + 1.7, carPose.p.z);
-    _camWant.set(
-      _camTarget.x + Math.sin(l.yaw) * dist * Math.cos(l.pitch),
-      _camTarget.y + 0.9 - Math.sin(l.pitch) * dist,
-      _camTarget.z + Math.cos(l.yaw) * dist * Math.cos(l.pitch),
-    );
-    const reach = cameraReach(_camTarget.x, _camTarget.y, _camTarget.z, _camWant.x, _camWant.y, _camWant.z);
+    _camWant.set(_camTarget.x + Math.sin(l.yaw) * dist * cp, _camTarget.y + 0.9 - sp * dist, _camTarget.z + Math.cos(l.yaw) * dist * cp);
+    _camUp.set(0, 1, 0);
+    if (carTilt > 0.001) {
+      // Lo mismo, en los ejes del coche (algo más cerca y más alto: dentro del looping, la pista se
+      // curva hacia la cámara por detrás).
+      const d = Math.min(dist, 5);
+      _rigAt.set(0, 1.25, 0.4).applyQuaternion(q).add(carPose.p);
+      _rigCam.set(Math.sin(carRel) * d * cp, 2.4 - sp * d, Math.cos(carRel) * d * cp).applyQuaternion(q).add(_rigAt);
+      _camTarget.lerp(_rigAt, carTilt);
+      _camWant.lerp(_rigCam, carTilt);
+      _camUp.lerp(_rigAt.set(0, 1, 0).applyQuaternion(q), carTilt).normalize();
+    }
+    // (Dentro del looping la cámara va por su hueco: no hay pared que se interponga, y la propia
+    // pista, que se curva por detrás, la acercaba de golpe.)
+    const reach = Math.max(carTilt, cameraReach(_camTarget.x, _camTarget.y, _camTarget.z, _camWant.x, _camWant.y, _camWant.z));
     camReach.current = reach < camReach.current ? reach : camReach.current + (reach - camReach.current) * Math.min(1, dt * 3);
     cam.position.lerpVectors(_camTarget, _camWant, camReach.current);
+    // Con su horizonte solo para este cálculo: el resto de cámaras cuentan con el de siempre.
+    cam.up.copy(_camUp);
     cam.lookAt(_camTarget);
+    cam.up.set(0, 1, 0);
   }
 
   // En VR: joystick izquierdo para moverse, derecho para girar (giro por pasos alrededor de la cabeza,
@@ -514,28 +583,10 @@ export function Player({ active }: { active: boolean }) {
     // Envío de pose: solo si hay cambio real, y un latido cada segundo. Detrás del panel no se envía.
     if ((!active && !inXR) || world.status !== "open" || !world.sessionId || world.solo) return;
     const now = performance.now();
-    // Lo que se ve de la persona: el parkour que esté haciendo, o su gesto.
-    const shown = motion.pk ?? motion.emote;
-    const held = motion.weapon ?? null;
-    const acted = shown !== lastEmote.current || drive.phase !== lastPhase.current || held !== lastWeapon;
+    const acted = (motion.pk ?? motion.emote) !== lastEmote || drive.phase !== lastPhase || (motion.weapon ?? null) !== lastWeapon;
     const moved = _headP.distanceToSquared(_lastP) > 1e-4 || _headQ.angleTo(_lastQ) > 0.01;
     if (!sender.due(now, moved, acted, people.fightOn && fighterNear(TIGHT_RANGE_M) ? SEND_TIGHT_MS : SEND_EVERY_MS)) return;
-    _lastP.copy(_headP);
-    _lastQ.copy(_headQ);
-    lastEmote.current = shown;
-    lastPhase.current = drive.phase;
-    lastWeapon = held;
-    net.send(
-      msg("POSE", {
-        // La hora de este equipo en que se tomó (el servidor solo usa las diferencias): con ella
-        // los demás ven el movimiento a velocidad uniforme aunque la red la entregue a rachas.
-        t: Math.round(now),
-        head: { p: [_headP.x, _headP.y, _headP.z], r: [_headQ.x, _headQ.y, _headQ.z, _headQ.w] },
-        ...(shown ? { emote: shown } : {}),
-        ...(held && isWeaponId(held) ? { weapon: held } : {}),
-        ...carForPose(),
-      }) as ClientMessage,
-    );
+    sendPose(now, motion);
   });
 
   return (

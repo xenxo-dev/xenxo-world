@@ -7,7 +7,10 @@
 import { useSyncExternalStore } from "react";
 import { msg, type ClientMessage, type MessageOf, type ServerMessage } from "@xenxo/protocol";
 import { checkBadgesSoon } from "./badges";
+import { gridHold, myRun, nextRound, roundFresh, type RoundPayload, type RoundState } from "./round";
 import { net } from "./session";
+
+export type { RoundState };
 
 export type TilesState = MessageOf<ServerMessage, "TILES">["payload"] & { at: number };
 
@@ -19,6 +22,8 @@ export type ActivityToast =
   | { kind: "tiles"; state: "won" | "lost"; at: number }
   | { kind: "badge"; name: Record<string, string>; at: number }
   | { kind: "guest"; at: number }
+  | { kind: "needCar"; at: number }
+  | { kind: "gridFull"; at: number }
   | { kind: "far"; at: number }
   /** Acabas de llegar de un salto (un «Ir» de la guía, un viaje): las actividades tardan unos segundos en contar. */
   | { kind: "wait"; at: number };
@@ -33,6 +38,8 @@ class ActivityStore {
   scores = new Map<string, ScoreRow[]>();
   /** Estado de cada tablero de baldosas (TILES), por su entidad; `at` = cuándo llegó (reloj local). */
   tiles = new Map<string, TilesState>();
+  /** La ronda en la que corro; si no corro en ninguna, la última de la que ha llegado aviso. */
+  round: RoundState | null = null;
   toast: ActivityToast | null = null;
   private version = 0;
   private listeners = new Set<() => void>();
@@ -54,8 +61,44 @@ class ActivityStore {
     this.race = null;
     this.scores = new Map();
     this.tiles = new Map();
+    this.round = null;
     this.toast = null;
     this.bump();
+  }
+
+  /**
+   * Llega cómo va una carrera de salida conjunta (round.ts elige cuál se enseña). `me`: mi sesión;
+   * `serverNow`: la hora del servidor vista desde aquí. Mientras corro en ella, la carrera está en
+   * marcha como una a pie (`race`: el cronómetro y la puerta que me toca).
+   */
+  applyRound(p: RoundPayload, me: string | null, serverNow: number) {
+    const now = performance.now();
+    this.round = nextRound(this.round, p, me, now);
+    const run = this.round.round === p.round ? myRun(this.round, me) : null;
+    if (run) this.race = { race: p.race, t0: now - (serverNow - p.go_at), next: run.next, total: run.total };
+    else if (this.round.round === p.round && this.race?.race === p.race) this.race = null;
+    this.bump();
+  }
+
+  /** Conexión nueva (otra sesión): la ronda en la que estuviera ya no es mía. */
+  dropRound() {
+    if (!this.round) return;
+    if (this.race?.race === this.round.race) this.race = null;
+    this.round = null;
+    this.bump();
+  }
+
+  /** ¿Toca esperar en la parrilla? (Estoy en una ronda que aún no ha salido: el coche no arranca.) */
+  gridHold(serverNow: number): boolean {
+    return gridHold(this.round, serverNow, performance.now());
+  }
+
+  /**
+   * Una ronda de la que ya no llega nada (el servidor se reinició, o su podio ya pasó) deja de
+   * valer: si corría en ella, se para el cronómetro. Se llama cada frame; casi nunca hace nada.
+   */
+  expireRound(now: number) {
+    if (this.round && !roundFresh(this.round, now)) this.dropRound();
   }
 
   /** Tras completar algo: ¿hay insignia nueva? (se enseña después del aviso de lo completado). */
@@ -106,6 +149,9 @@ class ActivityStore {
         if (m.payload.ref?.startsWith(ACTIVITY_REF) && reason === "jump" && !this.race) {
           this.toast = { kind: "wait", at: now };
           this.bump();
+        } else if (m.payload.ref?.startsWith(ACTIVITY_REF) && (reason === "vehicle" || reason === "full")) {
+          this.toast = { kind: reason === "full" ? "gridFull" : "needCar", at: now };
+          this.bump();
         }
         return;
       }
@@ -143,7 +189,14 @@ export const boost = { until: 0, speed: 0 };
 /** Los avisos de actividad llevan este prefijo en su id: sus errores no van al chat. */
 export const ACTIVITY_REF = "act_";
 let n = 0;
+/**
+ * Antes de avisar de «estoy aquí» se manda la pose de ahora (la pone el jugador: Player.tsx): el
+ * servidor comprueba el aviso con la última pose que tiene, y en coche la de hace 200 ms está a seis
+ * metros.
+ */
+export const poseFlush: { now: (() => void) | null } = { now: null };
 export function sendActivity(type: "COLLECT" | "CHECKPOINT" | "SCORES_GET", entityId: string) {
+  if (type !== "SCORES_GET") poseFlush.now?.();
   net.send(msg(type, { entity_id: entityId }, { id: `${ACTIVITY_REF}${++n}` }) as ClientMessage);
 }
 

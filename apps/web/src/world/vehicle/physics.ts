@@ -125,10 +125,14 @@ export class StaticWorld {
 
   constructor(private R: R, private world: InstanceType<R["World"]>, private source: StaticSource) {}
 
-  /** Se rehace solo si ha cambiado (las mallas, solo las nuevas o quitadas). */
-  sync(force = false) {
+  /**
+   * Se rehace solo si ha cambiado (las mallas, solo las nuevas o quitadas). Devuelve true si ha
+   * rehecho algo: hasta el siguiente paso del mundo, los rayos (las ruedas del coche) aún ven lo
+   * que se acaba de quitar.
+   */
+  sync(force = false): boolean {
     const v = this.source.version();
-    if (!force && v === this.seen) return;
+    if (!force && v === this.seen) return false;
     this.seen = v;
     const R = this.R;
     for (const c of this.statics) this.world.removeCollider(c, false);
@@ -153,7 +157,10 @@ export class StaticWorld {
         idx = new Uint32Array(n / 3);
         for (let i = 0; i < idx.length; i++) idx[i] = i;
       }
-      const col = this.world.createCollider(R.ColliderDesc.trimesh(pos, idx).setFriction(0.9));
+      // Con las aristas de dentro arregladas (une los vértices repetidos y mira los triángulos de al
+      // lado): rozando una pared hecha de muchos triángulos, la esquina de una caja se enganchaba en
+      // cada junta como si fuera un escalón (el coche se paraba en seco contra un quitamiedos liso).
+      const col = this.world.createCollider(R.ColliderDesc.trimesh(pos, idx, R.TriMeshFlags.FIX_INTERNAL_EDGES).setFriction(0.9));
       this.meshes.set(id, { col, n });
     });
     for (const [id, m] of this.meshes)
@@ -173,6 +180,7 @@ export class StaticWorld {
     wall(hi + 1, mid, 1, half + 2);
     wall(mid, lo - 1, half + 2, 1);
     wall(mid, hi + 1, half + 2, 1);
+    return true;
   }
 }
 
@@ -188,6 +196,16 @@ export class CarSim {
   private steerNow = 0;
   private lastSpeed = 0;
   private upsideDown = 0;
+  /** Ruedas apoyadas en el último paso. */
+  private touching = 0;
+  private stuck = 0;
+  /**
+   * Se ha quitado o puesto algo sólido (el coche mismo al sacarlo, lo sólido del lugar al cambiar)
+   * y el mundo aún no ha dado un paso. Los rayos de las ruedas buscan en un índice que solo se pone
+   * al día al dar el paso: si se lanzan antes, pueden dar con lo que ya no está (al sacar el coche
+   * por segunda vez, con el anterior) y la física se va al infinito: el coche desaparecía.
+   */
+  private stale = true;
   /**
    * El coche tras el paso anterior y tras el último. La física va a 60 pasos por segundo y la pantalla
    * a lo que vaya (90, 120, 144…): dibujando solo el último paso, a 144 Hz el coche no se movía en más
@@ -211,7 +229,7 @@ export class CarSim {
 
   /** Lo sólido del lugar (StaticWorld): se rehace solo si ha cambiado. */
   syncStatic(force = false) {
-    this.statics.sync(force);
+    if (this.statics.sync(force)) this.stale = true;
   }
 
   /** Saca el coche en (x, y, z) mirando a `yaw` (0 = +Z). */
@@ -235,12 +253,35 @@ export class CarSim {
           { x: 0, y: 0, z: 0, w: 1 },
         ),
     );
-    // Carrocería: la parte baja y el habitáculo (sin masa propia: la pone el sólido).
-    this.world.createCollider(
-      R.ColliderDesc.cuboid(CAR.width / 2 - 0.08, 0.28, CAR.length / 2 - 0.06).setTranslation(0, 0.46, CAR.centerZ).setDensity(0).setFriction(0.4).setRestitution(0.1),
-      body,
-    );
-    this.world.createCollider(R.ColliderDesc.cuboid(0.72, 0.2, 1.0).setTranslation(0, 0.92, -0.15).setDensity(0).setFriction(0.4), body);
+    // Carrocería (sin masa propia: la pone el sólido): un casco con el morro y la cola en cuña —como
+    // en un coche de verdad, van más altos que los bajos— y el habitáculo. Con una caja hasta abajo,
+    // al empezar a subir por una rampa curva o por el looping el morro se clavaba en la pista y el
+    // coche se frenaba en seco: dentro del looping (9 m de radio) el firme sube 19 cm bajo el morro,
+    // más lo que se hunda la suspensión.
+    // La chapa resbala contra lo que roce (se queda con el rozamiento menor de los dos): rozar un
+    // quitamiedos o una pared de refilón frena un poco, pero no clava el morro ni hace un trompo.
+    // El agarre es cosa de las ruedas, que van aparte.
+    const shell = (d: InstanceType<R["ColliderDesc"]>) => d.setDensity(0).setFriction(CAR.bodyFriction).setFrictionCombineRule(R.CoefficientCombineRule.Min).setRestitution(0.1);
+    const hw = CAR.width / 2 - 0.08;
+    const tail = CAR.centerZ - CAR.length / 2 + 0.06, nose = CAR.centerZ + CAR.length / 2 - 0.06;
+    // Con los cantos redondeados (`round`: el casco se da con esos centímetros de menos y se engorda
+    // otros tantos): una arista viva rozando una pared de triángulos se engancha en cada junta.
+    const hull: number[] = [];
+    const rd = CAR.hull.round;
+    const rearZ = CAR.wheels[2]!.z + 0.1, frontZ = CAR.wheels[0]!.z - 0.1;
+    for (const side of [-1, 1]) {
+      // Por abajo (más estrecho que el coche: los bajos van por dentro de las ruedas, así al
+      // balancearse no es la chapa la que toca el suelo): cola, eje trasero, eje delantero y morro.
+      const x = side * (CAR.hull.keel - rd);
+      hull.push(x, CAR.hull.tail + rd, tail + rd, x, CAR.hull.belly + rd, rearZ, x, CAR.hull.belly + rd, frontZ, x, CAR.hull.nose + rd, nose - rd);
+      // El costado a todo lo ancho, del estribo a la línea de la cintura.
+      const w = side * (hw - rd);
+      hull.push(w, CAR.hull.sill + 0.06 + rd, tail + rd, w, CAR.hull.sill + rd, rearZ, w, CAR.hull.sill + rd, frontZ, w, CAR.hull.sill + 0.08 + rd, nose - rd);
+      hull.push(w, CAR.hull.top - rd, tail + rd, w, CAR.hull.top - rd, nose - rd);
+    }
+    const tub = R.ColliderDesc.roundConvexHull(new Float32Array(hull), rd);
+    if (tub) this.world.createCollider(shell(tub), body);
+    this.world.createCollider(shell(R.ColliderDesc.roundCuboid(0.72 - rd, 0.2 - rd, 1.0 - rd, rd).setTranslation(0, 0.92, -0.15)), body);
     const v = this.world.createVehicleController(body);
     v.indexUpAxis = 1;
     v.setIndexForwardAxis = 2;
@@ -257,10 +298,13 @@ export class CarSim {
     });
     this.chassis = body;
     this.vehicle = v;
+    this.stale = true;
     this.acc = 0;
     this.steerNow = 0;
     this.lastSpeed = 0;
     this.upsideDown = 0;
+    this.stuck = 0;
+    this.touching = 0;
     this.jumped = true;
     this.capture();
     this.read();
@@ -287,6 +331,11 @@ export class CarSim {
     while (this.acc >= STEP) {
       this.acc -= STEP;
       this.simTime += STEP;
+      // Un paso del mundo antes de lanzar los rayos de las ruedas si algo sólido ha cambiado (`stale`).
+      if (this.stale) {
+        this.stale = false;
+        this.world.step();
+      }
       impact = Math.max(impact, this.hitPeople(body));
       this.controls(drive, body, v);
       v.updateVehicle(STEP);
@@ -321,14 +370,31 @@ export class CarSim {
       if (fwd > 0.8) brake = CAR.brake * -t;
       else engine = -CAR.engineForce * 0.7 * -t * Math.max(0, 1 - (fwd / CAR.reverseSpeed) ** 2);
     } else brake = CAR.engineBrake;
+    // ¿En una pared o del revés (el looping)? Muy empinado hacia arriba o hacia abajo, o con el
+    // suelo del coche mirando de lado o al cielo, y con ruedas apoyadas (las del paso anterior).
+    const q = body.rotation();
+    const fx = 2 * (q.x * q.z + q.w * q.y), fy = 2 * (q.y * q.z - q.w * q.x), fz = 1 - 2 * (q.x * q.x + q.y * q.y);
+    const ux = 2 * (q.x * q.y - q.w * q.z), upY = 1 - 2 * (q.x * q.x + q.z * q.z), uz = 2 * (q.y * q.z + q.w * q.x);
+    const looping = this.touching >= 2 && (Math.abs(fy) > 0.5 || upY < 0.2);
+    let touching = 0;
     for (let i = 0; i < 4; i++) {
       const front = CAR.wheels[i]!.front;
+      // En el looping las ruedas casi no agarran de lado: al coche lo llevan los quitamiedos (la
+      // pista se va desplazando hacia el otro carril), sin que los neumáticos se empeñen en seguir
+      // recto y acabe haciendo un trompo contra ellos.
+      v.setWheelSideFrictionStiffness(i, looping ? CAR.loopSideGrip : 1);
       v.setWheelSteering(i, front ? this.steerNow : 0);
       v.setWheelEngineForce(i, front ? 0 : engine);
       const hand = drive.handbrake && !front;
       v.setWheelBrake(i, hand ? CAR.handbrake : brake);
       if (!front) v.setWheelFrictionSlip(i, hand ? CAR.frictionRearHandbrake : CAR.frictionRear);
+      // Topes: cuanto más aplastado va el muelle, más duro (ver CAR.bumpFrom).
+      const squeeze = CAR.suspensionRest - (v.wheelSuspensionLength(i) ?? CAR.suspensionRest);
+      const over = Math.max(0, Math.min(1, (squeeze - CAR.bumpFrom) / (CAR.suspensionTravel - CAR.bumpFrom)));
+      v.setWheelSuspensionStiffness(i, CAR.suspensionStiffness * (1 + CAR.bumpGain * over));
+      if (v.wheelIsInContact(i)) touching++;
     }
+    this.touching = touching;
     // Aire y rodadura, contra la velocidad.
     const lv = body.linvel();
     const sp = Math.hypot(lv.x, lv.y, lv.z);
@@ -337,14 +403,111 @@ export class CarSim {
       const f = CAR.drag * sp * sp + CAR.rolling;
       body.addForce({ x: (-lv.x / sp) * f, y: (-lv.y / sp) * f, z: (-lv.z / sp) * f }, true);
     }
+    // Apoyo aerodinámico: hacia el suelo del coche (no hacia abajo del mundo), con ruedas apoyadas.
+    if (touching >= 2 && sp > 1) {
+      const f = -CAR.downforce * sp * sp;
+      body.addForce({ x: ux * f, y: upY * f, z: uz * f }, true);
+    }
+    // Subiendo por una pared o del revés (el looping), con las ruedas apoyadas y sin frenar: no se
+    // queda sin velocidad a media vuelta (se caería de espaldas desde lo alto). Es una ayuda de
+    // recreativa: quien entra despacio da la vuelta igual, solo que más lento.
+    // (Con el coche parado a media subida, basta dar gas; sin gas solo ayuda a quien ya va lanzado.)
+    if (touching >= 2 && !drive.handbrake && t > -0.05 && (fy > 0.5 || upY < 0.2) && (t > 0.3 ? fwd > -1 : fwd > 3) && fwd < CAR.loopHold) {
+      const f = CAR.mass * CAR.loopPush * Math.min(1, (CAR.loopHold - fwd) / 3);
+      body.addForce({ x: fx * f, y: fy * f, z: fz * f }, true);
+    }
+    // Y el morro, hacia donde va de verdad (lo que mandan los quitamiedos): gira sobre su propio eje
+    // vertical hasta mirar a su velocidad. Sin esto saldría del looping mirando hacia un lado.
+    if (looping && touching >= 2 && sp > 4) {
+      // La velocidad, sobre el suelo del coche.
+      const along = lv.x * ux + lv.y * upY + lv.z * uz;
+      let vx = lv.x - ux * along, vy = lv.y - upY * along, vz = lv.z - uz * along;
+      const vl = Math.hypot(vx, vy, vz);
+      if (vl > 3) {
+        vx /= vl;
+        vy /= vl;
+        vz /= vl;
+        if (fx * vx + fy * vy + fz * vz > 0.3) {
+          // (adelante × velocidad) · arriba = el seno de lo que le falta por girar.
+          const turn = ((fy * vz - fz * vy) * ux + (fz * vx - fx * vz) * upY + (fx * vy - fy * vx) * uz) * CAR.loopAlign;
+          const av = body.angvel();
+          const add = (turn - (av.x * ux + av.y * upY + av.z * uz)) * CAR.loopAlignBlend;
+          body.setAngvel({ x: av.x + ux * add, y: av.y + upY * add, z: av.z + uz * add }, true);
+        }
+      }
+    }
+    // En el aire: el morro hacia donde se vuela (si va más o menos de frente; dando vueltas, no).
+    if (touching === 0 && sp > 6) {
+      const vx = lv.x / sp, vy = lv.y / sp, vz = lv.z / sp;
+      if (fx * vx + fy * vy + fz * vz > 0.5) {
+        const av = body.angvel();
+        const k = CAR.airAlign, b = CAR.airBlend;
+        // Adelante × velocidad: el giro que lleva el morro a la dirección de vuelo (sin alabeo).
+        body.setAngvel(
+          { x: av.x + ((fy * vz - fz * vy) * k - av.x) * b, y: av.y + ((fz * vx - fx * vz) * k - av.y) * b, z: av.z + ((fx * vy - fy * vx) * k - av.z) * b },
+          true,
+        );
+      }
+    }
   }
 
-  /** Si se queda volcado unos segundos, se endereza solo (en su sitio, un poco más alto). */
+  /**
+   * Lleva el coche hacia (x, z) mirando a `yaw` sin pasar por la física, a `speed` m/s como mucho
+   * (colocarlo en su cajón de la parrilla): la altura no se toca, sigue apoyado en sus muelles.
+   * Devuelve true cuando ya está en su sitio.
+   */
+  slide(x: number, z: number, yaw: number, dt: number, speed = 26): boolean {
+    const body = this.chassis;
+    if (!body) return true;
+    const p = body.translation(), q = body.rotation();
+    const dx = x - p.x, dz = z - p.z, d = Math.hypot(dx, dz);
+    const cur = Math.atan2(2 * (q.w * q.y + q.x * q.z), 1 - 2 * (q.y * q.y + q.x * q.x));
+    let turn = yaw - cur;
+    turn = Math.atan2(Math.sin(turn), Math.cos(turn));
+    if (d < 0.03 && Math.abs(turn) < 0.01) return true;
+    // Rápido de lejos y suave al llegar; el giro, a la vez.
+    const k = d > 1e-6 ? Math.min(d, Math.min(speed, 2 + d * 5) * dt) / d : 0;
+    const a = cur + turn * Math.min(1, dt * 6);
+    body.setTranslation({ x: p.x + dx * k, y: p.y, z: p.z + dz * k }, true);
+    body.setRotation({ x: 0, y: Math.sin(a / 2), z: 0, w: Math.cos(a / 2) }, true);
+    body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    return false;
+  }
+
+  /**
+   * Una placa de turbo: `kick` m/s más hacia delante, sin pasar de `max` (ni frenar a quien ya va
+   * más rápido). Solo con ruedas en el suelo.
+   */
+  turbo(kick: number = CAR.turboKick, max: number = CAR.turboMax): boolean {
+    const body = this.chassis, v = this.vehicle;
+    if (!body || !v || this.touching < 2) return false;
+    const speed = v.currentVehicleSpeed();
+    const add = Math.min(kick, max - speed);
+    if (speed < 2 || add <= 0) return false;
+    const q = body.rotation();
+    const fx = 2 * (q.x * q.z + q.w * q.y), fy = 2 * (q.y * q.z - q.w * q.x), fz = 1 - 2 * (q.x * q.x + q.y * q.y);
+    const lv = body.linvel();
+    body.setLinvel({ x: lv.x + fx * add, y: lv.y + fy * add, z: lv.z + fz * add }, true);
+    return true;
+  }
+
+  /**
+   * Si se queda volcado unos segundos, se endereza solo (en su sitio, un poco más alto). Con las
+   * ruedas apoyadas no está volcado, por mucho que el suelo del coche mire al cielo: va por un
+   * peralte o por lo alto del looping.
+   */
   private recover(body: InstanceType<R["RigidBody"]>) {
     const r = body.rotation();
     const upY = 1 - 2 * (r.x * r.x + r.z * r.z);
-    this.upsideDown = upY < 0.35 ? this.upsideDown + STEP : 0;
-    if (this.upsideDown > 2) {
+    // (Volcado y casi quieto: por el aire, cayendo del revés, no se endereza a media caída.)
+    const lv = body.linvel();
+    const moving = Math.hypot(lv.x, lv.y, lv.z);
+    this.upsideDown = upY < 0.35 && this.touching < 2 && moving < 3 ? this.upsideDown + STEP : 0;
+    // Tampoco se queda tirado de lado o colgado de un quitamiedos: quieto y sin ruedas en el suelo.
+    this.stuck = this.touching === 0 && moving < 0.6 ? this.stuck + STEP : 0;
+    if (this.upsideDown > 2 || this.stuck > 2.5) {
+      this.stuck = 0;
       const yaw = Math.atan2(2 * (r.w * r.y + r.x * r.z), 1 - 2 * (r.y * r.y + r.x * r.x));
       const p = body.translation();
       body.setTranslation({ x: p.x, y: p.y + 1.2, z: p.z }, true);

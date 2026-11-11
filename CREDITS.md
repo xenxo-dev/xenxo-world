@@ -25,8 +25,9 @@ La excepción son las texturas generadas con IA (abajo), que tienen su propia no
   © The Khronos Group, con licencia [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); hecho a
   partir de un modelo de dominio público de Unity Fan. **Modificado** para xenxo con
   `tools/models/library/concept-car.mjs`: sin los logotipos de Khronos (sus marcas no entran en la
-  licencia), sin piezas ocultas, simplificado, con el cristal sin transmisión y separado en
-  carrocería, puertas y ruedas. No es CC0: hay que mantener esta atribución.
+  licencia; la matrícula, que lo llevaba, es ahora una de xenxo hecha aquí: `car-plate.mjs`), sin
+  piezas ocultas, simplificado, con el cristal sin transmisión y separado en carrocería, puertas y
+  ruedas. No es CC0: hay que mantener esta atribución.
 - **Mandos y manos en la VR** (`apps/web/public/xr/profiles/`, copiados con `tools/xr/fetch-profiles.mjs`):
   [WebXR Input Profiles](https://github.com/immersive-web/webxr-input-profiles) del grupo Immersive Web
   del W3C, © Amazon, con licencia MIT (su `LICENSE.md` va al lado). Los modelos de los mandos llevan

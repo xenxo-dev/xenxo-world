@@ -426,7 +426,7 @@
  ],
  "districts": [
   {
-   "id": "arcade", "rank": 2, "fight": "comic",
+   "id": "arcade", "rank": 2, "fight": "comic", "cars": true,
    "chunk": "c_1_0",
    "category": "game3d",
    "color": "#4fa3ff",

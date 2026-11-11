@@ -231,7 +231,8 @@ El agente de ejemplo usa la variable `XENXO_URL=https://api.xenxo.io` y el secre
 - [x] Distritos como ciudades con cosas que hacer: carreras, búsquedas, marcadores, el tablero de Píxel y la zona de pruebas del Taller
 - [x] Vertical: parkour (saltar vallas, colgarse, correr por la pared, rodar), las Pilas, seis niveles y cofres de botín
 - [x] Gente: rueda de acciones, acciones en pareja, modo pelea de consentimiento con vida y blásteres de juguete en Distrito Cero
-- [x] Ciudadanos con su día, compartidos por todos, interiores visitables y coche propio con física de verdad
+- [x] Ciudadanos con su día, compartidos por todos, interiores visitables y coche propio con física de verdad (en Arcade)
+- [x] Gran Premio Neón (Arcade): carreras en coche de salida conjunta —parrilla, semáforo, puestos en directo y clasificación— por un circuito con looping, salto y placas de turbo
 - [x] Fundas: configurador de personaje en el navegador (cuerpo, cara, ropa, estampados; opcionalmente desde una foto que no sale del equipo)
 - [x] Juegos de fuera con «Entrar con xenxo» (OpenID Connect), SDK, plantilla `npm create xenxo`, catálogo revisado y jams
 - [x] Distritos de la comunidad (kit y revisión) y nodos: distritos alojados en servidores de la comunidad, con relevo

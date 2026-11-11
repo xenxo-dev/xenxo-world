@@ -54,6 +54,15 @@ export const CAR = {
   frictionFront: 2.7,
   frictionRear: 2.4,
   frictionRearHandbrake: 0.9,
+  /**
+   * El casco con el que choca la carrocería (alturas sobre el suelo, m): los bajos entre los ejes
+   * (`keel`: su media anchura, por dentro de las ruedas), el morro y la cola más altos (en cuña), el
+   * estribo —desde ahí el costado va a todo lo ancho— y la línea de la cintura; encima, el habitáculo.
+   * `round`: el radio de sus cantos.
+   */
+  hull: { belly: 0.24, keel: 0.62, nose: 0.54, tail: 0.5, sill: 0.5, top: 0.74, round: 0.09 },
+  /** Rozamiento de la chapa contra lo que toque (paredes, quitamiedos): poco, para rozar sin clavarse. */
+  bodyFriction: 0.08,
   /** Motor (tracción trasera): fuerza por rueda y velocidades máximas (m/s). */
   engineForce: 3600,
   topSpeed: 31,
@@ -65,6 +74,43 @@ export const CAR = {
   /** Aire y rodadura. */
   drag: 0.4,
   rolling: 170,
+  /**
+   * Apoyo aerodinámico (N por cada m²/s² de velocidad, hacia el suelo del coche y solo con ruedas
+   * apoyadas): a 110 km/h pesa casi el doble. Es lo que lo pega a un peralte o a lo alto del looping.
+   */
+  downforce: 14,
+  /**
+   * Topes de la suspensión: a partir de `bumpFrom` m de compresión el muelle se va endureciendo,
+   * hasta `1 + bumpGain` veces al final del recorrido. Con el muelle de calle solo, un apoyo fuerte
+   * (el pie del looping, la caída de un salto) lo aplastaba y rozaba la carrocería.
+   */
+  bumpFrom: 0.11,
+  bumpGain: 3,
+  /**
+   * En el aire (un salto, un cambio de rasante): el coche se alinea con hacia donde vuela, como una
+   * flecha, a `airAlign` rad/s por cada radián que se desvía; `airBlend` es cuánto se acerca a eso en
+   * cada paso. Sin esto, al despegar agacha el morro (las ruedas de delante dejan la rampa antes) y
+   * cae de punta.
+   */
+  airAlign: 3.5,
+  airBlend: 0.12,
+  /**
+   * Looping: subiendo en vertical o del revés con las ruedas apoyadas, no baja de `loopHold` m/s
+   * (un empujón de hasta `loopPush` m/s²): arriba (9 m de radio) hacen falta 9,4 m/s para no caerse.
+   */
+  loopHold: 16,
+  loopPush: 26,
+  /**
+   * Y allí las ruedas agarran de lado solo esta parte de lo normal (al coche lo guían los
+   * quitamiedos: el looping lo cambia de carril) y el morro se alinea con la velocidad a `loopAlign`
+   * rad/s por cada radián de desvío (`loopAlignBlend`: cuánto se acerca a eso en cada paso).
+   */
+  loopSideGrip: 0.15,
+  loopAlign: 6,
+  loopAlignBlend: 0.25,
+  /** Placas de turbo: lo que suman de golpe (m/s) y hasta qué velocidad (m/s). */
+  turboKick: 7,
+  turboMax: 38,
   /** Dirección: giro máximo de las ruedas (rad) en parado; a más velocidad, menos. */
   steerMax: 0.6,
   steerSpeedFalloff: 14,

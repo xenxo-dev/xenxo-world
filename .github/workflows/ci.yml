@@ -39,6 +39,9 @@ jobs:
       - run: npm run test:graphics -w @xenxo/web
       # El multijugador: el viaje de una pose (red a rachas, lotes, reloj) y cómo se ve a los demás.
       - run: npm run test:netplay -w @xenxo/web
+      # Las carreras de salida conjunta y el circuito de Arcade: las rondas, y dos vueltas con el coche
+      # de verdad sobre la pista que se sirve (looping y salto incluidos).
+      - run: npm run test:race -w @xenxo/web
       # El servidor de distritos (workerd en una máquina propia): que siga compilando.
       - run: npm run build:district-host
       # Y sus scripts (portátil y relevo del NAS): que al menos se lean bien.

@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 import bpy  # noqa: E402
 
 import arcade  # noqa: E402
+import circuit  # noqa: E402
 import pixel  # noqa: E402
 import cero  # noqa: E402
 import city  # noqa: E402
@@ -115,6 +116,8 @@ def main() -> None:
                 add(f"pixel_sprite_{kind}", "prop", pixel.sprite_object(kind), [(ox + 32.0 + k * 4, -540.0, 0)])
         if dd["id"] == "arcade":  # la moneda del Arcade (se recoge: collectible@1)
             add("arcade_coin", "prop", arcade.coin_object, [(ox + 32.0, -540.0, 0)])
+            # El circuito de coches (el Gran Premio Neón), en su sitio: su malla es su colisión.
+            add("arcade_circuit", "district", circuit.track_object, [(ox + 32.0, 32.0, 0)])
         if dd["id"] == "cero":  # el fragmento del Rastro de datos (se recoge: collectible@1)
             add("cero_fragment", "prop", cero.fragment_object, [(ox + 32.0, -540.0, 0)])
         if dd["id"] == "vertical":  # el banderín de Vertical (se recoge: collectible@1)
@@ -129,6 +132,8 @@ def main() -> None:
     # Los niveles y los retos de Vertical (sus puntos salen de su plano) en la ficha de actividades; antes
     # que las colisiones: sus marcadores de pie también chocan.
     vertical.write_levels(vertical.ACTIVITIES)
+    # Y lo que sale del trazado del circuito de Arcade: la carrera, la parrilla, las placas de turbo…
+    circuit.write_activities()
     # Las colisiones de las ciudades de los distritos (las mismas cajas que sus edificios).
     city.write_colliders(dl, dl["districts"])
     # La plaza también tiene su isla en el nexo, con su decorado mediterráneo.

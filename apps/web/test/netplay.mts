@@ -431,6 +431,29 @@ console.log("Cuándo se manda la pose");
   n = 0;
   for (let t = 0; t < 10_000; t += 16.7) if (tight.due(t, true, false, SEND_TIGHT_MS)) n++;
   check(n >= 95 && n <= 100, `en el modo pelea con alguien al lado, diez por segundo (${n} en 10 s)`);
+  // Fuera de turno (justo antes de avisar de «estoy aquí», p. ej. un punto de carrera en coche): el
+  // servidor tiene que tener una pose de hace nada. O sale una ya, o es que se acaba de mandar.
+  const f = new PoseSender();
+  n = 0;
+  let forced = 0, asks = 0, old = 0, lastSent = -Infinity, nextAsk = 730;
+  for (let t = 0; t < 20_000; t += 16.7) {
+    if (f.due(t, true, false)) {
+      n++;
+      lastSent = t;
+    }
+    if (t < nextAsk) continue;
+    nextAsk += 1370;
+    asks++;
+    if (f.force(t)) {
+      forced++;
+      lastSent = t;
+    } else if (t - lastSent > 70) old++;
+  }
+  check(old === 0 && forced > asks / 2, `antes de cada aviso, una pose de hace menos de 70 ms (${forced} fuera de turno en ${asks} avisos; las demás, recién mandadas)`);
+  check(n + forced <= 104, `y con ellas no se manda más de la cuenta (${n + forced} en 20 s)`);
+  const q = new PoseSender();
+  q.due(0, true, false);
+  check(!q.force(40) && q.force(80), "ni antes de 70 ms de la anterior");
 }
 
 console.log("La hora de cada muestra (servidor)");

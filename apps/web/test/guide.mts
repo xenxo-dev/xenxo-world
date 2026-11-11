@@ -16,6 +16,7 @@ import activities from "../../realtime/src/district-activities.json";
 import cities from "../../realtime/src/district-cities.json";
 import layout from "../../realtime/src/districts.json";
 import raw from "../src/world/guide.json";
+import circuit from "./circuit-line.json";
 import { inAppBrowser, openInBrowserUrl } from "../src/net/inapp";
 import { appPath, pathLang, placeRoute } from "../src/routes";
 import { directPlace, guideOf, spotIds, spotOf, type GuideSpot } from "../src/world/guide";
@@ -51,10 +52,14 @@ function blocked(boxes: Box[], s: GuideSpot): Box | null {
   return null;
 }
 
-/** En alto, ¿hay algo debajo que lo sostenga (el tejado, la rejilla del mirador)? */
-function supported(boxes: Box[], s: GuideSpot): boolean {
+/** La línea central del circuito de Arcade (lo escribe la forja): su pista es una malla, no cajas. */
+const TRACK = (circuit as unknown as { line: [number, number, number, number, string][] }).line;
+
+/** En alto, ¿hay algo debajo que lo sostenga (el tejado, la rejilla del mirador, la pista del circuito)? */
+function supported(boxes: Box[], s: GuideSpot, district: string): boolean {
   const [x, y, z] = s.p;
   if (y < 0.2) return true;
+  if (district === "arcade" && TRACK.some(([tx, ty, tz]) => Math.hypot(x - tx, z - tz) < 3.5 && Math.abs(ty - y) < 0.3)) return true;
   return boxes.some(([cx, cy, cz, hx, hy, hz]) => Math.abs(x - cx) <= hx && Math.abs(z - cz) <= hz && Math.abs(cy + hy - y) < 0.4);
 }
 
@@ -80,7 +85,7 @@ for (const id of districts) {
     const s = spotOf(id, sid)!;
     const inside = s.p[0] > B0 + 2 && s.p[0] < B1 - 2 && s.p[2] > B0 + 2 && s.p[2] < B1 - 2;
     const hit = blocked(boxes, s);
-    const ok = inside && !hit && supported(boxes, s) && Number.isFinite(s.yaw);
+    const ok = inside && !hit && supported(boxes, s, id) && Number.isFinite(s.yaw);
     check(ok, `${id}/${sid}: [${s.p.join(", ")}] libre${s.p[1] > 0.2 ? " y con suelo debajo" : ""}${hit ? ` — choca con la caja [${hit.map((v) => v.toFixed(1)).join(", ")}]` : ""}${inside ? "" : " — fuera del distrito"}`);
   }
 }

@@ -5,8 +5,11 @@
  * él vuelve a subir; lejos, lo trae). Los demás lo ven todo por la pose (`car`, `vehicle` y los
  * gestos `car_open`, `car_in`, `car_out`).
  *
- * Solo en los distritos (las calles de sus ciudades) y nunca en las gafas: en VR manda el casco y un
- * coche en movimiento marea. La física (Rapier) se carga aparte la primera vez.
+ * Solo donde el lugar tiene coches (`WELCOME.cars`: Arcade, con su circuito) y nunca en las gafas: en
+ * VR manda el casco y un coche en movimiento marea. La física (Rapier) se carga aparte la primera vez.
+ *
+ * En la parrilla de una carrera de salida conjunta, durante la cuenta atrás, el coche va solo a su
+ * cajón y espera con el freno echado (se puede dar gas: suena, pero no arranca hasta la salida).
  */
 import * as THREE from "three";
 import { world } from "../../net/world-store";
@@ -17,7 +20,8 @@ import { input } from "../input";
 import { CAR, driverRoot } from "./car";
 import { createCarPose } from "./CarModel";
 import { carSound, carSoundStop } from "./audio";
-import { DISTRICT_CHUNKS, drive, driveNotice, emitDrive, SEATED, setPhase, type Phase } from "./drive-state";
+import { activity } from "../../net/activity-store";
+import { drive, driveNotice, emitDrive, gridSpot, SEATED, setPhase, type Phase } from "./drive-state";
 import type { StaticSource } from "./physics";
 import { loadRagdolls } from "../people/ragdoll";
 
@@ -35,9 +39,9 @@ const _q = new THREE.Quaternion();
 const _y = new THREE.Vector3(0, 1, 0);
 const _p = { x: 0, z: 0 };
 
-/** ¿Se puede sacar el coche aquí? (un distrito, el lugar ya abierto y fuera de las gafas). */
+/** ¿Se puede sacar el coche aquí? (donde el lugar tiene coches —Arcade—, ya abierto y fuera de las gafas). */
 export function carAllowed(inXR: boolean) {
-  return !inXR && world.status === "open" && DISTRICT_CHUNKS.has(world.chunkId);
+  return !inXR && world.status === "open" && world.cars;
 }
 
 const source: StaticSource = {
@@ -285,10 +289,13 @@ export function carFrame(dt: number, ctx: SeqCtx): "free" | "walking" | "seated"
     case "stop": {
       const sim = drive.sim!;
       const stopping = ph === "stop";
-      const handbrake = stopping || input.brake || input.jump;
+      // En la parrilla, hasta la salida: a su cajón y quieto.
+      const hold = !stopping && activity.gridHold(world.serverNow());
+      const handbrake = stopping || hold || input.brake || input.jump;
       input.jump = false;
       input.emote = null;
-      sim.update(Math.min(dt, 0.1), { throttle: stopping ? 0 : input.move.y, steer: stopping ? 0 : input.move.x, handbrake });
+      if (hold && gridSpot.on) sim.slide(gridSpot.x, gridSpot.z, gridSpot.yaw, Math.min(dt, 0.1));
+      sim.update(Math.min(dt, 0.1), { throttle: stopping || hold ? 0 : input.move.y, steer: stopping || hold ? 0 : input.move.x, handbrake });
       readSim();
       const st = sim.state;
       carSound(st.speed, stopping ? 0 : input.move.y, st.slip, st.impact);

@@ -62,11 +62,12 @@ import { isCommunityChunk, type CommunityMeta } from "./community";
 import type { PlaceFlags } from "./ops";
 import { fitsZone, localBox, worldBox, type Zone } from "./zone";
 import { assetKey } from "./assets";
-import { ACTIVITY_SCHEMA, activityKey, ARRIVALS_FREE, ARRIVALS_WINDOW_MS, isoWeek, JUMP_COOLDOWN_MS, weekStart, minRaceMs, MOVE_BURST, FOOT_BURST, near, POSE_MAX_AGE_MS, RACE_TIMEOUT_MS, SCORES_LIMIT, stepMove, unitQuat, type Move, type RaceRun } from "./activities";
+import { ACTIVITY_SCHEMA, activityKey, ARRIVALS_FREE, ARRIVALS_WINDOW_MS, isoWeek, JUMP_COOLDOWN_MS, weekStart, minRaceMs, MOVE_BURST, FOOT_BURST, near, POSE_MAX_AGE_MS, RACE_TIMEOUT_MS, SCORES_LIMIT, stepMove, unitQuat, MAX_SPEED, type Move, type RaceRun } from "./activities";
 import { SEED_ASSETS } from "./seed-assets";
 import { figureFor, pointsDay, TILES_IDLE_MS, TILES_PAUSE_MS, TILES_SCHEMA, TILES_START_MS, tileAt, tilesRoundMs, type TileBoard, type TileGame } from "./tiles";
 import { isAvatarPreset } from "./avatar-presets-check";
 import { allowSample, batchGap, roundP, roundR, stampSample, type PoseClock } from "./pose-clock";
+import { CAR_SPEED, dropIdle, joinRound, minRoundMs, passGate, roundOver, standings, startRound, type Round } from "./rounds";
 import { damageOf, dodges, DOWN_IMMUNE_MS, DUEL_WINDOW_MS, HIT_GAP_MS, HIT_MAX_DY, hitOutcome, moveAllowed, PAIR_OFFER_RANGE, PAIR_START_RANGE, PAIR_TTL_MS, REACH, REACT_GAP_MS, styleOf } from "./people";
 
 const TICK_HZ = 8;
@@ -187,6 +188,10 @@ function cleanText(raw: string, max: number): string {
   return [...s].slice(0, max).join("").trim();
 }
 
+type CheckpointData = ReturnType<typeof CheckpointV1.parse>;
+/** Una entidad de actividad del lugar (búsqueda o punto de carrera), como la da `activityEntities`. */
+type ActivityItem = { id: string; owner: string; p: number[]; cp?: CheckpointData };
+
 interface Attachment {
   session_id: string;
   principal: Principal;
@@ -266,6 +271,10 @@ export class ChunkRoom extends DurableObject<Env> {
   /** De cada sesión: su reloj (para fechar cada muestra como se tomó) y su tope de frecuencia (pose-clock.ts). */
   private poseClocks = new Map<string, PoseClock>();
   private poseTat = new Map<string, number>();
+  /** Carreras de salida conjunta (rounds.ts): las rondas que se están formando o corriendo, y el temporizador de su salida. */
+  private rounds: Round[] = [];
+  private roundSeq = 0;
+  private roundTimers = new Map<number, ReturnType<typeof setTimeout>>();
   private mutationLog = new Map<string, number[]>();
   private chatLog = new Map<string, number[]>();
   private activityLog = new Map<string, number[]>();
@@ -580,6 +589,7 @@ export class ChunkRoom extends DurableObject<Env> {
           ...this.themeHint(),
           ...(this.fightStyle ? { fight: this.fightStyle } : {}),
           ...(this.parkour ? { parkour: true } : {}),
+          ...(this.carsHere ? { cars: true } : {}),
           ...(this.weaponsHere ? { weapons: this.weaponsOf(att) } : {}),
           ...(this.closedHere().length ? { closed: this.closedHere() } : {}),
         }));
@@ -638,8 +648,8 @@ export class ChunkRoom extends DurableObject<Env> {
           return h && r && Math.hypot(h.p[0] - head.p[0], h.p[1] - head.p[1], h.p[2] - head.p[2]) <= HAND_REACH ? trim(h, r) : undefined;
         };
         const hand_l = hand(m.payload.hand_l), hand_r = hand(m.payload.hand_r);
-        // Coches solo en los distritos (en la plaza se va a pie) y dentro de sus límites.
-        const roads = !!districtByChunk(this.chunkId!);
+        // Coches solo donde el distrito los tiene (`cars` en districts.json: Arcade) y dentro de sus límites.
+        const roads = this.carsHere;
         const carR = m.payload.car && unitQuat(m.payload.car.r);
         const car = m.payload.car && carR ? trim(m.payload.car, carR) : undefined;
         const withCar = roads && car && this.inBounds(car.p) ? { car, ...(vehicle ? { vehicle } : {}) } : {};
@@ -649,6 +659,7 @@ export class ChunkRoom extends DurableObject<Env> {
         this.scheduleTick();
         // Una pose que llega de un salto no pisa baldosas.
         if (!jump) this.tilesPose(att, head.p);
+        if (this.rounds.length) this.sweepRounds(now);
         // Quien lleva a los ciudadanos ha dejado de mandar su estado (pestaña dormida, conexión mala): otro.
         // Y si no los lleva nadie, quien sepa y se mueva.
         if (this.npcHost && !this.npcHostAlive(now)) this.electNpcHost(this.npcHost);
@@ -707,6 +718,7 @@ export class ChunkRoom extends DurableObject<Env> {
     this.lastPoseAt.delete(att.session_id);
     this.poseClocks.delete(att.session_id);
     this.poseTat.delete(att.session_id);
+    if (this.rounds.length) this.leaveRounds(att.session_id, Date.now());
     this.activityLog.delete(att.session_id);
     this.buckets.delete(att.session_id);
     this.moves.delete(att.session_id);
@@ -759,6 +771,7 @@ export class ChunkRoom extends DurableObject<Env> {
         ws.serializeAttachment(att);
       }
     } else ({ jump, fast } = stepMove(m, p, now));
+    if (jump && this.rounds.length) this.leaveRounds(att.session_id, now);
     if ((jump || fast) && att.run) {
       const race = att.run.race;
       att.run = undefined;
@@ -1767,7 +1780,7 @@ export class ChunkRoom extends DurableObject<Env> {
   }
 
   private readActivityEntities() {
-    const out: { id: string; owner: string; p: number[]; col?: { set: string; radius: number; note?: Record<string, string> }; cp?: { race: string; role: "start" | "cp" | "finish"; order: number; radius: number } }[] = [];
+    const out: { id: string; owner: string; p: number[]; col?: { set: string; radius: number; note?: Record<string, string> }; cp?: CheckpointData }[] = [];
     for (const r of this.sql.exec<{ entity_id: string; owner: string; data: string }>("SELECT entity_id, owner, data FROM entities").toArray()) {
       if (!r.data.includes("collectible@1") && !r.data.includes("checkpoint@1")) continue;
       const e = JSON.parse(r.data) as Entity;
@@ -1836,10 +1849,16 @@ export class ChunkRoom extends DurableObject<Env> {
 
   private handleCheckpoint(ws: WebSocket, att: Attachment, ref: string | undefined, entityId: string) {
     if (this.solo) return this.sendError(ws, ref, "forbidden", "en el nexo no hay actividades");
-    if (att.principal.kind !== "user") return this.sendError(ws, ref, "forbidden", "crea una cuenta para que cuenten tus tiempos");
-    if (!this.activityAllowed(att)) return this.sendError(ws, ref, "rate_limited", "demasiados avisos; espera un poco");
     const all = this.activityEntities();
     const it = all.find((a) => a.id === entityId && a.cp);
+    // Las carreras de salida conjunta (con parrilla) van por rondas, y en ellas corre cualquiera.
+    const grid = it?.cp && all.find((a) => a.owner === it.owner && a.cp?.race === it.cp!.race && a.cp.role === "start" && a.cp.mode === "grid");
+    if (it?.cp && grid) {
+      if (!this.activityAllowed(att)) return this.sendError(ws, ref, "rate_limited", "demasiados avisos; espera un poco");
+      return this.handleRoundGate(ws, att, ref, it, grid, all.filter((a) => a.owner === it.owner && a.cp?.race === it.cp!.race));
+    }
+    if (att.principal.kind !== "user") return this.sendError(ws, ref, "forbidden", "crea una cuenta para que cuenten tus tiempos");
+    if (!this.activityAllowed(att)) return this.sendError(ws, ref, "rate_limited", "demasiados avisos; espera un poco");
     if (!it?.cp) return this.sendError(ws, ref, "not_found", "eso no es un punto de carrera");
     if (this.jumpedRecently(att)) return this.sendError(ws, ref, "forbidden", "acabas de llegar de un salto: espera unos segundos", { reason: "jump" });
     if (!this.sessionNear(att, it.p, it.cp.radius)) return this.sendError(ws, ref, "forbidden", "estás demasiado lejos");
@@ -1881,6 +1900,13 @@ export class ChunkRoom extends DurableObject<Env> {
     if (!start || ms < minRaceMs([start.p, ...cps.map((c) => c.p), it.p])) {
       return this.send(ws, msg("RACE", { race, state: "reset" }));
     }
+    const { best, rank } = this.recordRace(att, key, ms, now);
+    const loot = this.rollLootFor(att, it.owner, race, key, now);
+    this.send(ws, msg("RACE", { race, state: "finish", ms, best, rank, ...(loot ? { loot } : {}) }));
+  }
+
+  /** Apunta el tiempo de una cuenta en una carrera (su mejor de siempre y el de la semana) y dice cómo queda. */
+  private recordRace(att: Attachment, key: string, ms: number, now: number): { best: number; rank: number } {
     const sub = att.principal.sub;
     const prev = this.sql.exec<{ ms: number }>("SELECT ms FROM act_race_best WHERE race_key = ? AND sub = ?", key, sub).toArray()[0]?.ms;
     if (prev === undefined || ms < prev) {
@@ -1901,8 +1927,133 @@ export class ChunkRoom extends DurableObject<Env> {
     this.scoreCache.clear();
     const best = Math.min(ms, prev ?? ms);
     const rank = 1 + this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM act_race_best WHERE race_key = ? AND ms < ?", key, best).one().n;
-    const loot = this.rollLootFor(att, it.owner, race, key, now);
-    this.send(ws, msg("RACE", { race, state: "finish", ms, best, rank, ...(loot ? { loot } : {}) }));
+    return { best, rank };
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Carreras de salida conjunta (rounds.ts): parrilla, salida y clasificación */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Un aviso de punto en una carrera con parrilla (§7). En la salida: se entra en la ronda que se
+   * está formando (o se abre una). En un punto o en la meta: cuenta si es la puerta que le toca a esa
+   * sesión en la ronda que corre. En coche si la carrera lo es, y siempre con la pose de verdad.
+   */
+  private handleRoundGate(ws: WebSocket, att: Attachment, ref: string | undefined, it: ActivityItem, start: ActivityItem, points: ActivityItem[]) {
+    const now = Date.now();
+    const sid = att.session_id;
+    const cp = it.cp!, conf = start.cp!;
+    const key = activityKey(it.owner, cp.race);
+    if (this.jumpedRecently(att)) return this.sendError(ws, ref, "forbidden", "acabas de llegar de un salto: espera unos segundos", { reason: "jump" });
+    if (conf.vehicle === "car" && this.poses.get(sid)?.vehicle !== "car") return this.sendError(ws, ref, "forbidden", "esta carrera es en coche", { reason: "vehicle" });
+    if (!this.sessionNear(att, it.p, cp.radius)) return this.sendError(ws, ref, "forbidden", "estás demasiado lejos");
+    const cps = points.filter((a) => a.cp!.role === "cp").sort((a, b) => a.cp!.order - b.cp!.order);
+    const finish = points.find((a) => a.cp!.role === "finish");
+    if (!finish) return;
+    const mine = (r: Round) => {
+      const e = r.entrants.get(sid);
+      return r.key === key && r.state === "running" && !!e && !e.out && e.ms === undefined;
+    };
+    const running = this.rounds.find(mine);
+    if (cp.role === "start") {
+      if (running) return; // pasa por la parrilla en plena carrera
+      // Ya está en la que se forma (su cliente insiste mientras sigue en la parrilla): solo a él.
+      const waiting = this.rounds.find((r) => r.key === key && r.state === "countdown" && r.entrants.has(sid));
+      if (waiting) return this.sendRound(waiting, now, ws);
+      const laps = conf.laps ?? 1;
+      const r = joinRound(
+        this.rounds,
+        () => ({
+          id: this.roundSeq + 1, key, race: cp.race, owner: it.owner, laps, perLap: cps.length + 1,
+          minMs: minRoundMs([...cps.map((c) => c.p), finish.p], laps, conf.vehicle === "car" ? CAR_SPEED : MAX_SPEED), slots: conf.grid?.length ?? 0,
+        }),
+        { session_id: sid, sub: att.principal.sub, ranked: att.principal.kind === "user", name: att.principal.name ?? att.display_name, ...(att.principal.no != null ? { no: att.principal.no } : {}) },
+        now,
+      );
+      if (!r) return this.sendError(ws, ref, "forbidden", "la parrilla está llena: espera a la siguiente", { reason: "full" });
+      this.roundSeq = Math.max(this.roundSeq, r.id);
+      // La salida, a su hora (como mucho unos segundos: el objeto no se queda despierto por esto).
+      const old = this.roundTimers.get(r.id);
+      if (old) clearTimeout(old);
+      this.roundTimers.set(r.id, setTimeout(() => this.goRound(r, start), Math.max(0, r.goAt - now)));
+      return this.sendRound(r, now);
+    }
+    if (!running) return;
+    const e = running.entrants.get(sid)!;
+    const res = passGate(running, sid, cp.role === "finish" ? "finish" : cps.findIndex((c) => c.id === it.id), now);
+    if (!res) {
+      // No era su puerta (nada que contar) o iba imposible de rápido: entonces se queda fuera, y se dice.
+      if (!e.out) return;
+      return roundOver(running, now) ? this.endRound(running, now) : this.sendRound(running, now);
+    }
+    if (res === "finish" && e.ranked && e.ms !== undefined) {
+      const { best, rank } = this.recordRace(att, key, e.ms, now);
+      this.send(ws, msg("RACE", { race: cp.race, state: "finish", ms: e.ms, best, rank }));
+    }
+    if (roundOver(running, now)) this.endRound(running, now);
+    else this.sendRound(running, now);
+  }
+
+  /** La salida: quien no está en la parrilla (o no va en coche, si toca) se queda fuera. */
+  private goRound(r: Round, start: ActivityItem) {
+    this.roundTimers.delete(r.id);
+    if (r.state !== "countdown") return;
+    const now = Date.now();
+    const car = start.cp!.vehicle === "car";
+    const alive = startRound(r, (sid) => {
+      const pose = this.poses.get(sid);
+      return !!pose && now - (this.lastPoseAt.get(sid) ?? 0) <= POSE_MAX_AGE_MS && (!car || pose.vehicle === "car") && near(pose.head.p, start.p, start.cp!.radius);
+    });
+    if (!alive) return this.endRound(r, now);
+    this.sendRound(r, now);
+  }
+
+  /** Cómo va una ronda: a todo el lugar o, con `only`, a una sola sesión. */
+  private sendRound(r: Round, now: number, only?: WebSocket) {
+    const m = msg("ROUND", {
+      race: r.race, owner: r.owner, round: r.id, state: r.state, now, go_at: r.goAt, laps: r.laps, per_lap: r.perLap,
+      entrants: standings(r).map((e) => ({
+        session_id: e.session_id, name: e.name, ...(e.no != null ? { player_no: e.no } : {}), ...(e.slot !== undefined ? { slot: e.slot } : {}), gates: e.gates,
+        ...(e.at !== undefined ? { at: e.at } : {}), ...(e.ms !== undefined ? { ms: e.ms } : {}), ...(e.out ? { out: true } : {}),
+      })),
+    });
+    if (only) this.send(only, m);
+    else this.broadcast(m);
+  }
+
+  private endRound(r: Round, now: number) {
+    r.state = "done";
+    const t = this.roundTimers.get(r.id);
+    if (t) clearTimeout(t);
+    this.roundTimers.delete(r.id);
+    this.rounds = this.rounds.filter((x) => x !== r);
+    this.sendRound(r, now);
+  }
+
+  /** Las rondas que ya han acabado (todos han llegado, o se ha pasado el tiempo) y quien se ha quedado en la parrilla. */
+  private sweepRounds(now: number) {
+    for (const r of [...this.rounds]) {
+      const idle = dropIdle(r, now);
+      if (roundOver(r, now)) this.endRound(r, now);
+      else if (idle) this.sendRound(r, now);
+    }
+  }
+
+  /** Una sesión deja las rondas en las que estuviera (se va, o llega de un salto). */
+  private leaveRounds(sid: string, now: number) {
+    for (const r of [...this.rounds]) {
+      const e = r.entrants.get(sid);
+      if (!e || e.out || e.ms !== undefined) continue;
+      if (r.state === "countdown") {
+        r.entrants.delete(sid);
+        if (r.entrants.size === 0) this.endRound(r, now);
+        else this.sendRound(r, now);
+      } else {
+        e.out = true;
+        if (roundOver(r, now)) this.endRound(r, now);
+        else this.sendRound(r, now);
+      }
+    }
   }
 
   /**
@@ -2331,6 +2482,12 @@ export class ChunkRoom extends DurableObject<Env> {
   private get parkour(): boolean {
     if (this.solo || !this.chunkId || this.community) return false;
     return districtByChunk(this.chunkId)?.parkour === true;
+  }
+
+  /** Coches: solo en los distritos del sistema que lo dicen (Arcade, que tiene el circuito). */
+  private get carsHere(): boolean {
+    if (this.solo || !this.chunkId || this.community) return false;
+    return districtByChunk(this.chunkId)?.cars === true;
   }
 
   /** Armas (§9 octies ter): solo en los distritos del sistema que lo dicen (Distrito Cero). */

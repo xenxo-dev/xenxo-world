@@ -254,6 +254,32 @@ export const CheckpointV1 = z.object({
   role: z.enum(["start", "cp", "finish"]),
   order: z.number().int().min(0).max(63).default(0),
   radius: z.number().min(0.5).max(8).default(2.5),
+  /**
+   * En la salida (`start`): la carrera se corre en coche (hoy solo `car`; §7 «Carreras de salida
+   * conjunta»). Sus puntos solo cuentan conduciendo. Sin el campo, a pie.
+   */
+  vehicle: z.enum(["car"]).optional(),
+  /**
+   * En la salida: `grid` = salida conjunta. La salida es una parrilla: quien se pone en ella entra
+   * en la ronda que se está formando, el servidor da la hora de salida y la clasificación (`ROUND`).
+   * Sin el campo, cada uno corre contra el reloj cuando quiere (`RACE`).
+   */
+  mode: z.enum(["grid"]).optional(),
+  /** En la salida: vueltas (por defecto, 1). En cada vuelta se pasa por todos los puntos y por la meta. */
+  laps: z.number().int().min(1).max(9).optional(),
+  /**
+   * En la salida de una carrera con parrilla: sus cajones, en orden (el primero, la pole), en metros
+   * del lugar como `transform@1.p`; miran hacia donde mira la entidad (el giro de su `transform@1`).
+   * A quien entra en la ronda el servidor le da uno (`ROUND.entrants[].slot`) y su cliente lo coloca
+   * en él. Caben tantos como cajones (sin el campo, hasta 16 y cada cual donde se pare).
+   */
+  grid: z.array(Vec3).min(1).max(16).optional(),
+  /**
+   * En la salida de una carrera con parrilla: dónde va su semáforo (el centro de una fila de cinco
+   * luces, de lado a lado de la pista, a 1,1 m una de otra). El cliente las dibuja y las enciende con
+   * la cuenta atrás de `ROUND` (una roja más cada segundo; verdes en la salida). Sin el campo, sin semáforo.
+   */
+  lights: Vec3.optional(),
 });
 
 /**
@@ -768,6 +794,12 @@ export const WelcomeMsg = envelope(
      */
     parkour: z.boolean().optional(),
     /**
+     * Coches (§7 «Vehículos»): aquí se puede sacar el coche propio y las poses llevan `car` y
+     * `vehicle` (lo dice el distrito, `cars` en districts.json: Arcade, que tiene el circuito). Sin
+     * el campo, aquí se va a pie: el cliente no ofrece el coche y el servidor no reparte los que lleguen.
+     */
+    cars: z.boolean().optional(),
+    /**
      * Armas (§9 octies ter): con cuáles puede disparar esta sesión aquí, en el modo pelea (la pipa y,
      * las cuentas, las de su inventario). Sin el campo, aquí no hay armas.
      */
@@ -878,6 +910,45 @@ export const RaceMsg = envelope(
     loot: z.object({ weapon: WeaponIdSchema, fresh: z.boolean() }).optional(),
   }),
 );
+/**
+ * Una carrera de salida conjunta (`checkpoint@1.mode = "grid"`; §7): quién corre y cómo va. Lo recibe
+ * todo el lugar cada vez que cambia algo: alguien se pone en la parrilla (`countdown`: la salida es a
+ * la hora `go_at` del servidor), dan la salida (`running`), alguien pasa por una puerta o llega, y al
+ * acabar (`done`: la clasificación final). `now` es la hora del servidor al mandarlo.
+ */
+export const RoundEntrant = z.object({
+  session_id: z.string(),
+  name: z.string(),
+  player_no: z.number().int().min(0).optional(),
+  /** Su cajón de la parrilla (índice en `checkpoint@1.grid`), si la carrera los tiene. */
+  slot: z.number().int().min(0).max(15).optional(),
+  /** Puertas que lleva (los puntos y la meta de cada vuelta, en orden). */
+  gates: z.number().int().min(0),
+  /** ms desde la salida en que pasó por la última. */
+  at: z.number().int().min(0).optional(),
+  /** Ha llegado: su tiempo (ms). */
+  ms: z.number().int().min(0).optional(),
+  /** Fuera de la ronda: salió antes de tiempo, se fue o llegó de un salto. */
+  out: z.boolean().optional(),
+});
+export type RoundEntrant = z.infer<typeof RoundEntrant>;
+export const RoundMsg = envelope(
+  "ROUND",
+  z.object({
+    race: ActivityId,
+    /** Dueño de la carrera (`system` o `prj_<id>`), como en sus entidades. */
+    owner: z.string(),
+    round: z.number().int().min(0),
+    state: z.enum(["countdown", "running", "done"]),
+    now: z.number(),
+    go_at: z.number(),
+    laps: z.number().int().min(1),
+    /** Puertas por vuelta: sus puntos más la meta. */
+    per_lap: z.number().int().min(1),
+    /** Ordenados por cómo van: más puertas y, a igualdad, quien pasó antes. */
+    entrants: z.array(RoundEntrant).max(32),
+  }),
+);
 /** Marcador (los 10 primeros): tiempo en ms en las carreras; fecha en la que se completó, en las búsquedas. */
 export const ScoresMsg = envelope(
   "SCORES",
@@ -983,6 +1054,7 @@ export const NpcPairEventMsg = envelope("NPC_PAIR_EVENT", z.object({ from: z.str
 export const ServerMessage = z.discriminatedUnion("type", [
   ProgressMsg,
   TilesMsg,
+  RoundMsg,
   CollectedMsg,
   RaceMsg,
   ScoresMsg,

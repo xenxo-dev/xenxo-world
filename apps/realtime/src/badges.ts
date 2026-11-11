@@ -48,6 +48,22 @@ export const BADGES: Badge[] = [
     color: "#36d9ff",
   },
   {
+    id: "arcade_gp",
+    district: "arcade",
+    rule: { kind: "race", key: "system:gp" },
+    name: { es: "Gran Premio Neón", en: "Neon Grand Prix" },
+    desc: { es: "Terminó una carrera del Gran Premio Neón, con su looping y su salto.", en: "Finished a Neon Grand Prix race, loop and jump included." },
+    color: "#ff4fd8",
+  },
+  {
+    id: "arcade_as",
+    district: "arcade",
+    rule: { kind: "race", key: "system:gp", under_ms: 80_000 },
+    name: { es: "As del volante", en: "Ace Driver" },
+    desc: { es: "Hizo las dos vueltas del Gran Premio Neón en menos de 1:20.", en: "Drove both laps of the Neon Grand Prix in under 1:20." },
+    color: "#ffd54f",
+  },
+  {
     id: "pixel_sprites",
     district: "pixel",
     rule: { kind: "hunt", key: "system:sprites" },

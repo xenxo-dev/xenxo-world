@@ -181,10 +181,11 @@ await scenario("gestos: el emote de A llega a B con su pose (también golpes seg
   b.close();
 });
 
-await scenario("coche: en un distrito los demás ven el coche de A (y si va dentro); en la plaza se va a pie; un vehículo desconocido no pasa", async () => {
-  const chunkId = "c_-1_-1";
+await scenario("coche: solo en Arcade (WELCOME.cars), donde los demás ven el coche de A (y si va dentro); en los demás distritos y en la plaza se va a pie; un vehículo desconocido no pasa", async () => {
+  const chunkId = "c_1_0";
   const a = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-coche-a" });
   const b = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-coche-b" });
+  assert(a.welcome.cars === true, "Arcade dice que tiene coches (WELCOME.cars)");
   b.pose([32, 1.6, 128]);
   await new Promise((r) => setTimeout(r, 300));
   const got = b.next("POSES", (m) => m.payload.poses.some((p) => p.session_id === a.welcome.session_id && p.vehicle === "car" && p.car?.p[0] === 34), 3000);
@@ -205,16 +206,22 @@ await scenario("coche: en un distrito los demás ven el coche de A (y si va dent
   await bad;
   a.close();
   b.close();
-  // En la plaza no hay coches: la pose llega, pero a pie y sin coche.
-  const pa = await XenxoClient.connect({ baseUrl, displayName: "conf-coche-pa" });
-  const pb = await XenxoClient.connect({ baseUrl, displayName: "conf-coche-pb" });
-  const seen = pb.next("POSES", (m) => m.payload.poses.some((p) => p.session_id === pa.welcome.session_id), 3000);
-  pa.pose([30, 1.6, 40], 0, undefined, { p: [30, 0, 42], inside: true });
-  const m = await seen;
-  const pp = m.payload.poses.find((p) => p.session_id === pa.welcome.session_id);
-  assert(!pp?.vehicle && !pp?.car, "en la plaza se va a pie");
-  pa.close();
-  pb.close();
+  // En los demás distritos (aquí, Distrito Cero) y en la plaza no hay coches: la pose llega, pero a
+  // pie y sin coche.
+  for (const [place, where] of [["c_-1_-1", "en otro distrito"], [undefined, "en la plaza"]] as const) {
+    const pa = await XenxoClient.connect({ baseUrl, ...(place ? { chunkId: place } : {}), displayName: "conf-coche-pa" });
+    const pb = await XenxoClient.connect({ baseUrl, ...(place ? { chunkId: place } : {}), displayName: "conf-coche-pb" });
+    assert(pa.welcome.cars === undefined, `${where} el lugar no dice que tenga coches`);
+    pb.pose([31, 1.6, 41]);
+    await sleep(250);
+    const seen = pb.next("POSES", (m) => m.payload.poses.some((p) => p.session_id === pa.welcome.session_id), 3000);
+    pa.pose([30, 1.6, 40], 0, undefined, { p: [30, 0, 42], inside: true });
+    const m = await seen;
+    const pp = m.payload.poses.find((p) => p.session_id === pa.welcome.session_id);
+    assert(!pp?.vehicle && !pp?.car, `${where} se va a pie`);
+    pa.close();
+    pb.close();
+  }
 });
 
 await scenario("gente: reacciones a los de alrededor, acciones en pareja con propuesta y respuesta, y modo pelea solo con consentimiento y en los distritos", async () => {
@@ -1234,12 +1241,6 @@ await scenario("actividades: el servidor comprueba la cercanía, el orden y el r
   await at([0, 1.6, 120], 12);
   const done = await u.activity("CHECKPOINT", fin);
   assert(done.type === "RACE" && done.payload.state === "finish" && (done.payload.ms ?? 0) >= 1400 && done.payload.rank === 1, `meta: tiempo y puesto (${JSON.stringify(done.payload)})`);
-  // En coche no se corre: la salida no cuenta.
-  await at([0, 1.6, 100]);
-  u.pose([0, 1.2, 100], 0, undefined, { p: [0, 0, 100], inside: true });
-  await new Promise((r) => setTimeout(r, 260));
-  const inCar = await u.activity("CHECKPOINT", start);
-  assert(inCar.type === "ERROR" && inCar.payload.code === "forbidden", "en coche, la carrera no cuenta");
   await at([0, 1.6, 100]);
   const sr = await u.activity("SCORES_GET", boardRace);
   assert(sr.type === "SCORES" && sr.payload.rows[0]?.name === name && sr.payload.rows[0]?.value === done.payload.best, "el marcador de la carrera");
@@ -1342,12 +1343,179 @@ await scenario("Circuito Neón (Arcade): carrera del sistema con salida, 11 punt
   const cps = sys.filter((e) => (e.components["checkpoint@1"] as { race?: string } | undefined)?.race === "circuito");
   const roles = (r: string) => cps.filter((e) => (e.components["checkpoint@1"] as { role: string }).role === r).length;
   assert(roles("start") === 1 && roles("finish") === 1 && roles("cp") === 11, `salida, 11 puntos y meta (${roles("start")}/${roles("cp")}/${roles("finish")})`);
-  assert(sys.filter((e) => e.components["boost@1"]).length === 6, "seis placas de impulso");
+  assert(sys.filter((e) => e.components["boost@1"]).length === 11, "seis placas de impulso (y las cinco de turbo del Gran Premio)");
   assert(sys.filter((e) => (e.components["collectible@1"] as { set?: string } | undefined)?.set === "monedas").length === 50, "cincuenta monedas");
   const boards = sys.filter((e) => e.components["scoreboard@1"]).map((e) => (e.components["scoreboard@1"] as { id: string }).id);
   assert(boards.includes("circuito") && boards.includes("monedas"), "marcador de la carrera y de las monedas");
   c.close();
 });
+
+await scenario("Gran Premio Neón (Arcade): el circuito (su malla es su colisión), la carrera en coche con parrilla de 8 cajones, semáforo, 11 puntos y meta a 2 vueltas, sus placas de turbo y sus marcadores; a pie no se entra y quien se va de la parrilla la deja libre", async () => {
+  const c = await XenxoClient.connect({ baseUrl, chunkId: "c_1_0", displayName: "conf-gp" });
+  const w = await XenxoClient.connect({ baseUrl, chunkId: "c_1_0", displayName: "conf-gp-mira" });
+  const sys = c.snapshot.entities.filter((e) => e.owner === "system");
+  const cps = sys.filter((e) => (e.components["checkpoint@1"] as { race?: string } | undefined)?.race === "gp");
+  const role = (r: string) => cps.filter((e) => (e.components["checkpoint@1"] as { role: string }).role === r);
+  assert(role("start").length === 1 && role("finish").length === 1 && role("cp").length === 11, `salida, 11 puntos y meta (${role("start").length}/${role("cp").length}/${role("finish").length})`);
+  const start = role("start")[0]!;
+  const conf = start.components["checkpoint@1"] as { vehicle?: string; mode?: string; laps?: number; grid?: number[][]; lights?: number[]; radius: number };
+  const sp = (start.components["transform@1"] as { p: [number, number, number] }).p;
+  assert(conf.vehicle === "car" && conf.mode === "grid" && conf.laps === 2, "la salida dice cómo es: en coche, con parrilla y a dos vueltas");
+  assert(conf.grid?.length === 8 && conf.grid.every((g) => Math.hypot(g[0]! - sp[0], g[2]! - sp[2]) <= conf.radius), "ocho cajones, todos dentro del círculo de salida");
+  assert(conf.lights?.length === 3, "y dónde va su semáforo");
+  const track = sys.find((e) => (e.components["mesh@1"] as { lods?: { tris: number }[] } | undefined) && e.entity_id.includes("prop") && (e.components["collider@1"] as { from_mesh?: boolean } | undefined)?.from_mesh);
+  assert(track, "la pista es un modelo con el que se choca por su malla (collider@1.from_mesh)");
+  const lods = (track.components["mesh@1"] as { lods: { tris: number }[] }).lods;
+  assert(lods[lods.length - 1]!.tris <= 20_000, "y su nivel ligero cabe en una malla de colisión");
+  const boards = sys.filter((e) => (e.components["scoreboard@1"] as { id?: string } | undefined)?.id === "gp").map((e) => (e.components["scoreboard@1"] as { period?: string }).period);
+  assert(boards.includes("week") && boards.includes("all"), "marcadores de la semana y de siempre");
+  // A pie no se entra en la carrera.
+  const send = (cl: XenxoClient, entity_id: string) => {
+    const id = randomUUID();
+    cl.sendRaw(msg("CHECKPOINT", { entity_id }, { id }));
+    return id;
+  };
+  c.pose([sp[0], 1.6, sp[2]]);
+  await sleep(260);
+  const ref = send(c, start.entity_id);
+  const foot = await c.next("ERROR", (m) => m.payload.ref === ref);
+  assert(foot.payload.code === "forbidden" && (foot.payload.detail as { reason?: string } | undefined)?.reason === "vehicle", "a pie, la parrilla no apunta a nadie (reason: vehicle)");
+  // En coche, sí: se abre la ronda con su cuenta atrás, y lo ve todo el lugar.
+  const g0 = conf.grid![0]!;
+  c.pose([g0[0]!, 1.2, g0[2]!], 0, undefined, { p: [g0[0]!, 0.22, g0[2]!], inside: true });
+  await sleep(260);
+  const seen = w.next("ROUND", (m) => m.payload.race === "gp" && m.payload.state === "countdown");
+  send(c, start.entity_id);
+  const r1 = (await seen).payload;
+  assert(r1.owner === "system" && r1.laps === 2 && r1.per_lap === 12, `la ronda: dos vueltas de 12 puertas (${r1.laps} × ${r1.per_lap})`);
+  assert(r1.entrants.length === 1 && r1.entrants[0]!.session_id === c.welcome.session_id && r1.entrants[0]!.slot === 0 && r1.entrants[0]!.gates === 0, "quien llega primero, a la pole");
+  assert(r1.go_at - r1.now > 3000 && r1.go_at - r1.now <= 8000, `la salida, a unos segundos (${r1.go_at - r1.now} ms)`);
+  // Se va (cierra): la parrilla queda vacía y la ronda se acaba sin salir.
+  const over = w.next("ROUND", (m) => m.payload.round === r1.round && m.payload.state === "done");
+  c.close();
+  assert((await over).payload.entrants.length === 0, "si se va el único de la parrilla, la ronda se acaba");
+  w.close();
+});
+
+await scenario("carreras de salida conjunta: la parrilla forma la ronda, se sale a la hora del servidor, las puertas van en orden y por vueltas, la clasificación llega a todos y al marcador van solo las cuentas", async () => {
+  if (!adminKey) return console.log("    (sin XENXO_ADMIN_KEY: se omite: la carrera de prueba la pone la administración)");
+  const chunkId = "c_1_0";
+  const tag = randomUUID().slice(0, 6);
+  const admin = await XenxoClient.connect({ baseUrl, chunkId, agentKey: adminKey });
+  const put = async (p: number[], extra: Record<string, unknown>) => {
+    const r = await admin.mutate({ op: "SPAWN", components: { "transform@1": { p, r: [0, 0, 0, 1], s: [1, 1, 1], parent: null }, ...extra } });
+    assert(r.type === "ACK", `spawn de la carrera: ${JSON.stringify(r.payload)}`);
+    return (r.payload as { entity_id: string }).entity_id;
+  };
+  // Una carrera pequeña en coche: parrilla de dos, un punto a 40 m y la meta a medio camino; dos vueltas.
+  const race = `g${tag}`;
+  const S: [number, number, number] = [-60, 0, 60], P: [number, number, number] = [-60, 0, 20], F: [number, number, number] = [-60, 0, 45];
+  const grid = [[-62, 0, 60], [-58, 0, 60]];
+  const start = await put(S, { "checkpoint@1": { race, role: "start", radius: 6, vehicle: "car", mode: "grid", laps: 2, grid } });
+  const cp = await put(P, { "checkpoint@1": { race, role: "cp", order: 1, radius: 6 } });
+  const fin = await put(F, { "checkpoint@1": { race, role: "finish", radius: 6 } });
+  const board = await put([-55, 2, 60], { "scoreboard@1": { kind: "race", id: race } });
+  // Y una a pie al lado, para ver que en coche no cuenta.
+  const footStart = await put([-70, 0, 60], { "checkpoint@1": { race: `f${tag}`, role: "start" } });
+  admin.close();
+
+  const api = new Api(baseUrl);
+  const name = `conf ${randomUUID().slice(0, 6)}`;
+  await api.register(name);
+  const u = await XenxoClient.connect({ baseUrl, chunkId, token: api.token });
+  const g = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-gp-invitado" });
+  const w = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-gp-mira" });
+  const send = (cl: XenxoClient, entity_id: string) => {
+    const id = randomUUID();
+    cl.sendRaw(msg("CHECKPOINT", { entity_id }, { id }));
+    return id;
+  };
+  const car = (cl: XenxoClient, p: [number, number, number]) => cl.pose([p[0], 1.2, p[2]], 0, undefined, { p: [p[0], 0, p[2]], inside: true });
+  /** Conduce de `from` a `to` (m/s) mandando poses como un cliente de verdad. */
+  const drive = async (cl: XenxoClient, from: [number, number, number], to: [number, number, number], speed = 30) => {
+    const d = Math.hypot(to[0] - from[0], to[2] - from[2]);
+    const n = Math.max(1, Math.ceil(d / (speed * 0.2)));
+    for (let i = 1; i <= n; i++) {
+      car(cl, [from[0] + ((to[0] - from[0]) * i) / n, 0, from[2] + ((to[2] - from[2]) * i) / n]);
+      await sleep(200);
+    }
+  };
+  const mine = (m: { payload: { race: string } }) => m.payload.race === race;
+  const U: [number, number, number] = [-62, 0, 60], G: [number, number, number] = [-58, 0, 60];
+
+  // En coche, la carrera a pie no cuenta (y la de coche, a pie, tampoco: escenario del Gran Premio).
+  car(u, [-70, 0, 60]);
+  await sleep(260);
+  const inCar = await u.activity("CHECKPOINT", footStart);
+  assert(inCar.type === "ERROR" && inCar.payload.code === "forbidden", "en coche, una carrera a pie no cuenta");
+
+  // La parrilla: la cuenta abre la ronda; el invitado entra en la misma (corre cualquiera).
+  await drive(u, [-70, 0, 60], U);
+  const opened = w.next("ROUND", (m) => mine(m) && m.payload.state === "countdown" && m.payload.entrants.length === 1);
+  send(u, start);
+  const r1 = (await opened).payload;
+  assert(r1.laps === 2 && r1.per_lap === 2 && r1.entrants[0]!.slot === 0 && r1.entrants[0]!.name === name, "la cuenta abre la ronda y se queda la pole");
+  car(g, G);
+  await sleep(260);
+  const both = w.next("ROUND", (m) => mine(m) && m.payload.entrants.length === 2);
+  send(g, start);
+  const r2 = (await both).payload;
+  assert(r2.round === r1.round && r2.entrants.find((e) => e.session_id === g.welcome.session_id)?.slot === 1, "el invitado entra en la misma ronda, en el cajón siguiente");
+  assert(r2.go_at >= r1.go_at && r2.go_at - r2.now >= 3000, "y tiene tiempo de ver la cuenta atrás");
+  // Insistir desde la parrilla no vuelve a avisar a todo el lugar: solo contesta a quien insiste.
+  const quiet = w.next("ROUND", mine, 700).then(() => true, () => false);
+  const own = u.next("ROUND", (m) => mine(m) && m.payload.entrants.length === 2, 2000);
+  send(u, start);
+  await own;
+  assert(!(await quiet), "quien ya está en la parrilla e insiste no hace ruido a los demás");
+
+  // La salida, a su hora: los dos en su sitio y en coche (mandan su pose mientras esperan).
+  const go = w.next("ROUND", (m) => mine(m) && m.payload.state === "running", 12_000);
+  const waitMs = r2.go_at - r2.now;
+  for (let t = 0; t < waitMs + 400; t += 400) {
+    car(u, U);
+    car(g, G);
+    await sleep(400);
+  }
+  const r3 = (await go).payload;
+  assert(r3.entrants.length === 2 && r3.entrants.every((e) => !e.out && e.gates === 0), "salen los dos");
+
+  // El invitado se salta el punto y va a la meta: no cuenta. La cuenta hace sus dos vueltas.
+  const lap = async (cl: XenxoClient, from: [number, number, number]) => {
+    await drive(cl, from, P);
+    send(cl, cp);
+    await drive(cl, P, F);
+    send(cl, fin);
+  };
+  await drive(g, G, F);
+  send(g, fin);
+  const after1 = u.next("ROUND", (m) => mine(m) && m.payload.entrants.some((e) => e.session_id === u.welcome.session_id && e.gates === 1));
+  await drive(u, U, P);
+  send(u, cp);
+  const r4 = (await after1).payload;
+  assert(r4.entrants[0]!.session_id === u.welcome.session_id && r4.entrants.find((e) => e.session_id === g.welcome.session_id)!.gates === 0, "la puerta que toca cuenta (y pone primera a quien la pasa); la que no toca, no");
+  await drive(u, P, F);
+  send(u, fin);
+  const finished = u.next("RACE", (m) => m.payload.race === race && m.payload.state === "finish", 8000);
+  await lap(u, F);
+  const done = (await finished).payload;
+  assert((done.ms ?? 0) > 2500 && done.best === done.ms && done.rank === 1, `la cuenta llega: su tiempo desde la salida, su mejor marca y su puesto (${JSON.stringify(done)})`);
+  // El invitado, ahora por orden: al llegar el último, la ronda se acaba y la clasificación llega a todos.
+  const end = w.next("ROUND", (m) => mine(m) && m.payload.state === "done", 15_000);
+  await lap(g, F);
+  await lap(g, F);
+  const r5 = (await end).payload;
+  const [first, second] = r5.entrants;
+  assert(first!.session_id === u.welcome.session_id && first!.ms === done.ms && second!.session_id === g.welcome.session_id && (second!.ms ?? 0) > first!.ms!, "clasificación final: por tiempo, con el de cada uno");
+  // Al marcador van solo las cuentas.
+  u.pose([-56, 1.6, 60]);
+  await sleep(260);
+  const sc = await u.activity("SCORES_GET", board);
+  assert(sc.type === "SCORES" && sc.payload.rows.length === 1 && sc.payload.rows[0]!.name === name && sc.payload.rows[0]!.value === done.ms, "en el marcador sale la cuenta (el invitado corre, pero no se apunta)");
+  u.close();
+  g.close();
+  w.close();
+}, 60_000);
 
 await scenario("Ruta de las Azoteas (Vertical): parkour solo aquí (WELCOME.parkour); carrera con salida, 7 puntos y meta, 8 banderines en alto, sus marcadores, las farolas del Patio (sin pasarse de las luces del chunk), las Pilas con la escalera de la Gran Pila (choca con su malla), y los gestos pk_* (también las caídas) llegan a los demás", async () => {
   const chunkId = "c_-1_1";

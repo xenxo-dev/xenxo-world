@@ -48,4 +48,16 @@ export class PoseSender {
     this.settle = moved || state;
     return true;
   }
+
+  /**
+   * ¿Se puede mandar una pose ya, fuera de turno? (Justo antes de avisar al servidor de «estoy
+   * aquí»: una búsqueda, un punto de carrera.) Cuenta como una más: la siguiente espera su turno.
+   */
+  force(now: number): boolean {
+    if (now - this.last < SEND_MIN_MS) return false;
+    this.last = now;
+    this.tokens = Math.max(0, this.tokens - 1);
+    this.settle = true;
+    return true;
+  }
 }

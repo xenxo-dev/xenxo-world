@@ -46,6 +46,14 @@ En marcha:
   moviéndose, nunca): el objeto hiberna entre mensajes. Desde el 11-11-2026, con hasta 6 sesiones
   mandando poses no hay intervalo ni temporizador: cada pose sale al llegar (los mensajes que salen
   no cuentan). Con más, lotes cada 40, 70 o 105 ms según cuánta gente (`batchGap`, `pose-clock.ts`).
+- **Corriendo el Gran Premio Neón** (11-11-2026): además de sus poses, cada coche manda un aviso por
+  puerta (12 por vuelta, 24 por carrera) y, justo antes de cada uno, la pose de ese momento fuera de
+  turno (cuenta como una de las cinco por segundo: la siguiente se retrasa). Son unos 50 mensajes
+  por carrera, 2,5 peticiones. En la parrilla no se insiste (un aviso para entrar; si está llena,
+  uno por segundo hasta la siguiente). Lo que el servidor reparte (`ROUND`, en cada puerta que pasa
+  alguien) sale y no cuenta. El único temporizador es el de la salida: segundos, y solo mientras hay
+  una parrilla formándose; las rondas viven en memoria y no escriben nada (solo el mejor tiempo de
+  las cuentas, al llegar).
 
 ## 3. Cuánto aguanta
 

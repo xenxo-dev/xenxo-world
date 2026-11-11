@@ -814,6 +814,134 @@
           ],
           "radius": 2.5
         }
+      },
+      {
+        "id": "gp",
+        "vehicle": "car",
+        "mode": "grid",
+        "laps": 2,
+        "radius": 8.0,
+        "start": {
+          "p": [
+            89.0,
+            0.22,
+            141.5
+          ],
+          "radius": 8.0,
+          "yaw": -90.0
+        },
+        "grid": [
+          [
+            96.5,
+            0.22,
+            139.3
+          ],
+          [
+            96.5,
+            0.22,
+            143.7
+          ],
+          [
+            91.5,
+            0.22,
+            139.3
+          ],
+          [
+            91.5,
+            0.22,
+            143.7
+          ],
+          [
+            86.5,
+            0.22,
+            139.3
+          ],
+          [
+            86.5,
+            0.22,
+            143.7
+          ],
+          [
+            81.5,
+            0.22,
+            139.3
+          ],
+          [
+            81.5,
+            0.22,
+            143.7
+          ]
+        ],
+        "lights": [
+          106.38,
+          6.0,
+          141.5
+        ],
+        "cps": [
+          [
+            141.14,
+            2.05,
+            135.64
+          ],
+          [
+            147.0,
+            0.22,
+            36.05
+          ],
+          [
+            141.14,
+            2.05,
+            -72.14
+          ],
+          [
+            32.0,
+            0.22,
+            -78.0
+          ],
+          [
+            -77.14,
+            2.05,
+            -72.14
+          ],
+          [
+            -83.0,
+            2.42,
+            36.17
+          ],
+          [
+            -77.14,
+            1.16,
+            144.64
+          ],
+          [
+            -33.03,
+            0.22,
+            150.5
+          ],
+          [
+            -18.03,
+            20.33,
+            146.09
+          ],
+          [
+            8.97,
+            0.99,
+            141.5
+          ],
+          [
+            43.34,
+            1.18,
+            141.5
+          ]
+        ],
+        "finish": {
+          "p": [
+            76.0,
+            0.22,
+            141.5
+          ],
+          "radius": 8.0
+        }
       }
     ],
     "boosts": [
@@ -864,6 +992,66 @@
           70
         ],
         "yaw": 180
+      },
+      {
+        "p": [
+          147.0,
+          0.25,
+          81.57
+        ],
+        "yaw": -0.0,
+        "radius": 4.2,
+        "speed": 12,
+        "seconds": 1,
+        "circuit": true
+      },
+      {
+        "p": [
+          -11.79,
+          0.25,
+          -78.0
+        ],
+        "yaw": 90.0,
+        "radius": 4.2,
+        "speed": 12,
+        "seconds": 1,
+        "circuit": true
+      },
+      {
+        "p": [
+          -83.0,
+          0.25,
+          -18.07
+        ],
+        "yaw": 180.0,
+        "radius": 4.2,
+        "speed": 12,
+        "seconds": 1,
+        "circuit": true
+      },
+      {
+        "p": [
+          -36.03,
+          0.25,
+          150.5
+        ],
+        "yaw": -90.0,
+        "radius": 4.2,
+        "speed": 12,
+        "seconds": 1,
+        "circuit": true
+      },
+      {
+        "p": [
+          -1.0,
+          0.31,
+          141.5
+        ],
+        "yaw": -90.0,
+        "radius": 4.2,
+        "speed": 12,
+        "seconds": 1,
+        "circuit": true
       }
     ],
     "boards": [
@@ -923,6 +1111,48 @@
           "es": "DE SIEMPRE",
           "en": "ALL TIME"
         }
+      },
+      {
+        "kind": "race",
+        "id": "gp",
+        "period": "week",
+        "p": [
+          84.8,
+          3.0,
+          148.6
+        ],
+        "yaw": 180,
+        "size": [
+          4.6,
+          3.2
+        ],
+        "title": {
+          "es": "GRAN PREMIO · SEMANA",
+          "en": "GRAND PRIX · WEEK"
+        },
+        "title_size": 0.4,
+        "circuit": true
+      },
+      {
+        "kind": "race",
+        "id": "gp",
+        "period": "all",
+        "p": [
+          93.2,
+          3.0,
+          148.6
+        ],
+        "yaw": 180,
+        "size": [
+          4.6,
+          3.2
+        ],
+        "title": {
+          "es": "GRAN PREMIO · SIEMPRE",
+          "en": "GRAND PRIX · ALL TIME"
+        },
+        "title_size": 0.4,
+        "circuit": true
       }
     ],
     "labels": [
@@ -966,6 +1196,51 @@
         "yaw": 0,
         "size": 0.6,
         "flat": true
+      },
+      {
+        "text": {
+          "es": "GRAN PREMIO NEÓN",
+          "en": "NEON GRAND PRIX"
+        },
+        "p": [
+          106.5,
+          8.5,
+          141.5
+        ],
+        "yaw": 270,
+        "size": 0.9,
+        "circuit": true
+      },
+      {
+        "text": {
+          "es": "PARRILLA",
+          "en": "GRID"
+        },
+        "p": [
+          78.5,
+          0.25,
+          141.5
+        ],
+        "yaw": 270,
+        "size": 0.7,
+        "flat": true,
+        "circuit": true
+      },
+      {
+        "text": {
+          "es": "Súbete al coche (C) y párate en la parrilla: la carrera sale sola.",
+          "en": "Get in your car (C) and stop on the grid: the race starts by itself."
+        },
+        "p": [
+          89.0,
+          5.3,
+          148.6
+        ],
+        "yaw": 180,
+        "size": 0.34,
+        "width": 9,
+        "max_distance": 60,
+        "circuit": true
       }
     ],
     "props": [
@@ -1052,6 +1327,21 @@
           0.95,
           0.45
         ]
+      },
+      {
+        "piece": "arcade_circuit",
+        "p": [
+          32,
+          0,
+          32
+        ],
+        "yaw": 0,
+        "half": [
+          0,
+          0,
+          0
+        ],
+        "mesh_collider": true
       }
     ],
     "cabinets": [

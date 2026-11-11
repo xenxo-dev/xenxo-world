@@ -1,15 +1,15 @@
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
-import { usePlace } from "../net/world-store";
+import { useCars } from "../net/world-store";
 import { input } from "../world/input";
-import { carSpeed, DISTRICT_CHUNKS, useDrive } from "../world/vehicle/drive-state";
+import { carSpeed, useDrive } from "../world/vehicle/drive-state";
 import { CarIcon, hudIconButton } from "./icons";
 
-/** Conducir o bajarse del coche (también con la tecla C). Solo en los distritos. */
+/** Conducir o bajarse del coche (también con la tecla C). Solo donde el lugar tiene coches (Arcade). */
 export function CarButton({ touch }: { touch: boolean }) {
-  const place = usePlace();
+  const cars = useCars();
   const d = useDrive();
-  if (!DISTRICT_CHUNKS.has(place)) return null;
+  if (!cars) return null;
   const label = t(d.on ? "car.exit" : d.phase === "parked" ? "car.enter" : "car.drive");
   return (
     <button

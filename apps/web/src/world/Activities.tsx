@@ -13,11 +13,14 @@ import * as THREE from "three";
 import { BoostV1, CheckpointV1, CollectibleV1, ScoreboardV1, TilesV1, TransformV1, type Entity } from "@xenxo/protocol";
 import { t } from "../i18n";
 import { accountToken } from "../net/account";
-import { activity, boost, formatRaceTime, sendActivity, useActivity } from "../net/activity-store";
+import { activity, boost, sendActivity, useActivity } from "../net/activity-store";
+import { startLights } from "../net/round";
 import { boardTitle, scoreValue } from "../net/scores";
 import { useWorldVersion, world } from "../net/world-store";
 import { SIGN_FONT_URL, FONT_URL } from "./font";
 import { playerPos } from "./Player";
+import { raceBeep, turboSound } from "./vehicle/audio";
+import { carSpeed, drive, gridSpot } from "./vehicle/drive-state";
 
 interface Zone {
   id: string;
@@ -28,7 +31,16 @@ interface Zone {
   kind: "collect" | "checkpoint" | "boost";
   role?: "start" | "cp" | "finish";
   race?: string;
+  owner?: string;
   order?: number;
+  /** Puesto de este punto entre los de su carrera (1 = el primero). */
+  nth?: number;
+  /** Cómo es su carrera (lo dice su salida): en coche y con parrilla (salida conjunta, por rondas). */
+  vehicle?: "car";
+  mode?: "grid";
+  /** En la salida de una carrera con parrilla: sus cajones, su semáforo y hacia dónde se sale. */
+  grid?: number[][];
+  lights?: number[];
   /** Placas de impulso: velocidad, segundos y hacia dónde apuntan las flechas (giro en Y). */
   speed?: number;
   seconds?: number;
@@ -60,7 +72,18 @@ function zonesOf(list: Entity[]): Zone[] {
     const col = CollectibleV1.safeParse(e.components["collectible@1"]);
     if (col.success) out.push({ id: e.entity_id, x: x + ox, y, z: z + oz, r: col.data.radius, kind: "collect" });
     const cp = CheckpointV1.safeParse(e.components["checkpoint@1"]);
-    if (cp.success) out.push({ id: e.entity_id, x: x + ox, y, z: z + oz, r: cp.data.radius, kind: "checkpoint", role: cp.data.role, race: cp.data.race, order: cp.data.order });
+    if (cp.success) {
+      const zn: Zone = { id: e.entity_id, x: x + ox, y, z: z + oz, r: cp.data.radius, kind: "checkpoint", role: cp.data.role, race: cp.data.race, owner: e.owner, order: cp.data.order };
+      if (cp.data.role === "start") {
+        zn.vehicle = cp.data.vehicle;
+        zn.mode = cp.data.mode;
+        zn.grid = cp.data.grid?.map(([gx, gy, gz]) => [gx + ox, gy, gz + oz]);
+        zn.lights = cp.data.lights && [cp.data.lights[0] + ox, cp.data.lights[1], cp.data.lights[2] + oz];
+        const [qx, qy, qz, qw] = tr.data.r;
+        zn.yaw = Math.atan2(2 * (qw * qy + qx * qz), 1 - 2 * (qy * qy + qx * qx));
+      }
+      out.push(zn);
+    }
     const bo = BoostV1.safeParse(e.components["boost@1"]);
     if (bo.success) {
       const [qx, qy, qz, qw] = tr.data.r;
@@ -68,17 +91,41 @@ function zonesOf(list: Entity[]): Zone[] {
       out.push({ id: e.entity_id, x: x + ox, y, z: z + oz, r: bo.data.radius, kind: "boost", speed: bo.data.speed, seconds: bo.data.seconds, yaw });
     }
   }
+  // Cada punto sabe cómo es su carrera (lo dice la salida) y qué puesto ocupa entre los suyos.
+  const same = (a: Zone, b: Zone) => a.race === b.race && a.owner === b.owner;
+  for (const st of out) {
+    if (st.kind !== "checkpoint" || st.role !== "start") continue;
+    const cps = out.filter((z) => z.kind === "checkpoint" && z.role === "cp" && same(z, st)).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    cps.forEach((z, i) => (z.nth = i + 1));
+    for (const z of out) {
+      if (z.kind !== "checkpoint" || !same(z, st)) continue;
+      z.vehicle = st.vehicle;
+      z.mode = st.mode;
+    }
+  }
   return out;
 }
+
+/** Parado en la parrilla: por debajo de esta velocidad (m/s) el coche entra en la carrera. */
+const GRID_STOP = 2.5;
+/** La parrilla llega un poco más allá de su círculo (m): quien aparca en el primer cajón también está en ella. */
+const GRID_REACH = 1.5;
 
 /**
  * Avisa al servidor al entrar en un círculo y, mientras sigas dentro, cada segundo (la pose que el
  * servidor tiene puede llegar un poco tarde, sobre todo tras un salto o un viaje). En la salida de
  * una carrera eso hace que el reloj empiece de verdad al salir del círculo.
+ *
+ * En las carreras con parrilla (salida conjunta): se entra parándose en la parrilla (pasar de largo
+ * no apunta a nadie), corre cualquiera —también sin cuenta— y, en carrera, solo se avisa de la
+ * puerta que toca. En coche, las placas de impulso son un turbo por pasada.
  */
 function Sensor({ zones }: { zones: Zone[] }) {
   const inside = useRef(new Map<string, number>());
   const guestWarned = useRef(false);
+  /** Corría en una ronda (y, al dejarla, toca moverse antes de entrar en otra: quien se queda parado en la parrilla no encadena carreras sin estar). */
+  const wasLive = useRef(false);
+  const needMove = useRef(false);
   useEffect(() => {
     inside.current.clear();
   }, [zones]);
@@ -86,21 +133,58 @@ function Sensor({ zones }: { zones: Zone[] }) {
     if (world.status !== "open" || zones.length === 0) return;
     const signed = !!accountToken();
     const now = performance.now();
+    const driving = drive.phase === "drive";
+    activity.expireRound(now);
+    const live = !!activity.round?.live;
+    if (wasLive.current && !live) needMove.current = true;
+    wasLive.current = live;
+    if (needMove.current && (!driving || Math.abs(carSpeed()) > GRID_STOP + 2)) needMove.current = false;
     for (const zn of zones) {
       const dx = playerPos.x - zn.x, dz = playerPos.z - zn.z;
-      const isIn = dx * dx + dz * dz <= zn.r * zn.r && Math.abs(playerPos.y - zn.y) <= 4 + zn.r;
+      const gridStart = zn.mode === "grid" && zn.role === "start";
+      const r = gridStart ? zn.r + GRID_REACH : zn.r;
+      const isIn = dx * dx + dz * dz <= r * r && Math.abs(playerPos.y - zn.y) <= 4 + zn.r;
       if (!isIn) {
         inside.current.delete(zn.id);
         continue;
       }
       // Placa de impulso: solo en el cliente (no se avisa al servidor), también para invitados.
       if (zn.kind === "boost") {
-        boost.until = now + (zn.seconds ?? 2) * 1000;
-        boost.speed = zn.speed ?? 9;
+        if (driving) {
+          // Al volante: un turbo por pasada.
+          if (!inside.current.has(zn.id)) {
+            inside.current.set(zn.id, now);
+            if (drive.sim?.turbo()) turboSound();
+          }
+        } else {
+          boost.until = now + (zn.seconds ?? 2) * 1000;
+          boost.speed = zn.speed ?? 9;
+        }
         continue;
       }
       const last = inside.current.get(zn.id);
       if (last !== undefined && now - last < 1000) continue;
+      if (zn.mode === "grid") {
+        const rd = activity.round;
+        const mine = !!rd && rd.live && rd.race === zn.race && rd.owner === zn.owner;
+        if (zn.role === "start") {
+          if (mine) continue; // ya estoy en la que se forma (o corriendo: paso por la parrilla)
+          if (zn.vehicle === "car" && !driving) {
+            // A pie en la parrilla: se dice una vez por visita que es en coche.
+            if (last === undefined && drive.phase === "none") activity.notice({ kind: "needCar", at: now });
+            inside.current.set(zn.id, now);
+            continue;
+          }
+          if (zn.vehicle === "car" && (needMove.current || Math.abs(carSpeed()) > GRID_STOP)) continue;
+        } else {
+          const run = activity.race;
+          if (!mine || !run || run.race !== zn.race) continue;
+          if (run.next > run.total ? zn.role !== "finish" : zn.role !== "cp" || zn.nth !== run.next) continue;
+        }
+        inside.current.set(zn.id, now);
+        sendActivity("CHECKPOINT", zn.id);
+        continue;
+      }
       inside.current.set(zn.id, now);
       if (zn.kind === "collect" && activity.collected.has(zn.id)) continue;
       if (!signed) {
@@ -131,7 +215,9 @@ const CheckpointMark = memo(function CheckpointMark({ zone, hot }: { zone: Zone;
 function Checkpoints({ zones }: { zones: Zone[] }) {
   const a = useActivity();
   const run = a.race;
-  const cps = zones.filter((z) => z.kind === "checkpoint");
+  // Las carreras con parrilla van por un circuito cerrado: sus puntos no se pintan (RaceGrid pone
+  // el semáforo y el cajón de cada cual).
+  const cps = zones.filter((z) => z.kind === "checkpoint" && z.mode !== "grid");
   // Sin carrera se ven solo las salidas (en Vertical hay siete carreras: con todos sus puntos, las
   // Pilas se llenarían de columnas de luz); durante una, solo los de la tuya, con el que toca (o la
   // meta) más brillante y tu salida, por si quieres empezar otra vez.
@@ -146,6 +232,80 @@ function Checkpoints({ zones }: { zones: Zone[] }) {
       {shown.map((z) => (
         <CheckpointMark key={z.id} zone={z} hot={hot(z)} />
       ))}
+    </>
+  );
+}
+
+/* --- Carreras con parrilla: el semáforo de la salida y el cajón que me ha tocado --- */
+
+const lightGeo = new THREE.SphereGeometry(0.27, 16, 12);
+const LIGHT_OFF = new THREE.MeshBasicMaterial({ color: "#3a1218" });
+const LIGHT_RED = new THREE.MeshBasicMaterial({ color: "#ff2a3c", toneMapped: false });
+const LIGHT_GREEN = new THREE.MeshBasicMaterial({ color: "#3dff7c", toneMapped: false });
+const GLOW_RED = glow("#ff2a3c", 0.35);
+const GLOW_GREEN = glow("#3dff7c", 0.4);
+const slotGeo = new THREE.PlaneGeometry(2.7, 4.9).rotateX(-Math.PI / 2);
+const SLOT_MAT = new THREE.MeshBasicMaterial({ color: "#36d9ff", transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false });
+/** Separación entre luces del semáforo (m): la de la forja (checkpoint@1.lights). */
+const LIGHT_GAP = 1.1;
+
+/**
+ * La salida de una carrera con parrilla. El semáforo (cinco luces sobre la pista: una roja más cada
+ * segundo y verdes en la salida, con la hora del servidor) lo ve todo el mundo; a quien entra en la
+ * ronda se le marca su cajón y su coche va solo hasta él (vehicle/drive.ts lee `gridSpot`).
+ */
+function RaceGrid({ zone }: { zone: Zone }) {
+  const a = useActivity();
+  const lamps = useRef<(THREE.Mesh | null)[]>([]);
+  const halos = useRef<(THREE.Mesh | null)[]>([]);
+  const slot = useRef<THREE.Mesh>(null);
+  const shown = useRef(-1);
+  const rd = a.round && a.round.race === zone.race && a.round.owner === zone.owner ? a.round : null;
+  const me = rd?.live && rd.state === "countdown" ? rd.entrants.find((e) => e.session_id === world.sessionId) : undefined;
+  const spot = me?.slot !== undefined ? zone.grid?.[me.slot] : undefined;
+  // Hacia dónde se sale (adelante = −Z girado `yaw`) y, de lado a lado, la fila de luces.
+  const yaw = zone.yaw ?? 0;
+  const sx = Math.cos(yaw), sz = -Math.sin(yaw);
+  useEffect(() => {
+    if (!spot) return;
+    gridSpot.on = true;
+    gridSpot.x = spot[0]!;
+    gridSpot.z = spot[2]!;
+    gridSpot.yaw = yaw + Math.PI; // el coche mide su giro desde +Z
+    return () => {
+      gridSpot.on = false;
+    };
+  }, [spot, yaw]);
+  useFrame((st) => {
+    if (slot.current) SLOT_MAT.opacity = 0.2 + 0.14 * Math.sin(st.clock.elapsedTime * 6);
+    if (!zone.lights) return;
+    const l = startLights(rd, world.serverNow(), performance.now());
+    const code = l.green ? 6 : l.red;
+    if (code === shown.current) return;
+    // Un pitido por luz y uno largo en la salida, para quien está cerca.
+    const dx = playerPos.x - zone.x, dz = playerPos.z - zone.z;
+    if (shown.current >= 0 && code > 0 && dx * dx + dz * dz < 70 * 70) raceBeep(l.green);
+    shown.current = code;
+    for (let k = 0; k < 5; k++) {
+      const on = l.green || k < l.red;
+      const lamp = lamps.current[k], halo = halos.current[k];
+      if (lamp) lamp.material = l.green ? LIGHT_GREEN : on ? LIGHT_RED : LIGHT_OFF;
+      if (halo) {
+        halo.visible = on;
+        halo.material = l.green ? GLOW_GREEN : GLOW_RED;
+      }
+    }
+  });
+  return (
+    <>
+      {zone.lights &&
+        [0, 1, 2, 3, 4].map((k) => (
+          <group key={k} position={[zone.lights![0]! + sx * (k - 2) * LIGHT_GAP, zone.lights![1]!, zone.lights![2]! + sz * (k - 2) * LIGHT_GAP]}>
+            <mesh ref={(m) => void (lamps.current[k] = m)} geometry={lightGeo} material={LIGHT_OFF} />
+            <mesh ref={(m) => void (halos.current[k] = m)} geometry={lightGeo} material={GLOW_RED} scale={1.9} visible={false} />
+          </group>
+        ))}
+      {spot && <mesh ref={slot} geometry={slotGeo} material={SLOT_MAT} position={[spot[0]!, spot[1]! + 0.05, spot[2]!]} rotation={[0, yaw, 0]} renderOrder={2} />}
     </>
   );
 }
@@ -303,6 +463,7 @@ export function Activities() {
     <>
       <Sensor zones={zones} />
       <Checkpoints zones={zones} />
+      {zones.map((z) => (z.kind === "checkpoint" && z.role === "start" && z.mode === "grid" ? <RaceGrid key={z.id} zone={z} /> : null))}
       <BoostPads zones={zones} />
       {tileBoards.map((e) => (
         <TileBoard key={`${e.entity_id}:${e.rev}`} entity={e} />
