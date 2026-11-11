@@ -12,6 +12,7 @@ import { teleport } from "../net/session";
 import { usePlace, useWorldVersion, world } from "../net/world-store";
 import { placeLink } from "../routes";
 import { districtIdOfChunk, guideOf, type GuideSpot } from "../world/guide";
+import { useDrive } from "../world/vehicle/drive-state";
 import { GuideIcon, ShareIcon } from "./icons";
 
 const box = "rounded-2xl border border-cal/10 bg-noche/85 shadow-[0_18px_50px_-18px_rgb(0_0_0/0.8)] backdrop-blur";
@@ -89,6 +90,13 @@ export function GuideCard() {
     markSeen(district);
     setOpen(true);
   }, [district, entries.length]);
+
+  // Al ir a por el coche se quita de en medio: en pantallas pequeñas tapa la cuenta atrás de la parrilla.
+  const d = useDrive();
+  const toCar = d.phase !== "none" && d.phase !== "parked";
+  useEffect(() => {
+    if (toCar) setOpen(false);
+  }, [toCar]);
 
   if (!district || !entries.length || !isOpen) return null;
   const go = (s: GuideSpot) => {
