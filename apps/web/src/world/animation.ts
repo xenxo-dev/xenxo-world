@@ -43,6 +43,8 @@ export const EMOTE_CLIPS: Record<string, EmoteClip> = {
   car_open: { clip: "interact", once: true, hold: true },
   car_in: { clip: "sit_enter", once: true, hold: true },
   car_out: { clip: "sit_exit", once: true, hold: true },
+  // Al volante (people/gestures.ts). Por la red viaja como «sit»: quien lo dibuja sabe que conduce.
+  drive: { clip: "drive" },
   // La gente de las ciudades (city/citizens.ts): jugar a una máquina y pulsar la expendedora.
   arcade: { clip: "arcade", upper: true },
   interact: { clip: "interact", once: true },
@@ -389,6 +391,8 @@ export class VrmAnimator {
       for (const c of SLIDE_CLIPS) void this.ensure(c);
     }
 
+    // Al sentarse en el coche, la pose de conducir ya tiene que estar: si no, mientras carga se pondría de pie.
+    if (emote === "car_in") void this.ensure("drive");
     // Gesto: se carga bajo demanda la primera vez.
     if (known && emote !== this.emoteName) {
       this.emoteName = emote;

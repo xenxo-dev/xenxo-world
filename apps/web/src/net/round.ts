@@ -70,6 +70,23 @@ export function gridHold(r: RoundState | null, serverNow: number, now: number): 
 }
 
 /**
+ * Con qué coches choca el mío (world/vehicle/rivals.ts). Fuera de una carrera, con cualquiera que
+ * vaya en marcha (`"all"`). Corriendo una, solo con quienes la corren (devuelve sus inscritos: ver
+ * `stillRacing`): nadie de fuera se mete a estorbar. Y en la parrilla, durante la cuenta atrás, con
+ * nadie (`"none"`): los coches van solos a su cajón.
+ */
+export function crashWith(r: RoundState | null): "all" | "none" | readonly RoundEntry[] {
+  if (!r || !r.live) return "all";
+  return r.state === "running" ? r.entrants : "none";
+}
+
+/** ¿Sigue corriendo `id` entre esos inscritos? (Ni se ha quedado fuera ni ha llegado ya.) */
+export function stillRacing(entrants: readonly RoundEntry[], id: string): boolean {
+  for (const e of entrants) if (e.session_id === id) return !e.out && e.ms === undefined;
+  return false;
+}
+
+/**
  * El semáforo de la salida: cuántas de sus cinco luces rojas van encendidas (una más cada segundo,
  * las cinco en el último) y si ya está en verde (los dos segundos siguientes a la salida).
  */

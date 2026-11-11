@@ -6,8 +6,8 @@
  *   tsx tools/models/library/concept-car.mjs <ruta>/CarConcept/glTF-Binary/CarConcept.glb
  *
  * - Quita los logotipos de Khronos (la licencia no cubre las marcas): la textura con el logo sale de
- *   todos los materiales y la matrícula —que lo lleva en una textura sin nombre— pasa a ser la de
- *   xenxo (car-plate.mjs).
+ *   todos los materiales, la matrícula —que lo lleva en una textura sin nombre— pasa a ser la de
+ *   xenxo y los neumáticos se quedan sin los dos que llevan en el costado (car-plate.mjs).
  * - Quita lo que no se ve desde fuera ni desde el asiento (motor, bajos del capó, pedales, ejes,
  *   pinzas de freno, limpiaparabrisas). Simplifica el interior y las llantas; la carrocería, solo
  *   donde es plana (medio milímetro de error: con más, la pintura se veía abollada).
@@ -24,7 +24,7 @@ import { ALL_EXTENSIONS } from "@gltf-transform/extensions";
 import { getBounds, prune, simplifyPrimitive, textureCompress, weldPrimitive } from "@gltf-transform/functions";
 import { MeshoptSimplifier } from "meshoptimizer";
 import sharp from "sharp";
-import { plate } from "./car-plate.mjs";
+import { plate, tires } from "./car-plate.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const file = process.argv[2];
@@ -77,6 +77,8 @@ async function load() {
   }
   // La matrícula lleva el logotipo en una textura sin nombre (la regla de arriba no la ve): la de xenxo.
   await plate(doc);
+  // Y los neumáticos, el de Khronos y el de 3D Commerce, pintados y en relieve: fuera también.
+  await tires(doc);
   for (const n of root.listNodes()) if (DROP.test(n.getName())) n.dispose();
   // Fuera también del archivo (el servidor no admite iridiscencia).
   for (const ext of root.listExtensionsUsed())

@@ -942,6 +942,122 @@
           ],
           "radius": 8.0
         }
+      },
+      {
+        "id": "vertigo",
+        "vehicle": "car",
+        "mode": "grid",
+        "laps": 3,
+        "radius": 7.0,
+        "start": {
+          "p": [
+            63.5,
+            26.0,
+            113.0
+          ],
+          "radius": 8.0,
+          "yaw": -90.0
+        },
+        "grid": [
+          [
+            71.0,
+            26.0,
+            110.8
+          ],
+          [
+            71.0,
+            26.0,
+            115.2
+          ],
+          [
+            66.0,
+            26.0,
+            110.8
+          ],
+          [
+            66.0,
+            26.0,
+            115.2
+          ],
+          [
+            61.0,
+            26.0,
+            110.8
+          ],
+          [
+            61.0,
+            26.0,
+            115.2
+          ],
+          [
+            56.0,
+            26.0,
+            110.8
+          ],
+          [
+            56.0,
+            26.0,
+            115.2
+          ]
+        ],
+        "lights": [
+          83.38,
+          32.0,
+          113.0
+        ],
+        "cps": [
+          [
+            113.0,
+            26.0,
+            76.0,
+            -0.0
+          ],
+          [
+            113.0,
+            26.0,
+            -15.0,
+            -0.0
+          ],
+          [
+            96.0,
+            26.0,
+            -49.0,
+            90.0
+          ],
+          [
+            46.0,
+            26.0,
+            -49.0,
+            90.0
+          ],
+          [
+            13.5,
+            26.0,
+            -21.0,
+            180.0
+          ],
+          [
+            13.5,
+            20.0,
+            35.0,
+            180.0
+          ],
+          [
+            13.5,
+            26.0,
+            83.0,
+            180.0
+          ]
+        ],
+        "finish": {
+          "p": [
+            50.0,
+            26.0,
+            113.0
+          ],
+          "radius": 7.0,
+          "yaw": -90.0
+        }
       }
     ],
     "boosts": [
@@ -1052,6 +1168,18 @@
         "speed": 12,
         "seconds": 1,
         "circuit": true
+      },
+      {
+        "p": [
+          114.6,
+          26.04,
+          60.0
+        ],
+        "yaw": -0.0,
+        "radius": 1.9,
+        "speed": 12,
+        "seconds": 1,
+        "vertigo": true
       }
     ],
     "boards": [
@@ -1153,6 +1281,48 @@
         },
         "title_size": 0.4,
         "circuit": true
+      },
+      {
+        "kind": "race",
+        "id": "vertigo",
+        "period": "week",
+        "p": [
+          65.3,
+          28.9,
+          126.15
+        ],
+        "yaw": 180,
+        "size": [
+          4.6,
+          3.2
+        ],
+        "title": {
+          "es": "VÉRTIGO · SEMANA",
+          "en": "VERTIGO · WEEK"
+        },
+        "title_size": 0.4,
+        "vertigo": true
+      },
+      {
+        "kind": "race",
+        "id": "vertigo",
+        "period": "all",
+        "p": [
+          73.7,
+          28.9,
+          126.15
+        ],
+        "yaw": 180,
+        "size": [
+          4.6,
+          3.2
+        ],
+        "title": {
+          "es": "VÉRTIGO · SIEMPRE",
+          "en": "VERTIGO · ALL TIME"
+        },
+        "title_size": 0.4,
+        "vertigo": true
       }
     ],
     "labels": [
@@ -1241,6 +1411,81 @@
         "width": 9,
         "max_distance": 60,
         "circuit": true
+      },
+      {
+        "text": {
+          "es": "CIRCUITO VÉRTIGO",
+          "en": "VERTIGO CIRCUIT"
+        },
+        "p": [
+          83.5,
+          34.5,
+          113.0
+        ],
+        "yaw": 270,
+        "size": 0.9,
+        "vertigo": true
+      },
+      {
+        "text": {
+          "es": "PARRILLA",
+          "en": "GRID"
+        },
+        "p": [
+          53.0,
+          26.03,
+          113.0
+        ],
+        "yaw": 270,
+        "size": 0.7,
+        "flat": true,
+        "vertigo": true
+      },
+      {
+        "text": {
+          "es": "Tres vueltas sin quitamiedos. Saca el coche (C) y párate en la parrilla; si te caes, vuelves al último punto.",
+          "en": "Three laps, no guard rails. Get your car (C) and stop on the grid; if you fall, you go back to the last gate."
+        },
+        "p": [
+          69.5,
+          31.2,
+          126.15
+        ],
+        "yaw": 180,
+        "size": 0.34,
+        "width": 9.4,
+        "max_distance": 60,
+        "vertigo": true
+      },
+      {
+        "text": {
+          "es": "CIRCUITO VÉRTIGO",
+          "en": "VERTIGO CIRCUIT"
+        },
+        "p": [
+          65.94,
+          3.65,
+          153.0
+        ],
+        "yaw": 270,
+        "size": 0.42,
+        "vertigo": true
+      },
+      {
+        "text": {
+          "es": "La carrera del cielo: más difícil que el Gran Premio.",
+          "en": "The race in the sky: harder than the Grand Prix."
+        },
+        "p": [
+          65.94,
+          4.15,
+          153.0
+        ],
+        "yaw": 270,
+        "size": 0.22,
+        "width": 5,
+        "max_distance": 40,
+        "vertigo": true
       }
     ],
     "props": [
@@ -1342,6 +1587,21 @@
           0
         ],
         "mesh_collider": true
+      },
+      {
+        "piece": "arcade_vertigo",
+        "p": [
+          32,
+          0,
+          32
+        ],
+        "yaw": 0,
+        "half": [
+          0,
+          0,
+          0
+        ],
+        "mesh_collider": true
       }
     ],
     "cabinets": [
@@ -1392,6 +1652,75 @@
           30.437
         ],
         "yaw": 100
+      }
+    ],
+    "portals": [
+      {
+        "p": [
+          66.1,
+          1.4,
+          153.0
+        ],
+        "yaw": 270,
+        "size": [
+          3.2,
+          2.8
+        ],
+        "color": "#36d9ff",
+        "title": {
+          "es": "Circuito Vértigo",
+          "en": "Vertigo Circuit"
+        },
+        "to": {
+          "p": [
+            56.0,
+            26.0,
+            122.0
+          ],
+          "yaw": 0
+        },
+        "vertigo": true
+      },
+      {
+        "p": [
+          50.6,
+          27.4,
+          122.0
+        ],
+        "yaw": 90,
+        "size": [
+          3.2,
+          2.8
+        ],
+        "color": "#4fa3ff",
+        "title": {
+          "es": "Bajar a Arcade",
+          "en": "Back down to Arcade"
+        },
+        "to": {
+          "p": [
+            61.0,
+            0,
+            153.0
+          ],
+          "yaw": 90
+        },
+        "vertigo": true
+      }
+    ],
+    "solids": [
+      {
+        "p": [
+          63.5,
+          25.8,
+          117.5
+        ],
+        "half": [
+          13.5,
+          0.2,
+          9.0
+        ],
+        "vertigo": true
       }
     ]
   },

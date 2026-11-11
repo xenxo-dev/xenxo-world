@@ -19,6 +19,8 @@ Object.defineProperty(globalThis, "performance", { value: { now: () => vt + LOCA
 const { world } = await import("../src/net/world-store");
 const { Catchup, cursor, seek, ServerClock } = await import("../src/net/playout");
 const { PoseSender, SEND_EVERY_MS, SEND_TIGHT_MS } = await import("../src/net/pose-send");
+const { CarPlayout } = await import("../src/net/car-playout");
+type CarSample = import("../src/net/car-playout").CarSample;
 const { allowSample, batchGap, SAMPLE_MAX_AGE_MS, stampSample } = await import("../../realtime/src/pose-clock");
 const { crowdFrame, joinCrowd, leaveCrowd } = await import("../src/world/crowd");
 type PoseClock = import("../../realtime/src/pose-clock").PoseClock;
@@ -590,6 +592,102 @@ console.log("Mucha gente a la vez: a quién le toca cada frame");
   }
   check(skipped === 0, "con poca gente, todo el mundo a cada frame");
   for (const e of few) leaveCrowd(e);
+}
+
+console.log("El coche de otra persona: donde está ahora, no donde estaba");
+{
+  // Un coche de verdad en marcha (dónde está y cómo mira en cada momento), sus poses como las manda
+  // la web (5 o 10 por segundo, con la hora en que se tomaron), una red que tarda y con rachas, y
+  // quien lo mira a 60 frames por segundo. Se mide a cuánto se dibuja de donde está de verdad.
+  type Truth = (t: number) => { p: [number, number, number]; r: [number, number, number, number] };
+  const yawQ = (yaw: number): [number, number, number, number] => [0, Math.sin(yaw / 2), 0, Math.cos(yaw / 2)];
+  const straight = (v: number): Truth => (t) => ({ p: [0, 0.3, (v * t) / 1000], r: yawQ(0) });
+  const curve = (v: number, R: number): Truth => (t) => {
+    const a = (v * t) / 1000 / R;
+    return { p: [R * Math.sin(a), 0.3, R - R * Math.cos(a)], r: yawQ(Math.PI / 2 - a) };
+  };
+  const loop = (v: number, R: number): Truth => (t) => {
+    const a = (v * t) / 1000 / R;
+    return { p: [0, R - R * Math.cos(a), R * Math.sin(a)], r: [Math.sin(-a / 2), 0, 0, Math.cos(a / 2)] };
+  };
+  // Acelera a 4 m/s² hasta 30 m/s, aguanta y frena a 12 m/s² hasta pararse; y vuelta a empezar.
+  const stopGo: Truth = (t) => {
+    const T = ((t / 1000) % 16);
+    const z0 = Math.floor(t / 16000) * (112.5 + 105 + 37.5);
+    const z = T < 7.5 ? 2 * T * T : T < 11 ? 112.5 + 30 * (T - 7.5) : T < 13.5 ? 217.5 + 30 * (T - 11) - 6 * (T - 11) ** 2 : 255;
+    return { p: [0, 0.3, z0 + z], r: yawQ(0) };
+  };
+  // Una chicane: de lado a lado (4 m, cada 3 s) a 25 m/s, mirando hacia donde va.
+  const chicane: Truth = (t) => {
+    const T = t / 1000, w = (2 * Math.PI) / 3;
+    return { p: [4 * Math.sin(w * T), 0.3, 25 * T], r: yawQ(Math.atan2(4 * w * Math.cos(w * T), 25)) };
+  };
+  const drive = (truth: Truth, every: number, secs = 30, up = 20, down = 20) => {
+    seed = 77;
+    // Las poses: cuándo se toman, la hora que les pone el servidor (la suya más el viaje más rápido) y cuándo llegan.
+    const sent: { at: number; s: CarSample }[] = [];
+    for (let t = 0; t < secs * 1000; t += every + (rnd() - 0.5) * 14) {
+      const tr = truth(t);
+      const jit = rnd() < 0.08 ? 60 + rnd() * 80 : rnd() * 25;
+      sent.push({ at: t + up + down + jit, s: { t: t + up, vehicle: "car", car: { p: tr.p.map((v) => Math.round(v * 1000) / 1000), r: tr.r.map((v) => Math.round(v * 10000) / 10000) } } });
+    }
+    const car = new CarPlayout();
+    const buf: CarSample[] = [];
+    const errs: number[] = [], steps: number[] = [];
+    let next = 0, last: [number, number, number] | null = null;
+    for (let t = 2000; t < secs * 1000; t += 1000 / 60) {
+      // (Una que llega tarde no se cuela delante de otra más nueva: world-store las guarda por orden.)
+      while (next < sent.length && sent[next]!.at <= t) {
+        const s = sent[next++]!.s;
+        if (!buf.length || s.t > buf[buf.length - 1]!.t) buf.push(s);
+        if (buf.length > 20) buf.shift();
+      }
+      // La hora del servidor que estima quien mira va por detrás lo que tarda su mejor viaje.
+      if (!car.frame(buf, t - down, 1 / 60)) continue;
+      const tr = truth(t).p;
+      errs.push(Math.hypot(car.x - tr[0], car.y - tr[1], car.z - tr[2]));
+      if (last) {
+        const want = Math.hypot(tr[0] - truth(t - 1000 / 60).p[0], tr[1] - truth(t - 1000 / 60).p[1], tr[2] - truth(t - 1000 / 60).p[2]);
+        steps.push(Math.hypot(car.x - last[0], car.y - last[1], car.z - last[2]) - want);
+      }
+      last = [car.x, car.y, car.z];
+    }
+    errs.sort((a, b) => a - b);
+    return { mean: mean(errs), p95: errs[Math.floor(errs.length * 0.95)]!, max: errs[errs.length - 1]!, jerk: Math.max(...steps.map(Math.abs)) };
+  };
+  const show = (r: ReturnType<typeof drive>) => `${f1(r.mean * 100)} cm de media, ${f1(r.p95 * 100)} cm el 95 %, ${f1(r.max * 100)} cm lo peor`;
+  let r = drive(straight(30), SEND_EVERY_MS);
+  check(r.mean < 0.6 && r.p95 < 1.2, `en recta a 108 km/h, 5 poses por segundo: ${show(r)} (con retraso iría 9 m atrás)`);
+  r = drive(straight(30), SEND_TIGHT_MS);
+  check(r.mean < 0.6 && r.p95 < 1.2, `y con 10: ${show(r)}`);
+  r = drive(curve(22, 20), SEND_EVERY_MS);
+  check(r.mean < 0.7 && r.p95 < 1.5, `en una curva de 20 m de radio a 79 km/h: ${show(r)}`);
+  r = drive(loop(18, 9), SEND_TIGHT_MS);
+  check(r.mean < 0.7 && r.p95 < 1.5, `en el looping (9 m de radio, 65 km/h): ${show(r)}`);
+  r = drive(loop(18, 9), SEND_EVERY_MS);
+  check(r.mean < 1.2 && r.p95 < 2.5, `y con 5 poses por segundo: ${show(r)}`);
+  r = drive(chicane, SEND_TIGHT_MS);
+  check(r.mean < 0.8 && r.p95 < 1.6, `en la chicane: ${show(r)}`);
+  r = drive(stopGo, SEND_TIGHT_MS, 48);
+  check(r.mean < 0.8 && r.p95 < 2 && r.max < 4, `acelerando y frenando a fondo: ${show(r)}`);
+  check(r.jerk < 0.25, `y sin saltos al corregir (lo más que se desvía de un frame a otro: ${f1(r.jerk * 100)} cm)`);
+  // Una red peor (60 ms de ida y 60 de vuelta que no se ven, en vez de los 50 que se suponen).
+  r = drive(straight(30), SEND_TIGHT_MS, 30, 60, 60);
+  check(r.mean < 2.6, `con una red que tarda 120 ms: ${show(r)} (lo que tarda de más no se puede saber)`);
+  // Parado (un latido por segundo) no se mueve; y sin poses nuevas no sigue adelante sin fin.
+  const car = new CarPlayout();
+  const still: CarSample[] = [0, 1000, 2000].map((t) => ({ t, vehicle: "car", car: { p: [5, 0.3, 7], r: [0, 0, 0, 1] } }));
+  car.frame(still, 2300, 1 / 60);
+  check(Math.hypot(car.x - 5, car.z - 7) < 1e-6, "parado, quieto");
+  const gone: CarSample[] = [0, 200].map((t) => ({ t, vehicle: "car", car: { p: [0, 0.3, (30 * t) / 1000], r: [0, 0, 0, 1] } }));
+  const lost = new CarPlayout();
+  for (let t = 200; t < 3000; t += 16) lost.frame(gone, t, 0.016);
+  check(lost.z < 6 + 30 * 0.36, `si dejan de llegar poses, se queda donde iba a estar un momento después (${f1(lost.z)} m)`);
+  // Aparcado (ya no conduce): donde lo dejó, sin seguir adelante.
+  const parked: CarSample[] = [{ t: 0, vehicle: "car", car: { p: [0, 0.3, 0], r: [0, 0, 0, 1] } }, { t: 200, car: { p: [0, 0.3, 2], r: [0, 0, 0, 1] } }];
+  const pk = new CarPlayout();
+  pk.frame(parked, 300, 0.016);
+  check(Math.abs(pk.z - 2) < 1e-6, "y aparcado, donde lo dejó");
 }
 
 console.log(fails ? `\n${fails} fallo(s)` : "\nmultijugador: todo bien");

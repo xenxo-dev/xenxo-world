@@ -17,6 +17,7 @@ import cities from "../../realtime/src/district-cities.json";
 import layout from "../../realtime/src/districts.json";
 import raw from "../src/world/guide.json";
 import circuit from "./circuit-line.json";
+import vertigo from "./vertigo-line.json";
 import { inAppBrowser, openInBrowserUrl } from "../src/net/inapp";
 import { appPath, pathLang, placeRoute } from "../src/routes";
 import { directPlace, guideOf, spotIds, spotOf, type GuideSpot } from "../src/world/guide";
@@ -52,8 +53,8 @@ function blocked(boxes: Box[], s: GuideSpot): Box | null {
   return null;
 }
 
-/** La línea central del circuito de Arcade (lo escribe la forja): su pista es una malla, no cajas. */
-const TRACK = (circuit as unknown as { line: [number, number, number, number, string][] }).line;
+/** La línea central de los circuitos de Arcade (la escribe la forja): sus pistas son mallas, no cajas. */
+const TRACK = [...(circuit as unknown as { line: [number, number, number, number, string][] }).line, ...(vertigo as unknown as { line: [number, number, number, number, string][] }).line];
 
 /** En alto, ¿hay algo debajo que lo sostenga (el tejado, la rejilla del mirador, la pista del circuito)? */
 function supported(boxes: Box[], s: GuideSpot, district: string): boolean {

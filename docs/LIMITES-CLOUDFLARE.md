@@ -37,8 +37,11 @@ En marcha:
   segundo (**180 por hora**). Con esas mismas se ve mejor a los demás (11-11-2026): al pararse sale
   una pose más, para que los otros sepan que se ha parado (una por parada: un 2–4 % más moviéndose a
   ratos), y un cambio de gesto no espera a su turno, pero de media nunca se mandan más de 5
-  (`net/pose-send.ts`). Solo hay una excepción: en el modo pelea, con otra persona que pelea a
-  menos de 10 m, van a 10 por segundo mientras dura (1.800 por hora de pelea, no de visita).
+  (`net/pose-send.ts`). Solo hay dos excepciones: en el modo pelea, con otra persona que pelea a
+  menos de 10 m, van a 10 por segundo mientras dura (1.800 por hora de pelea, no de visita); y
+  conduciendo en Arcade con otro coche en marcha a menos de 40 m, lo mismo, porque los coches chocan
+  entre ellos tal como se ven (una carrera de ocho, dos vueltas: unas 3.000 poses más entre todos,
+  150 peticiones).
 - **Duración:** antes, cada pose dejaba un temporizador de reparto pendiente y el objeto no podía
   hibernar: un chunk con gente moviéndose gastaba 450 GB-s por hora (el día entero de plan gratuito
   da para unas 29 horas así). Ahora la pose se reparte al llegar si ya ha pasado el intervalo, y

@@ -22,11 +22,12 @@ import { carForPose, carFrame, carPose, drive, dropCar, requestCar, seated } fro
 import { useDrive } from "./vehicle/drive-state";
 import { applyCarPose, CarModel, createCarHandle } from "./vehicle/CarModel";
 import { CAR, paintFor } from "./vehicle/car";
+import { rivalNear } from "./vehicle/rivals";
 import { bumpNpcs, camKick, parkourFall, peopleBusy, peopleFrame, prepareFights, resetPeople, selfFx, startStrike, striking } from "./people/selfPeople";
 import { cancelSlide, slideDir, slideEmote, slideP, slideStep, sliding, startSlide } from "./people/slide";
 import { people } from "../net/people-store";
 import { fighterNear } from "../net/people";
-import { PoseSender, SEND_EVERY_MS, SEND_TIGHT_MS, TIGHT_RANGE_M } from "../net/pose-send";
+import { PoseSender, RACE_RANGE_M, SEND_EVERY_MS, SEND_TIGHT_MS, TIGHT_RANGE_M } from "../net/pose-send";
 import { preloadParkour, UPPER_EMOTES } from "./animation";
 import { createParkour, parkourStep, resetParkour } from "./parkour/moves";
 import { gun, gunFrame, resetGun, SELF_GUN } from "./people/guns";
@@ -78,7 +79,8 @@ let lastWeapon: string | null = null;
 /** Manda la pose de ahora (la cabeza de este frame, el gesto, el arma y el coche) y apunta lo mandado. */
 function sendPose(now: number, motion: Motion) {
   // Lo que se ve de la persona: el parkour que esté haciendo, o su gesto.
-  const shown = motion.pk ?? motion.emote;
+  // «drive» (la pose al volante) es cosa de quien dibuja: por la red, sentarse y estar sentado.
+  const shown = motion.pk ?? (motion.emote === "drive" ? (drive.phase === "in" ? "car_in" : "sit") : motion.emote);
   const held = motion.weapon ?? null;
   _lastP.copy(_headP);
   _lastQ.copy(_headQ);
@@ -585,7 +587,9 @@ export function Player({ active }: { active: boolean }) {
     const now = performance.now();
     const acted = (motion.pk ?? motion.emote) !== lastEmote || drive.phase !== lastPhase || (motion.weapon ?? null) !== lastWeapon;
     const moved = _headP.distanceToSquared(_lastP) > 1e-4 || _headQ.angleTo(_lastQ) > 0.01;
-    if (!sender.due(now, moved, acted, people.fightOn && fighterNear(TIGHT_RANGE_M) ? SEND_TIGHT_MS : SEND_EVERY_MS)) return;
+    // Más seguido solo con alguien al lado en el modo pelea, o conduciendo con otro coche cerca (chocan como se ven).
+    const tight = (people.fightOn && fighterNear(TIGHT_RANGE_M)) || (mode === "drive" && rivalNear(carPose.p.x, carPose.p.z, RACE_RANGE_M));
+    if (!sender.due(now, moved, acted, tight ? SEND_TIGHT_MS : SEND_EVERY_MS)) return;
     sendPose(now, motion);
   });
 

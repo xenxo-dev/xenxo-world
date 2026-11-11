@@ -22,6 +22,7 @@ import bpy  # noqa: E402
 
 import arcade  # noqa: E402
 import circuit  # noqa: E402
+import vertigo  # noqa: E402
 import pixel  # noqa: E402
 import cero  # noqa: E402
 import city  # noqa: E402
@@ -118,6 +119,8 @@ def main() -> None:
             add("arcade_coin", "prop", arcade.coin_object, [(ox + 32.0, -540.0, 0)])
             # El circuito de coches (el Gran Premio Neón), en su sitio: su malla es su colisión.
             add("arcade_circuit", "district", circuit.track_object, [(ox + 32.0, 32.0, 0)])
+            # Y el Circuito Vértigo, la pista del cielo (lo mismo: su malla es su colisión).
+            add("arcade_vertigo", "district", vertigo.track_object, [(ox + 32.0, 32.0, 0)])
         if dd["id"] == "cero":  # el fragmento del Rastro de datos (se recoge: collectible@1)
             add("cero_fragment", "prop", cero.fragment_object, [(ox + 32.0, -540.0, 0)])
         if dd["id"] == "vertical":  # el banderín de Vertical (se recoge: collectible@1)
@@ -134,6 +137,7 @@ def main() -> None:
     vertical.write_levels(vertical.ACTIVITIES)
     # Y lo que sale del trazado del circuito de Arcade: la carrera, la parrilla, las placas de turbo…
     circuit.write_activities()
+    vertigo.write_activities()
     # Las colisiones de las ciudades de los distritos (las mismas cajas que sus edificios).
     city.write_colliders(dl, dl["districts"])
     # La plaza también tiene su isla en el nexo, con su decorado mediterráneo.

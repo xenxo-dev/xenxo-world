@@ -165,7 +165,7 @@ class Path:
             bank_now = math.radians(bank[0] + (bank[1] - bank[0]) * _smooth(bu))
             self._emit(pitch, bank_now, w[0] + (w[1] - w[0]) * _smooth(u), **attrs)
 
-    def arc(self, radius: float, turn_deg: float, bank_deg: float = 0.0, step: float = 1.6, **attrs) -> None:
+    def arc(self, radius: float, turn_deg: float, bank_deg: float = 0.0, step: float = 1.6, w: float = W, **attrs) -> None:
         """Curva de `turn_deg` grados (positivo = a la izquierda) con su peralte (la calzada cae hacia dentro)."""
         turn = math.radians(turn_deg)
         n = max(2, round(abs(turn) * radius / step))
@@ -177,7 +177,7 @@ class Path:
             self.a = a0 - turn * i / n
             _, lf = self._axes()
             self.x, self.z = cx - lf[0] * radius * side, cz - lf[2] * radius * side
-            self._emit(0.0, math.radians(bank_deg) * side, W, **attrs)
+            self._emit(0.0, math.radians(bank_deg) * side, w, **attrs)
 
     def gap(self, length: float, y1: float) -> None:
         """Un hueco (el salto): la pista sigue más allá, a la altura `y1`, sin nada en medio."""

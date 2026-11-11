@@ -58,10 +58,30 @@ export const BADGES: Badge[] = [
   {
     id: "arcade_as",
     district: "arcade",
-    rule: { kind: "race", key: "system:gp", under_ms: 80_000 },
+    // (1:12: hay que ir a fondo, sin frenar y pisando las placas de turbo. Frenando en las curvas,
+    // con el teclado, salen 1:19; un trazado perfecto frenando, 1:12 justo: ver test/race.mts.)
+    rule: { kind: "race", key: "system:gp", under_ms: 72_000 },
     name: { es: "As del volante", en: "Ace Driver" },
-    desc: { es: "Hizo las dos vueltas del Gran Premio Neón en menos de 1:20.", en: "Drove both laps of the Neon Grand Prix in under 1:20." },
+    desc: { es: "Hizo las dos vueltas del Gran Premio Neón en menos de 1:12.", en: "Drove both laps of the Neon Grand Prix in under 1:12." },
     color: "#ffd54f",
+  },
+  {
+    id: "arcade_vertigo",
+    district: "arcade",
+    rule: { kind: "race", key: "system:vertigo" },
+    name: { es: "Circuito Vértigo", en: "Vertigo Circuit" },
+    desc: { es: "Terminó una carrera del Circuito Vértigo, la pista del cielo.", en: "Finished a race on the Vertigo Circuit, the track in the sky." },
+    color: "#36d9ff",
+  },
+  {
+    id: "arcade_sinred",
+    district: "arcade",
+    // (1:20: una carrera limpia y con ritmo. Con el teclado, frenando donde toca y sin caerse, 1:19;
+    // cada caída cuesta unos seis segundos: ver test/vertigo.mts.)
+    rule: { kind: "race", key: "system:vertigo", under_ms: 80_000 },
+    name: { es: "Sin red", en: "No Net" },
+    desc: { es: "Hizo las tres vueltas del Circuito Vértigo en menos de 1:20.", en: "Drove all three laps of the Vertigo Circuit in under 1:20." },
+    color: "#ff4f6d",
   },
   {
     id: "pixel_sprites",

@@ -21,6 +21,7 @@ import { SIGN_FONT_URL, FONT_URL } from "./font";
 import { playerPos } from "./Player";
 import { raceBeep, turboSound } from "./vehicle/audio";
 import { carSpeed, drive, gridSpot } from "./vehicle/drive-state";
+import { raceGates, type Gate } from "./vehicle/rescue";
 
 interface Zone {
   id: string;
@@ -41,7 +42,11 @@ interface Zone {
   /** En la salida de una carrera con parrilla: sus cajones, su semáforo y hacia dónde se sale. */
   grid?: number[][];
   lights?: number[];
-  /** Placas de impulso: velocidad, segundos y hacia dónde apuntan las flechas (giro en Y). */
+  /**
+   * Placas de impulso: velocidad, segundos y hacia dónde apuntan las flechas (giro en Y). `yaw`
+   * es también el giro de cada punto de carrera: hacia dónde sale la parrilla y hacia dónde sigue
+   * la pista en los demás (a quien se cae de una pista en alto, su coche vuelve mirando hacia ahí).
+   */
   speed?: number;
   seconds?: number;
   yaw?: number;
@@ -74,13 +79,13 @@ function zonesOf(list: Entity[]): Zone[] {
     const cp = CheckpointV1.safeParse(e.components["checkpoint@1"]);
     if (cp.success) {
       const zn: Zone = { id: e.entity_id, x: x + ox, y, z: z + oz, r: cp.data.radius, kind: "checkpoint", role: cp.data.role, race: cp.data.race, owner: e.owner, order: cp.data.order };
+      const [qx, qy, qz, qw] = tr.data.r;
+      zn.yaw = Math.atan2(2 * (qw * qy + qx * qz), 1 - 2 * (qy * qy + qx * qx));
       if (cp.data.role === "start") {
         zn.vehicle = cp.data.vehicle;
         zn.mode = cp.data.mode;
         zn.grid = cp.data.grid?.map(([gx, gy, gz]) => [gx + ox, gy, gz + oz]);
         zn.lights = cp.data.lights && [cp.data.lights[0] + ox, cp.data.lights[1], cp.data.lights[2] + oz];
-        const [qx, qy, qz, qw] = tr.data.r;
-        zn.yaw = Math.atan2(2 * (qw * qy + qx * qz), 1 - 2 * (qy * qy + qx * qx));
       }
       out.push(zn);
     }
@@ -106,6 +111,13 @@ function zonesOf(list: Entity[]): Zone[] {
   return out;
 }
 
+function setGate(g: Gate, z: Zone) {
+  g.x = z.x;
+  g.y = z.y;
+  g.z = z.z;
+  g.yaw = z.yaw ?? 0;
+}
+
 /** Parado en la parrilla: por debajo de esta velocidad (m/s) el coche entra en la carrera. */
 const GRID_STOP = 2.5;
 /** La parrilla llega un poco más allá de su círculo (m): quien aparca en el primer cajón también está en ella. */
@@ -126,9 +138,14 @@ function Sensor({ zones }: { zones: Zone[] }) {
   /** Corría en una ronda (y, al dejarla, toca moverse antes de entrar en otra: quien se queda parado en la parrilla no encadena carreras sin estar). */
   const wasLive = useRef(false);
   const needMove = useRef(false);
+  /** Entre qué puntos de mi carrera voy (para volver a la pista si me caigo: vehicle/rescue.ts): solo se busca al cambiar de punto. */
+  const between = useRef("");
   useEffect(() => {
     inside.current.clear();
+    between.current = "";
+    raceGates.on = false;
   }, [zones]);
+  useEffect(() => () => void (raceGates.on = false), []);
   useFrame(() => {
     if (world.status !== "open" || zones.length === 0) return;
     const signed = !!accountToken();
@@ -139,6 +156,27 @@ function Sensor({ zones }: { zones: Zone[] }) {
     if (wasLive.current && !live) needMove.current = true;
     wasLive.current = live;
     if (needMove.current && (!driving || Math.abs(carSpeed()) > GRID_STOP + 2)) needMove.current = false;
+    // Corriendo en coche una carrera de salida conjunta: el último punto que pasé y el que me toca.
+    const rd0 = activity.round, run0 = activity.race;
+    if (driving && rd0 && rd0.live && rd0.state === "running" && run0 && run0.race === rd0.race) {
+      const key = `${rd0.owner}:${rd0.race}:${run0.next}`;
+      if (key !== between.current) {
+        between.current = key;
+        const mine = (z: Zone) => z.kind === "checkpoint" && z.race === rd0.race && z.owner === rd0.owner;
+        const finish = zones.find((z) => mine(z) && z.role === "finish");
+        const cpAt = (n: number) => zones.find((z) => mine(z) && z.role === "cp" && z.nth === n);
+        const last = run0.next <= 1 ? finish : cpAt(run0.next - 1);
+        const next = run0.next > run0.total ? finish : cpAt(run0.next);
+        raceGates.on = !!last && !!next;
+        if (last && next) {
+          setGate(raceGates.last, last);
+          setGate(raceGates.next, next);
+        }
+      }
+    } else if (between.current) {
+      between.current = "";
+      raceGates.on = false;
+    }
     for (const zn of zones) {
       const dx = playerPos.x - zn.x, dz = playerPos.z - zn.z;
       const gridStart = zn.mode === "grid" && zn.role === "start";
@@ -179,6 +217,8 @@ function Sensor({ zones }: { zones: Zone[] }) {
         } else {
           const run = activity.race;
           if (!mine || !run || run.race !== zn.race) continue;
+          // (Mientras el coche vuelve solo a la pista no se pasa por ningún punto.)
+          if (drive.sim?.carrying) continue;
           if (run.next > run.total ? zn.role !== "finish" : zn.role !== "cp" || zn.nth !== run.next) continue;
         }
         inside.current.set(zn.id, now);

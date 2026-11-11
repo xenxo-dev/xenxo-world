@@ -8,6 +8,7 @@
   ],
   "arcade": [
     { "id": "gp", "race": "gp" },
+    { "id": "vertigo", "race": "vertigo" },
     { "id": "circuito", "race": "circuito" },
     { "id": "maquinas", "cabinet": 0 },
     { "id": "palanca", "at": [32, 0, 38], "yaw": 0 }

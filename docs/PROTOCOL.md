@@ -179,7 +179,8 @@ Cómo mandar y cómo dibujar (lo que hace la web; no obliga a nadie):
   **una más con la misma pose** (así los demás saben que se ha parado y no la siguen dibujando hacia
   donde iba) y después un latido por segundo. Un cambio de gesto, de arma o de coche sale al momento
   si no se ha mandado nada en el último intervalo. En el modo pelea, con otra persona que pelea a
-  menos de 10 m, 10 por segundo.
+  menos de 10 m, 10 por segundo; y conduciendo, con otro coche en marcha a menos de 40 m, también
+  (los coches chocan entre ellos tal como cada uno ve al otro: «Coches», más abajo).
 - **Dibujar** (`net/playout.ts`): a cada persona, con el retraso justo para que su muestra siguiente
   ya haya llegado: su intervalo de envío más lo que tardan en llegar las suyas (unos 250 ms con buena
   red; se mide por persona y cambia poco a poco). Si la siguiente no llega a tiempo, se sigue un
@@ -187,8 +188,26 @@ Cómo mandar y cómo dibujar (lo que hace la web; no obliga a nadie):
   saltos. La hora del servidor se estima con el viaje más rápido de los últimos segundos (`t` de los
   lotes), no con `PING`.
 
+**Coches: chocan entre ellos, en cada cliente.** No hay mensaje para esto. Cada cliente lleva solo
+su coche y choca con los de los demás tal como los ve por sus poses (`car`), con el retraso con que
+los dibuja; el golpe lo resuelve quien lo ve, sobre su propio coche. Por eso quien alcanza a otro
+se queda detrás de lo que ve de él, y el de delante no nota nada mientras en su pantalla no lo
+toquen. Reglas de la web (no obligan a nadie): solo cuentan los coches con alguien al volante y en
+marcha, el suyo y el propio (desde 3 m/s; uno parado se atraviesa, así nadie corta la pista con el
+suyo ni embiste a quien espera); no cuenta el que aparece de golpe, ni el que sube o cae a plomo
+(lo llevan de vuelta a la pista, se ha caído o va por el looping), ni el que ya está encima al
+empezar a contar; el coche de otro pesa lo que el propio (un golpe reparte la
+velocidad, no es un muro) y, si su pose sigue de largo por donde está el propio, da el golpe y
+deja de contar un momento. Quien corre una carrera de salida conjunta solo choca con quienes la
+corren, y en la parrilla, con nadie. Un agente no tiene que hacer nada.
+
+La web, además, dibuja el coche de quien conduce **donde está ahora** y no con el retraso de sus
+poses (`net/car-playout.ts`: desde su última pose, con la velocidad y el giro que traía entre las
+dos últimas): a 30 m/s, con retraso se vería nueve metros atrás y cada uno chocaría con un coche
+que el otro no lleva ahí.
+
 **Carreras de salida conjunta** (`checkpoint@1` con `mode: "grid"` en su salida; hoy, el Gran Premio
-Neón de Arcade, en coche). No se corre contra el reloj cuando uno quiere: se corre por **rondas**.
+Neón y el Circuito Vértigo de Arcade, en coche). No se corre contra el reloj cuando uno quiere: se corre por **rondas**.
 
 - **La parrilla.** Quien manda `CHECKPOINT` de la salida estando en ella (y en coche, si la carrera
   lo es: si no, `forbidden` con `detail.reason = "vehicle"`) entra en la ronda de esa carrera que se
@@ -217,6 +236,13 @@ Neón de Arcade, en coche). No se corre contra el reloj cuando uno quiere: se co
 - **Los tiempos.** A las cuentas se les apunta como en las demás carreras (reciben además `RACE`
   `finish` con su marca y su puesto, y salen en los `scoreboard@1` de esa carrera); a quien corre sin
   cuenta no se le guarda nada. Las rondas viven en memoria: nada de ellas se guarda.
+- **Hacia dónde sigue la pista.** El giro del `transform@1` de cada punto y de la meta puede decirlo
+  (como el de la salida dice hacia dónde mira la parrilla). No cambia nada en el servidor. La web lo
+  usa en las pistas en alto (el Circuito Vértigo, sin quitamiedos): a quien, corriendo, se le cae el
+  coche 8 m por debajo del más bajo de los dos puntos entre los que va, se lo devuelve al último que
+  pasó, mirando hacia ahí y parado. Lo lleva hasta allí a menos de 30 m/s en horizontal y 26 en
+  vertical, así que para el servidor no es un salto (ver «Movimiento»), y mientras tanto no avisa de
+  ningún punto.
 
 ### Servidor → cliente
 

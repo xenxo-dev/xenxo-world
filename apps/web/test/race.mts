@@ -22,7 +22,7 @@ import {
   ROUND_AFTER_MS, ROUND_COUNTDOWN_MS, ROUND_IDLE_MS, ROUND_JOIN_MS, ROUND_MAX_MS, ROUND_OPEN_MAX_MS, type Round,
 } from "../../realtime/src/rounds.ts";
 import { SEED_ASSETS } from "../../realtime/src/seed-assets.ts";
-import { gridHold, myRun, nextRound, PODIUM_MS, startLights, type RoundPayload, type RoundState } from "../src/net/round.ts";
+import { crashWith, gridHold, myRun, nextRound, PODIUM_MS, startLights, stillRacing, type RoundPayload, type RoundState } from "../src/net/round.ts";
 import { CarSim, loadRapier, type StaticSource } from "../src/world/vehicle/physics.ts";
 
 let fails = 0;
@@ -119,6 +119,8 @@ console.log("Rondas (cliente):");
   let r: RoundState | null = null;
   r = nextRound(r, pay(1, "countdown", [ent("yo", 0, { slot: 0 }), ent("otro", 0, { slot: 1 })]), "yo", 100);
   check(r.mine && r.live, "estoy en la parrilla: es mi ronda");
+  // Con qué coches choco: fuera de carrera, con cualquiera; en la parrilla, con nadie; corriendo, con quienes corren.
+  check(crashWith(null) === "all" && crashWith(r) === "none", "los coches: fuera de carrera chocan todos; en la parrilla, ninguno");
   check(gridHold(r, 9_999, 200) && !gridHold(r, 10_000, 200), "el coche espera hasta la hora de salida, ni un momento más");
   check(startLights(r, 2_000, 200).red === 0 && startLights(r, 5_001, 200).red === 1 && startLights(r, 9_100, 200).red === 5, "semáforo: una roja más cada segundo; las cinco en el último");
   check(startLights(r, 10_500, 200).green && !startLights(r, 12_500, 200).green, "verde en la salida, un par de segundos");
@@ -129,12 +131,18 @@ console.log("Rondas (cliente):");
   const run = myRun(r, "yo")!;
   check(run.next === 3 && run.total === 11 && run.lap === 1 && run.place === 2 && run.of === 2, "en carrera: la puerta que toca, la vuelta y el puesto");
   check(!gridHold(r, 20_000, 500), "en carrera no se espera");
+  {
+    const mid = nextRound(r, pay(1, "running", [ent("otro", 3), ent("yo", 2), ent("fuera", 0, { out: true }), ent("llegado", 24, { ms: 70_000 })]), "yo", 450);
+    const who = crashWith(mid);
+    check(Array.isArray(who) && stillRacing(who, "otro") && !stillRacing(who, "fuera") && !stillRacing(who, "llegado") && !stillRacing(who, "paseante"), "corriendo, solo choco con quienes siguen en mi carrera");
+  }
   r = nextRound(r, pay(1, "running", [ent("otro", 13), ent("yo", 11)]), "yo", 500);
   check(myRun(r, "yo")!.next === 12 && myRun(r, "yo")!.lap === 1, "tras los puntos de la vuelta toca la meta");
   r = nextRound(r, pay(1, "running", [ent("otro", 14), ent("yo", 12)]), "yo", 600);
   check(myRun(r, "yo")!.next === 1 && myRun(r, "yo")!.lap === 2, "y después, la segunda vuelta");
   r = nextRound(r, pay(1, "running", [ent("yo", 24, { ms: 80_000 }), ent("otro", 20)]), "yo", 700);
   check(r.mine && !r.live && myRun(r, "yo") === null, "he llegado: ya no corro, pero la ronda sigue siendo la mía");
+  check(crashWith(r) === "all", "y vuelvo a chocar con cualquiera");
   check(nextRound(r, pay(3, "countdown", [ent("z")]), "yo", 800).round === 1, "mientras los demás acaban, veo cómo van");
   const joined = nextRound(r, pay(3, "countdown", [ent("z"), ent("yo")]), "yo", 900);
   check(joined.round === 3 && joined.live, "si me pongo en la parrilla siguiente, manda esa");

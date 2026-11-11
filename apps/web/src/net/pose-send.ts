@@ -9,14 +9,17 @@
  *    dibujando hacia donde iba. Después, un latido por segundo.
  *  - Un cambio de gesto, de arma o de lo que se hace con el coche no espera a su turno: sale al
  *    momento si queda crédito (un cubo que se llena a ese mismo ritmo: de media nunca se manda más).
- *  - Con alguien al lado en el modo pelea, el doble de seguido mientras dura (`SEND_TIGHT_MS`).
+ *  - Con alguien al lado en el modo pelea, el doble de seguido mientras dura (`SEND_TIGHT_MS`). Y
+ *    conduciendo con otro coche en marcha cerca (`RACE_RANGE_M`), también: los coches chocan entre
+ *    ellos tal como se ven (vehicle/rivals.ts), y a 30 m/s una pose de hace 300 ms está nueve metros
+ *    atrás.
  *
  * Sin Three.js ni nada del navegador: se prueba en Node (test/netplay.mts).
  */
 
 /** Cada cuánto se manda en marcha (ms): 5 Hz. El movimiento se suaviza al otro lado (playout.ts). */
 export const SEND_EVERY_MS = 200;
-/** Con alguien al lado en el modo pelea (ms): 10 Hz, para que los golpes y las esquivas cuadren. */
+/** Con alguien al lado en el modo pelea, o conduciendo con otro coche cerca (ms): 10 Hz, para que los golpes, las esquivas y los choques cuadren. */
 export const SEND_TIGHT_MS = 100;
 /** Nunca más seguido que esto (ms): el servidor admite 15 Hz de media. */
 export const SEND_MIN_MS = 70;
@@ -24,6 +27,8 @@ export const SEND_MIN_MS = 70;
 export const HEARTBEAT_MS = 1000;
 /** A menos de esto (m) de alguien que también pelea se manda más seguido. */
 export const TIGHT_RANGE_M = 10;
+/** Y conduciendo, a menos de esto (m) de otro coche que también va en marcha. */
+export const RACE_RANGE_M = 40;
 
 export class PoseSender {
   private last = -Infinity;

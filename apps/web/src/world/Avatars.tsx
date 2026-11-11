@@ -25,16 +25,19 @@ import { aimHands } from "./people/arms";
 import { HeldWeapon } from "./people/HeldWeapon";
 import { isWeaponId } from "@xenxo/protocol";
 import { CAR, driverRoot, paintFor } from "./vehicle/car";
+import { driverFx, driverLean, releaseDriver } from "./vehicle/driver";
+import { dropRival, putRival } from "./vehicle/rivals";
+import { CarPlayout } from "../net/car-playout";
 
 /** Gestos con la puerta del coche abierta (subir y bajar). */
 const DOOR_OPEN = new Set(["car_open", "car_in", "car_out"]);
 const _cp = new THREE.Vector3();
 const _cq = new THREE.Quaternion();
-/** Quien conduce: recostado y mirando adelante (vehicle/car.ts). */
+/** Quien conduce: recostado (lo que pida su estatura) y mirando adelante (vehicle/car.ts). */
 const SEAT = driverRoot(CAR.lean);
-const _seatQ = new THREE.Quaternion()
-  .setFromAxisAngle(new THREE.Vector3(1, 0, 0), -CAR.lean)
-  .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI));
+const _seatQ = new THREE.Quaternion();
+const _seatX = new THREE.Vector3(1, 0, 0);
+const _halfTurn = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
 
 /** Entre qué dos muestras de alguien toca dibujar (net/playout.ts): uno para todos, sin objetos nuevos por frame. */
 const _cur = cursor();
@@ -236,10 +239,19 @@ function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; n
   const pkHang = useRef({ x: 0, y: 0, z: 0, fx: 0, fz: 1, t: 0, on: false, hands: false, sh: 0, off: 0, lift: 0 }).current;
   /** Con el arma sacada, las manos apuntan (§9 octies ter): para soltarlas una sola vez. */
   const gunHands = useRef(false);
+  /** Al volante, la cadera y las manos las lleva el coche (vehicle/driver.ts): para soltarlas al bajar. */
+  const seatedFx = useRef(false);
+  /** Conduciendo, su coche cuenta para el mío (vehicle/rivals.ts): para dejar de apuntarlo al bajarse. */
+  const rival = useRef(false);
+  /** Y se dibuja donde está ahora, no donde estaba cuando mandó su última pose (net/car-playout.ts). */
+  const carNow = useRef(new CarPlayout()).current;
   const feetAt = useRef(new THREE.Vector3()).current;
   useEffect(() => {
     remoteFeet.set(sessionId, feetAt);
-    return () => void remoteFeet.delete(sessionId);
+    return () => {
+      remoteFeet.delete(sessionId);
+      dropRival(sessionId);
+    };
   }, [sessionId, feetAt]);
   /** Lo que queda por deshacer cuando la muestra que se esperaba llega y no cae donde se la suponía (net/playout.ts). */
   const catchup = useRef(new Catchup()).current;
@@ -310,21 +322,40 @@ function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; n
     // Velocidad horizontal medida entre frames, suavizada: de ella sale el paso.
     if (dt > 0) smoothSpeed(motion, step / dt, dt);
 
-    // El coche: entre sus dos últimas poses, como la persona.
+    // El coche. Aparcado, donde lo dejó (entre sus dos poses, como la persona). Con ella al volante
+    // (lo dice su última pose), donde está ahora: a esas velocidades, dibujado con el retraso de las
+    // poses iría metros por detrás, y cada uno chocaría con un coche que el otro no lleva ahí.
     const c1 = s1.car;
     if (c1 && !hasCar) setHasCar(true);
     // (Su coche puede estar aparcado en otro sitio: se ve aunque ella quede fuera de la vista.)
     car.visible = !!c1 && shown;
     if (c1) {
-      const c0 = s0.car ?? c1;
       const was = _cp.copy(car.p);
-      car.p.fromArray(c0.p).lerp(_b.fromArray(c1.p), k);
-      car.q.fromArray(c0.r).slerp(_cq.fromArray(c1.r), _cur.kr).normalize();
-      // Conduciendo, el coche va con la persona: lleva su mismo desajuste (si no, daría él el salto).
-      if (s1.vehicle === "car") {
-        car.p.x += catchup.x;
-        car.p.y += catchup.y;
-        car.p.z += catchup.z;
+      const latest = buf[buf.length - 1]!;
+      if (latest.vehicle === "car" && latest.car && carNow.frame(buf, world.serverNow(), dt)) {
+        car.p.set(carNow.x, carNow.y, carNow.z);
+        car.q.set(carNow.qx, carNow.qy, carNow.qz, carNow.qw);
+        // Y cuenta para el mío, que choca con él tal como se dibuja; si mi golpe lo ha desplazado, se
+        // ve ya (vehicle/rivals.ts), hasta que su propia pose diga qué le ha pasado.
+        if (shown) {
+          const hit = putRival(sessionId, car.p, car.q);
+          car.p.x += hit.ox;
+          car.p.y += hit.oy;
+          car.p.z += hit.oz;
+          rival.current = true;
+        } else if (rival.current) {
+          dropRival(sessionId);
+          rival.current = false;
+        }
+      } else {
+        carNow.reset();
+        if (rival.current) {
+          dropRival(sessionId);
+          rival.current = false;
+        }
+        const c0 = s0.car ?? c1;
+        car.p.fromArray(c0.p).lerp(_b.fromArray(c1.p), k);
+        car.q.fromArray(c0.r).slerp(_cq.fromArray(c1.r), _cur.kr).normalize();
       }
       // Las ruedas giran con lo que avanza (hacia delante o hacia atrás).
       const dz = was.sub(car.p).negate();
@@ -332,6 +363,9 @@ function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; n
       if (dz.lengthSq() < 4) car.spin += dz.dot(_b) / CAR.wheelRadius;
       const want = s1.emote && DOOR_OPEN.has(s1.emote) ? 1 : 0;
       car.doorL += Math.max(-dt * 2, Math.min(dt * 2, want - car.doorL));
+    } else if (rival.current) {
+      dropRival(sessionId);
+      rival.current = false;
     }
     applyCarPose(carHandle, car);
     const driving = s1.vehicle === "car" && !!c1;
@@ -341,13 +375,23 @@ function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; n
     motion.airborne = !driving && feet - groundHeight(_a.x, _a.z, 0.24, feet + 0.1) > 0.05;
     motion.fight = people.fighters.has(sessionId);
     if (driving) {
-      motion.emote = s1.emote ?? null;
+      // Sentado al volante («sit» en su pose): la de conducir, con la cadera en el asiento y las manos en el aro.
+      const atWheel = s1.emote === "sit";
+      motion.emote = atWheel ? "drive" : (s1.emote ?? null);
       motion.weapon = null;
       // Sentado en el asiento, pegado al coche (sin el desfase entre las dos poses).
+      const lean = driverLean(motion.fx);
+      driverRoot(lean, SEAT);
       body.current.position.set(SEAT.x, SEAT.y, SEAT.z).applyQuaternion(car.q).add(car.p);
-      body.current.quaternion.copy(car.q).multiply(_seatQ);
-      feetAt.set(_a.x, body.current.position.y, _a.z);
+      body.current.quaternion.copy(car.q).multiply(_seatQ.setFromAxisAngle(_seatX, -lean)).multiply(_halfTurn);
+      driverFx(motion.fx, car.p, car.q, 1, atWheel ? 1 : 0);
+      seatedFx.current = true;
+      feetAt.copy(body.current.position);
     } else {
+      if (seatedFx.current) {
+        releaseDriver(motion.fx);
+        seatedFx.current = false;
+      }
       const yaw = _e.setFromQuaternion(_qa, "YXZ").y;
       // Golpes, caídas y parejas (lo dibuja este cliente al llegar, sin esperar a su pose).
       const d = rp.current ? rp.current.frame(dt, body.current, _a.x, feet, _a.z, yaw, s1.emote ?? null, _draw) : plain(_a.x, feet, _a.z, yaw, s1.emote ?? null);

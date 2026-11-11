@@ -77,6 +77,12 @@ interface Def {
   base: "idle" | "guard";
   loop?: boolean;
   /**
+   * Pose entera: la cadera, el tronco, el cuello y la cabeza no se suman a la base (que de pie
+   * descansa sobre una pierna, con la cadera ladeada y el tronco compensando) sino que parten de la
+   * pose en T: lo que no se escriba queda recto. Para estar sentado en un asiento.
+   */
+  still?: boolean;
+  /**
    * Pierna de apoyo: no se inclina con la cadera (solo gira con ella, pivotando sobre el pie), así
    * el pie sigue en el suelo aunque la cadera se eche atrás o a un lado.
    */
@@ -100,6 +106,16 @@ const mirror = (a: Arm): Arm => ({
   wrist: a.wrist ? [a.wrist[0], -a.wrist[1], -a.wrist[2]] : undefined,
 });
 const both = (a: Arm) => ({ L: a, R: mirror(a) });
+
+/** Al volante: brazos al aro, manos cerradas y piernas a los pedales (ver `drive`). */
+const DRIVE: Pick<Key, "L" | "R" | "l" | "r" | "LL" | "RL"> = {
+  L: { at: [0.02, -0.185, 0.39], pole: [0.4, -1, -0.25], twist: 78, wrist: [0, 0, -8] },
+  R: { at: [-0.02, -0.185, 0.39], pole: [-0.4, -1, -0.25], twist: 78, wrist: [0, 0, 8] },
+  l: "grip",
+  r: "grip",
+  LL: { at: [0.1, -0.35, 0.61], pole: [0.4, 1, 0.5], foot: [14, 0, 0] },
+  RL: { at: [-0.09, -0.36, 0.65], pole: [-0.4, 1, 0.5], foot: [8, 0, 0] },
+};
 
 export const GESTURES: Record<string, Def> = {
   /* --- Gestos --- */
@@ -341,6 +357,27 @@ export const GESTURES: Record<string, Def> = {
       { t: 0, L: { at: [0.4, 0.02, 0.09], pole: [0.2, -0.6, -1], twist: -15 }, R: { at: [-0.4, -0.1, 0.09], pole: [-0.2, -0.6, -1], twist: -15 }, l: "relaxed", r: "relaxed", p: { chest: [0, 0, -3], head: [6, 0, 2] } },
       { t: 0.9, L: { at: [0.4, -0.1, 0.09], pole: [0.2, -0.6, -1], twist: -15 }, R: { at: [-0.4, 0.02, 0.09], pole: [-0.2, -0.6, -1], twist: -15 }, l: "relaxed", r: "relaxed", p: { chest: [0, 0, 3], head: [6, 0, -2] } },
       { t: 1.8, L: { at: [0.4, 0.02, 0.09], pole: [0.2, -0.6, -1], twist: -15 }, R: { at: [-0.4, -0.1, 0.09], pole: [-0.2, -0.6, -1], twist: -15 }, l: "relaxed", r: "relaxed", p: { chest: [0, 0, -3], head: [6, 0, 2] } },
+    ],
+  },
+
+  /* --- Al volante (world/vehicle) --- */
+  /**
+   * Sentado en el asiento de un deportivo, recostado (el personaje entero va echado atrás: car.ts →
+   * `lean`; aquí el tronco es su vertical): los muslos sobre el cojín y las rodillas algo arriba y
+   * abiertas (entre ellas pasa la columna del volante), los pies en los pedales, los brazos al aro a
+   * las nueve y las tres y la cabeza derecha, mirando adelante. La cadera la pone el asiento y las
+   * manos las lleva al aro la IK del esqueleto (people/rig.ts → `seat`, `reachL`, `reachR`), midan
+   * lo que midan sus brazos; esto es la pose de la que parten.
+   */
+  drive: {
+    base: "idle",
+    loop: true,
+    still: true,
+    keys: [
+      { t: 0, ...DRIVE, p: { spine: [2, 0, 0], chest: [3, 0, 0], upperChest: [3, 0, 0], neck: [8, 0, 0], head: [10, 0, 0], leftShoulder: [0, -6, 0], rightShoulder: [0, 6, 0] } },
+      // Respira: el pecho sube un poco y la cabeza lo compensa.
+      { t: 1.7, ...DRIVE, p: { spine: [1.6, 0, 0], chest: [2, 0, 0], upperChest: [2.4, 0, 0], neck: [8.6, 0, 0], head: [11, 0, 0], leftShoulder: [0, -6, 0.6], rightShoulder: [0, 6, -0.6] } },
+      { t: 3.4, ...DRIVE, p: { spine: [2, 0, 0], chest: [3, 0, 0], upperChest: [3, 0, 0], neck: [8, 0, 0], head: [10, 0, 0], leftShoulder: [0, -6, 0], rightShoulder: [0, 6, 0] } },
     ],
   },
 
@@ -628,10 +665,19 @@ export function buildGesture(name: string, src: GestureSources): VRMAnimation | 
   };
   const track = (bone: string, values: Float32Array) => rotation.set(bone, new THREE.QuaternionKeyframeTrack(`${bone}.quaternion`, times, values));
 
-  // Tronco, hombros, cuello y cabeza: grados sumados a la base.
+  // Tronco, hombros, cuello y cabeza: grados sumados a la base (o, en una pose entera, a la pose en T).
+  const still = !!def.still;
+  const rest = (bone: string) => {
+    const values = new Float32Array(n * 4);
+    for (let i = 0; i < n; i++) values[i * 4 + 3] = 1;
+    track(bone, values);
+  };
   for (const bone of TORSO) {
     const ch = channel(def, (k) => k.p?.[bone]);
-    if (!ch) continue;
+    if (!ch) {
+      if (still) rest(bone);
+      continue;
+    }
     const curve = spline(ch.times, ch.values as number[][], ch.holds, !!def.loop, duration);
     const sb = sampleBase(bone);
     const values = new Float32Array(n * 4);
@@ -639,7 +685,7 @@ export function buildGesture(name: string, src: GestureSources): VRMAnimation | 
       const e = curve(t, tmp);
       const w = ch.weight(t);
       q.setFromEuler(_eu.set(e[0]! * DEG * w, e[1]! * DEG * w, e[2]! * DEG * w, "XYZ"));
-      writeQ(values, i, sb(t, qBase).multiply(q));
+      writeQ(values, i, still ? q : sb(t, qBase).multiply(q));
     });
     track(bone, values);
   }
@@ -654,10 +700,10 @@ export function buildGesture(name: string, src: GestureSources): VRMAnimation | 
       const e = curve(t, tmp);
       const w = turn.weight(t);
       q.setFromEuler(_eu.set(e[0]! * DEG * w, e[1]! * DEG * w, e[2]! * DEG * w, "XYZ"));
-      writeQ(values, i, sb(t, qBase).multiply(q));
+      writeQ(values, i, still ? q : sb(t, qBase).multiply(q));
     });
     track("hips", values);
-  }
+  } else if (still) rest("hips");
   // La pierna de apoyo no se inclina con la cadera: muslo' = giro⁻¹ · (solo su parte en Y) · muslo.
   if (turn && def.plant) {
     const bone = def.plant === "LL" ? "leftUpperLeg" : "rightUpperLeg";

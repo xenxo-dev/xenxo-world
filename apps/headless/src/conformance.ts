@@ -1343,7 +1343,7 @@ await scenario("Circuito Neón (Arcade): carrera del sistema con salida, 11 punt
   const cps = sys.filter((e) => (e.components["checkpoint@1"] as { race?: string } | undefined)?.race === "circuito");
   const roles = (r: string) => cps.filter((e) => (e.components["checkpoint@1"] as { role: string }).role === r).length;
   assert(roles("start") === 1 && roles("finish") === 1 && roles("cp") === 11, `salida, 11 puntos y meta (${roles("start")}/${roles("cp")}/${roles("finish")})`);
-  assert(sys.filter((e) => e.components["boost@1"]).length === 11, "seis placas de impulso (y las cinco de turbo del Gran Premio)");
+  assert(sys.filter((e) => e.components["boost@1"]).length === 12, "seis placas de impulso (y las cinco de turbo del Gran Premio y la del Circuito Vértigo)");
   assert(sys.filter((e) => (e.components["collectible@1"] as { set?: string } | undefined)?.set === "monedas").length === 50, "cincuenta monedas");
   const boards = sys.filter((e) => e.components["scoreboard@1"]).map((e) => (e.components["scoreboard@1"] as { id: string }).id);
   assert(boards.includes("circuito") && boards.includes("monedas"), "marcador de la carrera y de las monedas");
@@ -1395,6 +1395,58 @@ await scenario("Gran Premio Neón (Arcade): el circuito (su malla es su colisió
   c.close();
   assert((await over).payload.entrants.length === 0, "si se va el único de la parrilla, la ronda se acaba");
   w.close();
+});
+
+await scenario("Circuito Vértigo (Arcade): la pista del cielo (otra malla con la que se choca), su carrera en coche a 3 vueltas con 7 puntos que dicen hacia dónde sigue la pista, sus marcadores y las dos puertas (del suelo a la plataforma y vuelta); desde el suelo no se entra", async () => {
+  const c = await XenxoClient.connect({ baseUrl, chunkId: "c_1_0", displayName: "conf-vertigo" });
+  const g = await XenxoClient.connect({ baseUrl, chunkId: "c_1_0", displayName: "conf-vertigo-suelo" });
+  const sys = c.snapshot.entities.filter((e) => e.owner === "system");
+  const cps = sys.filter((e) => (e.components["checkpoint@1"] as { race?: string } | undefined)?.race === "vertigo");
+  const role = (r: string) => cps.filter((e) => (e.components["checkpoint@1"] as { role: string }).role === r);
+  assert(role("start").length === 1 && role("finish").length === 1 && role("cp").length === 7, `salida, 7 puntos y meta (${role("start").length}/${role("cp").length}/${role("finish").length})`);
+  const start = role("start")[0]!;
+  const conf = start.components["checkpoint@1"] as { vehicle?: string; mode?: string; laps?: number; grid?: number[][]; lights?: number[]; radius: number };
+  const tr = (e: { components: Record<string, unknown> }) => e.components["transform@1"] as { p: [number, number, number]; r: [number, number, number, number] };
+  const sp = tr(start).p;
+  assert(conf.vehicle === "car" && conf.mode === "grid" && conf.laps === 3, "en coche, con parrilla y a tres vueltas");
+  assert(sp[1] > 20 && conf.grid?.length === 8 && conf.grid.every((q) => q[1] === sp[1] && Math.hypot(q[0]! - sp[0], q[2]! - sp[2]) <= conf.radius), `la parrilla, en el cielo (a ${sp[1]} m), con sus ocho cajones`);
+  // Cada punto mira hacia donde sigue la pista (el giro de su transform@1): ahí vuelve quien se cae.
+  const yawOf = (r: number[]) => (Math.atan2(2 * (r[3]! * r[1]! + r[0]! * r[2]!), 1 - 2 * (r[1]! * r[1]! + r[0]! * r[0]!)) * 180) / Math.PI;
+  const turns = role("cp").map((e) => Math.round(yawOf(tr(e).r)));
+  assert(new Set(turns).size >= 3 && Math.round(yawOf(tr(role("finish")[0]!).r)) === -90, `los puntos llevan su rumbo (${turns.join(", ")}) y la meta, hacia el este`);
+  assert(role("cp").every((e) => tr(e).p[1] >= 19), "todos en alto");
+  const tracks = sys.filter((e) => e.components["mesh@1"] && e.entity_id.includes("prop") && (e.components["collider@1"] as { from_mesh?: boolean } | undefined)?.from_mesh);
+  assert(tracks.length === 2 && tracks.every((e) => { const l = (e.components["mesh@1"] as { lods: { tris: number }[] }).lods; return l[l.length - 1]!.tris <= 20_000; }), "dos pistas (el Gran Premio y Vértigo), cada una con su malla de colisión");
+  const boards = sys.filter((e) => (e.components["scoreboard@1"] as { id?: string } | undefined)?.id === "vertigo").map((e) => (e.components["scoreboard@1"] as { period?: string }).period);
+  assert(boards.includes("week") && boards.includes("all"), "marcadores de la semana y de siempre");
+  const doors = sys.filter((e) => (e.components["portal@1"] as { to?: { kind: string; chunk_id?: string } } | undefined)?.to?.chunk_id === "c_1_0").map((e) => ({ y: tr(e).p[1], to: (e.components["portal@1"] as { to: { spawn?: number[] } }).to.spawn }));
+  assert(doors.length === 2 && doors.some((d) => d.y < 3 && d.to?.[1] === sp[1]) && doors.some((d) => d.y > sp[1] && d.to?.[1] === 0), "dos puertas dentro del distrito: del suelo a la plataforma y de vuelta");
+  // Bajo la parrilla y la plataforma hay además una caja (quien llega de un salto aparece antes de que la malla haya cargado).
+  const floor = sys.find((e) => e.entity_id.includes("_solid_") && (e.components["collider@1"] as { shape?: string } | undefined)?.shape === "box");
+  assert(floor && Math.abs(tr(floor).p[1] + (floor.components["collider@1"] as { half_extents: number[] }).half_extents[1]! - sp[1]) < 0.01, "y una caja a ras bajo la parrilla y la plataforma");
+  const send = (cl: XenxoClient, entity_id: string) => {
+    const id = randomUUID();
+    cl.sendRaw(msg("CHECKPOINT", { entity_id }, { id }));
+    return id;
+  };
+  // Desde el suelo, justo debajo de la parrilla y en coche: demasiado lejos (el servidor mira la altura).
+  const g0 = conf.grid![0]!;
+  g.pose([g0[0]!, 1.2, g0[2]!], 0, undefined, { p: [g0[0]!, 0, g0[2]!], inside: true });
+  await sleep(260);
+  const ref = send(g, start.entity_id);
+  const far = await g.next("ERROR", (m) => m.payload.ref === ref);
+  assert(far.payload.code === "forbidden" && (far.payload.detail as { reason?: string } | undefined)?.reason === undefined, "desde el suelo no se entra en la carrera del cielo");
+  // Arriba, en su cajón: se abre la ronda.
+  c.pose([g0[0]!, g0[1]! + 1, g0[2]!], 0, undefined, { p: [g0[0]!, g0[1]!, g0[2]!], inside: true });
+  await sleep(260);
+  const seen = g.next("ROUND", (m) => m.payload.race === "vertigo" && m.payload.state === "countdown");
+  send(c, start.entity_id);
+  const r1 = (await seen).payload;
+  assert(r1.laps === 3 && r1.per_lap === 8 && r1.entrants.length === 1 && r1.entrants[0]!.session_id === c.welcome.session_id, `la ronda: tres vueltas de 8 puertas (${r1.laps} × ${r1.per_lap})`);
+  const over = g.next("ROUND", (m) => m.payload.round === r1.round && m.payload.state === "done");
+  c.close();
+  await over;
+  g.close();
 });
 
 await scenario("carreras de salida conjunta: la parrilla forma la ronda, se sale a la hora del servidor, las puertas van en orden y por vueltas, la clasificación llega a todos y al marcador van solo las cuentas", async () => {

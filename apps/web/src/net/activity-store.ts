@@ -24,6 +24,8 @@ export type ActivityToast =
   | { kind: "guest"; at: number }
   | { kind: "needCar"; at: number }
   | { kind: "gridFull"; at: number }
+  /** Se ha caído de una pista en alto en plena carrera: su coche vuelve al último punto (vehicle/rescue.ts). */
+  | { kind: "rescue"; at: number }
   | { kind: "far"; at: number }
   /** Acabas de llegar de un salto (un «Ir» de la guía, un viaje): las actividades tardan unos segundos en contar. */
   | { kind: "wait"; at: number };

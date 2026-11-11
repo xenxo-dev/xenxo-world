@@ -87,6 +87,7 @@ export function ActivityHud() {
   else if (toast?.kind === "guest") text = t("activity.guest");
   else if (toast?.kind === "needCar") text = t("activity.needCar");
   else if (toast?.kind === "gridFull") text = t("activity.gridFull");
+  else if (toast?.kind === "rescue") text = t("activity.rescue");
   else if (toast?.kind === "wait") text = t("activity.wait");
   else if (toast?.kind === "badge") text = t("activity.badge", { name: toast.name[lang] ?? toast.name.en ?? "" });
   else if (toast?.kind === "tiles") text = toast.state === "won" ? t(accountToken() ? "activity.tilesWon" : "activity.tilesWonGuest") : t("activity.tilesLost");

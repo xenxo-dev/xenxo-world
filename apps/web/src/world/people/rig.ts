@@ -22,6 +22,13 @@ export interface Target {
   z: number;
   /** Peso pedido (0–1); el esqueleto llega a él con suavidad. */
   w: number;
+  /**
+   * Para una mano o un pie: hacia dónde va el codo o la rodilla (mundo). Sin esto (los tres a 0),
+   * hacia donde ya iba en su pose; pero si lo pedido queda lejos de esa pose, eso deja de decir nada.
+   */
+  px: number;
+  py: number;
+  pz: number;
 }
 
 /** Lo que la gente le pide al esqueleto de una persona (vive en su `Motion`). */
@@ -31,9 +38,17 @@ export interface PersonFx {
   look: Target;
   reachL: Target;
   reachR: Target;
+  /**
+   * Dónde tiene que quedar su cadera (mundo): sentado en un asiento que no se mueve con él (el del
+   * coche). Mida lo que mida el avatar y venga de la pose que venga, la cadera cae ahí.
+   */
+  seat: Target;
+  /** Dónde van sus tobillos (mundo), con la rodilla hacia donde ya iba: los pies en los pedales. */
+  footL: Target;
+  footR: Target;
 }
-const target = (): Target => ({ x: 0, y: 0, z: 0, w: 0 });
-export const createFx = (): PersonFx => ({ rig: null, look: target(), reachL: target(), reachR: target() });
+const target = (): Target => ({ x: 0, y: 0, z: 0, w: 0, px: 0, py: 0, pz: 0 });
+export const createFx = (): PersonFx => ({ rig: null, look: target(), reachL: target(), reachR: target(), seat: target(), footL: target(), footR: target() });
 
 const DEG = Math.PI / 180;
 
@@ -182,7 +197,18 @@ export class Rig {
       const n = name === "thorax" ? thorax : this.nodes.get(name);
       if (n) this.parts.push(n);
     }
+    // Lo que mide sentado: de la cadera a la coronilla (en reposo; el cráneo, en proporción).
+    const hips = this.nodes.get("hips"), head = this.nodes.get("head");
+    if (hips && head) {
+      hips.updateWorldMatrix(true, false);
+      head.updateWorldMatrix(true, false);
+      const up = head.getWorldPosition(_a).y - hips.getWorldPosition(_b).y;
+      if (up > 0.3 && up < 1.2) this.sitHeight = up * 1.27;
+    }
   }
+
+  /** De la cadera a la coronilla (m): para saber cuánto hay que recostarlo en un asiento bajo. */
+  sitHeight = 0.82;
 
   private n(name: Bone) {
     return this.nodes.get(name) ?? null;
@@ -480,6 +506,9 @@ export class Rig {
     this.applySprings(dt);
     this.liftNeed[0] = this.liftNeed[1] = -Infinity;
     if (fx) {
+      this.applySeat(fx.seat);
+      this.applyFoot(0, fx.footL);
+      this.applyFoot(1, fx.footR);
       this.applyLook(dt, fx.look);
       this.applyReach(dt, 0, fx.reachL);
       this.applyReach(dt, 1, fx.reachR);
@@ -507,6 +536,77 @@ export class Rig {
     // Los brazos se van un poco hacia el lado contrario (inercia).
     add("leftUpperArm", 0, 0, -b.p * 0.35);
     add("rightUpperArm", 0, 0, b.p * 0.35);
+  }
+
+  /** La cadera, donde está el asiento (quien lo pide ya suaviza su peso: va pegado al coche). */
+  private applySeat(t: Target) {
+    if (t.w < 0.001) return;
+    const hips = this.parts[0] ?? this.n("hips");
+    const root = hips?.parent;
+    if (!hips || !root) return;
+    root.updateWorldMatrix(true, false);
+    _v.set(t.x, t.y, t.z);
+    root.worldToLocal(_v);
+    hips.position.lerp(_v, Math.min(1, t.w));
+  }
+
+  /**
+   * IK de dos huesos de la pierna hacia el tobillo pedido (mundo), con la rodilla hacia donde ya iba.
+   * El pie conserva su giro en el mundo (el de la pose: apoyado en el pedal), se doble como se doble
+   * la pierna. Quien lo pide ya suaviza su peso.
+   */
+  private applyFoot(side: 0 | 1, t: Target) {
+    const w = Math.min(1, t.w);
+    if (w < 0.001) return;
+    const upper = this.n(side ? "rightUpperLeg" : "leftUpperLeg");
+    const lower = this.n(side ? "rightLowerLeg" : "leftLowerLeg");
+    const foot = this.n(side ? "rightFoot" : "leftFoot");
+    if (!upper || !lower || !foot || !upper.parent) return;
+    upper.updateWorldMatrix(true, true);
+    upper.getWorldPosition(_S);
+    lower.getWorldPosition(_E);
+    foot.getWorldPosition(_W);
+    foot.getWorldQuaternion(_qf);
+    const la = _S.distanceTo(_E), lb = _E.distanceTo(_W);
+    _D.set(t.x, t.y, t.z).sub(_S);
+    let dist = _D.length();
+    // Nunca del todo estirada (a quien no llega, la rodilla le queda algo doblada).
+    const max = (la + lb) * 0.94;
+    const min = Math.abs(la - lb) + 0.01;
+    if (dist > max) _D.multiplyScalar(max / dist);
+    else if (dist < min) _D.multiplyScalar(min / Math.max(dist, 1e-4));
+    dist = _D.length();
+    _U.copy(_D).normalize();
+    // La rodilla hacia donde se pida o hacia donde ya iba (respecto a la recta cadera-tobillo nueva).
+    if (t.px || t.py || t.pz) _N.set(t.px, t.py, t.pz);
+    else _N.copy(_E).sub(_S);
+    _N.addScaledVector(_U, -_N.dot(_U));
+    if (_N.lengthSq() < 1e-8) _N.set(0, 1, 0);
+    _N.normalize();
+    const x = (la * la + dist * dist - lb * lb) / (2 * dist);
+    const h = Math.sqrt(Math.max(0, la * la - x * x));
+    _v.copy(_E).sub(_S).normalize();
+    _w.copy(_U).multiplyScalar(x).addScaledVector(_N, h).normalize();
+    _q.setFromUnitVectors(_v, _w);
+    upper.getWorldQuaternion(_q2).premultiply(_q);
+    upper.parent.getWorldQuaternion(_qr);
+    _q3.copy(_qr).invert().multiply(_q2);
+    upper.quaternion.slerp(_q3, w);
+    upper.updateWorldMatrix(false, true);
+    lower.getWorldPosition(_E);
+    foot.getWorldPosition(_W);
+    _v.copy(_W).sub(_E).normalize();
+    _w.copy(_S).add(_D).sub(_E).normalize();
+    _q.setFromUnitVectors(_v, _w);
+    lower.getWorldQuaternion(_q2).premultiply(_q);
+    upper.getWorldQuaternion(_qr);
+    _q3.copy(_qr).invert().multiply(_q2);
+    lower.quaternion.slerp(_q3, w);
+    lower.updateWorldMatrix(false, true);
+    // El pie, como estaba en el mundo.
+    lower.getWorldQuaternion(_qr);
+    _q3.copy(_qr).invert().multiply(_qf);
+    foot.quaternion.slerp(_q3, w);
   }
 
   private applyLook(dt: number, t: Target) {
@@ -553,8 +653,9 @@ export class Rig {
     else if (dist < min) _D.multiplyScalar(min / Math.max(dist, 1e-4));
     dist = _D.length();
     _U.copy(_D).normalize();
-    // El codo hacia donde ya iba (respecto a la recta hombro-mano nueva).
-    _N.copy(_E).sub(_S);
+    // El codo hacia donde se pida o hacia donde ya iba (respecto a la recta hombro-mano nueva).
+    if (t.px || t.py || t.pz) _N.set(t.px, t.py, t.pz);
+    else _N.copy(_E).sub(_S);
     _N.addScaledVector(_U, -_N.dot(_U));
     if (_N.lengthSq() < 1e-8) _N.set(0, -1, 0);
     _N.normalize();
@@ -582,6 +683,7 @@ export class Rig {
   }
 }
 
+const _qf = new THREE.Quaternion();
 const _S = new THREE.Vector3();
 const _E = new THREE.Vector3();
 const _W = new THREE.Vector3();

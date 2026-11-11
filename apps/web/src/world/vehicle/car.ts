@@ -25,16 +25,36 @@ export const CAR = {
   hingeR: { x: -1.087, y: 0.643, z: 0.998 },
   doorOpen: 1.05,
   /**
-   * Quien conduce va en el centro (es un concept con el puesto de mando central) y recostado, como en
-   * un deportivo de verdad (sentado como en una silla, la cabeza atravesaba el techo): dónde queda su
-   * cadera, cuánto se echa hacia atrás (rad), sus ojos (primera persona) y dónde se pone de pie fuera,
-   * entre la puerta abierta y la carrocería. En la animación de sentarse (sit_idle) la cadera queda
-   * 54 cm por encima de los pies y 33 cm por detrás.
+   * Quien conduce va en el centro (es un concept con el puesto de mando central), sentado en su
+   * asiento de verdad: un baquet hondo, con el cojín a 12 cm del suelo en lo más bajo (z = 0,65), que
+   * sube hasta 29 cm en el borde de delante (z = 1,0), y el respaldo echado atrás (de z = 0,49 a la
+   * altura de la cadera a z = 0,22 a la de la nuca). `driverHips`: dónde queda su cadera (9 cm sobre
+   * el cojín, 12 por delante del respaldo); `lean`: cuánto va recostado (rad); `grip`: dónde se coge
+   * el aro del volante a las nueve y las tres (el aro va de y = 0,51 a 0,79, inclinado) y `wrist`,
+   * dónde queda la muñeca con la mano cerrada sobre él (x: la izquierda; la derecha, en espejo).
+   * `sitHips`: en la animación de sentarse (sit_enter) la cadera acaba 54 cm por encima de los pies y
+   * 33 por detrás (para subir y bajar; sentado, la cadera la fija el asiento: people/rig.ts → `seat`).
+   * `eye`: sus ojos (primera persona). `entry`: dónde se pone de pie fuera, entre la puerta abierta y
+   * la carrocería.
    */
-  driverHips: { x: 0, y: 0.28, z: 0.12 },
-  lean: 0.42,
+  driverHips: { x: 0, y: 0.22, z: 0.63 },
+  lean: 0.45,
+  grip: { x: 0.165, y: 0.64, z: 0.93 },
+  wrist: { x: 0.19, y: 0.645, z: 0.855 },
+  /**
+   * Los pedales: dónde quedan los tobillos (el izquierdo, en el reposapiés; el derecho, en el
+   * acelerador), a los lados de la columna del volante, con el talón en el suelo (a 9 cm).
+   */
+  ankleL: { x: 0.2, y: 0.18, z: 1.33 },
+  ankleR: { x: -0.19, y: 0.19, z: 1.37 },
+  /**
+   * El techo: lo más alto que puede quedar la coronilla sobre la cadera (el forro está a 1,05 m del
+   * suelo). A quien mide más sentado se le recuesta más (`leanFor`), hasta `leanMax`.
+   */
+  headroom: 0.78,
+  leanMax: 0.62,
   sitHips: { up: 0.54, back: 0.33 },
-  eye: { x: 0, y: 0.93, z: 0.3 },
+  eye: { x: 0, y: 0.9, z: 0.4 },
   entry: { x: 1.62, z: -0.3 },
   /** Pinturas de serie (la de cada coche sale de quien lo conduce). */
   paints: ["#a3121b", "#16181d", "#e6e7ea", "#59616d", "#1c3d78", "#0e5a49", "#c99a1f", "#5e1b52"],
@@ -134,16 +154,29 @@ export interface Drive {
 }
 
 /**
- * Dónde van los pies de quien conduce (en ejes del coche) para que, echado `lean` hacia atrás, su
- * cadera caiga en `driverHips`. El giro del personaje es: el del coche · inclinación (−lean en X) ·
- * media vuelta en Y (los personajes miran a −Z).
+ * Dónde va la raíz (los pies) de quien se sienta (en ejes del coche) para que, echado `lean` hacia
+ * atrás y con la pose de sentarse, su cadera caiga en `driverHips`. El giro del personaje es: el del
+ * coche · inclinación (−lean en X) · media vuelta en Y (los personajes miran a −Z). Sin objetos
+ * nuevos si se le pasa dónde escribir.
  */
-export function driverRoot(lean: number = CAR.lean): { x: number; y: number; z: number } {
+export function driverRoot(lean: number = CAR.lean, out: { x: number; y: number; z: number } = { x: 0, y: 0, z: 0 }): { x: number; y: number; z: number } {
   const t = -lean;
   const y0 = CAR.sitHips.up, z0 = -CAR.sitHips.back; // la cadera respecto a los pies, ya girada media vuelta
   const y = y0 * Math.cos(t) - z0 * Math.sin(t);
   const z = y0 * Math.sin(t) + z0 * Math.cos(t);
-  return { x: CAR.driverHips.x, y: CAR.driverHips.y - y, z: CAR.driverHips.z - z };
+  out.x = CAR.driverHips.x;
+  out.y = CAR.driverHips.y - y;
+  out.z = CAR.driverHips.z - z;
+  return out;
+}
+
+/**
+ * Cuánto va recostado (rad) quien mide `sitHeight` de la cadera a la coronilla: lo del asiento y, si
+ * no cabe bajo el techo, lo que haga falta (los personajes van de 1,49 a 2,02 m).
+ */
+export function leanFor(sitHeight: number): number {
+  const need = Math.acos(Math.min(1, CAR.headroom / Math.max(0.3, sitHeight)));
+  return Math.min(CAR.leanMax, Math.max(CAR.lean, need));
 }
 
 /** Pintura del coche de alguien (siempre la misma para la misma sesión). */

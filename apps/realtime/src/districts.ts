@@ -20,9 +20,19 @@ interface DistrictActivities {
   /**
    * `vehicle`, `mode`, `laps`, `grid` (los cajones de la parrilla, que también pinta la forja) y
    * `lights` (el semáforo) van en la salida (checkpoint@1); `start.yaw`: hacia dónde se sale (grados,
-   * como las placas de impulso).
+   * como las placas de impulso). Cada punto (y la meta) puede decir hacia dónde va la pista ahí
+   * (su cuarto valor, o `finish.yaw`: el giro de su `transform@1`): a quien se cae de una pista en
+   * alto, su coche lo devuelve al último que pasó, mirando hacia ahí.
    */
-  races?: { id: string; radius: number; start: { p: V3; radius: number; yaw?: number }; cps: V3[]; finish: { p: V3; radius: number }; vehicle?: "car"; mode?: "grid"; laps?: number; grid?: V3[]; lights?: V3 }[];
+  races?: { id: string; radius: number; start: { p: V3; radius: number; yaw?: number }; cps: (V3 | [number, number, number, number])[]; finish: { p: V3; radius: number; yaw?: number }; vehicle?: "car"; mode?: "grid"; laps?: number; grid?: V3[]; lights?: V3 }[];
+  /**
+   * Cajas sólidas sueltas (collider@1, sin modelo): el suelo de reserva de algo que es una malla
+   * (la plataforma y la parrilla de la pista del cielo: quien llega ahí de un salto aparece antes de
+   * que la malla haya cargado).
+   */
+  solids?: { p: V3; half: V3 }[];
+  /** Puertas dentro del distrito (portal@1 al mismo lugar): se cruzan a pie y se aparece en `to`. */
+  portals?: { p: V3; yaw: number; size: [number, number]; color?: string; title: { es: string; en: string }; to: { p: V3; yaw: number } }[];
   boosts?: { p: V3; yaw: number; speed?: number; seconds?: number; radius?: number }[];
   cabinets?: { p: V3; yaw: number }[];
   /** Anuncios de fachada (Distrito Cero): centro, giro y medida; los llena el Worker (syncBillboards). */
@@ -325,9 +335,20 @@ export function districtSeed(d: District, toNexo: { p: V3; yaw: number }): Seede
       { ...(rc.vehicle ? { vehicle: rc.vehicle } : {}), ...(rc.mode ? { mode: rc.mode } : {}), ...(rc.laps ? { laps: rc.laps } : {}), ...(rc.grid?.length ? { grid: rc.grid } : {}), ...(rc.lights ? { lights: rc.lights } : {}) },
       yaw(rc.start.yaw ?? 0),
     );
-    rc.cps.forEach((p, n) => cp(`${d.id}_${rc.id}_cp${n + 1}`, p, "cp", n + 1, rc.radius));
-    cp(`${d.id}_${rc.id}_finish`, rc.finish.p, "finish", 0, rc.finish.radius);
+    rc.cps.forEach((p, n) => cp(`${d.id}_${rc.id}_cp${n + 1}`, [p[0], p[1], p[2]], "cp", n + 1, rc.radius, {}, p.length > 3 ? yaw(p[3]!) : undefined));
+    cp(`${d.id}_${rc.id}_finish`, rc.finish.p, "finish", 0, rc.finish.radius, {}, rc.finish.yaw === undefined ? undefined : yaw(rc.finish.yaw));
   }
+  (acts?.solids ?? []).forEach((b, n) => solid(`${d.id}_solid_${n + 1}`, b.p, b.half));
+  /* --- Puertas dentro del distrito (a pie): del suelo a la pista del cielo y vuelta --- */
+  (acts?.portals ?? []).forEach((pt, n) =>
+    out.push({
+      id: `${d.id}_door_${n + 1}`,
+      components: {
+        "transform@1": { p: pt.p, r: yaw(pt.yaw), s: [1, 1, 1], parent: null },
+        "portal@1": { to: { kind: "chunk", chunk_id: d.chunk, spawn: pt.to.p, yaw: pt.to.yaw }, size: pt.size, title: pt.title.en, i18n: pt.title, ...(pt.color ? { color: pt.color } : {}) },
+      } as Components,
+    }),
+  );
   for (const tb of acts?.tiles ?? []) {
     out.push({
       id: `${d.id}_tiles_${tb.id}`,
