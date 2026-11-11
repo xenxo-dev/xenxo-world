@@ -336,29 +336,33 @@ await scenario("modo pelea con vida: cada golpe resta (lo ven ella y los de cerc
   const hurtB = b.next("HEALTH", (m) => m.payload.session_id === B && m.payload.hp === 90, 3000);
   send(a, "HIT", { to: B, move: "punch" });
   await Promise.all([hurt, hurtB]);
-  // Deslizándose (su pose lo dice), el puñetazo le pasa por encima.
+  // Deslizándose (su pose lo dice), el puñetazo le pasa por encima. (Entre golpe y golpe el servidor pide
+  // 600 ms: se espera con margen, que en una máquina cargada un mensaje se retrasa lo suyo.)
   at([41, 1.6, 120], "pk_slide");
-  await sleep(700);
+  await sleep(800);
   const dodged = a.next("ERROR", (m) => (m.payload.detail as { reason?: string } | undefined)?.reason === "dodged", 3000);
   send(a, "HIT", { to: B, move: "punch" });
   await dodged;
   // La barrida tira (y quita su parte).
   at([41, 1.6, 120]);
-  await sleep(700);
+  await sleep(800);
   const swept = b.next("HIT_EVENT", (m) => m.payload.from === A && m.payload.move === "slide" && m.payload.fall, 3000);
   const after = b.next("HEALTH", (m) => m.payload.session_id === B && m.payload.hp === 78, 3000);
   send(a, "HIT", { to: B, move: "slide" });
   await Promise.all([swept, after]);
   // Ya levantado (pasado el rato en que no se le puede dar, con margen por la red), a puñetazos hasta
-  // cero: fuera de combate hasta `down_until`. Uno de más por si alguno llega aún en ese rato (los de
-  // después de caer se ignoran).
+  // cero: fuera de combate hasta `down_until`. Hacen falta ocho; se dan hasta que caiga (con tope),
+  // uno cada 750 ms: con los justos y a 650 ms, en una máquina cargada dos llegaban antes de tiempo
+  // (el servidor pide 600 ms entre golpe y golpe), no contaban y no se llegaba a cero.
   await sleep(2900);
-  const ko = b.next("HEALTH", (m) => m.payload.session_id === B && m.payload.hp === 0 && !!m.payload.down_until, 12_000);
-  const koEv = a.next("HIT_EVENT", (m) => m.payload.to === B && m.payload.ko === true && m.payload.fall, 12_000);
-  for (let i = 0; i < 9; i++) {
+  const ko = b.next("HEALTH", (m) => m.payload.session_id === B && m.payload.hp === 0 && !!m.payload.down_until, 14_000);
+  const koEv = a.next("HIT_EVENT", (m) => m.payload.to === B && m.payload.ko === true && m.payload.fall, 14_000);
+  let out = false;
+  void ko.then(() => (out = true), () => {});
+  for (let i = 0; i < 14 && !out; i++) {
     at([41, 1.6, 120]);
     send(a, "HIT", { to: B, move: "punch" });
-    await sleep(650);
+    await sleep(750);
   }
   const [down] = await Promise.all([ko, koEv]);
   // Fuera de combate no se golpea, no se le puede golpear y reaparecer antes de tiempo no vale.
