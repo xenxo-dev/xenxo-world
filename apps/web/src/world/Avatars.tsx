@@ -5,12 +5,15 @@ import * as THREE from "three";
 import type { AvatarRef } from "@xenxo/protocol";
 import { assetUrl } from "../config";
 import { t } from "../i18n";
-import { BUBBLE_MS, chat, useChatVersion, useWorldVersion, world } from "../net/world-store";
+import { BUBBLE_MS, chat, useChatVersion, useWorldVersion, world, type PoseSample } from "../net/world-store";
+import { Catchup, cursor, seek } from "../net/playout";
 import { people } from "../net/people-store";
 import { remoteFeet } from "./people/where";
 import { self } from "./self";
 import { RemotePeople, type RemoteDraw } from "./people/remotePeople";
-import { walkAmount } from "./avatar-model";
+import { freezable, walkAmount } from "./avatar-model";
+import { crowdFrame, crowdView, joinCrowd, leaveCrowd, type CrowdEntry } from "./crowd";
+import { graphics } from "./graphics";
 import { groundHeight } from "./collision";
 import { CustomAvatar } from "./CustomAvatar";
 import { FONT_URL } from "./font";
@@ -33,12 +36,20 @@ const _seatQ = new THREE.Quaternion()
   .setFromAxisAngle(new THREE.Vector3(1, 0, 0), -CAR.lean)
   .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI));
 
-/** Se dibuja a los demás con este retraso para tener siempre dos poses entre las que interpolar (a 5 Hz llegan cada 200 ms). */
-const INTERP_DELAY_MS = 320;
+/** Entre qué dos muestras de alguien toca dibujar (net/playout.ts): uno para todos, sin objetos nuevos por frame. */
+const _cur = cursor();
+const _old = new THREE.Vector3();
+/** La cabeza de alguien en la hora `rt`, entre sus muestras (o siguiendo más allá de la última). */
+function headAt(buf: readonly PoseSample[], rt: number, out: THREE.Vector3): THREE.Vector3 {
+  seek(buf, rt, _cur);
+  return out.fromArray(buf[_cur.i0]!.head.p).lerp(_b.fromArray(buf[_cur.i1]!.head.p), _cur.k);
+}
 /** Sin poses nuevas en este tiempo (lugares grandes), la persona está lejos: no se dibuja. */
 const STALE_MS = 3500;
 /** En los lugares grandes, más lejos de esto (m) no se dibuja a nadie (las poses llegan a menos de 70: AOI_RADIUS). */
 const FAR = 75;
+/** Más lejos de esto (m) no se dibuja el nombre de nadie: no se lee, y es una llamada de dibujo por persona. */
+const NAME_FAR = 28;
 export const EYE_HEIGHT = 1.6;
 
 const _a = new THREE.Vector3();
@@ -145,13 +156,14 @@ export function DefaultAvatar({ color, motion }: { color: THREE.ColorRepresentat
  */
 /** `avatar`: el suyo; sin él, uno de serie según `seed`; `null`: aún no se sabe (solo el muñeco). */
 /** `extra`: gente de decorado (peatones, residentes): sin sombra. */
-export function AvatarBody({ avatar, seed, motion, extra = false, onLoad }: { avatar?: AvatarRef | null; seed: string; motion: Motion; extra?: boolean; onLoad?: (loaded: boolean) => void }) {
+/** `lite`: la versión ligera del avatar de serie (quien llega cuando ya hay mucha gente), con su sombra. */
+export function AvatarBody({ avatar, seed, motion, extra = false, lite = false, onLoad }: { avatar?: AvatarRef | null; seed: string; motion: Motion; extra?: boolean; lite?: boolean; onLoad?: (loaded: boolean) => void }) {
   useFrame((_, dt) => advance(motion, Math.min(dt, 0.1)));
   const fallback = <DefaultAvatar color={colorFor(seed)} motion={motion} />;
   if (avatar === null) return fallback;
   const preset = avatar ? null : presetFor(seed);
   // La gente de decorado lleva la versión ligera del avatar de serie (un tercio de los triángulos).
-  const url = avatar ? assetUrl(avatar.hash) : preset ? assetUrl(extra && preset.lite ? preset.lite : preset.hash) : null;
+  const url = avatar ? assetUrl(avatar.hash) : preset ? assetUrl((extra || lite) && preset.lite ? preset.lite : preset.hash) : null;
   return <CustomAvatar url={url} fallback={fallback} motion={motion} extra={extra} onLoad={onLoad} />;
 }
 
@@ -179,6 +191,21 @@ export function ChatBubble({ sessionId, self }: { sessionId?: string; self?: boo
       </Text>
     </Billboard>
   );
+}
+
+/** ¿Hay ya `full` personas más cerca de quien juega que esta? (Al montarla: entonces lleva la versión ligera.) */
+function crowdedFor(id: string, full: number): boolean {
+  if (world.peers.size <= full) return false;
+  const mine = world.poseBuffers.get(id);
+  const me = mine?.[mine.length - 1]?.head.p;
+  if (!me) return true;
+  const d = (me[0] - self.x) ** 2 + (me[2] - self.z) ** 2;
+  let nearer = 0;
+  for (const [other, buf] of world.poseBuffers) {
+    const p = other === id ? null : buf[buf.length - 1]?.head.p;
+    if (p && (p[0] - self.x) ** 2 + (p[2] - self.z) ** 2 < d && ++nearer >= full) return true;
+  }
+  return false;
 }
 
 function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; name: string; avatar?: AvatarRef; paint: string }) {
@@ -214,43 +241,91 @@ function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; n
     remoteFeet.set(sessionId, feetAt);
     return () => void remoteFeet.delete(sessionId);
   }, [sessionId, feetAt]);
+  /** Lo que queda por deshacer cuando la muestra que se esperaba llega y no cae donde se la suponía (net/playout.ts). */
+  const catchup = useRef(new Catchup()).current;
+  // Entre mucha gente (crowd.ts): quien no se ve no se toca y a los de más lejos no les toca a cada
+  // frame. Y quien llega cuando ya hay mucha lleva la versión ligera de su avatar de serie.
+  const crowd = useRef<CrowdEntry | null>(null);
+  const lite = useRef(crowdedFor(sessionId, graphics.features.crowd)).current;
+  const label = useRef<THREE.Group>(null);
+  const placed = useRef(false);
+  useEffect(() => {
+    const e = joinCrowd(motion);
+    crowd.current = e;
+    if (body.current) freezable(body.current);
+    return () => {
+      leaveCrowd(e);
+      crowd.current = null;
+    };
+  }, [motion]);
 
   useFrame((_, dt) => {
     const buf = world.poseBuffers.get(sessionId);
     if (!buf || buf.length === 0 || !body.current) return;
-    const rt = world.serverNow() - INTERP_DELAY_MS;
+    const rt = world.playTime(sessionId);
+    const newest = buf[buf.length - 1]!.t;
     // En los lugares grandes solo llegan las poses de quien está cerca: quien se aleja deja de
     // actualizarse y se oculta (no se queda congelado donde se le vio por última vez).
-    body.current.visible = !world.big || rt - buf[buf.length - 1]!.t < STALE_MS;
+    body.current.visible = !world.big || rt - newest < STALE_MS;
 
-    let i = buf.length - 1;
-    while (i > 0 && buf[i - 1]!.t > rt) i--;
-    const s1 = buf[i]!;
-    const s0 = buf[Math.max(0, i - 1)]!;
-    const span = s1.t - s0.t;
-    const k = span > 0 ? THREE.MathUtils.clamp((rt - s0.t) / span, 0, 1) : 1;
-
-    _a.fromArray(s0.head.p).lerp(_b.fromArray(s1.head.p), k);
-    _qa.fromArray(s0.head.r).slerp(_qb.fromArray(s1.head.r), k);
-    // Quien lleva a los ciudadanos recibe las poses de todo el lugar (§9 nonies): se dibuja (y se
-    // anima) solo a quien está tan cerca como para que le llegaran sin eso.
-    if (world.big && (_a.x - self.x) ** 2 + (_a.z - self.z) ** 2 > FAR * FAR) body.current.visible = false;
-    motion.hidden = !body.current.visible;
-
-    // Velocidad horizontal medida entre frames, suavizada: de ella sale el paso.
+    // Se iba siguiendo más allá de su última muestra y ha llegado la siguiente: en vez de saltar a
+    // donde cae con ella, la diferencia se deshace en un momento.
+    const redo = catchup.redo(newest);
+    if (!Number.isNaN(redo)) {
+      headAt(buf, redo, _old);
+      catchup.absorb(_old.x, _old.y, _old.z);
+    }
+    headAt(buf, rt, _a);
+    const s0 = buf[_cur.i0]!, s1 = buf[_cur.i1]!;
+    const k = _cur.k;
+    _qa.fromArray(s0.head.r).slerp(_qb.fromArray(s1.head.r), _cur.kr).normalize();
+    catchup.frame(rt, newest, _cur.over > 0, _a.x, _a.y, _a.z, dt);
+    // La velocidad del paso sale de lo que dan las muestras solas; lo que se dibuja lleva además el desajuste.
     const step = Number.isNaN(last.x) ? 0 : Math.hypot(_a.x - last.x, _a.z - last.z);
     last.copy(_a);
+    _a.x += catchup.x;
+    _a.y += catchup.y;
+    _a.z += catchup.z;
+    // Quien lleva a los ciudadanos recibe las poses de todo el lugar (§9 nonies): se dibuja (y se
+    // anima) solo a quien está tan cerca como para que le llegaran sin eso.
+    const far2 = (_a.x - self.x) ** 2 + (_a.z - self.z) ** 2;
+    if (world.big && far2 > FAR * FAR) body.current.visible = false;
+    // Dónde está, para la cuenta del frame que viene; y lo decidido para este: fuera de la vista no
+    // se dibuja ni se anima, y si no le toca se queda como estaba.
+    const ce = crowd.current;
+    const shown = body.current.visible;
+    if (ce) {
+      ce.x = _a.x;
+      ce.y = _a.y;
+      ce.z = _a.z;
+      ce.d2 = far2;
+      ce.shown = shown;
+      ce.lively = placed.current || people.fighters.has(sessionId);
+      if (!ce.inView) body.current.visible = false;
+    }
+    motion.hidden = !body.current.visible;
+    body.current.userData.frozen = motion.hidden || !!motion.skip;
+    if (label.current) label.current.visible = far2 < NAME_FAR * NAME_FAR;
+
+    // Velocidad horizontal medida entre frames, suavizada: de ella sale el paso.
     if (dt > 0) smoothSpeed(motion, step / dt, dt);
 
     // El coche: entre sus dos últimas poses, como la persona.
     const c1 = s1.car;
     if (c1 && !hasCar) setHasCar(true);
-    car.visible = !!c1 && body.current.visible;
+    // (Su coche puede estar aparcado en otro sitio: se ve aunque ella quede fuera de la vista.)
+    car.visible = !!c1 && shown;
     if (c1) {
       const c0 = s0.car ?? c1;
       const was = _cp.copy(car.p);
       car.p.fromArray(c0.p).lerp(_b.fromArray(c1.p), k);
-      car.q.fromArray(c0.r).slerp(_cq.fromArray(c1.r), k);
+      car.q.fromArray(c0.r).slerp(_cq.fromArray(c1.r), _cur.kr).normalize();
+      // Conduciendo, el coche va con la persona: lleva su mismo desajuste (si no, daría él el salto).
+      if (s1.vehicle === "car") {
+        car.p.x += catchup.x;
+        car.p.y += catchup.y;
+        car.p.z += catchup.z;
+      }
       // Las ruedas giran con lo que avanza (hacia delante o hacia atrás).
       const dz = was.sub(car.p).negate();
       _b.set(0, 0, 1).applyQuaternion(car.q);
@@ -276,6 +351,7 @@ function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; n
       const yaw = _e.setFromQuaternion(_qa, "YXZ").y;
       // Golpes, caídas y parejas (lo dibuja este cliente al llegar, sin esperar a su pose).
       const d = rp.current ? rp.current.frame(dt, body.current, _a.x, feet, _a.z, yaw, s1.emote ?? null, _draw) : plain(_a.x, feet, _a.z, yaw, s1.emote ?? null);
+      placed.current = d.placed;
       // Parkour (world/parkour): lo que está haciendo lo dibuja la animación con su propio reloj.
       const pkE = d.emote?.startsWith("pk_") ? d.emote : null;
       motion.pk = pkE;
@@ -356,15 +432,17 @@ function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; n
       )}
       <group ref={body}>
         <group ref={person}>
-          <AvatarBody avatar={avatar} seed={sessionId} motion={motion} />
+          <AvatarBody avatar={avatar} seed={sessionId} motion={motion} lite={lite} />
         </group>
         <HeldWeapon motion={motion} who={sessionId} />
         <Suspense fallback={null}>
-          <Billboard position={[0, 2.15, 0]}>
-            <Text font={FONT_URL} fontSize={0.22} color="#ffffff" outlineWidth={0.02} outlineColor="#000000">
-              {name}
-            </Text>
-          </Billboard>
+          <group ref={label}>
+            <Billboard position={[0, 2.15, 0]}>
+              <Text font={FONT_URL} fontSize={0.22} color="#ffffff" outlineWidth={0.02} outlineColor="#000000">
+                {name}
+              </Text>
+            </Billboard>
+          </group>
           <ChatBubble sessionId={sessionId} />
         </Suspense>
       </group>
@@ -374,6 +452,14 @@ function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; n
 
 export function Avatars() {
   useWorldVersion();
+  // Antes que nadie en cada frame: la hora con la que se dibuja a todos y el ajuste del reloj; y,
+  // entre mucha gente, a quién le toca este frame (crowd.ts).
+  useFrame((state) => {
+    world.frame();
+    crowdView(state.camera);
+    const f = graphics.features;
+    crowdFrame(f.crowd, f.shadows > 0);
+  }, -1);
   return (
     <>
       {[...world.peers.values()].map((p) => (

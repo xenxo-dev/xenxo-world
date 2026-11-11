@@ -3,7 +3,8 @@
  *
  * - Es la ÚNICA puerta de escritura del mundo: humanos y agentes pasan por aquí.
  * - Estado vivo en su SQLite (entidades, log de eventos, claves de idempotencia).
- * - Poses efímeras en memoria, repartidas en lotes a TICK_HZ como mucho (casi sin temporizadores: el objeto hiberna).
+ * - Poses efímeras en memoria, cada una con la hora en que se tomó (pose-clock.ts), repartidas al momento con
+ *   poca gente y en lotes con más (casi sin temporizadores: el objeto hiberna).
  * - WebSocket Hibernation: cuando no hay mensajes, el objeto duerme y no factura duración.
  */
 import { DurableObject } from "cloudflare:workers";
@@ -65,6 +66,7 @@ import { ACTIVITY_SCHEMA, activityKey, ARRIVALS_FREE, ARRIVALS_WINDOW_MS, isoWee
 import { SEED_ASSETS } from "./seed-assets";
 import { figureFor, pointsDay, TILES_IDLE_MS, TILES_PAUSE_MS, TILES_SCHEMA, TILES_START_MS, tileAt, tilesRoundMs, type TileBoard, type TileGame } from "./tiles";
 import { isAvatarPreset } from "./avatar-presets-check";
+import { allowSample, batchGap, roundP, roundR, stampSample, type PoseClock } from "./pose-clock";
 import { damageOf, dodges, DOWN_IMMUNE_MS, DUEL_WINDOW_MS, HIT_GAP_MS, HIT_MAX_DY, hitOutcome, moveAllowed, PAIR_OFFER_RANGE, PAIR_START_RANGE, PAIR_TTL_MS, REACH, REACT_GAP_MS, styleOf } from "./people";
 
 const TICK_HZ = 8;
@@ -129,7 +131,6 @@ const CHAT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const CHAT_KEEP = 2000;
 const CHAT_TRIM_EVERY = 100;
 const MAX_MESSAGE_BYTES = 64 * 1024;
-const MIN_POSE_INTERVAL_MS = 1000 / BUDGETS.maxPoseHz - 5;
 /**
  * Mensajes por conexión (de cualquier tipo): un cubo de MSG_BURST que se rellena a MSG_RATE por
  * segundo; cada 8 KB cuentan uno más. Quien lo vacía se queda sin conexión (4008). Las poses a 15 Hz,
@@ -262,6 +263,9 @@ export class ChunkRoom extends DurableObject<Env> {
   private poses = new Map<string, AvatarPose>();
   private dirty = new Set<string>();
   private lastPoseAt = new Map<string, number>();
+  /** De cada sesión: su reloj (para fechar cada muestra como se tomó) y su tope de frecuencia (pose-clock.ts). */
+  private poseClocks = new Map<string, PoseClock>();
+  private poseTat = new Map<string, number>();
   private mutationLog = new Map<string, number[]>();
   private chatLog = new Map<string, number[]>();
   private activityLog = new Map<string, number[]>();
@@ -609,24 +613,35 @@ export class ChunkRoom extends DurableObject<Env> {
       case "POSE": {
         if (this.solo) return; // en solitario no se reparten poses
         const now = Date.now();
-        if (now - (this.lastPoseAt.get(att.session_id) ?? 0) < MIN_POSE_INTERVAL_MS) return; // descarta en silencio
+        // De media, maxPoseHz como mucho; el exceso se descarta en silencio. Las que llegan juntas tras
+        // un atasco de la red pasan (cada una con la hora en que se tomó).
+        const tat = allowSample(this.poseTat.get(att.session_id), now, BUDGETS.maxPoseHz);
+        if (tat < 0) return;
         const { emote, vehicle } = m.payload;
         // El arma en la mano: donde hay armas, en el modo pelea y una que pueda usar (si no, fuera).
         const weapon = m.payload.weapon && att.fight && this.weaponsHere && !vehicle && this.weaponsOf(att).includes(m.payload.weapon) ? m.payload.weapon : undefined;
         const headR = unitQuat(m.payload.head.r);
         if (!headR || !this.inBounds(m.payload.head.p)) return;
+        this.poseTat.set(att.session_id, tat);
         this.lastPoseAt.set(att.session_id, now);
-        const head = { p: m.payload.head.p, r: headR };
+        // Cuándo se tomó (pose-clock.ts): con eso los demás la dibujan a velocidad uniforme.
+        this.poseClocks.set(att.session_id, stampSample(this.poseClocks.get(att.session_id), m.payload.t, now));
+        // Lo que viaja a los demás va con milímetros y diezmilésimas: un tercio menos de bytes.
+        const trim = (q: { p: readonly number[]; r: readonly number[] }, r: readonly number[]) => ({
+          p: [roundP(q.p[0]!), roundP(q.p[1]!), roundP(q.p[2]!)] as [number, number, number],
+          r: [roundR(r[0]!), roundR(r[1]!), roundR(r[2]!), roundR(r[3]!)] as [number, number, number, number],
+        });
+        const head = trim(m.payload.head, headR);
         // Las manos, con la cabeza (y con su giro normalizado); si no, no se reparten.
         const hand = (h: typeof m.payload.hand_l) => {
           const r = h && unitQuat(h.r);
-          return h && r && Math.hypot(h.p[0] - head.p[0], h.p[1] - head.p[1], h.p[2] - head.p[2]) <= HAND_REACH ? { p: h.p, r } : undefined;
+          return h && r && Math.hypot(h.p[0] - head.p[0], h.p[1] - head.p[1], h.p[2] - head.p[2]) <= HAND_REACH ? trim(h, r) : undefined;
         };
         const hand_l = hand(m.payload.hand_l), hand_r = hand(m.payload.hand_r);
         // Coches solo en los distritos (en la plaza se va a pie) y dentro de sus límites.
         const roads = !!districtByChunk(this.chunkId!);
         const carR = m.payload.car && unitQuat(m.payload.car.r);
-        const car = m.payload.car && carR ? { p: m.payload.car.p, r: carR } : undefined;
+        const car = m.payload.car && carR ? trim(m.payload.car, carR) : undefined;
         const withCar = roads && car && this.inBounds(car.p) ? { car, ...(vehicle ? { vehicle } : {}) } : {};
         const jump = this.trackMove(ws, att, head.p, now);
         this.poses.set(att.session_id, { session_id: att.session_id, head, ...(hand_l ? { hand_l } : {}), ...(hand_r ? { hand_r } : {}), ...(emote ? { emote } : {}), ...withCar, ...(att.fight ? { fight: true } : {}), ...(weapon ? { weapon } : {}) });
@@ -690,6 +705,8 @@ export class ChunkRoom extends DurableObject<Env> {
     this.poses.delete(att.session_id);
     this.dirty.delete(att.session_id);
     this.lastPoseAt.delete(att.session_id);
+    this.poseClocks.delete(att.session_id);
+    this.poseTat.delete(att.session_id);
     this.activityLog.delete(att.session_id);
     this.buckets.delete(att.session_id);
     this.moves.delete(att.session_id);
@@ -787,14 +804,17 @@ export class ChunkRoom extends DurableObject<Env> {
   /* ---------------------------------------------------------------- */
 
   /**
-   * Reparte las poses pendientes a TICK_HZ como mucho. Si ha pasado el intervalo, al momento (sin
-   * temporizador); si no, deja uno corto para lo que falte. Un temporizador pendiente impide que el
-   * objeto hiberne, y ese tiempo cuenta como duración (plan gratuito: 13.000 GB-s al día): así solo
-   * lo hay cuando varias poses llegan dentro del mismo intervalo, no mientras haya alguien en el chunk.
+   * Reparte las poses pendientes. Con poca gente mandándolas, al momento: lo que una pose espera
+   * aquí es retraso con el que la ven los demás. Con más, en lotes (`batchGap`: a TICK_HZ como poco),
+   * que es lo que mantiene a raya los mensajes que recibe cada uno: si ha pasado el intervalo, al
+   * momento (sin temporizador); si no, se deja uno corto para lo que falte. Un temporizador
+   * pendiente impide que el objeto hiberne, y ese tiempo cuenta como duración (plan gratuito:
+   * 13.000 GB-s al día): así solo lo hay cuando varias poses llegan dentro del mismo intervalo, no
+   * mientras haya alguien en el chunk.
    */
   private scheduleTick() {
     if (this.dirty.size === 0) return;
-    const wait = this.lastTick + 1000 / TICK_HZ - 20 - Date.now();
+    const wait = this.lastTick + batchGap(this.poses.size, 1000 / TICK_HZ - 20) - Date.now();
     if (wait <= 0) return this.flushPoses();
     if (!this.tickTimer) {
       this.tickTimer = setTimeout(() => {
@@ -804,30 +824,41 @@ export class ChunkRoom extends DurableObject<Env> {
     }
   }
 
+  /**
+   * El lote: `t` es la hora a la que sale y cada pose dice cuánto antes se tomó (`age`, ms). Nadie
+   * recibe la suya. En un lugar grande, a cada uno solo las de quien tiene a menos de AOI_RADIUS (y
+   * todas si aún no ha mandado la suya): con 100 personas repartidas, cada una recibe unas pocas.
+   * Cada pose se escribe una vez y el mensaje de cada uno se monta con esos trozos.
+   */
   private flushPoses() {
     if (this.dirty.size === 0) return;
     const now = Date.now();
     this.lastTick = now;
-    const poses = [...this.dirty].map((id) => this.poses.get(id)).filter((p): p is AvatarPose => !!p);
+    const batch: { id: string; x: number; z: number; json: string }[] = [];
+    for (const id of this.dirty) {
+      const p = this.poses.get(id);
+      if (!p) continue;
+      const age = Math.max(0, Math.round(now - (this.poseClocks.get(id)?.last ?? now)));
+      batch.push({ id, x: p.head.p[0]!, z: p.head.p[2]!, json: JSON.stringify(age > 0 ? { ...p, age } : p) });
+    }
     this.dirty.clear();
-    if (!this.big) return this.broadcast(msg("POSES", { t: now, poses }));
-    // Lugar grande: a cada uno, solo las poses de quien tiene a menos de AOI_RADIUS (y todas si aún
-    // no ha mandado la suya). Ahorra subida: con 100 personas repartidas, cada una recibe unas pocas.
+    if (!batch.length) return;
+    const [head, tail] = JSON.stringify(msg("POSES", { t: now, poses: [] })).split('"poses":[]') as [string, string];
     const R2 = AOI_RADIUS * AOI_RADIUS;
     for (const ws of this.ctx.getWebSockets()) {
       const att = ws.deserializeAttachment() as Attachment | null;
       if (!att?.hello) continue;
-      const me = this.poses.get(att.session_id)?.head.p;
       // Quien lleva a los ciudadanos recibe todas: tiene que saber dónde está cada uno (§9 nonies).
-      const near = me && att.session_id !== this.npcHost
-        ? poses.filter((q) => {
-            const dx = q.head.p[0]! - me[0]!, dz = q.head.p[2]! - me[2]!;
-            return dx * dx + dz * dz <= R2;
-          })
-        : poses;
-      if (!near.length) continue;
+      const me = this.big && att.session_id !== this.npcHost ? this.poses.get(att.session_id)?.head.p : undefined;
+      let list = "";
+      for (const b of batch) {
+        if (b.id === att.session_id) continue;
+        if (me && (b.x - me[0]!) ** 2 + (b.z - me[2]!) ** 2 > R2) continue;
+        list += list ? `,${b.json}` : b.json;
+      }
+      if (!list) continue;
       try {
-        ws.send(JSON.stringify(msg("POSES", { t: now, poses: near })));
+        ws.send(`${head}"poses":[${list}]${tail}`);
       } catch {
         /* socket cerrado */
       }

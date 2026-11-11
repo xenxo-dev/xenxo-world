@@ -18,6 +18,7 @@
     "test:springs": "tsx test/springs.mts",
     "test:guide": "tsx test/guide.mts",
     "test:graphics": "esbuild test/graphics.mts --bundle --platform=node --format=esm --define:import.meta.env={} --log-level=warning --outfile=node_modules/.cache/xenxo/graphics.mjs && node node_modules/.cache/xenxo/graphics.mjs",
+    "test:netplay": "esbuild test/netplay.mts --bundle --platform=node --format=esm --define:import.meta.env={} --log-level=warning --outfile=node_modules/.cache/xenxo/netplay.mjs && node node_modules/.cache/xenxo/netplay.mjs",
     "test:cine": "esbuild test/cine.mts --bundle --platform=node --format=esm --define:import.meta.env={} --log-level=warning --outfile=node_modules/.cache/xenxo/cine.mjs && node node_modules/.cache/xenxo/cine.mjs"
   },
   "dependencies": {

@@ -487,6 +487,10 @@ export const WeaponIdSchema = z.enum(WEAPON_IDS);
 export const PoseMsg = envelope(
   "POSE",
   z.object({
+    /**
+     * La hora del reloj de quien la manda en que tomó la pose (ms, con cualquier origen: el servidor
+     * solo usa las diferencias entre una y otra para fechar cada muestra, `AvatarPose.age`).
+     */
     t: z.number(),
     head: Pose,
     hand_l: Pose.optional(),
@@ -692,6 +696,12 @@ export type ClientMessage = z.infer<typeof ClientMessage>;
 
 export const AvatarPose = z.object({
   session_id: z.string(),
+  /**
+   * Cuántos ms antes de la `t` de su lote (`POSES`) se tomó esta muestra: con eso, quien la dibuja
+   * sabe cuándo se tomó cada una y la mueve a velocidad uniforme (las muestras esperan en el lote un
+   * rato distinto cada vez). Sin el campo, se tomó en `t`.
+   */
+  age: z.number().nonnegative().optional(),
   head: Pose,
   hand_l: Pose.optional(),
   hand_r: Pose.optional(),
@@ -804,7 +814,10 @@ export const DeltaMsg = envelope(
   }),
 );
 
-/** Lote de poses de un tick del servidor. */
+/**
+ * Lote de poses: `t` es la hora del servidor a la que sale y cada pose trae su `age`. Nadie recibe la
+ * suya. Con poca gente sale una pose por lote, al llegar; con más, varias (a `tick_hz` como poco).
+ */
 export const PosesMsg = envelope("POSES", z.object({ t: z.number(), poses: z.array(AvatarPose) }));
 export const PeerJoinMsg = envelope("PEER_JOIN", Peer);
 export const PeerLeaveMsg = envelope("PEER_LEAVE", z.object({ session_id: z.string() }));

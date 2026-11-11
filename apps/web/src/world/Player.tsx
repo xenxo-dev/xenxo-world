@@ -25,6 +25,8 @@ import { CAR, paintFor } from "./vehicle/car";
 import { bumpNpcs, camKick, parkourFall, peopleBusy, peopleFrame, prepareFights, resetPeople, selfFx, startStrike, striking } from "./people/selfPeople";
 import { cancelSlide, slideDir, slideEmote, slideP, slideStep, sliding, startSlide } from "./people/slide";
 import { people } from "../net/people-store";
+import { fighterNear } from "../net/people";
+import { PoseSender, SEND_EVERY_MS, SEND_TIGHT_MS, TIGHT_RANGE_M } from "../net/pose-send";
 import { preloadParkour, UPPER_EMOTES } from "./animation";
 import { createParkour, parkourStep, resetParkour } from "./parkour/moves";
 import { gun, gunFrame, resetGun, SELF_GUN } from "./people/guns";
@@ -51,10 +53,8 @@ const EMOTE_SECONDS: Record<string, number> = {
 };
 /** Lo que devuelve la gente cada frame (people/selfPeople.ts), sin crear objetos. */
 const _pf = { lock: false, wantX: 0, wantZ: 0, drawn: false };
-// 5 Hz: el movimiento se suaviza al otro lado (interpolación). Cada pose es 1/20 de petición del plan
-// gratuito de Durable Objects (docs/LIMITES-CLOUDFLARE.md): a 8 Hz costaba un 60 % más.
-const SEND_EVERY_MS = 200;
-const HEARTBEAT_MS = 1000;
+/** Cuándo se manda la pose (net/pose-send.ts): 5 Hz en marcha, lo que da el plan gratuito. */
+const sender = new PoseSender();
 /** Dónde está el jugador ahora (lo leen los portales; se copia cada frame, sin crear objetos). */
 export const playerPos = new THREE.Vector3(...spawn.p);
 /** Hacia dónde mira (giro en radianes; adelante = (−sin, −cos)). Lo lee la zona de pruebas. */
@@ -109,7 +109,6 @@ export function Player({ active }: { active: boolean }) {
   const pkHands = useRef(false);
   /** Colgado: lo que se sube el dibujo para que las manos lleguen al borde (m). */
   const pkLift = useRef(0);
-  const lastSend = useRef(0);
   const camReach = useRef(1);
   const cam3 = useRef({ dist: CAM_DIST, y: spawn.p[1] });
   /** Altura a la que se dibuja el cuerpo: sube y baja los escalones con suavidad (la física salta). */
@@ -512,16 +511,15 @@ export function Player({ active }: { active: boolean }) {
       }
     }
 
-    // Envío de pose: 8 Hz solo si hay cambio real, latido cada segundo. Detrás del panel no se envía.
+    // Envío de pose: solo si hay cambio real, y un latido cada segundo. Detrás del panel no se envía.
     if ((!active && !inXR) || world.status !== "open" || !world.sessionId || world.solo) return;
     const now = performance.now();
-    if (now - lastSend.current < SEND_EVERY_MS) return;
     // Lo que se ve de la persona: el parkour que esté haciendo, o su gesto.
     const shown = motion.pk ?? motion.emote;
     const held = motion.weapon ?? null;
-    const moved = _headP.distanceToSquared(_lastP) > 1e-4 || _headQ.angleTo(_lastQ) > 0.01 || shown !== lastEmote.current || drive.phase !== lastPhase.current || held !== lastWeapon;
-    if (!moved && now - lastSend.current < HEARTBEAT_MS) return;
-    lastSend.current = now;
+    const acted = shown !== lastEmote.current || drive.phase !== lastPhase.current || held !== lastWeapon;
+    const moved = _headP.distanceToSquared(_lastP) > 1e-4 || _headQ.angleTo(_lastQ) > 0.01;
+    if (!sender.due(now, moved, acted, people.fightOn && fighterNear(TIGHT_RANGE_M) ? SEND_TIGHT_MS : SEND_EVERY_MS)) return;
     _lastP.copy(_headP);
     _lastQ.copy(_headQ);
     lastEmote.current = shown;
@@ -529,7 +527,9 @@ export function Player({ active }: { active: boolean }) {
     lastWeapon = held;
     net.send(
       msg("POSE", {
-        t: world.serverNow(),
+        // La hora de este equipo en que se tomó (el servidor solo usa las diferencias): con ella
+        // los demás ven el movimiento a velocidad uniforme aunque la red la entregue a rachas.
+        t: Math.round(now),
         head: { p: [_headP.x, _headP.y, _headP.z], r: [_headQ.x, _headQ.y, _headQ.z, _headQ.w] },
         ...(shown ? { emote: shown } : {}),
         ...(held && isWeaponId(held) ? { weapon: held } : {}),

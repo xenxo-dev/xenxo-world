@@ -69,6 +69,12 @@ export interface Features {
    */
   residents: number;
   /**
+   * Otras personas (world/crowd.ts): a cuántas, las más cercanas de las que se ven, se las anima y
+   * mueve a cada frame. Las siguientes tantas, a uno de cada dos; el resto, a uno de cada tres. Y
+   * quien llega cuando ya hay más que estas lleva la versión ligera de su avatar de serie.
+   */
+  crowd: number;
+  /**
    * Gotas de lluvia en los lugares donde llueve (Distrito Cero; 0 = sin lluvia dibujada). Son
    * líneas que caen en el shader alrededor de la cámara. Los charcos van en todos los niveles.
    */
@@ -96,10 +102,10 @@ export interface Features {
 }
 
 export const FEATURES: Record<Tier, Features> = {
-  low: { dpr: [0.75, 1], antialias: false, pbr: false, post: false, bloom: false, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 48, flyerTris: 500, lod: "light", textures: 512, normalMaps: false, avatarFill: true, nexoCity: 0.5, pedestrians: 3, traffic: 8, residents: 2, rain: 900, ragdolls: 2, springs: 5, shots: 8, clipFps: 24 },
-  medium: { dpr: [1, 1.5], antialias: true, pbr: true, post: true, bloom: true, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 96, flyerTris: 900, lod: "light", textures: 512, normalMaps: true, avatarFill: true, nexoCity: 0.75, pedestrians: 5, traffic: 14, residents: 3, rain: 1600, ragdolls: 3, springs: 12, shots: 12, clipFps: 30 },
-  high: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: false, shadows: 1024, probe: 128, pointLights: true, lightPools: false, skyline: 150, flyerTris: 1800, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1, pedestrians: 7, traffic: 22, residents: 4, rain: 3200, ragdolls: 5, springs: 25, shots: 20, clipFps: 30 },
-  ultra: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: true, shadows: 2048, probe: 256, pointLights: true, lightPools: false, skyline: 220, flyerTris: 2700, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1, pedestrians: 9, traffic: 30, residents: 6, rain: 4800, ragdolls: 8, springs: 40, shots: 28, clipFps: 60 },
+  low: { dpr: [0.75, 1], antialias: false, pbr: false, post: false, bloom: false, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 48, flyerTris: 500, lod: "light", textures: 512, normalMaps: false, avatarFill: true, nexoCity: 0.5, pedestrians: 3, traffic: 8, crowd: 5, residents: 2, rain: 900, ragdolls: 2, springs: 5, shots: 8, clipFps: 24 },
+  medium: { dpr: [1, 1.5], antialias: true, pbr: true, post: true, bloom: true, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 96, flyerTris: 900, lod: "light", textures: 512, normalMaps: true, avatarFill: true, nexoCity: 0.75, pedestrians: 5, traffic: 14, crowd: 8, residents: 3, rain: 1600, ragdolls: 3, springs: 12, shots: 12, clipFps: 30 },
+  high: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: false, shadows: 1024, probe: 128, pointLights: true, lightPools: false, skyline: 150, flyerTris: 1800, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1, pedestrians: 7, traffic: 22, crowd: 12, residents: 4, rain: 3200, ragdolls: 5, springs: 25, shots: 20, clipFps: 30 },
+  ultra: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: true, shadows: 2048, probe: 256, pointLights: true, lightPools: false, skyline: 220, flyerTris: 2700, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1, pedestrians: 9, traffic: 30, crowd: 16, residents: 6, rain: 4800, ragdolls: 8, springs: 40, shots: 28, clipFps: 60 },
 };
 
 /* ------------------------------------------------------------------ */
@@ -188,6 +194,7 @@ function portableClamp(f: Features, xr: boolean): Features {
     pedestrians: Math.min(f.pedestrians, xr ? 3 : 5),
     traffic: Math.min(f.traffic, 14),
     residents: Math.min(f.residents, xr ? 2 : 3),
+    crowd: Math.min(f.crowd, xr ? 4 : 6),
     // En las gafas, solo los charcos (las gotas cruzan la vista y marean); en el móvil, poca.
     rain: xr ? 0 : Math.min(f.rain, 900),
     ragdolls: Math.min(f.ragdolls, xr ? 2 : 3),

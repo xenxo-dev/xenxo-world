@@ -18,7 +18,7 @@ import { people, type HitEvent } from "../../net/people-store";
 import { world } from "../../net/world-store";
 import { floorAt } from "../collision";
 import { self } from "../self";
-import { fallFor, FALL_MAX, HIT_DELAY_MS, LIE, LIE_KO, lightReaction, myStrike, parkourFallFor, RISE, STRIKES, strikeOf, type Strike } from "./fight";
+import { fallFor, FALL_MAX, HIT_AFTER_MS, LIE, LIE_KO, lightReaction, myStrike, parkourFallFor, RISE, STRIKES, strikeOf, type Strike } from "./fight";
 import { impact, thud } from "./fight-audio";
 import { loadRagdolls, ragdolls } from "./ragdoll";
 import { createFx, type Lying, type PersonFx } from "./rig";
@@ -76,7 +76,7 @@ export class RemotePeople {
   constructor(private id: string) {
     this.offs.push(
       people.onHit((h) => {
-        if (h.to === id) this.queue.push({ h, due: performance.now() + (h.from === world.sessionId ? 0 : HIT_DELAY_MS) });
+        if (h.to === id) this.queue.push({ h, due: performance.now() + (h.from === world.sessionId ? 0 : world.drawLag(h.from) + HIT_AFTER_MS) });
       }),
       people.onPair((p) => {
         if (p.a === id || p.b === id) this.pair = { kind: p.kind, partner: p.a === id ? p.b : p.a, t: 0, on: false };

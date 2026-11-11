@@ -18,7 +18,7 @@ Este documento y [`packages/protocol/src/index.ts`](../packages/protocol/src/ind
 | Rotaciones | Cuaterniones `[x, y, z, w]` |
 | Posiciones de entidades | **Relativas a su chunk** (`0 ≤ x, z < 64`, `-16 ≤ y ≤ 256`) |
 | Chunks | `c_<x>_<z>`, lado `CHUNK_SIZE = 64` m. Origen global = `(x·64, 0, z·64)` |
-| Tiempo | Milisegundos. Las poses de `POSES` usan la hora del servidor |
+| Tiempo | Milisegundos. Las poses de `POSES` usan la hora del servidor: la del lote (`t`) y, cada pose, cuánto antes se tomó (`age`) |
 | Assets | Direccionados por contenido: `sha256:<64 hex>`, inmutables |
 
 ## 3. Entidad
@@ -133,7 +133,7 @@ Las medidas de los modelos de la gente las da `GET /assets/<hash>/meta`. Moverlo
 | Tipo | Payload | Notas |
 |---|---|---|
 | `HELLO` | `client_type`, `capabilities`, `display_name?`, `avatar?` | Obligatorio antes de cualquier otro. `avatar` = `{hash, format: "vrm"}` de un **avatar de serie** (invitados y agentes); cualquier otro hash se ignora, y las personas registradas llevan el de su cuenta. `capabilities.npc_host: true` = puede llevar a los ciudadanos del distrito para todos (§9 nonies) |
-| `POSE` | `t`, `head {p, r}`, `hand_l?`, `hand_r?`, `emote?`, `vehicle?`, `car?`, `weapon?` | Sin `entity_id`: el servidor sabe de quién es. Máx. 15 Hz; el exceso se descarta. `emote` = gesto en curso (`^[a-z_]{1,24}$`; hoy `dance`, `wave`, `sit`, `talk`, `cheer`, `crouch`, `clap`, `point`, `beckon`, `laugh`, `shrug`, los de pareja `high_five`, `hug`, `handshake`, los de pelea `punch`, `kick`, `shove`, `hit_stagger`, `hit_down`, `get_up`, los del coche `car_open`, `car_in`, `car_out` y, donde hay parkour, los `pk_*` de §9 octies bis). Los clientes ignoran los que no conocen. `vehicle?` = en qué va si no va a pie (hoy solo `car`: va sentada dentro de su coche; `head` sigue siendo su cabeza) y `car?` = dónde está su coche, en marcha o aparcado (`p` = su origen en el suelo, `r` = su giro completo, con la inclinación). El servidor normaliza los giros (un cuaternión nulo descarta la pose) y no reparte una mano a más de 2,5 m de la cabeza. Ver «Movimiento» más abajo. Al subir y bajar, `emote` es `car_open` (abre la puerta), `car_in` (se sienta dentro) o `car_out` (sale): con esos tres, la puerta del coche está abierta. Quien no los conozca dibuja a la persona y no el coche. El servidor solo los reparte en los distritos (en la plaza se va a pie; `vehicle` sin `car` no vale) y con `vehicle` no cuentan los puntos de carrera (`CHECKPOINT` → `forbidden`). La cabeza más de 1,6 m por encima de lo que se pisa (el suelo o la cara de arriba de un `collider@1`: se puede estar de pie en un banco) indica un salto. `weapon?` = el arma que lleva en la mano (§9 octies ter): solo donde hay armas, en el modo pelea, a pie y una que pueda usar; si no, el servidor la quita |
+| `POSE` | `t`, `head {p, r}`, `hand_l?`, `hand_r?`, `emote?`, `vehicle?`, `car?`, `weapon?` | Sin `entity_id`: el servidor sabe de quién es. `t` = la hora del reloj de quien la manda en que tomó la pose (ms, con cualquier origen: el servidor solo usa las diferencias entre una y otra para fechar cada muestra; ver «Poses» más abajo). Máx. 15 Hz de media; el exceso se descarta (hasta cuatro que lleguen juntas tras un atasco de la red pasan). `emote` = gesto en curso (`^[a-z_]{1,24}$`; hoy `dance`, `wave`, `sit`, `talk`, `cheer`, `crouch`, `clap`, `point`, `beckon`, `laugh`, `shrug`, los de pareja `high_five`, `hug`, `handshake`, los de pelea `punch`, `kick`, `shove`, `hit_stagger`, `hit_down`, `get_up`, los del coche `car_open`, `car_in`, `car_out` y, donde hay parkour, los `pk_*` de §9 octies bis). Los clientes ignoran los que no conocen. `vehicle?` = en qué va si no va a pie (hoy solo `car`: va sentada dentro de su coche; `head` sigue siendo su cabeza) y `car?` = dónde está su coche, en marcha o aparcado (`p` = su origen en el suelo, `r` = su giro completo, con la inclinación). El servidor normaliza los giros (un cuaternión nulo descarta la pose) y no reparte una mano a más de 2,5 m de la cabeza. Ver «Movimiento» más abajo. Al subir y bajar, `emote` es `car_open` (abre la puerta), `car_in` (se sienta dentro) o `car_out` (sale): con esos tres, la puerta del coche está abierta. Quien no los conozca dibuja a la persona y no el coche. El servidor solo los reparte en los distritos (en la plaza se va a pie; `vehicle` sin `car` no vale) y con `vehicle` no cuentan los puntos de carrera (`CHECKPOINT` → `forbidden`). La cabeza más de 1,6 m por encima de lo que se pisa (el suelo o la cara de arriba de un `collider@1`: se puede estar de pie en un banco) indica un salto. `weapon?` = el arma que lleva en la mano (§9 octies ter): solo donde hay armas, en el modo pelea, a pie y una que pueda usar; si no, el servidor la quita |
 | `MUTATE_WORLD` | `idempotency_key`, `target`, `mutation` | Ver §8 |
 | `PING` | `t` | |
 | `COLLECT` | `entity_id` | Estoy en este objeto de búsqueda. Solo personas registradas. El servidor mira la última pose de la sesión (reciente y a menos del radio + 2,5 m) y responde `COLLECTED`. Tras un salto, `forbidden` con `detail.reason = "jump"` durante 15 s |
@@ -162,6 +162,31 @@ que la misma cuenta llegue más de 4 veces en 2 minutos al mismo lugar o que la 
 mandado poses antes (entonces cuenta como salto). Los clientes se mueven andando o en coche y no
 necesitan nada más; un agente que pruebe actividades tiene que ir andando.
 
+**Poses: cuándo se tomó cada una.** Quien recibe las poses de otra persona la dibuja entre dos
+muestras, y para que ande a velocidad uniforme tiene que saber cuándo se tomó cada una. Por eso cada
+pose de `POSES` trae `age`: los ms que pasaron desde que se tomó hasta la `t` de su lote (un entero;
+ausente = 0). La hora de la muestra es `t − age`, en el reloj del servidor. El servidor la saca de la
+`t` que mandó el cliente en su `POSE`: de ese reloj solo usa las diferencias (le suma lo que tarda el
+viaje más rápido de los últimos segundos), así que una muestra queda fechada como se tomó aunque la
+red la entregue a rachas; nunca después de la hora a la que llegó ni más de 1 s antes. Un cliente que
+no conozca `age` usa la `t` del lote, como antes: ve a los demás, pero a tirones.
+
+Con poca gente mandando poses (hasta 6 sesiones) cada una sale en su lote nada más llegar; con más,
+se juntan (cada 40 ms hasta 10 sesiones, cada 70 hasta 24 y a `tick_hz` = 8 Hz a partir de ahí).
+Cómo mandar y cómo dibujar (lo que hace la web; no obliga a nadie):
+
+- **Mandar** (`net/pose-send.ts`): 5 poses por segundo mientras la pose cambia; al dejar de cambiar,
+  **una más con la misma pose** (así los demás saben que se ha parado y no la siguen dibujando hacia
+  donde iba) y después un latido por segundo. Un cambio de gesto, de arma o de coche sale al momento
+  si no se ha mandado nada en el último intervalo. En el modo pelea, con otra persona que pelea a
+  menos de 10 m, 10 por segundo.
+- **Dibujar** (`net/playout.ts`): a cada persona, con el retraso justo para que su muestra siguiente
+  ya haya llegado: su intervalo de envío más lo que tardan en llegar las suyas (unos 250 ms con buena
+  red; se mide por persona y cambia poco a poco). Si la siguiente no llega a tiempo, se sigue un
+  momento (hasta unos 150 ms de recorrido) con la velocidad que llevaba, y al llegar se corrige sin
+  saltos. La hora del servidor se estima con el viaje más rápido de los últimos segundos (`t` de los
+  lotes), no con `PING`.
+
 ### Servidor → cliente
 
 | Tipo | Payload |
@@ -169,7 +194,7 @@ necesitan nada más; un agente que pruebe actividades tiene que ir andando.
 | `WELCOME` | `session_id`, `principal`, `chunk_id`, `server_time`, `tick_hz`, `budgets`, `fight?` (estilo de pelea del lugar, §9 octies; ausente = aquí no se pelea), `parkour?` (`true` = aquí el cuerpo hace parkour, §9 octies bis), `weapons?` (con qué armas puede disparar esta sesión aquí, §9 octies ter; ausente = aquí no hay armas) |
 | `SNAPSHOT` | `entities[]`, `peers[]`, `poses[]`, `chat[]?` (últimos 30 mensajes) |
 | `DELTA` | `changes[]`: `{kind: "upsert", entity}` o `{kind: "remove", entity_id}` |
-| `POSES` | `t` (hora del servidor), `poses[]` (cada una con su `emote?`, su `vehicle?`, su `car?`, su `fight?` y su `weapon?`) — lote por tick (8 Hz; los clientes envían su pose a 8 Hz como mucho y se interpolan con ~200 ms de retraso) |
+| `POSES` | `t` (hora del servidor a la que sale el lote), `poses[]` (cada una con su `age?`, su `emote?`, su `vehicle?`, su `car?`, su `fight?` y su `weapon?`) — las poses de los demás (nadie recibe la suya), con posiciones en milímetros y giros en diezmilésimas. Ver «Poses» más arriba |
 | `PEER_JOIN` / `PEER_LEAVE` | datos del peer (`session_id`, `kind`, `display_name`, `client_type`, `avatar?`, `player_no?`) / `session_id`. `player_no` es el número de jugador de una persona registrada: se asigna por orden de alta desde el 1 y no cambia; el 0 es el fundador (la cuenta de `FOUNDER_USER_ID`) |
 | `ACK` | `ref`, `entity_id`, `rev`, `replayed` |
 | `ERROR` | `ref`, `code`, `message`, `detail?` |
@@ -229,7 +254,7 @@ necesitan nada más; un agente que pruebe actividades tiene que ir andando.
 | Triángulos por chunk | 300.000 |
 | Triángulos por entidad | 50.000 |
 | Mutaciones por actor y minuto | 30 |
-| Poses por segundo y sesión | 15 |
+| Poses por segundo y sesión (de media; hasta 4 de golpe) | 15 |
 | Luces (`light@1`) por chunk | 16 |
 
 ## 9 bis. Parcelas (agentes con clave de parcela)

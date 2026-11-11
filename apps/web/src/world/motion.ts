@@ -25,6 +25,11 @@ export interface Motion {
   /** No se dibuja (lejos o fuera de la vista): el avatar no se anima. */
   hidden?: boolean;
   /**
+   * Este frame no le toca (está entre mucha gente y no es de los más cercanos: world/crowd.ts): ni
+   * se anima ni se recalcula su esqueleto; el tiempo se le acumula para el frame que sí.
+   */
+  skip?: boolean;
+  /**
    * Parkour en curso ("pk_vault", "pk_hang"…: world/parkour/moves.ts) o null. Manda sobre el gesto.
    * `pkP`: su progreso (0..1) en los guionados, si se sabe (el propio jugador); si no, el reloj.
    */

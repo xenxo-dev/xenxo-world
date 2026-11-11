@@ -2,7 +2,7 @@
  * Los disparos (§9 octies ter): el rayo de neón de cada uno (núcleo y halo, aditivos: brillan sin
  * post-proceso, también en las gafas y el móvil), el fogonazo en la boca del cañón y el chispazo
  * donde acaba (más grande si le da a alguien), con su sonido. Los tuyos salen al disparar; los de los
- * demás, con el retraso con que se les dibuja (como sus golpes: HIT_DELAY_MS), desde su arma. Cuántos
+ * demás, con el retraso con que se les dibuja (como sus golpes: `world.drawLag`), desde su arma. Cuántos
  * a la vez, `FEATURES.shots`. Todo hecho de antemano: sin objetos nuevos por frame.
  */
 import { useEffect, useMemo } from "react";
@@ -12,7 +12,7 @@ import { WEAPONS } from "@xenxo/protocol";
 import { weapons } from "../../net/weapons";
 import { world } from "../../net/world-store";
 import { useGraphics } from "../graphics";
-import { HIT_DELAY_MS } from "./fight";
+import { HIT_AFTER_MS } from "./fight";
 import { zap, zapHit } from "./fight-audio";
 import { muzzles } from "./arms";
 import { SELF_GUN } from "./guns";
@@ -85,7 +85,7 @@ export function ShotFx() {
     for (let i = 0; i < list.length; ) {
       const ev = list[i]!;
       const mine = !!ev.p;
-      if (!mine && now - ev.t < HIT_DELAY_MS) {
+      if (!mine && now - ev.t < world.drawLag(ev.from) + HIT_AFTER_MS) {
         i++;
         continue;
       }

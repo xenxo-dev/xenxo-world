@@ -111,6 +111,52 @@ await scenario("dos clientes se ven: las poses de A llegan a B", async () => {
   b.close();
 });
 
+await scenario("poses: cada una con la hora en que se tomó, sin eco y sin perder las que llegan juntas", async () => {
+  const a = await XenxoClient.connect({ baseUrl, displayName: "conf-reloj-a" });
+  const b = await XenxoClient.connect({ baseUrl, displayName: "conf-reloj-b" });
+  const A = a.welcome.session_id;
+  /** Lo que B ve de A: dónde estaba (x) y a qué hora del servidor se tomó la muestra (`t` del lote menos su `age`). */
+  const seen: { x: number; taken: number; age: number | undefined; batch: number }[] = [];
+  b.onMessage((m) => {
+    if (m.type !== "POSES") return;
+    for (const p of m.payload.poses) if (p.session_id === A) seen.push({ x: p.head.p[0], taken: m.payload.t - (p.age ?? 0), age: p.age, batch: m.payload.t });
+  });
+  const send = (t: number, x: number) => a.sendRaw(msg("POSE", { t, head: { p: [x, 1.6, 40], r: [0, 0, 0, 1] } }));
+  // El reloj de A no es el del servidor (otro origen): solo valen sus diferencias.
+  const T0 = 5_000_000;
+  send(T0, 30);
+  await sleep(450);
+  // La red se atascó: tres muestras tomadas cada 150 ms llegan a la vez.
+  send(T0 + 150, 31);
+  send(T0 + 300, 32);
+  send(T0 + 450, 33);
+  await sleep(400);
+  const burst = [31, 32, 33].map((x) => seen.find((q) => q.x === x));
+  assert(burst.every(Boolean), `las tres que llegan juntas se reparten (llegaron ${seen.map((q) => q.x).join(", ")})`);
+  const [p1, p2, p3] = burst as { x: number; taken: number; age: number | undefined; batch: number }[];
+  assert(Math.abs(p2!.taken - p1!.taken - 150) <= 12 && Math.abs(p3!.taken - p2!.taken - 150) <= 12, `cada una queda fechada cuando se tomó, a 150 ms de la anterior (${p2!.taken - p1!.taken} y ${p3!.taken - p2!.taken} ms)`);
+  assert(seen.every((q) => q.taken <= q.batch && q.batch - q.taken <= 1000 && (q.age === undefined || (Number.isInteger(q.age) && q.age > 0))), "`age` es un entero de ms (ausente si es 0) y nunca más de un segundo");
+  assert((p1!.age ?? 0) >= 250, `la primera de las tres se tomó unos 300 ms antes de llegar (age = ${p1!.age})`);
+  // Los decimales que viajan: milímetros y diezmilésimas.
+  const exact = b.next("POSES", (m) => m.payload.poses.some((p) => p.session_id === A && p.head.p[0] === 34.123), 3000);
+  await sleep(250);
+  a.sendRaw(msg("POSE", { t: T0 + 900, head: { p: [34.1234567, 1.6000004, 40], r: [0, 0.38268343236, 0, 0.92387953251] } }));
+  const m = await exact;
+  const got = m.payload.poses.find((p) => p.session_id === A)!;
+  assert(got.head.p[1] === 1.6 && got.head.r[1] === 0.3827 && got.head.r[3] === 0.9239, `posiciones con milímetros y giros con diezmilésimas (${JSON.stringify(got.head)})`);
+  // Nadie recibe su propia pose.
+  assert(!a.received.some((x) => x.type === "POSES" && x.payload.poses.some((p) => p.session_id === A)), "A no recibe su propia pose");
+  // De media, 15 por segundo como mucho: de veinte de golpe pasan unas pocas, no todas.
+  await sleep(400);
+  const before = seen.length;
+  for (let i = 0; i < 20; i++) send(T0 + 2000 + i, 50 + i);
+  await sleep(400);
+  const passed = seen.length - before;
+  assert(passed >= 1 && passed <= 6, `de veinte poses de golpe pasan ${passed} (el exceso se descarta)`);
+  a.close();
+  b.close();
+});
+
 await scenario("gestos: el emote de A llega a B con su pose (también golpes seguidos y reacciones); uno mal formado se descarta", async () => {
   const a = await XenxoClient.connect({ baseUrl, displayName: "conf-emote-a" });
   const b = await XenxoClient.connect({ baseUrl, displayName: "conf-emote-b" });

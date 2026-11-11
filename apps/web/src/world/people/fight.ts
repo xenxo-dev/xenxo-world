@@ -46,11 +46,11 @@ export const COMBO: Record<StrikeMove, string[]> = {
 export const COMBO_RESET = 1.1;
 
 /**
- * Cuánto se retrasa lo que ve cada uno de un golpe ajeno (ms): lo mismo que se retrasan las poses
- * de los demás al dibujarlas (Avatars.tsx) y un poco más (la pose del golpe sale antes que el HIT).
+ * Lo que ve cada uno de un golpe ajeno se retrasa lo mismo que se retrasa al dibujar a quien lo da
+ * (`world.drawLag`, que depende de su red) y esto más (ms): la pose del golpe sale antes que el HIT.
  * Así el puño se ve llegar antes de que el otro lo encaje.
  */
-export const HIT_DELAY_MS = 380;
+export const HIT_AFTER_MS = 50;
 
 /** De qué lado le viene el golpe a quien mira hacia `yaw` (adelante = (−sin, −cos)). */
 export function hitSide(dir: [number, number], yaw: number): { back: number; right: number } {

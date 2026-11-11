@@ -14,9 +14,11 @@ export const NPC_REF = "npc-";
 import { useSyncExternalStore } from "react";
 import { CHUNK_SIZE, PLACES, type AvatarPose, type ChatMessage, type Entity, type Peer, type ServerMessage } from "@xenxo/protocol";
 import type { ConnectionStatus } from "./NetworkAdapter";
+import { PeerPlayout, ServerClock, START_DELAY_MS } from "./playout";
 
 export interface PoseSample {
-  t: number; // hora del servidor (ms)
+  /** Hora del servidor (ms) en que se tomó la muestra. */
+  t: number;
   head: AvatarPose["head"];
   /** Gesto en curso ("dance", "wave", "sit"…), si lo hay. */
   emote?: string;
@@ -28,6 +30,8 @@ export interface PoseSample {
 }
 
 const BUFFER = 20;
+/** Si la página lleva más que esto (ms) sin dibujar, lo que tarda en llegar una muestra no dice nada de la red. */
+const STALLED_MS = 90;
 
 class WorldStore {
   entities = new Map<string, Entity>();
@@ -58,8 +62,11 @@ class WorldStore {
   host: string | null = null;
   /** Cuántas fotos completas del lugar (SNAPSHOT) han llegado: la pantalla de carga espera a la primera. */
   snapshots = 0;
-  /** serverTime ≈ Date.now() + clockOffset */
-  clockOffset = 0;
+  /** La hora del servidor vista desde aquí y el retraso con que se dibuja a cada persona (playout.ts). */
+  private clock = new ServerClock();
+  private playouts = new Map<string, PeerPlayout>();
+  /** El reloj local de todo esto y la hora del último frame (ms). */
+  private frameAt = performance.now();
 
   private version = 0;
   /**
@@ -88,6 +95,7 @@ class WorldStore {
     if (s !== "open") {
       this.peers.clear();
       this.poseBuffers.clear();
+      this.playouts.clear();
     }
     this.bump();
   }
@@ -105,7 +113,33 @@ class WorldStore {
   }
 
   serverNow() {
-    return Date.now() + this.clockOffset;
+    return performance.now() + this.clock.offset;
+  }
+
+  /** Una vez por frame, antes de dibujar a nadie: la hora de este frame y el ajuste suave del reloj. */
+  frame() {
+    const now = performance.now();
+    this.clock.step(now - this.frameAt);
+    this.frameAt = now;
+  }
+
+  /** La hora (del servidor) de la que toca dibujar a esta persona en este frame. */
+  playTime(id: string): number {
+    const p = this.playouts.get(id);
+    return p ? p.time(this.frameAt, this.clock.offset) : this.frameAt + this.clock.offset - START_DELAY_MS;
+  }
+
+  /**
+   * Cuánto hay que esperar (ms) para enseñar algo que acaba de llegar de esta persona y que no viaja
+   * con sus poses (un golpe, un disparo), de modo que se vea a la vez que lo que hacía entonces.
+   */
+  drawLag(id: string): number {
+    return this.playouts.get(id)?.lagMs() ?? START_DELAY_MS;
+  }
+
+  /** Con cuánto retraso se la está dibujando (ms): para medir. */
+  playDelay(id: string): number {
+    return this.playouts.get(id)?.delayMs(this.clock.offset) ?? START_DELAY_MS;
   }
 
   /** Desplazamiento (x, z) de un chunk respecto al actual: el actual queda en 0..CHUNK_SIZE. */
@@ -132,6 +166,7 @@ class WorldStore {
     this.entitiesVersion++;
     this.peers.clear();
     this.poseBuffers.clear();
+    this.playouts.clear();
     chat.reset([]);
     activity.reset();
     this.bump();
@@ -150,7 +185,8 @@ class WorldStore {
         this.theme = m.payload.theme ?? null;
         this.parkour = m.payload.parkour === true;
         this.closed = m.payload.closed ?? [];
-        this.clockOffset = m.payload.server_time - Date.now();
+        // Otro lugar puede ser otro servidor (un nodo de la comunidad), con otro reloj.
+        this.clock.reset(m.payload.server_time, performance.now());
         // El lugar puede ser otro (las entidades se colocan respecto a él).
         this.entitiesVersion++;
         this.bump();
@@ -161,7 +197,8 @@ class WorldStore {
         this.entities = new Map(m.payload.entities.map((e) => [e.entity_id, e]));
         this.entitiesVersion++;
         this.peers = new Map(m.payload.peers.filter((p) => p.session_id !== this.sessionId).map((p) => [p.session_id, p]));
-        for (const p of m.payload.poses) this.pushPose(p.session_id, this.serverNow(), p.head, p.emote, p.vehicle, p.car, p.weapon);
+        // Dónde estaba cada uno al llegar: una muestra de ahora, que no dice nada de cada cuánto manda.
+        for (const p of m.payload.poses) this.pushPose(p, this.serverNow(), performance.now(), false);
         this.bump();
         break;
       case "DELTA":
@@ -172,13 +209,17 @@ class WorldStore {
         this.entitiesVersion++;
         this.bump();
         break;
-      case "POSES":
-        // Ajuste suave del reloj: nunca adelantamos el servidor.
-        this.clockOffset = Math.min(this.clockOffset + 2, m.payload.t - Date.now());
+      case "POSES": {
+        const now = performance.now();
+        this.clock.sample(m.payload.t, now);
+        // Con la página atascada (o sin dibujar: otra pestaña), lo que han tardado no es cosa de la red.
+        const counts = now - this.frameAt < STALLED_MS;
+        // Cada muestra, con la hora en que se tomó (`age` antes de la del lote; sin él, la del lote).
         for (const p of m.payload.poses) {
-          if (p.session_id !== this.sessionId) this.pushPose(p.session_id, m.payload.t, p.head, p.emote, p.vehicle, p.car, p.weapon);
+          if (p.session_id !== this.sessionId) this.pushPose(p, m.payload.t - (p.age ?? 0), now, counts);
         }
         break;
+      }
       case "PEER_JOIN":
         if (m.payload.session_id !== this.sessionId) {
           this.peers.set(m.payload.session_id, m.payload);
@@ -188,6 +229,7 @@ class WorldStore {
       case "PEER_LEAVE":
         this.peers.delete(m.payload.session_id);
         this.poseBuffers.delete(m.payload.session_id);
+        this.playouts.delete(m.payload.session_id);
         this.bump();
         break;
       case "CHAT_MSG":
@@ -239,12 +281,35 @@ class WorldStore {
     }
   }
 
-  private pushPose(id: string, t: number, head: AvatarPose["head"], emote?: string, vehicle?: string, car?: AvatarPose["head"], weapon?: string) {
-    const buf = this.poseBuffers.get(id) ?? [];
-    buf.push({ t, head, emote, vehicle, car, weapon });
+  private pushPose(p: AvatarPose, t: number, arrival: number, counts: boolean) {
+    const id = p.session_id;
+    let buf = this.poseBuffers.get(id);
+    if (!buf) this.poseBuffers.set(id, (buf = []));
+    const last = buf[buf.length - 1];
+    // Las muestras de cada persona van en orden; una que no avanza (dos con la misma hora) sustituye a la anterior.
+    if (last && t <= last.t) {
+      if (t < last.t - 2000) {
+        // Su hora ha vuelto atrás de verdad (otro reloj): se empieza de nuevo.
+        buf.length = 0;
+        this.playouts.delete(id);
+      } else t = last.t + 1;
+    }
+    const moved = !last || last.emote !== p.emote || last.vehicle !== p.vehicle || changed(last.head, p.head) || (!!p.car && (!last.car || changed(last.car, p.car)));
+    let play = this.playouts.get(id);
+    if (!play) this.playouts.set(id, (play = new PeerPlayout()));
+    play.push(t, arrival, moved, counts);
+    buf.push({ t, head: p.head, emote: p.emote, vehicle: p.vehicle, car: p.car, weapon: p.weapon });
     if (buf.length > BUFFER) buf.shift();
-    this.poseBuffers.set(id, buf);
   }
+}
+
+/** ¿Ha cambiado la pose de una muestra a otra (más de un centímetro o un giro que se vea)? */
+function changed(a: AvatarPose["head"], b: AvatarPose["head"]): boolean {
+  const dx = a.p[0] - b.p[0], dy = a.p[1] - b.p[1], dz = a.p[2] - b.p[2];
+  if (dx * dx + dy * dy + dz * dz > 1e-4) return true;
+  const dot = a.r[0] * b.r[0] + a.r[1] * b.r[1] + a.r[2] * b.r[2] + a.r[3] * b.r[3];
+  // Los giros viajan con cuatro decimales: por debajo de un par de grados no se distingue de un redondeo.
+  return Math.abs(dot) < 0.9998;
 }
 
 export const world = new WorldStore();

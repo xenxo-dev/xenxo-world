@@ -31,7 +31,7 @@ import { knockBusy } from "../knock";
 import { placeBody, type Body } from "../locomotion";
 import type { Motion } from "../motion";
 import { impact, thud, whoosh } from "./fight-audio";
-import { COMBO, COMBO_RESET, fallFor, FALL_MAX, HIT_DELAY_MS, LIE, LIE_KO, lightReaction, myStrike, parkourFallFor, RISE, STRIKES, strikeOf, type Strike, type StrikeMove } from "./fight";
+import { COMBO, COMBO_RESET, fallFor, FALL_MAX, HIT_AFTER_MS, LIE, LIE_KO, lightReaction, myStrike, parkourFallFor, RISE, STRIKES, strikeOf, type Strike, type StrikeMove } from "./fight";
 import { loadRagdolls, ragdolls } from "./ragdoll";
 import { PAIR, pairTargets } from "./pair";
 import { createFx, type Lying } from "./rig";
@@ -100,7 +100,7 @@ export function knockedOut(): boolean {
 people.onHit((h) => {
   if (h.to !== world.sessionId) return;
   // Lo que pasa a quien golpeas lo ves con el mismo retraso que su golpe.
-  queue.push({ h, due: performance.now() + (h.from === world.sessionId ? 0 : HIT_DELAY_MS) });
+  queue.push({ h, due: performance.now() + (h.from === world.sessionId ? 0 : world.drawLag(h.from) + HIT_AFTER_MS) });
 });
 people.onPair((p) => {
   if (p.a === world.sessionId || p.b === world.sessionId) pendingPair = p;

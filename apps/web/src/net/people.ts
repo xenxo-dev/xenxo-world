@@ -26,6 +26,20 @@ function latest(id: string): [number, number, number] | null {
   return [s.head.p[0]!, s.head.p[1]! - 1.6, s.head.p[2]!];
 }
 
+/** ¿Hay alguien con el modo pelea a menos de `range` m? (Entonces la pose se manda más seguido.) Sin objetos nuevos. */
+export function fighterNear(range: number): boolean {
+  if (people.fighters.size === 0) return false;
+  const now = world.serverNow();
+  for (const id of people.fighters) {
+    const buf = world.poseBuffers.get(id);
+    const s = buf?.[buf.length - 1];
+    if (!s || now - s.t > 3000) continue;
+    const dx = s.head.p[0] - self.x, dz = s.head.p[2] - self.z;
+    if (dx * dx + dz * dz < range * range) return true;
+  }
+  return false;
+}
+
 /**
  * La persona más cercana a menos de `range` m (y, si `cone`, delante: dentro de ese ángulo a cada
  * lado de hacia donde miras). `only` filtra quién vale.

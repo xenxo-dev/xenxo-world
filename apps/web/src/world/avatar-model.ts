@@ -68,6 +68,18 @@ function normalize(root: THREE.Object3D, keepRealScale = false) {
  * cámara, y en una ciudad con gente era casi todo el trabajo de la tarjeta gráfica.
  */
 function tune(root: THREE.Object3D) {
+  // Los huesos no se dibujan, pero Three.js los recorre uno a uno en cada frame buscando qué
+  // dibujar: si de un esqueleto no cuelga nada que se vea (lo normal: las mallas van aparte), se le
+  // dice que no entre. Sus matrices se siguen calculando igual.
+  root.traverse((o) => {
+    if (!(o as THREE.Bone).isBone || (o.parent as THREE.Bone | null)?.isBone) return;
+    let drawn = false;
+    o.traverse((c) => {
+      const d = c as THREE.Mesh & THREE.Light & THREE.Sprite;
+      if (d.isMesh || d.isLight || d.isSprite || (c as THREE.Line).isLine || (c as THREE.Points).isPoints) drawn = true;
+    });
+    if (!drawn) o.visible = false;
+  });
   root.traverse((o) => {
     const m = o as THREE.Mesh;
     if (m.isMesh) {
@@ -83,8 +95,43 @@ function tune(root: THREE.Object3D) {
         g.boundingSphere = sphere.clone();
         m.frustumCulled = true;
       }
+      // Pestañas y cejas: transparentes, de dos caras y sin escribir profundidad. Three.js las
+      // dibujaba en dos pasadas (por detrás y por delante) recompilando el material en cada una, en
+      // cada frame: con veinte personas, un 10 % del trabajo de dibujar. En una pasada se ven igual.
+      for (const mat of Array.isArray(m.material) ? m.material : [m.material]) {
+        if (mat && mat.transparent && mat.side === THREE.DoubleSide && !mat.depthWrite) mat.forceSinglePass = true;
+      }
     }
   });
+}
+
+/**
+ * Mientras `held()` diga que sí, los esqueletos de este personaje no se recalculan ni se vuelven a
+ * subir a la tarjeta: se dibuja tal como quedó (world/crowd.ts: el frame que no le toca).
+ */
+export function holdSkeletons(root: THREE.Object3D, held: () => boolean) {
+  const seen = new Set<THREE.Skeleton>();
+  root.traverse((o) => {
+    const sk = (o as THREE.SkinnedMesh).isSkinnedMesh ? (o as THREE.SkinnedMesh).skeleton : null;
+    if (!sk || seen.has(sk)) return;
+    seen.add(sk);
+    const update = sk.update;
+    sk.update = function (this: THREE.Skeleton) {
+      if (!held()) update.call(this);
+    };
+  });
+}
+
+/**
+ * Lo que cuelga de `o` no recalcula sus matrices mientras `o.userData.frozen` (world/crowd.ts: quien
+ * no se ve, o el frame que no le toca). Three.js recorre y recompone cada nodo en cada frame aunque
+ * no se dibuje, y un personaje son más de cien.
+ */
+export function freezable(o: THREE.Object3D) {
+  const update = o.updateMatrixWorld;
+  o.updateMatrixWorld = function (this: THREE.Object3D, force?: boolean) {
+    if (!this.userData.frozen) update.call(this, force);
+  };
 }
 
 /** Personajes de decorado (peatones y residentes): sin sombra, que no se note su ausencia y cuesta otra pasada. */

@@ -34,12 +34,18 @@ En marcha:
 - **En el nexo** (en solitario): el cliente no manda poses. Casi no gasta.
 - **En la plaza, en un distrito o en una jam, moviéndose:** 5 poses por segundo (antes 8) = 0,25
   peticiones de Durable Object por segundo (**900 por hora**; antes 1.440). Quieto: 1 latido por
-  segundo (**180 por hora**).
+  segundo (**180 por hora**). Con esas mismas se ve mejor a los demás (11-11-2026): al pararse sale
+  una pose más, para que los otros sepan que se ha parado (una por parada: un 2–4 % más moviéndose a
+  ratos), y un cambio de gesto no espera a su turno, pero de media nunca se mandan más de 5
+  (`net/pose-send.ts`). Solo hay una excepción: en el modo pelea, con otra persona que pelea a
+  menos de 10 m, van a 10 por segundo mientras dura (1.800 por hora de pelea, no de visita).
 - **Duración:** antes, cada pose dejaba un temporizador de reparto pendiente y el objeto no podía
   hibernar: un chunk con gente moviéndose gastaba 450 GB-s por hora (el día entero de plan gratuito
   da para unas 29 horas así). Ahora la pose se reparte al llegar si ya ha pasado el intervalo, y
   solo se deja un temporizador corto cuando llegan varias dentro del mismo intervalo (con una persona
-  moviéndose, nunca): el objeto hiberna entre mensajes.
+  moviéndose, nunca): el objeto hiberna entre mensajes. Desde el 11-11-2026, con hasta 6 sesiones
+  mandando poses no hay intervalo ni temporizador: cada pose sale al llegar (los mensajes que salen
+  no cuentan). Con más, lotes cada 40, 70 o 105 ms según cuánta gente (`batchGap`, `pose-clock.ts`).
 
 ## 3. Cuánto aguanta
 
@@ -69,8 +75,9 @@ por ahora.
   en esa misma ruta.
 - `/chunk/<id>/state` se guarda 15 s en la caché del centro de datos; el panel lo consulta cada 30 s
   y solo con la pestaña visible.
-- Las poses se reparten al llegar; solo hay `setTimeout` (corto) cuando llegan varias en el mismo intervalo.
-- Las poses salen a 5 Hz (antes 8) y los demás se dibujan con 320 ms de retraso para interpolar.
+- Las poses se reparten al llegar; solo hay `setTimeout` (corto) cuando hay más de 6 sesiones mandándolas y llegan varias en el mismo intervalo.
+- Las poses salen a 5 Hz (antes 8), cada una con la hora en que se tomó, y a los demás se les dibuja con el retraso justo (unos 250 ms con buena red, medido por persona; antes, 320 fijos más lo que esperaban en el lote).
+- Nadie recibe su propia pose y los decimales que viajan son los que se ven (milímetros): un tercio menos de bajada.
 
 ## 5. Qué vigilar
 

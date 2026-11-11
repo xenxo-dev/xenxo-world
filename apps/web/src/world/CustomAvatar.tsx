@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
-import { loadAvatar, withoutShadows, type LoadedAvatar } from "./avatar-model";
+import { holdSkeletons, loadAvatar, withoutShadows, type LoadedAvatar } from "./avatar-model";
 import type { Motion } from "./motion";
 
 /**
@@ -19,6 +19,8 @@ export function CustomAvatar({ url, fallback, motion, extra = false, onLoad }: {
       .then((a) => {
         if (alive) {
           if (extra) withoutShadows(a.object);
+          // El frame que no le toca (o sin verse), su esqueleto se queda como estaba.
+          holdSkeletons(a.object, () => !!(motion.hidden || motion.skip));
           loaded = a;
           setAvatar(a);
           onLoad?.(true);
@@ -35,7 +37,16 @@ export function CustomAvatar({ url, fallback, motion, extra = false, onLoad }: {
   }, [url, extra]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sin dibujar (gente lejos o fuera de la vista), sin animar: es lo que más cuesta de cada persona.
-  useFrame((state, dt) => void (motion.hidden || avatar?.update(Math.min(dt, 0.1), motion, state.camera.position)));
+  // Y entre mucha gente, a los de más lejos no les toca a cada frame (world/crowd.ts): el tiempo de
+  // los que se saltan se suma al del siguiente.
+  const owed = useRef(0);
+  useFrame((state, dt) => {
+    if (motion.hidden || !avatar) return void (owed.current = 0);
+    owed.current = Math.min(owed.current + Math.min(dt, 0.1), 0.2);
+    if (motion.skip) return;
+    avatar.update(owed.current, motion, state.camera.position);
+    owed.current = 0;
+  });
 
   if (!url || !avatar) return <>{fallback}</>;
   return <primitive object={avatar.object} />;

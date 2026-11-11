@@ -126,6 +126,7 @@ if (!DEVICE) {
   check(graphics.features === first && graphics.features === graphics.features, "leer lo que se dibuja da siempre el mismo objeto (si no, la escena entera se rehacía)");
   if (DEVICE === "desktop") {
     check(first === FEATURES[gpu.tier], "un escritorio lleva la tabla tal cual");
+    check(TIERS.every((t, i) => i === 0 || FEATURES[t].crowd >= FEATURES[TIERS[i - 1]!].crowd) && FEATURES.low.crowd >= 4, "a más nivel, a más gente se dibuja a cada frame");
     check(!graphics.canvasAA, "el canvas va sin MSAA (el suavizado lo pone el post-proceso)");
     graphics.setXrCapable(true);
     check(graphics.canvasAA, "salvo que el equipo pueda entrar en VR: dentro de las gafas es el único suavizado");
@@ -146,6 +147,7 @@ if (!DEVICE) {
     }
     graphics.setPref("auto");
     check(graphics.features === first, "y de vuelta en automático, el objeto de antes");
+    check(first.crowd >= 3 && first.crowd <= 6, `entre mucha gente, a cada frame solo las ${first.crowd} personas más cercanas`);
     if (DEVICE === "quest") {
       graphics.setXR(true);
       const xr = graphics.features;
