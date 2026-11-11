@@ -4,7 +4,7 @@ import { XROrigin, useXR, useXRControllerLocomotion } from "@react-three/xr";
 import * as THREE from "three";
 import { CHUNK_SIZE, isWeaponId, msg, type ClientMessage } from "@xenxo/protocol";
 import { net, spawn } from "../net/session";
-import { world } from "../net/world-store";
+import { useCars, world } from "../net/world-store";
 import type { AvatarRef } from "@xenxo/protocol";
 import { useAccount } from "../net/account";
 import { AvatarBody, ChatBubble } from "./Avatars";
@@ -151,6 +151,7 @@ export function Player({ active }: { active: boolean }) {
   const emoteUntil = useRef(0);
   const inXR = useXR((s) => s.session != null);
   const driving = useDrive();
+  const cars = useCars();
   const carHandle = useRef(createCarHandle()).current;
   const seqCtx = useRef({ body, motion, bodyYaw }).current;
   // Justo antes de avisar al servidor de «estoy aquí» (un punto de carrera, algo que se recoge) sale
@@ -356,8 +357,11 @@ export function Player({ active }: { active: boolean }) {
         playerLook.yaw = l.yaw;
         _right.set(-_fwd.z, 0, _fwd.x);
         const amount = Math.min(1, Math.hypot(input.move.x, input.move.y));
-        // En móvil, el joystick a tope también corre.
-        let speed = input.run || (controls.autoRun && amount > 0.92) ? (world.parkour ? PK_RUN : RUN) : WALK;
+        // Con la entrada a tope (una tecla, o el joystick empujado del todo) se corre, si así está puesto
+        // (`controls.autoRun`, que viene puesto). Mayús es lo contrario de lo que toque: con eso puesto,
+        // andar (antes no hacía nada, y con teclado no había forma de andar); sin eso, correr.
+        const fast = controls.autoRun && amount > 0.92;
+        let speed = fast !== input.run ? (world.parkour ? PK_RUN : RUN) : WALK;
         // Placa de impulso (boost@1): más rápido unos segundos, mientras te muevas.
         if (boost.until > performance.now()) speed = Math.max(speed, boost.speed);
         // En diagonal no se corre más (locomotion.ts → moveScale).
@@ -598,7 +602,9 @@ export function Player({ active }: { active: boolean }) {
   return (
     <>
       <XROrigin ref={origin}>{inXR && <VRMenu />}</XROrigin>
-      {driving.phase !== "none" && (
+      {/* Donde hay coches, el propio se va preparando al llegar (descargado y con sus shaders
+          compilados: world/warm.ts), escondido: al sacarlo con la C ya está. En las gafas no hay coche. */}
+      {(driving.phase !== "none" || (cars && !inXR)) && (
         <Suspense fallback={null}>
           <CarModel handle={carHandle} paint={paintFor(user?.player_no != null ? `n${user.player_no}` : (world.sessionId ?? "local"))} />
         </Suspense>

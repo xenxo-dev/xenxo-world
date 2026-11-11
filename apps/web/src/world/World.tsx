@@ -16,6 +16,7 @@ import { FRAME_PX, useCine } from "./cine/state";
 import { useCovered } from "./cover";
 import { self } from "./self";
 import { setMaxAnisotropy, tickMaterials } from "./materials";
+import { setWarmRenderer, tickWarm, warmBusy, type WarmRenderer } from "./warm";
 import { Player } from "./Player";
 import { Portals } from "./Portals";
 import { PhotoSky, Sky, SKY } from "./Sky";
@@ -298,11 +299,19 @@ function Environment({ ambience, profile, probe, sky }: { ambience: Ambience; pr
 /* Entrada, VR y rendimiento                                            */
 /* ------------------------------------------------------------------ */
 
-/** Reloj de los materiales animados (agua) y anisotropía máxima de la GPU. */
+/** Reloj de los materiales animados (agua), anisotropía máxima de la GPU y subida de texturas. */
 function MaterialClock() {
   const gl = useThree((s) => s.gl);
   useEffect(() => setMaxAnisotropy(gl.capabilities.getMaxAnisotropy()), [gl]);
-  useFrame((s) => tickMaterials(s.clock.elapsedTime));
+  // Las texturas recién cargadas suben a la gráfica aquí, de una en una (world/warm.ts).
+  useEffect(() => {
+    setWarmRenderer(gl as unknown as WarmRenderer);
+    return () => setWarmRenderer(null);
+  }, [gl]);
+  useFrame((s) => {
+    tickMaterials(s.clock.elapsedTime);
+    tickWarm();
+  });
   return null;
 }
 
@@ -365,7 +374,8 @@ function FpsGuard() {
       k.ambience = ambience;
       watch.rest(now);
     }
-    const busy = splashActive() || loading.pending > 0 || now - loading.last < LOADED_MS;
+    // «Cargando» es también lo que aún se prepara para verse (shaders compilando, texturas subiendo).
+    const busy = splashActive() || loading.pending > 0 || now - loading.last < LOADED_MS || warmBusy();
     if (watch.frame(now, busy)) graphics.decline();
   });
   return null;
@@ -410,13 +420,17 @@ function DevStats() {
 
 /**
  * Quita la pantalla de carga cuando el mundo ya se ve: ha llegado la foto del lugar, no queda
- * nada descargándose (modelos, texturas) y se han dibujado unos cuantos frames seguidos (los
- * primeros compilan los shaders, que es lo que más bloquea). Mientras, la barra sigue las descargas.
+ * nada descargándose (modelos, texturas), lo descargado está preparado (sus shaders compilados y sus
+ * texturas subidas: world/warm.ts) y se han dibujado unos cuantos frames seguidos. Mientras, la barra
+ * sigue las descargas. Lo que se prepara tiene su plazo, y aquí otro por si acaso (`WARM_WAIT_MS`):
+ * la pantalla de carga no se queda puesta por esto.
  */
 const SPLASH_FRAMES = 8;
+const WARM_WAIT_MS = 8000;
 function SplashWatcher() {
   const pending = useRef(0);
   const calm = useRef(0);
+  const warmSince = useRef(-1);
   useEffect(() => {
     if (!splashActive()) return;
     splashProgress(0.5);
@@ -438,7 +452,12 @@ function SplashWatcher() {
   }, []);
   useFrame(() => {
     if (!splashActive()) return;
-    const settled = world.snapshots > 0 && pending.current === 0;
+    const loaded = world.snapshots > 0 && pending.current === 0;
+    // Con todo descargado, se espera a que esté preparado (hasta `WARM_WAIT_MS`).
+    const now = performance.now();
+    if (!loaded || !warmBusy()) warmSince.current = -1;
+    else if (warmSince.current < 0) warmSince.current = now;
+    const settled = loaded && (warmSince.current < 0 || now - warmSince.current > WARM_WAIT_MS);
     calm.current = settled ? calm.current + 1 : 0;
     if (calm.current >= SPLASH_FRAMES) splashDone();
   });

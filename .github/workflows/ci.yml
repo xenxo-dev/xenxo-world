@@ -37,6 +37,8 @@ jobs:
       - run: npm run test:cine -w @xenxo/web
       # Los gráficos: cuándo se baja de nivel porque el equipo no aguanta y qué se dibuja en cada equipo.
       - run: npm run test:graphics -w @xenxo/web
+      # Los modelos entran con sus shaders compilados y sus texturas subidas (sin parones al verlos).
+      - run: npm run test:warm -w @xenxo/web
       # El multijugador: el viaje de una pose (red a rachas, lotes, reloj) y cómo se ve a los demás.
       - run: npm run test:netplay -w @xenxo/web
       # Las carreras de salida conjunta y el circuito de Arcade: las rondas, y dos vueltas con el coche

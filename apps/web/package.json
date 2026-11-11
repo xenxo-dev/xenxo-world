@@ -20,6 +20,7 @@
     "test:guide": "tsx test/guide.mts && esbuild test/arrive.mts --bundle --platform=node --format=esm --define:import.meta.env={} --log-level=warning --outfile=node_modules/.cache/xenxo/arrive.mjs && node node_modules/.cache/xenxo/arrive.mjs",
     "test:graphics": "esbuild test/graphics.mts --bundle --platform=node --format=esm --define:import.meta.env={} --log-level=warning --outfile=node_modules/.cache/xenxo/graphics.mjs && node node_modules/.cache/xenxo/graphics.mjs",
     "test:netplay": "esbuild test/netplay.mts --bundle --platform=node --format=esm --define:import.meta.env={} --log-level=warning --outfile=node_modules/.cache/xenxo/netplay.mjs && node node_modules/.cache/xenxo/netplay.mjs",
+    "test:warm": "tsx test/warm.mts",
     "test:cine": "esbuild test/cine.mts --bundle --platform=node --format=esm --define:import.meta.env={} --log-level=warning --outfile=node_modules/.cache/xenxo/cine.mjs && node node_modules/.cache/xenxo/cine.mjs"
   },
   "dependencies": {

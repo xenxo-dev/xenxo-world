@@ -12,6 +12,7 @@ import { SEED_ASSETS } from "../../../../realtime/src/seed-assets";
 import { assetUrl } from "../../config";
 import { useGraphics } from "../graphics";
 import { lightweight } from "../materials";
+import { useWarmedAll } from "../useWarmed";
 import { CAR } from "./car";
 
 export interface CarPose {
@@ -112,21 +113,22 @@ export const CarModel = memo(function CarModel({ handle, paint }: { handle: CarH
   // Cuatro ruedas: dos de cada lado (clones de la misma geometría).
   const wheels = useMemo(() => CAR.wheels.map((w) => (w.left ? wheelL : wheelR).clone(true)), [wheelL, wheelR]);
   const hl = CAR.hingeL, hr = CAR.hingeR;
+  // El coche entra entero y con sus shaders ya compilados (world/warm.ts): sacarlo no congela la imagen.
+  const parts = useMemo(() => [body, doorL, doorR, ...wheels], [body, doorL, doorR, wheels]);
+  const ready = useWarmedAll(parts, f.post);
 
   return (
     <group ref={(o) => void (handle.root = o)} visible={false}>
-      <primitive object={body} />
+      {ready && <primitive object={body} />}
       <group ref={(o) => void (handle.doorL = o)} position={[hl.x, hl.y, hl.z]}>
-        <primitive object={doorL} />
+        {ready && <primitive object={doorL} />}
       </group>
       <group ref={(o) => void (handle.doorR = o)} position={[hr.x, hr.y, hr.z]}>
-        <primitive object={doorR} />
+        {ready && <primitive object={doorR} />}
       </group>
       {CAR.wheels.map((w, i) => (
         <group key={i} ref={(o) => void (handle.steer[i] = o)} position={[w.x, w.y, w.z]}>
-          <group ref={(o) => void (handle.spin[i] = o)}>
-            <primitive object={wheels[i]!} />
-          </group>
+          <group ref={(o) => void (handle.spin[i] = o)}>{ready && <primitive object={wheels[i]!} />}</group>
         </group>
       ))}
     </group>

@@ -344,6 +344,21 @@ scene([
     if (run.pk.fall) walkCrash = run.pk.fall;
   });
   check(!walkCrash, "andando contra la pared: solo se para");
+  // Sin carrerilla no hay golpe: quien arranca a un paso de una pared (la salida de un nivel está al
+  // pie de su pila, y con teclado se corre siempre) se para contra ella, no se estampa.
+  let near = "";
+  const stop = simulate([0, 0, -11.5], 0, 1.6, (_t, run, i) => {
+    go(i, 0, -1, RUN);
+    if (run.pk.fall) near = run.pk.fall;
+  });
+  console.log(`a dos metros de la pared: z=${r2(stop.b.z)} choque=${near || "no"}`);
+  check(!near && stop.b.z < -13 && !stop.stuck, "arrancando a dos metros de la pared, sin carrerilla: se para contra ella");
+  let far = "";
+  simulate([0, 0, -8], 0, 1.6, (_t, run, i) => {
+    go(i, 0, -1, RUN);
+    if (run.pk.fall) far = run.pk.fall;
+  });
+  check(far === "crash", "con cinco metros de carrerilla, sí se la come");
 }
 
 // 12) Viga estrecha (20 cm): equilibrio.

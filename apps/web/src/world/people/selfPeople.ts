@@ -268,8 +268,10 @@ export function peopleFrame(dt: number, c: PeopleCtx, out: { lock: boolean; want
       }
       placeFromDoll(c);
       out.drawn = true;
-      // Al empezar una caída del parkour, los demás ven cuál (la hacen con su propia física).
-      motion.emote = me.fallEmote && me.t < 0.6 ? me.fallEmote : "hit_down";
+      // Al empezar una caída del parkour, los demás ven cuál (la hacen con su propia física). Solo al
+      // empezar: en el suelo o dándose la vuelta el reloj vuelve a cero, y el gesto volvía a salir (los
+      // demás veían a quien ya estaba tumbado estamparse otra vez).
+      motion.emote = me.phase === "fall" && me.fallEmote && me.t < 0.6 ? me.fallEmote : "hit_down";
       motion.speed = 0;
       if (me.phase === "fall") {
         // El golpe contra el suelo: la cadera deja de caer de golpe.

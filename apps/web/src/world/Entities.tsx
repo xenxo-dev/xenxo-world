@@ -12,6 +12,7 @@ import { FONT_URL, NEON_FONT_URL, SIGN_FONT_URL } from "./font";
 import type { Ambience, Features } from "./graphics";
 import { useFrame } from "@react-three/fiber";
 import { failedUrl, RETRY_MS, retryIn } from "./retry";
+import { useWarmed } from "./useWarmed";
 import { haloMaterial, hologramMaterial, lightweight, libraryMaterial, neonGlow, paintedLights, parseLibraryName, tickHolograms } from "./materials";
 
 /** Origen de un chunk respecto al lugar actual (que se dibuja en 0..CHUNK_SIZE). */
@@ -150,7 +151,10 @@ function MeshAsset({ hash, features, ambience, holo, dim }: { hash: string; feat
     });
     return c;
   }, [gltf, hash, shadows, features, ambience, holo, dim]);
-  return <primitive object={scene} />;
+  // Entra en la escena con sus shaders compilados y sus texturas subidas (world/warm.ts): sin parones
+  // al verlo por primera vez. Mientras se prepara uno nuevo (otro ambiente, otro nivel), sigue el de antes.
+  const shown = useWarmed(scene, features.post);
+  return shown ? <primitive object={shown} /> : null;
 }
 
 /**

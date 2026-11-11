@@ -63,6 +63,13 @@ const ROLL_MAX = 17.5;
 const FALL_LANDING = 12.2;
 /** Corriendo de frente contra una pared alta sin saltar, a partir de esta velocidad: el golpe y al suelo. */
 const CRASH_SPEED = 5.2;
+/**
+ * …y solo con carrerilla: este rato seguido corriendo (unos tres metros desde parado). El cuerpo coge
+ * la velocidad de correr en un par de décimas, y con teclado se corre siempre: sin esto, quien
+ * arrancaba a un paso de una pared (la salida de un nivel, que es al pie de su pila) se estampaba
+ * nada más pulsar W, y otra vez al levantarse.
+ */
+export const CRASH_RUN = 0.45;
 
 export type PkMove = "none" | "vault" | "mantle" | "hang" | "climb" | "wallrun" | "wallup" | "slide" | "slideup" | "crouch" | "roll" | "land";
 
@@ -142,6 +149,8 @@ export interface Parkour {
   noGrab: number;
   /** Empujando contra un borde andando (s): sube al rato, sin saltar. */
   push: number;
+  /** Segundos seguidos corriendo (a velocidad de estamparse): la carrerilla. */
+  run: number;
   /** Paso de las manos al moverse colgado (m recorridos). */
   shim: number;
   /** Rebotes en paredes desde la última vez que se pisó suelo (o se colgó): como mucho MAX_KICKS. */
@@ -166,7 +175,7 @@ export function createParkour(): Parkour {
     yaw: NaN, lean: 0, pitch: 0, ox: 0, oz: 0,
     hand: { lx: 0, ly: 0, lz: 0, rx: 0, ry: 0, rz: 0, w: 0 },
     emote: null, balance: false,
-    wallNx: 0, wallNz: 0, wallD: 0, wallUsed: false, airFx: 0, rollAge: Infinity, noGrab: 0, push: 0, shim: 0, kicks: 0,
+    wallNx: 0, wallNz: 0, wallD: 0, wallUsed: false, airFx: 0, rollAge: Infinity, noGrab: 0, push: 0, run: 0, shim: 0, kicks: 0,
     fall: "", fallX: 0, fallZ: 0, fallV: 0,
   };
 }
@@ -185,6 +194,7 @@ export function resetParkour(pk: Parkour, b: Body) {
   pk.airFx = 0;
   pk.rollAge = Infinity;
   pk.push = 0;
+  pk.run = 0;
   b.h = BODY_HEIGHT;
 }
 
@@ -658,6 +668,8 @@ function moveDir(b: Body, inp: ParkourInput) {
 function free(pk: Parkour, b: Body, inp: ParkourInput, dt: number, min: number, max: number) {
   const speed = Math.hypot(b.vx, b.vz);
   const want = Math.hypot(inp.wantX, inp.wantZ);
+  // La carrerilla: cuánto lleva corriendo sin parar (tras una valla o un salto, la que traía).
+  pk.run = speed >= CRASH_SPEED ? pk.run + dt : 0;
   const dir = moveDir(b, inp);
   const dx = dir.x;
   const dz = dir.z;
@@ -703,9 +715,9 @@ function free(pk: Parkour, b: Body, inp: ParkourInput, dt: number, min: number, 
       if (tryWallUp(pk, b, dx, dz, into, true)) return consumeJump();
       requestJump(b);
       consumeJump();
-    } else if (speed >= CRASH_SPEED && toward > 0.7) {
-      // Corriendo de frente contra una pared alta, sin saltar: se la come (la velocidad de antes del
-      // choque, que el paso de la física se quedaría al pararle).
+    } else if (speed >= CRASH_SPEED && pk.run >= CRASH_RUN && toward > 0.7) {
+      // Corriendo de frente y con carrerilla contra una pared alta, sin saltar: se la come (la
+      // velocidad de antes del choque, que el paso de la física se quedaría al pararle).
       const ux = b.vx / speed;
       const uz = b.vz / speed;
       if (probeWall(b.x, b.y + 1.25, b.z, ux, uz, R + speed * dt + 0.06) && -(wallHit.nx * ux + wallHit.nz * uz) > 0.9) {

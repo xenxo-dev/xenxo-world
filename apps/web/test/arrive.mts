@@ -18,7 +18,8 @@ import activities from "../../realtime/src/district-activities.json";
 import { DISTRICT_BOUNDS, DISTRICTS, districtSeed } from "../../realtime/src/districts.ts";
 import { world } from "../src/net/world-store";
 import { directPlace, GUIDED, spotIds, spotOf } from "../src/world/guide";
-import { createBody, stepBody, STEP_UP, type Body } from "../src/world/locomotion";
+import { createBody, placeBody, stepBody, STEP_UP, type Body } from "../src/world/locomotion";
+import { createParkour, parkourStep, resetParkour, type ParkourInput } from "../src/world/parkour/moves";
 import { failedUrl, gone, RETRY_MS, retryIn } from "../src/world/retry";
 
 let fails = 0;
@@ -122,6 +123,50 @@ console.log("Cada sitio tiene suelo con lo que manda el servidor (sin mallas)");
     const bad = doors.map((pt) => ({ p: pt.to.p, b: arrive(id, pt.to.p, 0) })).filter((r) => !stays(r.b, r.p));
     check(bad.length === 0, `${id}: sus ${doors.length} puertas dejan en un sitio con suelo${bad.length ? ` — ${bad.map((r) => `[${r.p.join(", ")}] → ${fmt(r.b)}`).join("; ")}` : ""}`);
   }
+}
+
+console.log("Donde hay parkour, pulsar W al llegar no estampa a nadie");
+{
+  // Con teclado se corre siempre, y en Vertical correr de frente contra una pared alta es una caída de
+  // verdad (cuatro segundos en el suelo). Medido en producción: en el Patio se llegaba mirando a una
+  // pared a dos metros, y en cada nivel, al pie de su pila; W, y al suelo; al levantarse, otra vez.
+  // Ahora hace falta carrerilla (parkour/moves.ts → CRASH_RUN) y el Patio deja delante de las vallas.
+  const PK_RUN = 6.0;
+  /** Corre hacia delante `secs` s desde `p` mirando a `deg` (grados, como la guía): "" o en qué acaba. */
+  const press = (p: readonly number[], deg: number, secs: number): string => {
+    const yaw = (deg * Math.PI) / 180;
+    const b = createBody(p[0]!, p[1]!, p[2]!);
+    placeBody(b, p[0]!, p[1]!, p[2]!);
+    const pk = createParkour();
+    resetParkour(pk, b);
+    const inp: ParkourInput = { wantX: -Math.sin(yaw) * PK_RUN, wantZ: -Math.cos(yaw) * PK_RUN, jump: false, crouch: false, crouchPressed: false, yaw };
+    for (let t = 0; t < secs; t += 1 / HZ) {
+      parkourStep(pk, b, inp, 1 / HZ, B0, B1);
+      if (pk.fall) return `${pk.fall} a los ${t.toFixed(2)} s, tras ${Math.hypot(b.x - p[0]!, b.z - p[2]!).toFixed(1)} m`;
+    }
+    return "";
+  };
+  let seen = 0;
+  for (const d of GUIDED) {
+    if (!(DISTRICTS.find((x) => x.id === d.id) as { parkour?: boolean } | undefined)?.parkour) continue;
+    seen++;
+    const bad: string[] = [];
+    for (const sid of spotIds(d.id)) {
+      const s = spotOf(d.id, sid)!;
+      arrive(d.id, s.p, 0);
+      const r = press(s.p, s.yaw, 1.0);
+      if (r) bad.push(`${sid} [${s.p.join(", ")}] → ${r}`);
+    }
+    check(bad.length === 0, `${d.id}: en sus ${spotIds(d.id).length} sitios, un segundo corriendo hacia delante y nadie acaba en el suelo${bad.length ? ` — ${bad.join("; ")}` : ""}`);
+    // Y la regla sigue ahí: con carrerilla, contra una pared, sí.
+    const patio = spotOf(d.id, "patio");
+    if (patio) {
+      arrive(d.id, patio.p, 0);
+      check(press([32, 0, 37.6], 180, 1.5).startsWith("crash"), `${d.id}: con carrerilla contra el muro del Patio (3 m), sí se estampa`);
+      check(press(patio.p, patio.yaw, 2.4) === "", `${d.id}: desde el sitio del Patio, las vallas se saltan corriendo`);
+    }
+  }
+  check(seen > 0, "hay al menos un distrito con parkour en la guía");
 }
 
 console.log("Lo que no llega a la primera (un modelo, un personaje)");

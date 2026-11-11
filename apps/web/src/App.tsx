@@ -301,7 +301,11 @@ export function App() {
           ) : (
             <p className={`absolute bottom-5 left-1/2 -translate-x-1/2 px-3 py-1.5 text-center text-xs text-cal/70 ${hudBox}`}>
               {driving.on ? t("car.hint") : t("hud.desktopHint")}
-              {!driving.on && <span className="block text-cal/45">{t("hud.keys")}</span>}
+              {!driving.on && (
+                <span className="block text-cal/45">
+                  {t(controls.autoRun ? "hud.shiftWalk" : "hud.shiftRun")} · {t("hud.keys")}
+                </span>
+              )}
               {!driving.on && world.parkour && <span className="block text-neon-suave/80">{t("hud.keysParkour")}</span>}
             </p>
           )}

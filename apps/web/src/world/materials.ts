@@ -16,6 +16,7 @@
 import * as THREE from "three";
 import library from "./material-library.json";
 import type { Ambience, Features } from "./graphics";
+import { queueTexture } from "./warm";
 
 type LibInfo = { tile: number };
 const LIB = library as Record<string, LibInfo>;
@@ -37,6 +38,17 @@ export function parseLibraryName(name: string): LibraryRef | null {
 /* ------------------------------------------------------------------ */
 
 const loader = new THREE.TextureLoader();
+/**
+ * Las texturas se decodifican fuera del hilo principal (createImageBitmap). Con <img>, cada una se
+ * decodificaba en la misma imagen en que subía a la gráfica: unos 20 ms por textura de 1024², tres por
+ * material, justo al ver ese material por primera vez. El mapa de bits viene ya volteado (lo que hace
+ * `flipY` con un <img>): se ve exactamente igual. Safari y lo que no tenga createImageBitmap siguen
+ * con <img>, como hace el cargador de modelos de Three.js.
+ */
+const bitmaps =
+  typeof createImageBitmap === "function" && typeof navigator !== "undefined" && !/^((?!chrome|android).)*safari/i.test(navigator.userAgent)
+    ? new THREE.ImageBitmapLoader().setOptions({ imageOrientation: "flipY", premultiplyAlpha: "none", colorSpaceConversion: "none" })
+    : null;
 const textures = new Map<string, THREE.Texture>();
 let anisotropy = 4;
 
@@ -49,7 +61,18 @@ function tex(lib: string, map: "albedo" | "normal" | "rm", size: number): THREE.
   const key = `${lib}/${map}.${size}`;
   let t = textures.get(key);
   if (!t) {
-    t = loader.load(`/materials/${lib}/${map}.${size}.webp`);
+    const url = `/materials/${lib}/${map}.${size}.webp`;
+    // Al llegar, a la cola de subida (world/warm.ts): sube en un rato libre, no al dibujarla.
+    if (bitmaps) {
+      const made = new THREE.Texture();
+      const arrived = (image: unknown) => {
+        made.image = image;
+        made.needsUpdate = true;
+        queueTexture(made);
+      };
+      bitmaps.load(url, arrived, undefined, () => loader.load(url, (l) => arrived(l.image)));
+      t = made;
+    } else t = loader.load(url, (l) => void queueTexture(l));
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     // Las UV de los modelos de la forja están en metros: la textura se repite según su tamaño real.
     t.repeat.setScalar(1 / LIB[lib]!.tile);
