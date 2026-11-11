@@ -34,6 +34,9 @@ export const carPose = createCarPose();
 const DUR: Partial<Record<Phase, number>> = { open: 0.5, in: 1.3, close: 0.5, open_out: 0.5, out: 1.05, close_out: 0.55 };
 const WALK = 2.1;
 
+/** Lo más que avanza de una vez el coche hacia su cajón de la parrilla (s de un frame largo). */
+const GRID_DT = 0.5;
+
 const _v = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 const _y = new THREE.Vector3(0, 1, 0);
@@ -294,7 +297,9 @@ export function carFrame(dt: number, ctx: SeqCtx): "free" | "walking" | "seated"
       const handbrake = stopping || hold || input.brake || input.jump;
       input.jump = false;
       input.emote = null;
-      if (hold && gridSpot.on) sim.slide(gridSpot.x, gridSpot.z, gridSpot.yaw, Math.min(dt, 0.1));
+      // El camino al cajón cuenta el tiempo de verdad (no el paso corto de la física): con muy pocos
+      // frames por segundo también llega antes de la salida.
+      if (hold && gridSpot.on) sim.slide(gridSpot.x, gridSpot.z, gridSpot.yaw, Math.min(dt, GRID_DT));
       sim.update(Math.min(dt, 0.1), { throttle: stopping || hold ? 0 : input.move.y, steer: stopping || hold ? 0 : input.move.x, handbrake });
       readSim();
       const st = sim.state;

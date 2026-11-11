@@ -297,6 +297,20 @@ const settle = (secs = 1) => {
   check(done && off < 0.15 && Math.abs(dyaw) < 0.05, "el coche va solo a su cajón y queda recto");
   check(hop < 40, "sin pasar de lo que el servidor da por un movimiento posible (40 m/s)");
   check(st.contacts === 4 && Math.abs(st.speed) < 0.3, "y se queda quieto sobre sus cuatro ruedas");
+  // Con dos frames por segundo (un equipo que va a tirones): llega igual, mucho antes de la salida.
+  sim.spawn(from[0]! - 2, from[1]! + 0.1, from[2]! + 0.8, yaw + 0.5);
+  settle();
+  let slow = 0, hop2 = 0, done2 = false;
+  for (; slow < ROUND_JOIN_MS / 1000 && !done2; slow += 0.5) {
+    const bx = st.x, bz = st.z;
+    done2 = sim.slide(to[0]!, to[2]!, yaw, 0.5);
+    for (let i = 0; i < 6; i++) sim.update(1 / 60, { throttle: 0, steer: 0, handbrake: true });
+    hop2 = Math.max(hop2, Math.hypot(st.x - bx, st.z - bz) / 0.5);
+  }
+  settle(0.5);
+  const off2 = Math.hypot(st.x - to[0]!, st.z - to[2]!);
+  console.log(`  a 2 frames por segundo: en su cajón en ${r1(slow)} s, a ${r1(hop2)} m/s como mucho; queda a ${off2.toFixed(2)} m`);
+  check(done2 && off2 < 0.15 && hop2 < 40 && st.contacts === 4, "con muy pocos frames por segundo también llega a su cajón antes de la salida, sin saltos imposibles");
 }
 
 // b) La carrera: dos vueltas desde la pole, pasando por las puertas como las comprueba el servidor.
