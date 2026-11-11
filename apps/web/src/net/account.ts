@@ -10,7 +10,7 @@ import { REALTIME_URL, assetUrl, loadPref, savePref } from "../config";
 import { campaign, withCampaign } from "./campaign";
 import { guestToken, reconnect } from "./session";
 
-export const TERMS_VERSION = "2026-10";
+export const TERMS_VERSION = "2026-11";
 
 export interface User {
   id: string;

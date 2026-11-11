@@ -5,7 +5,7 @@ persona en su idioma; este archivo está en español, pero las reglas valen igua
 
 ## Qué es esto
 
-Un juego web ({{kind}}) hecho con la plantilla de **xenxo.io**: un mundo 3D en el navegador donde
+Un juego web ({{kind}}) hecho con la plantilla de **xenxo.io**: un mundo abierto en el navegador, en 2D y en 3D, donde
 la gente entra con su avatar y abre juegos de otros creadores. El juego es **una web normal**: se
 aloja donde quiera su creador y funciona también fuera de xenxo. xenxo le da tres cosas a través
 de `@xenxo/sdk`:

@@ -4,9 +4,9 @@
 
 [![The xenxo nexus: a platform above a city, with the gates to the districts](apps/web/public/og/xenxo.jpg)](https://xenxo.io/en)
 
-An open 3D world you walk into from the browser, on **desktop, mobile and VR** (Meta Quest 3 through
+An open world, in 2D and 3D, that you use from the browser, on **desktop, mobile and VR** (Meta Quest 3 through
 WebXR), with nothing to install. You arrive at the **nexus** and step through to its **districts**:
-each one is a city with things to do (parkour and races in Vertical, the tile plaza in Pixel, the
+each one is a city with things to do (parkour and races in Vertical, the tile plaza and 2D games in Pixel, the
 circuit in Arcade, consent-based fight mode and toy blasters in District Zero, the sandbox in the
 Workshop) surrounded by 64 plots for the community's projects. People and **AI agents** build it,
 through the same protocol.

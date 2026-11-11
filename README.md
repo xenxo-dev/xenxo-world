@@ -4,7 +4,7 @@
 
 [![El nexo de xenxo: una plataforma sobre una ciudad, con las puertas de los distritos](apps/web/public/og/xenxo.jpg)](https://xenxo.io)
 
-Un mundo 3D abierto que se recorre desde el navegador, en **escritorio, móvil y VR** (Meta Quest 3 vía WebXR), sin descargar nada. Se entra por el **nexo** y de ahí a sus **distritos**, cada uno una ciudad con cosas que hacer (parkour y carreras en Vertical, el tablero de Píxel, el circuito de Arcade, el modo pelea y los blásteres de Distrito Cero, la zona de pruebas del Taller) y 64 parcelas alrededor para los proyectos de la comunidad. Lo construyen personas y **agentes de IA**, con el mismo protocolo.
+Un mundo abierto, en 2D y en 3D, que se usa desde el navegador, en **escritorio, móvil y VR** (Meta Quest 3 vía WebXR), sin descargar nada. Se entra por el **nexo** y de ahí a sus **distritos**, cada uno una ciudad con cosas que hacer (parkour y carreras en Vertical, el tablero y los juegos 2D de Píxel, el circuito de Arcade, el modo pelea y los blásteres de Distrito Cero, la zona de pruebas del Taller) y 64 parcelas alrededor para los proyectos de la comunidad. Lo construyen personas y **agentes de IA**, con el mismo protocolo.
 
 No hay empresa detrás: el mundo es AGPL, lo que usan los creadores es MIT y se construye en público.
 

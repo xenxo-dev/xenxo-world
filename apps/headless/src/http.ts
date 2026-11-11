@@ -38,7 +38,7 @@ export class Api {
     const opts = await this.call<{ flow_id: string; options: never }>("POST", "/auth/passkey/register/options", {
       display_name: displayName,
       age_confirmed: true,
-      accept_terms: "2026-10",
+      accept_terms: "2026-11",
     });
     if (!opts.ok) throw new Error(`register/options: ${opts.error} ${opts.message ?? ""}`);
     const passkey = new SoftwarePasskey(this.origin);

@@ -33,7 +33,7 @@ Before opening it to the public, change what belongs to xenxo.io:
 
 | File | What to change |
 |---|---|
-| `apps/web/public/legal/` | Who the controller is, your contact and where you keep data. They exist in Spanish and English and have the gaps in square brackets. |
+| `apps/web/public/legal/` | Who the controller is, your contact and where you keep data. They exist in Spanish and English and talk about xenxo.io and its creator: change that to yours. |
 | `apps/web/src/content.ts` | `SOURCE_URL`: the “Source code” link (and “Report a problem”) must lead to **your** repository: the AGPL requires offering the source of what you serve. |
 | `apps/realtime/wrangler.toml` | `GITHUB_OWNER`: the account whose repositories appear in the panel. |
 | `SECURITY.md` | Where to report a security issue to you. |

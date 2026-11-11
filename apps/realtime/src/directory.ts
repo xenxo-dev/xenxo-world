@@ -43,7 +43,7 @@ import {
   type FlagName, type Flags, type StatEvent,
 } from "./ops";
 
-export const TERMS_VERSION = "2026-10";
+export const TERMS_VERSION = "2026-11";
 const FLOW_TTL_MS = 5 * 60 * 1000;
 /** Flujos de alta y acceso vivos a la vez (todos los visitantes juntos). */
 const MAX_LIVE_FLOWS = 3000;

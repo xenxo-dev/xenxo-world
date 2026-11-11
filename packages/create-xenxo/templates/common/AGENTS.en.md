@@ -5,7 +5,7 @@ in their language; the rules are the same in any language.
 
 ## What this is
 
-A web game ({{kind}}) made with the **xenxo.io** template: a 3D world in the browser where people
+A web game ({{kind}}) made with the **xenxo.io** template: an open world in the browser, in 2D and 3D, where people
 walk around with their avatar and open games by other creators. The game is **a normal website**:
 it is hosted wherever its creator wants and also works outside xenxo. xenxo gives it three things
 through `@xenxo/sdk`:

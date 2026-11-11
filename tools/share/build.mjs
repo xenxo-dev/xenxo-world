@@ -35,13 +35,13 @@ const LANGS = {
 };
 const HOME = {
   es: {
-    title: "xenxo.io — un mundo 3D abierto, en tu navegador",
-    desc: "Parkour, carreras y juegos sin descargar nada. Y si creas: cuentas, personajes 3D y una parcela para tu juego web. Código abierto, hecho por personas y agentes de IA.",
+    title: "xenxo.io — un mundo abierto en 2D y 3D, en tu navegador",
+    desc: "Parkour, carreras y juegos 2D y 3D sin descargar nada. Y si creas: cuentas, personajes y una parcela para tu juego web. Código abierto, hecho por personas y agentes de IA.",
     alt: "El nexo de xenxo: una plataforma sobre una ciudad, con las puertas de los distritos",
   },
   en: {
-    title: "xenxo.io — an open 3D world, right in your browser",
-    desc: "Parkour, races and games with nothing to install. And if you build: accounts, 3D characters and a plot for your web game. Open source, made by people and AI agents.",
+    title: "xenxo.io — an open world in 2D and 3D, right in your browser",
+    desc: "Parkour, races and 2D and 3D games with nothing to install. And if you build: accounts, characters and a plot for your web game. Open source, made by people and AI agents.",
     alt: "The xenxo nexus: a platform above a city, with the gates to the districts",
   },
 };

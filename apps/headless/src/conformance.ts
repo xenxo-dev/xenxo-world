@@ -741,11 +741,11 @@ await scenario("alta con passkey y acceso de nuevo con la misma passkey", async 
 
 await scenario("el alta exige 14 años, aceptar las condiciones vigentes y un nombre no reservado", async () => {
   const api = new Api(baseUrl);
-  const noAge = await api.call("POST", "/auth/passkey/register/options", { display_name: "Menor", age_confirmed: false, accept_terms: "2026-10" });
+  const noAge = await api.call("POST", "/auth/passkey/register/options", { display_name: "Menor", age_confirmed: false, accept_terms: "2026-11" });
   assert(!noAge.ok && noAge.error === "age_required", "debería exigir la edad");
   const noTerms = await api.call("POST", "/auth/passkey/register/options", { display_name: "Alguien", age_confirmed: true });
   assert(!noTerms.ok && noTerms.error === "terms_required", "debería exigir las condiciones");
-  const reserved = await api.call("POST", "/auth/passkey/register/options", { display_name: "Xenxo", age_confirmed: true, accept_terms: "2026-10" });
+  const reserved = await api.call("POST", "/auth/passkey/register/options", { display_name: "Xenxo", age_confirmed: true, accept_terms: "2026-11" });
   assert(!reserved.ok && reserved.error === "name_reserved", "un nombre reservado debería decir name_reserved, no bad_name");
 });
 
@@ -2865,7 +2865,7 @@ await scenario("contadores de visitas: sumas por día de visitas, entradas, luga
   assert((await fetch(new URL(`/boot?src=${tag}`, baseUrl))).ok, "un refresco no es otra visita");
   // Entra en la plaza (cuenta la entrada, con la etiqueta, y el lugar) y crea una cuenta.
   const c = await XenxoClient.connect({ baseUrl, src: tag });
-  const opts = await new Api(baseUrl).call<{ flow_id: string; options: never }>("POST", "/auth/passkey/register/options", { display_name: `conf ${tag.slice(5)}`, age_confirmed: true, accept_terms: "2026-10" });
+  const opts = await new Api(baseUrl).call<{ flow_id: string; options: never }>("POST", "/auth/passkey/register/options", { display_name: `conf ${tag.slice(5)}`, age_confirmed: true, accept_terms: "2026-11" });
   assert(opts.ok, "alta: opciones");
   const made = await new Api(baseUrl).call("POST", "/auth/passkey/register/verify", { flow_id: opts.data.flow_id, response: await new SoftwarePasskey("http://localhost:5173").create(opts.data.options), src: tag });
   assert(made.ok, "alta con etiqueta");
@@ -2921,7 +2921,7 @@ await scenario("interruptores de emergencia: moderación cierra al momento el ch
     assert(!n.welcome.closed, "en el nexo no hay nada que cerrar");
     n.close();
     // Altas: ni empezar una. Entrar con una cuenta que ya existe, sí.
-    const reg = await new Api(baseUrl).call("POST", "/auth/passkey/register/options", { display_name: "conf cerrada", age_confirmed: true, accept_terms: "2026-10" });
+    const reg = await new Api(baseUrl).call("POST", "/auth/passkey/register/options", { display_name: "conf cerrada", age_confirmed: true, accept_terms: "2026-11" });
     assert(!reg.ok && reg.status === 403 && reg.error === "signups_closed", `altas cerradas (${JSON.stringify(reg)})`);
     assert((await api.call("GET", "/me")).ok, "quien ya tiene cuenta sigue dentro");
     // El panel lo sabe por el arranque.

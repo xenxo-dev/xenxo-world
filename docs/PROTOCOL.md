@@ -758,7 +758,7 @@ antes no se renuevan y, pasados 10 minutos desde que se emitieron, tampoco abren
 
 | Ruta | Quién | Qué hace |
 |---|---|---|
-| `POST /auth/passkey/register/options` · `/verify` | cualquiera | Alta con passkey: `display_name`, `age_confirmed: true` (14+), `accept_terms: "2026-10"` |
+| `POST /auth/passkey/register/options` · `/verify` | cualquiera | Alta con passkey: `display_name`, `age_confirmed: true` (14+), `accept_terms: "2026-11"` |
 | `POST /auth/passkey/login/options` · `/verify` | cualquiera | Acceso con passkey (descubrible, sin nombre de usuario) |
 | `GET /auth/methods` | público | Formas de entrar activas (`{passkey, google}`) |
 | `GET /auth/google/start?mode=login\|register&origin=…&b=<hash>` · `GET /auth/google/callback` · `POST /auth/google/finish { code, bind }` | cualquiera | Entrar con Google (OpenID Connect, código + PKCE, solo `openid`). Al volver, la web recibe un código de un solo uso (60 s) y lo cambia por la sesión; el token nunca viaja en una URL. El código está **atado al navegador** que empezó: `b` es el SHA-256 (base64url, 43 caracteres) de un secreto que la web guarda en `sessionStorage` y manda como `bind` al canjearlo (si no coincide, `flow_expired`). Para darse de alta se mandan `name`, `age=1` y `terms` como con passkey |

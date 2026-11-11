@@ -53,10 +53,10 @@ export const SOLUTIONS: Solution[] = [
     accent: "huerta",
   },
   {
-    title: { es: "Mundos 3D en la web", en: "3D worlds on the web" },
+    title: { es: "Mundos en la web, en 2D y 3D", en: "Worlds on the web, in 2D and 3D" },
     summary: {
-      es: "Esta plaza: escritorio, móvil y VR desde el navegador.",
-      en: "This plaza: desktop, mobile and VR, straight from the browser.",
+      es: "Este mundo: escritorio, móvil y VR desde el navegador.",
+      en: "This world: desktop, mobile and VR, straight from the browser.",
     },
     tag: { es: "WebXR", en: "WebXR" },
     accent: "ocre",
