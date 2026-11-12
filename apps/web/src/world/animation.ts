@@ -17,6 +17,7 @@ import type { VRM } from "@pixiv/three-vrm";
 import { createVRMAnimationClip, VRMAnimationLoaderPlugin, type VRMAnimation } from "@pixiv/three-vrm-animation";
 import { buildGesture, buildGuard, interpolant, PROCEDURAL } from "./people/gestures";
 import { Rig, type PersonFx } from "./people/rig";
+import { ALL_FINGER_BONES, handTable, type BaseHand } from "./people/hands";
 
 /**
  * Gesto → clip. `once`: se reproduce una vez y vuelve al reposo; con `hold`, se queda en la última
@@ -99,6 +100,9 @@ interface PkShot {
 }
 const PK_DUR: Record<string, number> = { pk_vault: 0.6, pk_mantle: 0.85, pk_climb: 1.05, pk_roll: 0.8, pk_slideup: 0.35, pk_land: 0.4 };
 const CLIMB_UP_S = 0.667;
+/** Lo que duran el agarrarse (`pk_grab`) y el tirón de trepar (`pk_pull`, people/gestures.ts). */
+const GRAB_S = 0.9;
+const PULL_S = 0.44;
 const _shot: PkShot = { clip: "idle", time: 0 };
 function pkShot(emote: string, p: number, t: number, speed: number): PkShot | null {
   const s = _shot;
@@ -113,11 +117,14 @@ function pkShot(emote: string, p: number, t: number, speed: number): PkShot | nu
     case "pk_mantle":
       return Object.assign(s, { clip: "climb_up", time: p * CLIMB_UP_S });
     case "pk_climb":
-      // Tirando de los brazos (colgado, la IK dobla los codos) y después, encima del borde.
-      if (p < 0.42) return Object.assign(s, { clip: "pk_hang", time: t, rate: 1 });
+      // El tirón (los codos se doblan con la IK, el pecho a la pared, una rodilla arriba) y después,
+      // encima del borde.
+      if (p < 0.42) return Object.assign(s, { clip: "pk_pull", time: (p / 0.42) * PULL_S });
       return Object.assign(s, { clip: "climb_up", time: 0.13 + ((p - 0.42) / 0.58) * (CLIMB_UP_S - 0.13) });
     case "pk_hang":
-      return Object.assign(s, { clip: "pk_hang", time: t, rate: 1 });
+      // Al agarrarse, lo que traía el salto sigue en las piernas un momento; después, colgado.
+      if (t < GRAB_S) return Object.assign(s, { clip: "pk_grab", time: t });
+      return Object.assign(s, { clip: "pk_hang", time: t - GRAB_S, rate: 1 });
     case "pk_shimmy_l":
     case "pk_shimmy_r":
       return Object.assign(s, { clip: emote, time: t, rate: 1 });
@@ -153,7 +160,7 @@ const IN_PLACE = new Set(["climb_up"]);
 /** Deslizarse (también en el modo pelea, fuera de Vertical). */
 const SLIDE_CLIPS = ["slide_start", "slide_loop", "slide_exit"];
 /** Los clips del parkour, para tenerlos antes del primer salto (solo donde hay parkour). */
-const PK_CLIPS = ["climb_up", "ninja_loop", "ninja_land", "slide_start", "slide_loop", "slide_exit", "roll", "crouch_idle", "crouch_walk", "pk_hang", "pk_shimmy_l", "pk_shimmy_r"];
+const PK_CLIPS = ["climb_up", "ninja_loop", "ninja_land", "slide_start", "slide_loop", "slide_exit", "roll", "crouch_idle", "crouch_walk", "pk_grab", "pk_hang", "pk_pull", "pk_shimmy_l", "pk_shimmy_r"];
 let pkLoaded = false;
 export function preloadParkour() {
   if (pkLoaded) return;
@@ -242,6 +249,15 @@ const UPPER_MASK: Record<string, number> = {
 const GUARD_MASK: Record<string, number> = { ...UPPER_MASK, spine: 0.15, chest: 0.35, upperChest: 0.5, neck: 0.35, head: 0.35 };
 const isFinger = (bone: string) => /^(left|right)(Thumb|Index|Middle|Ring|Little)/.test(bone);
 
+/**
+ * La mano de base de cada momento (people/hands.ts): los clips de captura traen siempre un puño en
+ * los dedos, así que se ponen después del mezclador. Con los puños: la guardia y los golpes; las
+ * palmas casi abiertas: al subirse a un borde (se apoyan en él); el resto, relajada (y algo más
+ * abierta corriendo a tope). Lo hecho en código (los gestos) trae sus propias manos y manda.
+ */
+const FIST_CLIPS = new Set(["punch_jab", "punch_cross", "guard"]);
+const OPEN_CLIPS = new Set(["climb_up", "roll", "slide_start", "slide_loop", "slide_exit"]);
+
 /** Un gesto encima de la pose (Motion.gesture): su clip, si va una vez, su ritmo, cuánto lleva y su peso. */
 interface Gest {
   clip: string | null;
@@ -289,6 +305,8 @@ export class VrmAnimator {
   private leap = new Leap();
   private cycle = Math.random();
   private readonly _w: Record<string, number> = {};
+  /** Los dedos (nodo normalizado y su giro de ahora, que va hacia la mano de base). */
+  private fingers: { node: THREE.Object3D; bone: string; now: THREE.Quaternion }[] | null = null;
   private readonly _dur: Record<string, number> = {};
 
   constructor(private vrm: VRM) {
@@ -334,7 +352,8 @@ export class VrmAnimator {
       const node = nodeName ? this.vrm.scene.getObjectByName(nodeName) : undefined;
       const bone = this.boneOf(node);
       if (!node || !bone) continue;
-      const w = (name === "guard" ? GUARD_MASK : UPPER_MASK)[bone] ?? (isFinger(bone) ? 1 : 0);
+      // Los dedos, solo de lo hecho en código (de la captura son siempre un puño: handBase).
+      const w = (name === "guard" ? GUARD_MASK : UPPER_MASK)[bone] ?? (isFinger(bone) && PROCEDURAL.has(name) ? 1 : 0);
       if (!w) continue;
       l.nodes.push(node);
       l.weights.push(w);
@@ -505,6 +524,7 @@ export class VrmAnimator {
       }
     }
     this.mixer.update(dt);
+    this.handBase(dt, guard || (pkAction ? FIST_CLIPS.has(shot!.clip) : !!(live && known && FIST_CLIPS.has(known.clip))) ? "fist" : pkAction && OPEN_CLIPS.has(shot!.clip) ? "open" : "relaxed", speed);
 
     // Capas de arriba: los puños en guardia al andar y el gesto que sigue al moverse.
     this.guardUpperW += ((guard && moving && !full && !pkAction ? 0.9 : 0) - this.guardUpperW) * Math.min(1, dt / 0.15);
@@ -515,6 +535,34 @@ export class VrmAnimator {
     this.applyGesture(dt, gesture ?? null);
 
     this.rig.apply(dt, fx ?? null);
+  }
+
+  /**
+   * La mano de base (people/hands.ts) sobre lo que ha dejado el mezclador, menos lo que pesen en él
+   * los gestos hechos en código (traen sus manos). Pasa de una forma a otra en una décima.
+   */
+  private handBase(dt: number, shape: BaseHand, speed: number) {
+    if (!this.fingers) {
+      this.fingers = [];
+      for (const bone of ALL_FINGER_BONES) {
+        const node = this.vrm.humanoid.getNormalizedBoneNode(bone as never);
+        if (node) this.fingers.push({ node, bone, now: handTable("relaxed").get(bone)!.clone() });
+      }
+    }
+    let made = 0;
+    for (const [name, a] of this.actions) if (PROCEDURAL.has(name)) made += a.getEffectiveWeight();
+    const w = 1 - Math.min(1, made);
+    const k = Math.min(1, dt / 0.1);
+    const t = handTable(shape);
+    // Corriendo a tope, la mano se suelta (algo más abierta).
+    const loose = shape === "relaxed" ? THREE.MathUtils.smoothstep(speed, 4, 6) * 0.5 : 0;
+    const open = handTable("open");
+    for (const f of this.fingers) {
+      _q.copy(t.get(f.bone)!);
+      if (loose > 0) _q.slerp(open.get(f.bone)!, loose);
+      f.now.slerp(_q, k);
+      if (w > 0.001) f.node.quaternion.slerp(f.now, w);
+    }
   }
 
   /**

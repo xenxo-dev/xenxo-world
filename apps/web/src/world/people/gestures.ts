@@ -17,22 +17,12 @@
  */
 import * as THREE from "three";
 import type { VRMAnimation } from "@pixiv/three-vrm-animation";
+import { FINGER_BONES, fingerPose } from "./hands";
 
 type V3 = [number, number, number];
 
 type TorsoBone = "spine" | "chest" | "upperChest" | "neck" | "head" | "leftShoulder" | "rightShoulder";
 const TORSO: TorsoBone[] = ["spine", "chest", "upperChest", "neck", "head", "leftShoulder", "rightShoulder"];
-
-const FINGERS = ["Thumb", "Index", "Middle", "Ring", "Little"] as const;
-const JOINTS: Record<(typeof FINGERS)[number], readonly string[]> = {
-  Thumb: ["Metacarpal", "Proximal", "Distal"],
-  Index: ["Proximal", "Intermediate", "Distal"],
-  Middle: ["Proximal", "Intermediate", "Distal"],
-  Ring: ["Proximal", "Intermediate", "Distal"],
-  Little: ["Proximal", "Intermediate", "Distal"],
-};
-const fingerBones = (side: "left" | "right") => FINGERS.flatMap((f) => JOINTS[f].map((j) => `${side}${f}${j}`));
-const FINGER_BONES = { left: fingerBones("left"), right: fingerBones("right") };
 
 /** Formas de la mano: el puño y la relajada salen de la captura; las demás, de mezclarlas. */
 export type Hand = "fist" | "relaxed" | "open" | "flat" | "point" | "grip" | "curl" | "thumb";
@@ -330,6 +320,34 @@ export const GESTURES: Record<string, Def> = {
       { t: 1.6, ...both({ at: [0.04, 0.49, 0.15], pole: [1, -0.1, -0.6], twist: 0, wrist: [-25, 0, 0] }), l: "grip", r: "grip", p: { chest: [5, 0, 0], neck: [-8, 0, 0], head: [-14, 0, 0] }, LL: { at: [0.03, -0.7, 0.2], pole: [0, 0, 1], foot: [25, 0, 0] }, RL: { at: [-0.04, -0.69, 0.25], pole: [0, 0, 1], foot: [20, 0, 0] }, turn: [4, 0, 1.5] },
     ],
   },
+  /**
+   * Al agarrarse a un borde (el primer momento colgado, antes de `pk_hang`): lo que traía el salto
+   * sigue en las piernas: van hacia la pared, rebotan atrás y se calman en un par de vaivenes que se
+   * apagan; el tronco acompaña (la cadera se dobla y se estira). Acaba justo en la pose de colgado.
+   */
+  pk_grab: {
+    base: "idle",
+    keys: [
+      { t: 0, ...both({ at: [0.04, 0.49, 0.15], pole: [1, -0.1, -0.6], twist: 0, wrist: [-25, 0, 0] }), l: "grip", r: "grip", p: { chest: [9, 0, 0], neck: [-6, 0, 0], head: [-10, 0, 0] }, LL: { at: [0.04, -0.6, 0.06], pole: [0, 0, 1], foot: [30, 0, 0] }, RL: { at: [-0.04, -0.62, 0.02], pole: [0, 0, 1], foot: [30, 0, 0] }, turn: [14, 0, 0] },
+      { t: 0.2, ...both({ at: [0.04, 0.49, 0.15], pole: [1, -0.1, -0.6], twist: 0, wrist: [-25, 0, 0] }), l: "grip", r: "grip", p: { chest: [3, 0, 0], neck: [-8, 0, 0], head: [-15, 0, 0] }, LL: { at: [0.03, -0.66, 0.36], pole: [0, 0, 1], foot: [12, 0, 0] }, RL: { at: [-0.04, -0.65, 0.4], pole: [0, 0, 1], foot: [10, 0, 0] }, turn: [-6, 0, 0] },
+      { t: 0.45, ...both({ at: [0.04, 0.49, 0.15], pole: [1, -0.1, -0.6], twist: 0, wrist: [-25, 0, 0] }), l: "grip", r: "grip", p: { chest: [7, 0, 0], neck: [-8, 0, 0], head: [-13, 0, 0] }, LL: { at: [0.03, -0.71, 0.06], pole: [0, 0, 1], foot: [26, 0, 0] }, RL: { at: [-0.04, -0.7, 0.1], pole: [0, 0, 1], foot: [26, 0, 0] }, turn: [9, 0, 0] },
+      { t: 0.68, ...both({ at: [0.04, 0.49, 0.15], pole: [1, -0.1, -0.6], twist: 0, wrist: [-25, 0, 0] }), l: "grip", r: "grip", p: { chest: [5, 0, 0], neck: [-8, 0, 0], head: [-14, 0, 0] }, LL: { at: [0.03, -0.7, 0.27], pole: [0, 0, 1], foot: [20, 0, 0] }, RL: { at: [-0.04, -0.69, 0.3], pole: [0, 0, 1], foot: [18, 0, 0] }, turn: [1, 0, 0] },
+      { t: 0.9, ...both({ at: [0.04, 0.49, 0.15], pole: [1, -0.1, -0.6], twist: 0, wrist: [-25, 0, 0] }), l: "grip", r: "grip", p: { chest: [5, 0, 0], neck: [-8, 0, 0], head: [-14, 0, 0] }, LL: { at: [0.03, -0.7, 0.2], pole: [0, 0, 1], foot: [25, 0, 0] }, RL: { at: [-0.04, -0.69, 0.25], pole: [0, 0, 1], foot: [20, 0, 0] }, turn: [4, 0, 1.5] },
+    ],
+  },
+  /**
+   * Trepar desde colgado, el tirón (antes de subir encima con la captura): los codos se doblan (la IK
+   * del mundo deja las manos en el borde), el pecho se pega a la pared y una rodilla sube hacia el
+   * borde mientras la otra pierna empuja contra la pared.
+   */
+  pk_pull: {
+    base: "idle",
+    keys: [
+      { t: 0, ...both({ at: [0.04, 0.49, 0.15], pole: [1, -0.1, -0.6], twist: 0, wrist: [-25, 0, 0] }), l: "grip", r: "grip", p: { chest: [5, 0, 0], neck: [-8, 0, 0], head: [-14, 0, 0] }, LL: { at: [0.03, -0.7, 0.2], pole: [0, 0, 1], foot: [25, 0, 0] }, RL: { at: [-0.04, -0.69, 0.25], pole: [0, 0, 1], foot: [20, 0, 0] }, turn: [4, 0, 0] },
+      { t: 0.22, ...both({ at: [0.04, 0.49, 0.15], pole: [1, -0.1, -0.6], twist: 0, wrist: [-25, 0, 0] }), l: "grip", r: "grip", p: { chest: [12, 0, 0], neck: [-4, 0, 0], head: [-10, 0, 0] }, LL: { at: [0.05, -0.48, 0.3], pole: [0, 0.2, 1], foot: [10, 0, 0] }, RL: { at: [-0.05, -0.62, 0.3], pole: [0, 0, 1], foot: [35, 0, 0] }, turn: [10, 0, 0] },
+      { t: 0.44, ...both({ at: [0.04, 0.49, 0.15], pole: [1, -0.1, -0.6], twist: 0, wrist: [-25, 0, 0] }), l: "grip", r: "grip", p: { chest: [18, 0, 0], neck: [0, 0, 0], head: [-6, 0, 0] }, LL: { at: [0.06, -0.3, 0.38], pole: [0, 0.4, 1], foot: [0, 0, 0] }, RL: { at: [-0.05, -0.55, 0.26], pole: [0, 0, 1], foot: [40, 0, 0] }, turn: [16, 0, 0] },
+    ],
+  },
   /** Colgado, de lado hacia su derecha: la cadera se balancea hacia donde va y las piernas la siguen. */
   pk_shimmy_r: {
     base: "idle",
@@ -588,19 +606,18 @@ function solveLeg(leg: { at: number[]; pole: number[]; foot: number[] }, upper: 
   foot.setFromEuler(_eu.set(leg.foot[0]! * DEG, leg.foot[1]! * DEG, leg.foot[2]! * DEG, "XYZ"));
 }
 
-/** Las formas de la mano, por hueso de los dedos (de la captura: el puño de la guardia, la mano del reposo). */
+/**
+ * Las formas de la mano, por hueso de los dedos. La relajada y el puño, de people/hands.ts (los
+ * clips de captura traen siempre un puño en los dedos: no sirven); las demás, de mezclarlas.
+ */
 type HandShapes = Record<Hand, Map<string, THREE.Quaternion>>;
-function handShapes(idle: VRMAnimation, jab: VRMAnimation | null): HandShapes {
-  const at0 = (a: VRMAnimation | null, bone: string) => {
-    const tr = a?.humanoidTracks.rotation.get(bone as never) as QuatTrack | undefined;
-    return tr ? new THREE.Quaternion(tr.values[0], tr.values[1], tr.values[2], tr.values[3]) : new THREE.Quaternion();
-  };
+function handShapes(): HandShapes {
   const shapes = {} as HandShapes;
   for (const h of ["fist", "relaxed", "open", "flat", "point", "grip", "curl", "thumb"] as Hand[]) shapes[h] = new Map();
   for (const side of ["left", "right"] as const) {
     for (const bone of FINGER_BONES[side]) {
-      const relaxed = at0(idle, bone);
-      const fist = jab ? at0(jab, bone) : relaxed.clone().slerp(new THREE.Quaternion(), -0.6);
+      const relaxed = fingerPose("relaxed", bone);
+      const fist = fingerPose("fist", bone);
       const flat = new THREE.Quaternion();
       const thumb = bone.includes("Thumb");
       const index = bone.includes("Index");
@@ -643,15 +660,21 @@ export function buildGesture(name: string, src: GestureSources): VRMAnimation | 
   const def = GESTURES[name];
   if (!def) return null;
   const base = def.base === "guard" && src.guard ? src.guard : src.idle;
-  const shapes = handShapes(src.idle, src.jab);
+  const shapes = handShapes();
   const duration = Math.max(0.1, def.keys[def.keys.length - 1]!.t);
   const n = Math.max(2, Math.round(duration * FPS) + 1);
   const times = Array.from({ length: n }, (_, i) => (i / (n - 1)) * duration);
   const baseRot = base.humanoidTracks.rotation as unknown as Map<string, QuatTrack>;
   const baseDur = base.duration;
-  const sampleBase = (bone: string) => quatSampler(baseRot.get(bone), baseDur);
+  // Los dedos de la base no sirven (la captura trae siempre un puño): la mano de la base es la
+  // relajada (o el puño, sobre la guardia), y la mano que no hace nada en el gesto se queda así.
+  const baseHand = shapes[def.base === "guard" ? "fist" : "relaxed"];
+  const sampleBase = (bone: string): Sample => {
+    const h = baseHand.get(bone);
+    return h ? (_t: number, out: THREE.Quaternion) => out.copy(h) : quatSampler(baseRot.get(bone), baseDur);
+  };
   const rotation = new Map<string, QuatTrack>();
-  for (const [bone, tr] of baseRot) rotation.set(bone, resample(quatSampler(tr, baseDur), times, `${bone}.quaternion`));
+  for (const [bone, tr] of baseRot) rotation.set(bone, resample(baseHand.has(bone) ? sampleBase(bone) : quatSampler(tr, baseDur), times, `${bone}.quaternion`));
   const translation = new Map<string, THREE.VectorKeyframeTrack>(base.humanoidTracks.translation as unknown as Map<string, THREE.VectorKeyframeTrack>);
 
   const tmp: number[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];

@@ -1,9 +1,9 @@
 /**
  * Prueba del pelo y la ropa con física sin navegador (world/springs.ts con los VRM de serie de verdad):
- * a quién le salen cadenas (coleta, trenza y melena sí; pelo corto no; la falda sí, a medias con las
- * piernas; pantalones y chaquetas no), que los pesos nuevos sumen uno y apunten a huesos que existen,
- * que el pelo y la falda se queden atrás al correr y vuelvan al reposo al pararse, que las piernas no
- * atraviesen la falda, sin NaN, y lo que cuesta.
+ * a quién le salen cadenas (coleta, trenza y melena sí; pelo corto no) y vaivén en la ropa (la falda
+ * sí; pantalones y chaquetas no), que los pesos nuevos sumen uno y apunten a huesos que existen, que
+ * en reposo la falda quede igual que sin física, que el pelo y la falda se queden atrás al correr y
+ * vuelvan al reposo al pararse, sin NaN, y lo que cuesta.
  *
  *   npm run test:springs -w @xenxo/web
  */
@@ -126,8 +126,9 @@ for (const id of Object.keys(expect)) {
   // Corre hacia +Z a 6 m/s medio segundo (el personaje mira a +Z): la punta se va hacia atrás (−Z).
   let lag = 0, nan = false;
   const t0 = performance.now();
+  // Arranca a correr como el cuerpo (locomotion.ts: hasta 6 m/s en unas décimas).
   for (let i = 0; i < 30; i++) {
-    vrm.scene.position.z += 6 * dt;
+    vrm.scene.position.z += 6 * (1 - Math.exp(-11 * i * dt)) * dt;
     s.update(dt);
     const r = rel(new THREE.Vector3());
     lag = Math.max(lag, rest.z - r.z);
@@ -143,74 +144,78 @@ for (const id of Object.keys(expect)) {
   check(ms < 0.5, "cuesta poco (menos de 0,5 ms por frame en Node)");
 }
 
-// La falda de Mar: va a medias con las piernas, corriendo se queda atrás, y las piernas no la atraviesan.
+// La falda de Mar: con su vaivén, pero en reposo igual que sin física (nada se rasga ni deja ver
+// las piernas), corriendo se balancea hacia atrás y parada vuelve.
 {
+  const plain = await load("mar");
   const vrm = await load("mar");
   const s = addSprings(vrm.scene, springBodyOf(vrm)!)!;
-  const tips: THREE.Object3D[] = [];
-  vrm.scene.traverse((o) => {
-    if (o.name.startsWith("cloth_") && o.children.every((c) => !c.name.startsWith("cloth_"))) tips.push(o);
-  });
-  // Lo más que va con la cadena un vértice de la falda (el resto, con las piernas, como estaba).
-  let most = 0;
-  vrm.scene.traverse((o) => {
-    const m = o as THREE.SkinnedMesh;
-    if (!m.isSkinnedMesh) return;
-    const si = m.geometry.getAttribute("skinIndex"), sw = m.geometry.getAttribute("skinWeight");
-    for (let i = 0; i < si.count; i++) {
-      let w = 0;
-      for (let k = 0; k < 4; k++) if (m.skeleton.bones[si.getComponent(i, k)]?.name.startsWith("cloth_")) w += sw.getComponent(i, k);
-      most = Math.max(most, w);
+  // Cada vértice, con los mismos pesos: solo la cadera pasa al péndulo.
+  const hipsName = plain.humanoid.getRawBoneNode("hips")!.name;
+  let changed = 0, moved = 0, total = 0;
+  const meshes = (v: VRM) => {
+    const out: THREE.SkinnedMesh[] = [];
+    v.scene.traverse((o) => void ((o as THREE.SkinnedMesh).isSkinnedMesh && out.push(o as THREE.SkinnedMesh)));
+    return out;
+  };
+  // Solo la prenda (el pelo tiene sus propias cadenas).
+  const a: THREE.SkinnedMesh[] = [], b: THREE.SkinnedMesh[] = [];
+  meshes(vrm).forEach((m, i) => {
+    if (m.skeleton.bones.some((x) => x.name === "cloth_sway") && /suit|skirt|dress|robe/i.test(m.name)) {
+      a.push(meshes(plain)[i]!);
+      b.push(m);
     }
   });
-  check(most > 0.3 && most <= 0.51, `cada vértice de la falda va como mucho a medias con su cadena (${most.toFixed(2)}): el resto, con las piernas`);
-  const hips = vrm.humanoid.getRawBoneNode("hips")!;
+  for (let m = 0; m < a.length; m++) {
+    const sa = a[m]!.geometry.getAttribute("skinWeight"), sb = b[m]!.geometry.getAttribute("skinWeight");
+    const ia = a[m]!.geometry.getAttribute("skinIndex"), ib = b[m]!.geometry.getAttribute("skinIndex");
+    for (let i = 0; i < sa.count; i++)
+      for (let k = 0; k < 4; k++) {
+        if (Math.abs(sa.getComponent(i, k) - sb.getComponent(i, k)) > 1e-6) changed++;
+        const na = a[m]!.skeleton.bones[ia.getComponent(i, k)]?.name, nb = b[m]!.skeleton.bones[ib.getComponent(i, k)]?.name;
+        if (na !== nb) {
+          moved++;
+          if (nb !== "cloth_sway" || na !== hipsName) changed++;
+        }
+        total++;
+      }
+  }
+  check(changed === 0 && moved > 0, `los pesos de la falda, los mismos: solo lo de la cadera pasa al péndulo (${moved} de ${total})`);
+  // En reposo, cada vértice en el mismo sitio que sin física.
+  const at = (m: THREE.SkinnedMesh, i: number) => m.getVertexPosition(i, new THREE.Vector3()).applyMatrix4(m.matrixWorld);
   const dt = 1 / 60;
-  const tipZ = () => {
-    vrm.scene.updateMatrixWorld(true);
-    let z = 0;
-    for (const t of tips) z += new THREE.Vector3().setFromMatrixPosition(t.matrixWorld).z - new THREE.Vector3().setFromMatrixPosition(hips.matrixWorld).z;
-    return z / tips.length;
-  };
   for (let i = 0; i < 120; i++) s.update(dt);
-  const rest = tipZ();
+  vrm.scene.updateMatrixWorld(true);
+  plain.scene.updateMatrixWorld(true);
+  let worst = 0;
+  for (let m = 0; m < a.length; m++) {
+    const n = a[m]!.geometry.getAttribute("position").count;
+    for (let i = 0; i < n; i += 7) worst = Math.max(worst, at(a[m]!, i).distanceTo(at(b[m]!, i)));
+  }
+  check(worst < 0.002, `en reposo, la falda queda igual que sin física (lo más que se aparta: ${(worst * 1000).toFixed(2)} mm)`);
+  // Corriendo: la punta del péndulo se queda atrás; parada, vuelve.
+  let tip: THREE.Object3D | null = null;
+  vrm.scene.traverse((o) => void (o.name === "cloth_sway_tip" && (tip = o)));
+  const hips = vrm.humanoid.getRawBoneNode("hips")!;
+  const rel = () => {
+    vrm.scene.updateMatrixWorld(true);
+    return new THREE.Vector3().setFromMatrixPosition(tip!.matrixWorld).z - new THREE.Vector3().setFromMatrixPosition(hips.matrixWorld).z;
+  };
+  const rest = rel();
   let lag = 0, nan = false;
+  // Arranca a correr como el cuerpo (locomotion.ts: hasta 6 m/s en unas décimas).
   for (let i = 0; i < 30; i++) {
-    vrm.scene.position.z += 6 * dt;
+    vrm.scene.position.z += 6 * (1 - Math.exp(-11 * i * dt)) * dt;
     s.update(dt);
-    const z = tipZ();
+    const z = rel();
     if (!Number.isFinite(z)) nan = true;
     lag = Math.max(lag, rest - z);
   }
   for (let i = 0; i < 240; i++) s.update(dt);
-  const back = Math.abs(tipZ() - rest);
-  console.log(`  falda: ${tips.length} cadenas; se queda ${(lag * 100).toFixed(1)} cm atrás al correr; parada, a ${(back * 100).toFixed(1)} cm del reposo`);
-  check(lag > 0.01, "corriendo, la falda se queda atrás");
-  check(back < 0.03 && !nan, "parada, vuelve al reposo (y nada se vuelve NaN)");
-  // Una zancada: el muslo izquierdo, 45° hacia delante. Las puntas de las cadenas no se quedan dentro de él.
-  const leg = vrm.humanoid.getRawBoneNode("leftUpperLeg")!, knee = vrm.humanoid.getRawBoneNode("leftLowerLeg")!;
-  const q0 = leg.quaternion.clone();
-  let inside = 0;
-  for (let i = 0; i < 40; i++) {
-    const a = (Math.min(1, i / 15) * Math.PI) / 4;
-    vrm.scene.updateMatrixWorld(true);
-    // Hacia delante es hacia +Z (el personaje mira a +Z): el giro que lleva la rodilla hacia ahí.
-    const hipW = new THREE.Vector3().setFromMatrixPosition(leg.matrixWorld);
-    const axis = new THREE.Vector3(1, 0, 0);
-    const parentQ = leg.parent!.getWorldQuaternion(new THREE.Quaternion());
-    const localAxis = axis.clone().applyQuaternion(parentQ.clone().invert());
-    leg.quaternion.copy(q0).premultiply(new THREE.Quaternion().setFromAxisAngle(localAxis, -a));
-    s.update(dt);
-    vrm.scene.updateMatrixWorld(true);
-    const kneeW = new THREE.Vector3().setFromMatrixPosition(knee.matrixWorld);
-    if (i === 39 && kneeW.z - hipW.z < 0.1) inside = -1; // la zancada no ha ido hacia delante: la prueba no vale
-    for (const t of tips) {
-      const p = new THREE.Vector3().setFromMatrixPosition(t.matrixWorld);
-      const d = new THREE.Line3(hipW, kneeW).closestPointToPoint(p, true, new THREE.Vector3()).distanceTo(p);
-      if (i === 39 && d < 0.07) inside++;
-    }
-  }
-  check(inside === 0, inside < 0 ? "la zancada de la prueba no va hacia delante" : "con el muslo adelantado, ninguna cadena de la falda se queda dentro de él");
+  const back = Math.abs(rel() - rest);
+  console.log(`  falda: el bajo se va ${(lag * 100).toFixed(1)} cm atrás al arrancar a correr; parada, a ${(back * 100).toFixed(1)} cm del reposo`);
+  check(lag > 0.02 && lag < 0.15, "al arrancar a correr se balancea hacia atrás, sin pasarse");
+  check(back < 0.01 && !nan, "parada, vuelve al reposo (y nada se vuelve NaN)");
 }
 
 if (fails) {
