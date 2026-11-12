@@ -1382,6 +1382,7 @@ export class CitySim {
     m.speed += (sp - m.speed) * Math.min(1, dt * 6);
     if (m.speed < 0.05) m.speed = 0;
     m.airborne = !b.grounded && b.airTime > 0.06;
+    m.vy = b.vy;
     if (sp > 0.25 && c.doing !== "dodge" && c.doing !== "pair") face = Math.atan2(-b.vx, -b.vz);
     if (!Number.isNaN(face)) this.turn(c, face, dt, sp > 0.25 ? 7 : 4);
   }

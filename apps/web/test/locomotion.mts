@@ -10,7 +10,9 @@
 import type { Entity } from "@xenxo/protocol";
 import { world } from "../src/net/world-store";
 import { others, solidsVersion } from "../src/world/collision";
-import { BODY_RADIUS, createBody, moveScale, requestJump, stepBody, STEP_UP } from "../src/world/locomotion";
+import { BODY_RADIUS, createBody, moveScale, placeBody, requestJump, stepBody, STEP_UP } from "../src/world/locomotion";
+import { cycleStep, Leap, MAX_LEAN, NATURAL, PHASE0, TurnLean } from "../src/world/leap";
+import { readFileSync } from "node:fs";
 
 let fails = 0;
 const check = (ok: boolean, what: string) => {
@@ -189,6 +191,140 @@ console.log("Lo sólido del lugar");
   const b = createBody(8, 0, 0);
   for (let i = 0; i < 180; i++) stepBody(b, 0, -WALK, 1 / 60, -LIM, LIM);
   check(solidsVersion() !== v0 && b.z > -4, "sí cuando cambia una entidad: la caja nueva ya para");
+}
+
+console.log("Saltos y pasos en la animación (world/leap.ts)");
+{
+  /** Lleva el cuerpo y lo que ve la animación: qué peso tiene cada parte en cada momento. */
+  const run = (b: ReturnType<typeof createBody>, secs: number, wantZ: number, jumpAt = -1, vy = true) => {
+    const leap = new Leap();
+    const out = { air: 0, start: 0, land: 0, landMax: 0, rose: false, startAtTakeoff: 0 };
+    for (let i = 0, n = Math.round(secs * 60); i < n; i++) {
+      if (i === jumpAt) requestJump(b);
+      stepBody(b, 0, wantZ, 1 / 60, -LIM, LIM);
+      const wasAir = leap.air;
+      leap.step(1 / 60, !b.grounded, vy ? b.vy : undefined);
+      if (leap.air) out.air++;
+      if (leap.air && !wasAir) out.startAtTakeoff = leap.startW();
+      out.rose ||= leap.rose;
+      out.start = Math.max(out.start, leap.startW());
+      out.land = Math.max(out.land, leap.land);
+      out.landMax = Math.max(out.landMax, leap.landW(Math.abs(wantZ)));
+    }
+    return out;
+  };
+  scene([]);
+  const jump = run(createBody(0, 0, 0), 2, 0, 10);
+  check(jump.rose && jump.startAtTakeoff === 1, "al saltar, el impulso desde el primer frame en el aire");
+  check(jump.land > 0.2 && jump.land < 0.6, `un salto normal aterriza con algo de flexión (${r2(jump.land)} de 1)`);
+  const jumpGuess = run(createBody(0, 0, 0), 2, 0, 10, false);
+  check(Math.abs(jumpGuess.land - jump.land) < 0.12, `sin saber su velocidad (los demás, si no la trae), lo mismo a ojo (${r2(jumpGuess.land)})`);
+  const running = run(createBody(0, 0, 0), 2, -RUN, 10);
+  check(running.landMax < jump.landMax * 0.75, `corriendo, el aterrizaje se agacha menos y sigue (${r2(running.landMax)} frente a ${r2(jump.landMax)})`);
+  // Un tejado: de 6 m, hasta el fondo.
+  const roof = createBody(0, 0, 0);
+  placeBody(roof, 0, 6, 0);
+  const fall = run(roof, 2, 0);
+  check(!fall.rose && fall.start === 0 && fall.land === 1, "cayendo de un tejado: sin impulso y el aterrizaje entero");
+  // Bajar escalones: los pies se pegan al suelo, nada de saltos.
+  const stairs: B[] = [];
+  for (let i = 0; i < 6; i++) stairs.push([0, 0.9 - 0.18 * i - 0.5, -0.5 - i * 0.4, 1, 0.5, 0.2]);
+  scene(stairs);
+  const down = createBody(0, 0.9, -0.45);
+  const steps = run(down, 2.5, -WALK);
+  check(steps.air === 0 && steps.land === 0 && down.y < 0.05, `bajando una escalera no salta ni aterriza (de 0,9 m a ${r2(down.y)} m)`);
+  // Un bordillo de 40 cm: se cae, pero apenas se nota.
+  scene([[0, 0.2, 3, 3, 0.2, 3]]);
+  const curb = createBody(0, 0.4, 0.5);
+  const kerb = run(curb, 1.5, -WALK);
+  check(kerb.land < 0.15, `al bajar de un bordillo de 40 cm, apenas se agacha (${r2(kerb.land)})`);
+  // Lo que llega de los demás a saltos: los pies un momento por encima del suelo no son un vuelo.
+  const flick = new Leap();
+  let flew = false;
+  for (let i = 0; i < 120; i++) {
+    flick.step(1 / 60, i % 20 < 3, i % 20 < 3 ? -1 : 0);
+    flew ||= flick.air || flick.land > 0;
+  }
+  check(!flew, "los pies un momento en el aire (una escalera, una pose que llega a saltos) no son un salto");
+
+  // Los pies no patinan: a cualquier velocidad, la fase común avanza lo que se avanza sobre el suelo.
+  const dur = { walk: 1.333, jog: 0.933, sprint: 0.667 };
+  let worst = 0, at = 0;
+  for (let v = 0.9; v <= 6; v += 0.1) {
+    const w = {
+      walk: v < 3 ? 1 - Math.max(0, (v - 1.9) / 1.1) : 0,
+      jog: v > 1.9 && v < 5.4 ? Math.min(1, (v - 1.9) / 1.1) * (1 - Math.max(0, (v - 4) / 1.4)) : 0,
+      sprint: v > 4 ? Math.min(1, (v - 4) / 1.4) : 0,
+    };
+    let sw = 0, stride = 0;
+    for (const k of ["walk", "jog", "sprint"] as const) {
+      sw += w[k];
+      stride += w[k] * NATURAL[k]! * dur[k];
+    }
+    // Lo que avanza sobre el suelo un ciclo de la mezcla, frente a lo que avanza el cuerpo en ese tiempo.
+    const slide = Math.abs(v / cycleStep(1, v, w, dur) - stride / sw) / (stride / sw);
+    if (slide > worst) [worst, at] = [slide, v];
+  }
+  check(worst < 0.02, `entre 0,9 y 6 m/s, los pies avanzan lo que el cuerpo (lo peor: ${(worst * 100).toFixed(1)} % a ${at.toFixed(1)} m/s)`);
+  // Y con la misma fase, las piernas de un clip y otro van juntas (si no, mezclados, dos zancadas).
+  type Track = { t: number[]; v: number[][] };
+  const legs = (name: string): Track[] => {
+    const b = readFileSync(`public/anims/${name}.vrma`);
+    const len = b.readUInt32LE(12);
+    const j = JSON.parse(b.subarray(20, 20 + len).toString());
+    const bin = b.subarray(20 + len + 8);
+    const read = (i: number): number[][] => {
+      const a = j.accessors[i], bv = j.bufferViews[a.bufferView], n = a.type === "VEC4" ? 4 : 1, off = (bv.byteOffset ?? 0) + (a.byteOffset ?? 0);
+      return Array.from({ length: a.count }, (_, k) => Array.from({ length: n }, (_, c) => bin.readFloatLE(off + (k * n + c) * 4)));
+    };
+    const hb = j.extensions.VRMC_vrm_animation.humanoid.humanBones;
+    return ["leftUpperLeg", "rightUpperLeg", "leftLowerLeg", "rightLowerLeg"].map((bone) => {
+      const ch = j.animations[0].channels.find((c: { target: { node: number; path: string } }) => c.target.node === hb[bone].node && c.target.path === "rotation");
+      const sm = j.animations[0].samplers[ch.sampler];
+      return { t: read(sm.input).map((x) => x[0]!), v: read(sm.output) };
+    });
+  };
+  const sampleAt = (tr: Track, u: number) => {
+    const T = tr.t[tr.t.length - 1]!, t = u * T;
+    let i = 0;
+    while (i < tr.t.length - 2 && tr.t[i + 1]! < t) i++;
+    const k = (t - tr.t[i]!) / (tr.t[i + 1]! - tr.t[i]! || 1), a = tr.v[i]!, c = tr.v[i + 1]!;
+    const sg = a[0]! * c[0]! + a[1]! * c[1]! + a[2]! * c[2]! + a[3]! * c[3]! < 0 ? -1 : 1;
+    const q = a.map((x, n) => x + (c[n]! * sg - x) * k), l = Math.hypot(...q);
+    return q.map((x) => x / l);
+  };
+  const apart = (A: Track[], B: Track[], off: number) => {
+    let sum = 0;
+    for (let u = 0; u < 1; u += 0.02)
+      for (let n = 0; n < A.length; n++) {
+        const p = sampleAt(A[n]!, u), q = sampleAt(B[n]!, (u + off + 1) % 1);
+        sum += (2 * Math.acos(Math.min(1, Math.abs(p[0]! * q[0]! + p[1]! * q[1]! + p[2]! * q[2]! + p[3]! * q[3]!))) * 180) / Math.PI;
+      }
+    return sum / (50 * A.length);
+  };
+  const clips = { walk: legs("walk"), jog: legs("jog"), sprint: legs("sprint") };
+  for (const [a, b] of [["walk", "jog"], ["jog", "sprint"]] as const) {
+    let best = Infinity;
+    for (let o = 0; o < 1; o += 0.01) best = Math.min(best, apart(clips[a], clips[b], o));
+    const mine = apart(clips[a], clips[b], PHASE0[b]! - PHASE0[a]!);
+    check(mine < best + 3, `${a} y ${b} con las piernas a la par (${mine.toFixed(0)}° de media por hueso; lo mejor posible, ${best.toFixed(0)}°)`);
+  }
+  // Al girar corriendo, hacia dentro de la curva.
+  const curve = (speed: number, rate: number, secs = 2) => {
+    const l = new TurnLean();
+    let yaw = 0, v = 0;
+    for (let i = 0; i < secs * 60; i++) v = l.step(1 / 60, (yaw += rate / 60), speed, true);
+    return v;
+  };
+  const left = curve(RUN, RUN / 6), right = curve(RUN, -RUN / 6);
+  check(left > 0.12 && left <= MAX_LEAN && Math.abs(left + right) < 1e-9, `corriendo en una curva de 6 m, se inclina hacia dentro (${r2((left * 180) / Math.PI)}°, igual a los dos lados)`);
+  check(curve(WALK, WALK / 6) < left / 2, "andando, mucho menos");
+  check(curve(0, 2) === 0 && curve(RUN, 0) === 0, "girando sin avanzar o en línea recta, nada");
+  const snap = new TurnLean();
+  let spike = 0;
+  for (let i = 0; i < 60; i++) spike = Math.max(spike, Math.abs(snap.step(1 / 60, i === 30 ? Math.PI : i > 30 ? Math.PI : 0, RUN, true)));
+  check(spike < 0.01, "darse la vuelta de golpe (aparecer, un giro de cámara) no es una curva");
+  check(cycleStep(1, 0, { walk: 0 }, dur) === 0 && cycleStep(1, 0, { walk: 1 }, dur) > 0, "parado, el paso no avanza; arrancando, sí (aunque despacio)");
 }
 
 console.log(fails ? `\n${fails} fallo(s)` : "\na pie: todo bien");

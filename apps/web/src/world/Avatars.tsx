@@ -28,6 +28,7 @@ import { CAR, driverRoot, paintFor } from "./vehicle/car";
 import { driverFx, driverLean, releaseDriver } from "./vehicle/driver";
 import { dropRival, putRival } from "./vehicle/rivals";
 import { CarPlayout } from "../net/car-playout";
+import { TurnLean } from "./leap";
 
 /** Gestos con la puerta del coche abierta (subir y bajar). */
 const DOOR_OPEN = new Set(["car_open", "car_in", "car_out"]);
@@ -235,6 +236,8 @@ function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; n
   const tilt = useRef(0);
   /** Parkour: inclinado de lado (correr por la pared) y hacia atrás (subir por ella), suavizado. */
   const pkTilt = useRef({ lean: 0, pitch: 0 }).current;
+  /** Al girar corriendo, hacia dentro de la curva (world/leap.ts). */
+  const turnLean = useRef(new TurnLean()).current;
   /** Parkour, colgado: el borde (reconstruido con las reglas del parkour), las manos y el dibujo. */
   const pkHang = useRef({ x: 0, y: 0, z: 0, fx: 0, fz: 1, t: 0, on: false, hands: false, sh: 0, off: 0, lift: 0 }).current;
   /** Con el arma sacada, las manos apuntan (§9 octies ter): para soltarlas una sola vez. */
@@ -294,6 +297,9 @@ function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; n
     catchup.frame(rt, newest, _cur.over > 0, _a.x, _a.y, _a.z, dt);
     // La velocidad del paso sale de lo que dan las muestras solas; lo que se dibuja lleva además el desajuste.
     const step = Number.isNaN(last.x) ? 0 : Math.hypot(_a.x - last.x, _a.z - last.z);
+    // Y la vertical (para el salto y lo fuerte del aterrizaje: world/leap.ts), algo suavizada.
+    const rise = Number.isNaN(last.x) || !(dt > 0) ? 0 : Math.max(-30, Math.min(30, (_a.y - last.y) / dt));
+    motion.vy = (motion.vy ?? 0) + (rise - (motion.vy ?? 0)) * Math.min(1, dt * 15);
     last.copy(_a);
     _a.x += catchup.x;
     _a.y += catchup.y;
@@ -462,7 +468,7 @@ function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; n
         _ty.setFromAxisAngle(_Y, d.yaw);
         body.current.quaternion.copy(_tq).multiply(_ty);
         body.current.position.y = Math.max(d.y, groundHeight(d.x, d.z, 0.24, d.y + 1.8));
-      } else if (!d.placed) body.current.rotation.set(pkTilt.pitch, d.yaw, pkTilt.lean, "YXZ");
+      } else if (!d.placed) body.current.rotation.set(pkTilt.pitch, d.yaw, pkTilt.lean + turnLean.step(dt, d.yaw, motion.speed, !motion.airborne && !pkE && !d.emote), "YXZ");
       feetAt.set(body.current.position.x, d.placed ? body.current.position.y : d.y, body.current.position.z);
     }
   });

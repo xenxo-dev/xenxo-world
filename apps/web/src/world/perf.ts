@@ -81,3 +81,54 @@ export class FpsWatch {
     return true;
   }
 }
+
+/*
+ * Qué se hace cuando no aguanta. Bajar de nivel rehace la escena entera (otros materiales, otras
+ * sombras, otro post-proceso): con el mundo a la vista se nota como un salto de toda la imagen. Así
+ * que primero se baja la resolución, que no recompila nada y casi no se ve (el canvas cambia de
+ * tamaño antes de dibujar el frame: World.tsx → FpsGuard), y solo si con la mínima sigue sin llegar
+ * se baja un nivel, y no en ese momento: al cruzar la próxima puerta (el viaje ya esconde el lugar
+ * mientras se prepara). Si no cruza ninguna y sigue sin llegar un buen rato, entonces sí.
+ */
+
+/** Los escalones de resolución, sobre la del nivel. */
+export const DPR_STEPS = [0.85, 0.72, 0.6] as const;
+/** Por debajo de esto no se baja (ni en una pantalla de alta densidad: se vería borroso). */
+export const MIN_DPR = 0.6;
+
+/** La resolución siguiente por debajo de `current` (sobre la del nivel, `base`), o null si ya está en la mínima. */
+export function lowerDpr(base: number, current: number): number | null {
+  for (const s of DPR_STEPS) {
+    const d = Math.round(Math.max(MIN_DPR, base * s) * 100) / 100;
+    if (d < current - 0.01) return d;
+  }
+  return null;
+}
+
+/** Cuántas veces más tiene que decir el vigilante que no llega, con la bajada esperando, para hacerla ya (cada una, unos 12 s). */
+export const LATE_STRIKES = 4;
+
+/** La bajada de nivel que espera a la próxima puerta. */
+export class LateDecline {
+  private strikes = -1;
+  get pending() {
+    return this.strikes >= 0;
+  }
+  /** Sigue sin llegar con la resolución mínima. true: no hay que esperar más, se baja ya. */
+  slow(): boolean {
+    this.strikes++;
+    if (this.strikes < LATE_STRIKES) return false;
+    this.strikes = -1;
+    return true;
+  }
+  /** Se cruza una puerta: true si había una bajada esperando (y deja de esperar). */
+  travel(): boolean {
+    const was = this.pending;
+    this.strikes = -1;
+    return was;
+  }
+  /** El nivel ha cambiado por otro lado (lo ha elegido la persona, la VR): ya no espera nada. */
+  clear() {
+    this.strikes = -1;
+  }
+}

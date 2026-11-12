@@ -12,6 +12,7 @@ import { createMotion, smoothSpeed, type Motion } from "./motion";
 import { cameraReach, findSeat } from "./collision";
 import { boost, poseFlush } from "../net/activity-store";
 import { STEP_UP, createBody, moveScale, placeBody, requestJump, stepBody } from "./locomotion";
+import { TurnLean } from "./leap";
 import { VRMenu } from "./xr/VRMenu";
 import { placeOrigin, vr, vrFollowGround, vrStick, VR_SNAP, VR_WALK } from "./xr/vr-move";
 import { guestPreset, useAccountPreset, useChosenPreset } from "./presets";
@@ -142,6 +143,8 @@ export function Player({ active }: { active: boolean }) {
   const pkHands = useRef(false);
   /** Colgado: lo que se sube el dibujo para que las manos lleguen al borde (m). */
   const pkLift = useRef(0);
+  /** Al girar corriendo, hacia dentro de la curva (world/leap.ts). */
+  const turnLean = useRef(new TurnLean()).current;
   const camReach = useRef(1);
   const cam3 = useRef({ dist: CAM_DIST, y: spawn.p[1] });
   /** Altura a la que se dibuja el cuerpo: sube y baja los escalones con suavidad (la física salta). */
@@ -441,6 +444,7 @@ export function Player({ active }: { active: boolean }) {
         if (free && !_pf.lock) bumpNpcs(body, bodyYaw.current);
         if (free) smoothSpeed(motion, Math.hypot(body.vx, body.vz), dt);
         motion.airborne = free && !body.grounded && pk.move === "none";
+        motion.vy = body.vy;
         motion.pk = parkour ? pk.emote : slideEmote();
         motion.pkP = parkour ? pk.p : slideP();
         // Las manos en el borde o en la valla (IK del esqueleto, people/rig.ts).
@@ -561,7 +565,8 @@ export function Player({ active }: { active: boolean }) {
       } else if (!_pf.drawn) {
         // Con parkour, el cuerpo entero se inclina (correr por la pared) y los pies van contra ella.
         avatar.current.position.set(body.x + pk.ox, visY.current + pkLift.current, body.z + pk.oz);
-        avatar.current.rotation.set(pk.pitch, bodyYaw.current, -pk.lean, "YXZ");
+        const turn = turnLean.step(dt, bodyYaw.current, motion.speed, body.grounded && pk.move === "none" && !motion.pk);
+        avatar.current.rotation.set(pk.pitch, bodyYaw.current, turn - pk.lean, "YXZ");
       }
       playerPos.set(body.x, body.y, body.z);
       self.x = body.x;

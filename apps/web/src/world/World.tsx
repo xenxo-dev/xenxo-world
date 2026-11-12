@@ -8,7 +8,7 @@ import { useCars, usePlace, usePlaceTheme, world } from "../net/world-store";
 import { Avatars } from "./Avatars";
 import { Entities, SkipOnError } from "./Entities";
 import { ENV_SIZE, graphics, useGraphics, type Ambience, type Features } from "./graphics";
-import { FpsWatch, LOADED_MS } from "./perf";
+import { FpsWatch, LOADED_MS, SETTLE_MS, lowerDpr } from "./perf";
 import { attachDesktopInput, input } from "./input";
 import { PhotoTaker } from "./Photo";
 import { Recorder } from "./cine/Recorder";
@@ -416,32 +416,64 @@ function hookLoading() {
 }
 
 /**
- * Si el equipo no aguanta el nivel, un escalón menos (solo en automático: graphics.decline). Lo que
- * cuenta como «no aguanta» está en perf.ts; aquí, cuándo no hay que medir: al cambiar de lugar, de
- * nivel o de ambiente, mientras se descarga algo y con la pestaña escondida.
+ * Si el equipo no aguanta el nivel (solo en automático). Lo que cuenta como «no aguanta» y qué se
+ * hace entonces está en perf.ts: primero, menos resolución (sin recompilar nada); con la mínima,
+ * un nivel menos al cruzar la próxima puerta (`useArrivalHold`), o ya si tarda mucho en cruzarla.
+ * Aquí, cuándo no hay que medir: al cambiar de lugar, de nivel o de ambiente, mientras se descarga o
+ * se prepara algo y con la pestaña escondida.
+ *
+ * La resolución se cambia aquí, en el frame y antes de dibujarlo: el canvas cambia de tamaño (y se
+ * vacía) y en seguida se pinta. Hecho desde React, se vaciaría después de pintado y se vería ese
+ * frame en blanco. `fixed`: el modo cine, que fija el tamaño del vídeo.
  */
-function FpsGuard() {
+function FpsGuard({ fixed }: { fixed: boolean }) {
   const watch = useMemo(() => new FpsWatch(), []);
-  const seen = useRef({ place: "", tier: "", ambience: "" });
+  const seen = useRef({ place: "", tier: "", ambience: "", tierAt: 0 });
   useEffect(() => {
     hookLoading();
     const hidden = () => watch.rest(performance.now(), LOADED_MS);
     document.addEventListener("visibilitychange", hidden);
     return () => document.removeEventListener("visibilitychange", hidden);
   }, [watch]);
-  useFrame(() => {
+  useFrame((state) => {
     const now = performance.now();
     const k = seen.current;
     const place = world.chunkId, tier = graphics.tier, ambience = graphics.ambience;
     if (place !== k.place || tier !== k.tier || ambience !== k.ambience) {
+      if (tier !== k.tier) k.tierAt = now;
       k.place = place;
       k.tier = tier;
       k.ambience = ambience;
       watch.rest(now);
     }
     // «Cargando» es también lo que aún se prepara para verse (shaders compilando, texturas subiendo).
-    const busy = splashActive() || loading.pending > 0 || now - loading.last < LOADED_MS || warmBusy();
-    if (watch.frame(now, busy)) graphics.decline();
+    const busy = splashActive() || loading.pending > 0 || now - loading.last < LOADED_MS || warmBusy() || world.frozen;
+    const scalable = !fixed && !graphics.inXR;
+    const setDpr = (dpr: number) => {
+      graphics.dprCap = dpr;
+      state.setDpr(dpr);
+    };
+    const f = graphics.features;
+    const base = Math.min(Math.max(window.devicePixelRatio || 1, f.dpr[0]), f.dpr[1]);
+    // Tras bajar de nivel (con la resolución que había), la del nivel nuevo, cuando ya se ha asentado.
+    if (graphics.dprRetry && !busy && now - k.tierAt > SETTLE_MS) {
+      graphics.dprRetry = false;
+      if (scalable && state.viewport.dpr < base) {
+        setDpr(base);
+        watch.rest(now);
+      }
+    }
+    if (!watch.frame(now, busy) || graphics.pref !== "auto") return;
+    const next = scalable ? lowerDpr(base, state.viewport.dpr) : null;
+    if (next !== null) {
+      console.info(`[xenxo] gráficos: resolución ${next} para mantener la fluidez`);
+      setDpr(next);
+      return;
+    }
+    if (graphics.tier === "low") return;
+    const was = graphics.late.pending;
+    if (graphics.late.slow()) graphics.decline(state.viewport.dpr);
+    else if (!was) console.info("[xenxo] gráficos: bajará un nivel al cruzar la próxima puerta");
   });
   return null;
 }
@@ -561,6 +593,8 @@ function useArrivalHold(place: string, xr: boolean): boolean {
   const since = useRef(0);
   // Cada lugar pide su repaso; hasta que no se haga uno que empiece después, no está preparado.
   useLayoutEffect(() => {
+    // La bajada de nivel que esperaba a una puerta (FpsGuard): ahora, que el viaje esconde el cambio.
+    if (graphics.late.travel()) graphics.decline(gl.getPixelRatio());
     need.current = requestPass();
     since.current = performance.now();
   }, [place]);
@@ -676,7 +710,7 @@ function SplashWatcher() {
   return null;
 }
 
-function Scene({ active }: { active: boolean }) {
+function Scene({ active, fixedDpr }: { active: boolean; fixedDpr: boolean }) {
   const g = useGraphics();
   const f = g.features;
   const place = usePlace();
@@ -729,7 +763,7 @@ function Scene({ active }: { active: boolean }) {
       {holding && <Hold />}
       <WarmPass post={f.post && !g.inXR} />
       {import.meta.env.DEV && <DevStats />}
-      <FpsGuard />
+      <FpsGuard fixed={fixedDpr} />
       {daySky && !skyDome ? <primitive key="sky" attach="background" object={daySky.tex} /> : <color key="color" attach="background" args={[sky.fog]} />}
       {daySky && skyDome && <PhotoSky map={daySky.tex} />}
       <fog attach="fog" args={fog} />
@@ -824,7 +858,7 @@ export function World({ active, paused = false }: { active: boolean; paused?: bo
       key={aa ? "aa" : "plain"}
       className={box ? "!absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 touch-none" : "!absolute inset-0 touch-none"}
       style={box ?? undefined}
-      dpr={box && px ? px[1] / box.height + 1e-4 : f.dpr}
+      dpr={box && px ? px[1] / box.height + 1e-4 : g.canvasDpr(f)}
       // Sombras PCF (las «suaves» de antes ya no existen en Three.js: pedirlas era un aviso por frame).
       shadows="percentage"
       gl={{ antialias: aa, powerPreference: "high-performance" }}
@@ -836,7 +870,7 @@ export function World({ active, paused = false }: { active: boolean; paused?: bo
       onCreated={({ gl }) => setDirectTone(gl.toneMapping)}
     >
       <XR store={xrStore}>
-        <Scene active={active} />
+        <Scene active={active} fixedDpr={!!box} />
       </XR>
     </Canvas>
   );

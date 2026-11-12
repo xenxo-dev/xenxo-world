@@ -11,6 +11,8 @@ export interface Motion {
   phase: number;
   /** En el aire (saltando). */
   airborne: boolean;
+  /** Su velocidad vertical (m/s), si se sabe: para el salto y lo fuerte del aterrizaje (world/leap.ts). */
+  vy?: number;
   /** Gesto en curso ("dance", "wave", "sit"…) o null. */
   emote: string | null;
   /** En modo pelea: guardia en reposo y puños arriba al andar. */

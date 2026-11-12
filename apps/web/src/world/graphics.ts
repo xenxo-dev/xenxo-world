@@ -7,6 +7,7 @@
  */
 import { useSyncExternalStore } from "react";
 import { loadPref, savePref } from "../config";
+import { LateDecline } from "./perf";
 
 export type Tier = "low" | "medium" | "high" | "ultra";
 export type QualityPref = "auto" | Tier;
@@ -228,6 +229,17 @@ class GraphicsStore {
   ambiencePref: AmbiencePref = loadPref<AmbiencePref>("ambience", "auto");
   /** Bajadas automáticas aplicadas por el monitor de rendimiento. */
   private declines = 0;
+  /**
+   * La resolución del canvas cuando el monitor la ha bajado (o la ha dejado fija al bajar de nivel);
+   * null: la del nivel. Cambiarla no avisa a nadie: la aplica el monitor en el propio frame, antes de
+   * dibujarlo (World.tsx → FpsGuard), y el canvas la lee la próxima vez que se pinte. Si la cambiara
+   * React, el canvas cambiaría de tamaño después de dibujado el frame y se vería un frame en blanco.
+   */
+  dprCap: number | null = null;
+  /** Al bajar de nivel con la resolución bajada: probar otra vez la del nivel nuevo cuando se asiente. */
+  dprRetry = false;
+  /** La bajada de nivel que espera a la próxima puerta (perf.ts). */
+  readonly late = new LateDecline();
   /** La VR fuerza el nivel ligero mientras dura la sesión. */
   inXR = false;
   /** Este equipo puede entrar en VR (lo dice el navegador al arrancar: `setXrCapable`). */
@@ -296,9 +308,17 @@ class GraphicsStore {
     return h >= 20 || h < 7 ? "night" : "day";
   }
 
+  /** La resolución que se le pide al canvas. */
+  canvasDpr(f: Features): number | [number, number] {
+    return this.dprCap ?? f.dpr;
+  }
+
   setPref(p: QualityPref) {
     this.pref = p;
     this.declines = 0;
+    this.dprCap = null;
+    this.dprRetry = false;
+    this.late.clear();
     savePref("quality", p);
     this.bump();
   }
@@ -309,10 +329,18 @@ class GraphicsStore {
     this.bump();
   }
 
-  /** El monitor detecta FPS bajos: un escalón menos (solo en automático). */
-  decline() {
+  /**
+   * El monitor detecta FPS bajos: un escalón menos (solo en automático). `dpr`: la resolución que
+   * tiene ahora el canvas, que se queda (si cambiara con el nivel, el canvas se vaciaría con el viaje
+   * o la escena a la vista); con el nivel nuevo ya asentado, el monitor prueba la suya.
+   */
+  decline(dpr?: number) {
     if (this.pref !== "auto" || this.tier === "low") return;
     this.declines++;
+    if (dpr !== undefined) {
+      this.dprCap = dpr;
+      this.dprRetry = true;
+    }
     console.info(`[xenxo] gráficos: bajando a «${this.tier}» para mantener la fluidez`);
     this.bump();
   }
@@ -320,6 +348,7 @@ class GraphicsStore {
   setXR(on: boolean) {
     if (this.inXR === on) return;
     this.inXR = on;
+    this.late.clear();
     this.bump();
   }
 }

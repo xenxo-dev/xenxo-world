@@ -18,7 +18,7 @@ const check = (ok: boolean, what: string) => {
 const DEVICE = process.env.XENXO_TEST_DEVICE;
 
 if (!DEVICE) {
-  const { FpsWatch, slowBelow } = await import("../src/world/perf.ts");
+  const { FpsWatch, slowBelow, lowerDpr, MIN_DPR, LateDecline, LATE_STRIKES } = await import("../src/world/perf.ts");
   type Watch = InstanceType<typeof FpsWatch>;
   /** `secs` segundos a `fps`. Devuelve cuántas veces ha pedido bajar y el reloj al acabar. */
   const run = (w: Watch, t: number, secs: number, fps: number, busy = false): [number, number] => {
@@ -102,6 +102,35 @@ if (!DEVICE) {
     check(a >= 1, "un equipo que va a 30 desde el principio baja");
   }
 
+  console.log("Qué se hace cuando no aguanta");
+  {
+    // Bajar de nivel rehace la escena entera (con el mundo a la vista, un salto de toda la imagen):
+    // antes, menos resolución, que no recompila nada.
+    const steps = (base: number) => {
+      const out: number[] = [];
+      for (let d = base, n: number | null; (n = lowerDpr(base, d)) !== null; d = n) out.push(n);
+      return out;
+    };
+    const one = steps(1), hi = steps(1.5), two = steps(2);
+    check(one.length === 3 && one.every((d, i) => d < (i ? one[i - 1]! : 1)), `con resolución 1, tres escalones hacia abajo (${one.join(", ")})`);
+    check([...one, ...hi, ...two].every((d) => d >= MIN_DPR), `nunca por debajo de ${MIN_DPR} (${hi.join(", ")} · ${two.join(", ")})`);
+    check(lowerDpr(1, MIN_DPR) === null && lowerDpr(0.75, 0.6) === null, "con la mínima no queda más que bajar de nivel");
+    check(lowerDpr(1.5, 1) === 0.9, "si ya va por debajo de un escalón, sigue desde donde está");
+  }
+  {
+    // Y el nivel, al cruzar la próxima puerta (el viaje esconde el cambio)...
+    const late = new LateDecline();
+    check(!late.pending && !late.slow() && late.pending, "con la resolución mínima y sin llegar, la bajada espera a una puerta");
+    check(late.travel() && !late.pending && !late.travel(), "y al cruzarla se hace (una vez)");
+    // ...o ya, si no cruza ninguna y sigue sin llegar un buen rato.
+    let now = -1;
+    for (let k = 0; k <= LATE_STRIKES && now < 0; k++) if (late.slow()) now = k;
+    check(now === LATE_STRIKES, `sin cruzar ninguna, a la ${LATE_STRIKES + 1}.ª vez que sigue sin llegar (unos ${LATE_STRIKES * 12} s después)`);
+    late.slow();
+    late.clear();
+    check(!late.pending, "si el nivel lo cambia la persona, ya no espera nada");
+  }
+
   for (const device of ["phone", "quest", "desktop"]) {
     const out = execFileSync(process.execPath, [fileURLToPath(import.meta.url)], { env: { ...process.env, XENXO_TEST_DEVICE: device }, encoding: "utf8" });
     process.stdout.write(out);
@@ -144,6 +173,13 @@ if (!DEVICE) {
     check(TIERS.indexOf(graphics.tier) <= TIERS.indexOf("medium"), "en VR, como mucho el nivel medio");
     graphics.setXR(false);
     check(graphics.features === first, "al salir de la VR vuelve lo de antes");
+    // Bajar de nivel no cambia el tamaño del canvas: se vaciaría con la escena a la vista.
+    check(graphics.canvasDpr(first) === first.dpr, "el canvas, con la resolución del nivel");
+    const before = graphics.tier;
+    graphics.decline(1.25);
+    check(TIERS.indexOf(graphics.tier) === TIERS.indexOf(before) - 1 && graphics.canvasDpr(graphics.features) === 1.25 && graphics.dprRetry, "al bajar de nivel el canvas se queda con la que tenía (y luego se prueba la del nivel nuevo)");
+    graphics.setPref("auto");
+    check(graphics.features === first && graphics.canvasDpr(first) === first.dpr && !graphics.dprRetry, "elegir el nivel lo deja todo como al principio");
   } else {
     check(gpu.portable, "es un equipo de los que van sin efectos de pantalla completa");
     check(graphics.canvasAA, "el canvas va con MSAA en todos los niveles (no se recrea al bajar de nivel)");

@@ -11,6 +11,7 @@
  * parejas y las caídas con física.
  */
 import * as THREE from "three";
+import { cycleStep, Leap, PHASE0 } from "./leap";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { VRM } from "@pixiv/three-vrm";
 import { createVRMAnimationClip, VRMAnimationLoaderPlugin, type VRMAnimation } from "@pixiv/three-vrm-animation";
@@ -163,7 +164,9 @@ export function preloadParkour() {
 /** Gestos que siguen al andar (sobre la parte de arriba del cuerpo). */
 export const UPPER_EMOTES = new Set(Object.entries(EMOTE_CLIPS).filter(([, c]) => c.upper || c.overlay).map(([n]) => n));
 
-const LOCOMOTION = ["idle", "walk", "jog", "sprint", "jump_loop"] as const;
+const LOCOMOTION = ["idle", "walk", "jog", "sprint", "jump_loop", "jump_start", "jump_land"] as const;
+/** Los de desplazamiento, que van con la fase común (leap.ts). */
+const STRIDES = ["walk", "jog", "sprint"] as const;
 
 /** Clips montados aquí a partir de otros: la guardia, el gancho entero y los gestos procedurales. */
 const DERIVED: Record<string, () => Promise<VRMAnimation | null>> = {
@@ -215,8 +218,6 @@ function inPlace(a: VRMAnimation) {
   }
 }
 
-/** Velocidad natural (m/s) de cada clip de desplazamiento: para que los pies no patinen. */
-const NATURAL: Record<string, number> = { walk: 1.25, jog: 3.0, sprint: 5.8 };
 
 /**
  * Peso de cada hueso en la capa de arriba (gestos al andar, guardia al andar, reacciones): la
@@ -284,6 +285,11 @@ export class VrmAnimator {
   /** Parkour: el movimiento en curso y cuánto lleva (para los demás, el reloj es la única pista). */
   private pkName: string | null = null;
   private pkT = 0;
+  /** El salto y el aterrizaje, y la fase común de los pasos (leap.ts). */
+  private leap = new Leap();
+  private cycle = Math.random();
+  private readonly _w: Record<string, number> = {};
+  private readonly _dur: Record<string, number> = {};
 
   constructor(private vrm: VRM) {
     this.mixer = new THREE.AnimationMixer(vrm.scene);
@@ -369,8 +375,10 @@ export class VrmAnimator {
    * está en modo pelea y `fx` lo que la gente le hace al esqueleto (golpes, parejas, caídas).
    * Los pesos se suavizan para que las transiciones no den saltos.
    */
-  update(dt: number, speed: number, airborne: boolean, emote: string | null, fight = false, fx?: PersonFx | null, gesture?: string | null, pkP?: number) {
+  update(dt: number, speed: number, airborne: boolean, emote: string | null, fight = false, fx?: PersonFx | null, gesture?: string | null, pkP?: number, vy?: number) {
     const target: Record<string, number> = {};
+    const leap = this.leap;
+    leap.step(dt, airborne, vy);
     // Parkour: el equilibrio va encima de andar; lo demás manda sobre todo el cuerpo.
     if (emote === "pk_balance") {
       gesture = gesture ?? "pk_balance";
@@ -423,18 +431,25 @@ export class VrmAnimator {
       target[shot!.clip] = 1;
     } else if (full) {
       target[known!.clip] = 1;
-    } else if (airborne && this.actions.has("jump_loop")) {
-      target.jump_loop = 1;
+    } else if (leap.air && this.actions.has("jump_loop")) {
+      // En el aire: el impulso (si ha saltado) y el vuelo.
+      const st = this.actions.has("jump_start") ? leap.startW() : 0;
+      target.jump_start = st;
+      target.jump_loop = 1 - st;
     } else {
       const s = speed;
       const walk = THREE.MathUtils.smoothstep(s, 0.12, 0.7);
       const jog = THREE.MathUtils.smoothstep(s, 1.9, 3.0);
       const sprint = THREE.MathUtils.smoothstep(s, 4.0, 5.4);
+      // Al aterrizar, se agacha encima de lo que haga (más o menos, según lo fuerte que llegue).
+      const land = this.actions.has("jump_land") ? leap.landW(s) : 0;
+      const rest = 1 - land;
       // Parado en el modo pelea, la guardia en vez del reposo.
-      target[guard ? "guard" : "idle"] = 1 - walk;
-      target.walk = walk * (1 - jog);
-      target.jog = jog * (1 - sprint);
-      target.sprint = sprint;
+      target[guard ? "guard" : "idle"] = (1 - walk) * rest;
+      target.walk = walk * (1 - jog) * rest;
+      target.jog = jog * (1 - sprint) * rest;
+      target.sprint = sprint * rest;
+      target.jump_land = land;
       // Sin el clip aún: su peso pasa al anterior disponible.
       for (const [from, to] of [["sprint", "jog"], ["jog", "walk"], ["walk", "idle"]] as const) {
         if (!this.actions.has(from) && target[from]) {
@@ -445,7 +460,7 @@ export class VrmAnimator {
     }
 
     // Suavizado y normalización de pesos (más rápido al entrar en un golpe o una reacción, y en el parkour).
-    const fade = pkAction ? 0.09 : live ? (known!.fade ?? 0.15) : 0.15;
+    const fade = pkAction ? 0.09 : live ? (known!.fade ?? 0.15) : leap.sharp ? 0.05 : leap.air || leap.land > 0 ? 0.08 : 0.15;
     const k = Math.min(1, dt / fade);
     let sum = 0;
     for (const [name] of this.actions) {
@@ -456,8 +471,30 @@ export class VrmAnimator {
     for (const [name, action] of this.actions) {
       const w = sum > 0.001 ? this.weights.get(name)! / sum : name === "idle" ? 1 : 0;
       action.setEffectiveWeight(w);
-      const natural = NATURAL[name];
-      if (natural) action.timeScale = THREE.MathUtils.clamp(speed / natural, 0.55, 1.6);
+    }
+    // Andar, trotar y correr, con la misma fase, que avanza con lo que se avanza sobre el suelo.
+    for (const name of STRIDES) {
+      const a = this.actions.get(name);
+      this._w[name] = a ? (this.weights.get(name) ?? 0) : 0;
+      this._dur[name] = a ? a.getClip().duration : 0;
+    }
+    this.cycle = (this.cycle + cycleStep(dt, speed, this._w, this._dur)) % 1;
+    for (const name of STRIDES) {
+      const a = this.actions.get(name);
+      if (!a) continue;
+      a.timeScale = 0;
+      a.time = ((this.cycle + PHASE0[name]!) % 1) * this._dur[name]!;
+    }
+    // El impulso y el aterrizaje, al tiempo que toca (los lleva leap.ts).
+    const js = this.actions.get("jump_start");
+    if (js) {
+      js.timeScale = 0;
+      js.time = Math.min(js.getClip().duration, leap.startTime());
+    }
+    const jl = this.actions.get("jump_land");
+    if (jl) {
+      jl.timeScale = 0;
+      jl.time = Math.min(jl.getClip().duration, leap.landTime());
     }
     // El parkour va al tiempo que toca (los guionados) o a su ritmo (los bucles).
     if (pkAction && shot) {

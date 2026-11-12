@@ -215,7 +215,7 @@ function fromVrm(vrm: VRM, scene: THREE.Group, decor: boolean): LoadedAvatar {
     update: (dt, m, view) => {
       if (animator.ready) {
         if (m.fx) m.fx.rig = animator.rig;
-        animator.update(dt, m.speed, m.airborne, m.pk ?? m.emote, !!m.fight, m.fx, m.gesture, m.pk ? m.pkP : undefined);
+        animator.update(dt, m.speed, m.airborne, m.pk ?? m.emote, !!m.fight, m.fx, m.gesture, m.pk ? m.pkP : undefined, m.vy);
       } else {
         // Respaldo: paso procedural sencillo hasta que cargan los clips.
         const k = walkAmount(m.speed);
