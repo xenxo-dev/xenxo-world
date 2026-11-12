@@ -80,6 +80,11 @@ console.log("El cuerpo espera a la foto del lugar");
     check(!world.walkable, "ni con el WELCOME solo");
     world.apply(snapshot("arcade"));
     check(world.walkable, "al llegar la foto, sí");
+    // Mientras el lugar se prepara no se dibuja (World.tsx): tampoco se anda, aunque ya haya llegado.
+    world.setFrozen(true);
+    check(!world.walkable && world.landed, "mientras el lugar se prepara (aún no se dibuja), tampoco: sería a ciegas");
+    world.setFrozen(false);
+    check(world.walkable, "y en cuanto se dibuja, sí");
     world.setStatus("closed");
     check(!world.walkable, "si se corta la conexión, se para");
     world.setStatus("open");

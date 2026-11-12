@@ -16,7 +16,7 @@
  *   npm run test:warm -w @xenxo/web
  */
 import * as THREE from "three";
-import { dropPass, MAX_WAIT_MS, passDue, POLL_MS, prepare, queueTexture, requestPass, runPass, setDirectTone, SETTLE_MS, setWarmRenderer, texturesOf, tickWarm, UPLOAD_BUDGET_MS, warmBusy, warmHold, warmPasses, warmQueued, warmSettled, type WarmRenderer } from "../src/world/warm";
+import { dropPass, kickScene, MAX_WAIT_MS, passDue, passServed, POLL_MS, prepare, queueTexture, requestPass, runPass, setDirectTone, SETTLE_MS, setWarmRenderer, texturesOf, tickWarm, UPLOAD_BUDGET_MS, warmBusy, warmHold, warmPasses, warmQueued, warmSettled, type WarmRenderer } from "../src/world/warm";
 
 let fails = 0;
 const check = (ok: boolean, what: string) => {
@@ -371,9 +371,16 @@ console.log("El repaso general");
   const later = () => performance.now() + SETTLE_MS;
   check(!passDue(later()), "sin pedirlo, no toca");
   // Al llegar a un lugar: hasta que se haga, el lugar no está preparado.
-  requestPass();
+  const first = requestPass();
   check(warmBusy() && !warmSettled(later()), "pedido (lugar nuevo, otro nivel, otro ambiente), el lugar no está preparado");
+  check(passServed() < first, "y su petición aún no está atendida");
   check(passDue(later()), "y toca");
+  // El adelanto (al llegar la foto del lugar): lanza la compilación de lo que ya hay, sin esperar a nada.
+  const k0 = f.compiles.length;
+  kickScene(f.gl, place, camera, true);
+  check(f.compiles.length === k0 + 1 && f.compiles.at(-1)!.object === place && f.compiles.at(-1)!.target !== null && f.gl.getRenderTarget() === null, "el adelanto lanza ya la compilación de la escena, en su variante");
+  check(passDue(later()) && passServed() < first && f.uploads.length === 0, "y no da nada por hecho: el repaso sigue pendiente");
+  f.finish();
   let shown = 0;
   const stop = prepare(f.gl, [model(tex(64))], camera, place, false, () => shown++, 5000);
   check(!passDue(later()), "…salvo que quede algún modelo preparándose (aún no está en la escena)");
@@ -383,6 +390,8 @@ console.log("El repaso general");
   check(shown === 1 && !passDue(), `ni nada más prepararse el último: React aún tiene que montarlo (${SETTLE_MS} ms)`);
   check(passDue(later()), "pasado ese momento, toca");
   stop();
+  // Algo que ha llegado después del adelanto (sin textura): aún por compilar.
+  place.add(new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial()));
   const n0 = f.compiles.length, u0 = f.uploads.length;
   runPass(f.gl, place, camera, true);
   check(f.compiles.length === n0 + 1 && f.compiles.at(-1)!.object === place && f.compiles.at(-1)!.target !== null, "compila la escena entera, en la variante que se dibuja");
@@ -395,12 +404,15 @@ console.log("El repaso general");
   f.finish();
   await noticed();
   check(warmPasses() === before + 1 && !warmBusy() && warmSettled(later()), "al acabar, el lugar está preparado");
-  // Lo pedido mientras se hacía uno queda para el siguiente.
-  requestPass();
+  check(passServed() === first, "y su petición, atendida");
+  // Lo pedido mientras se hacía uno queda para el siguiente (al viajar: el repaso del lugar anterior
+  // no vale para el nuevo).
+  const second = requestPass();
   runPass(f.gl, place, camera, false);
-  requestPass();
+  const third = requestPass();
   await noticed();
   check(warmPasses() === before + 2 && warmBusy() && passDue(later()), "lo pedido mientras se hacía uno queda para el siguiente");
+  check(passServed() === second && passServed() < third, "el que estaba en marcha atiende lo pedido antes de empezar, no lo de después");
   // Un repaso que no acaba: a su plazo, se da por hecho.
   place.add(model(tex(64)));
   runPass(f.gl, place, camera, false, 60);

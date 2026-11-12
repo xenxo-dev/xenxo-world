@@ -16,7 +16,7 @@ import { FRAME_PX, useCine } from "./cine/state";
 import { useCovered } from "./cover";
 import { self } from "./self";
 import { setMaxAnisotropy, tickMaterials } from "./materials";
-import { dropPass, passDue, requestPass, runPass, setDirectTone, setWarmRenderer, tickWarm, UPLOAD_BUDGET_MS, warmBusy, warmHold, warmPasses, warmSettled, type WarmRenderer } from "./warm";
+import { dropPass, kickScene, passDue, passServed, requestPass, runPass, setDirectTone, setWarmRenderer, tickWarm, UPLOAD_BUDGET_MS, warmBusy, warmHold, warmSettled, type WarmRenderer } from "./warm";
 import { Player } from "./Player";
 import { Portals } from "./Portals";
 import { PhotoSky, Sky, SKY } from "./Sky";
@@ -326,12 +326,14 @@ function Environment({ ambience, profile, probe, sky }: { ambience: Ambience; pr
       wait.current = Math.max(wait.current, 1);
     }
     if (!dirty.current) return;
-    wait.current -= dt;
-    age.current += dt;
+    // Una imagen muy larga (la primera, sobre todo) no cuenta como todo ese tiempo de espera.
+    const step = Math.min(dt, 0.1);
+    wait.current -= step;
+    age.current += step;
     if (wait.current > 0) return;
     // Con el lugar entero: sus modelos en la escena y todo compilado (si no, la foto saldría sin
     // ellos, o esperando a cada shader). Tiene su plazo.
-    if (!(world.walkable && warmSettled()) && age.current < PHOTO_WAIT_S) return;
+    if (!(world.landed && warmSettled()) && age.current < PHOTO_WAIT_S) return;
     dirty.current = false;
     // La foto se hace con el entorno base (cielo o estudio), no con la propia foto.
     scene.environment = base ?? room;
@@ -438,14 +440,19 @@ function FpsGuard() {
 
 /** Lo que se espera sin novedades (descargas, cambios del lugar) antes del repaso: lo que tarda en montarse lo recién llegado (ms). */
 const PASS_CALM_MS = 300;
+/** Lo que se espera tras llegar la foto de un lugar para adelantar la compilación de lo que ya hay montado (ms). */
+const KICK_MS = 100;
 
 /**
- * El repaso general (world/warm.ts): al llegar a un lugar, y al cambiar de nivel o de ambiente,
- * cuando todo ha acabado de llegar (su foto, sus descargas y sus modelos, ya preparados) se compila
- * lo que quede en la escena sin compilar, se vea o no. Hasta entonces el lugar no está preparado.
+ * El repaso general (world/warm.ts): al llegar a un lugar (lo pide `useArrivalHold`) y al cambiar de
+ * nivel o de ambiente, cuando todo ha acabado de llegar (su foto, sus descargas y sus modelos, ya
+ * preparados) se compila lo que quede en la escena sin compilar, se vea o no. Hasta entonces el lugar
+ * no está preparado. Y un adelanto en cuanto llega la foto del lugar (`kickScene`): lo que ya está
+ * montado (el propio personaje con las luces nuevas, lo hecho en código) se compila mientras llegan
+ * las descargas.
  */
 function WarmPass({ post }: { post: boolean }) {
-  const seen = useRef({ place: "", tier: "", ambience: "", post: false, version: -1, changed: 0 });
+  const seen = useRef({ place: "", kick: false, tier: graphics.tier, ambience: graphics.ambience, post, version: -1, changed: 0 });
   useEffect(() => {
     hookLoading();
     return dropPass;
@@ -454,9 +461,12 @@ function WarmPass({ post }: { post: boolean }) {
     if (gl.xr.isPresenting) return;
     const now = performance.now();
     const k = seen.current;
-    const place = world.chunkId, tier = graphics.tier, ambience = graphics.ambience, version = world.getEntitiesVersion();
-    if (place !== k.place || tier !== k.tier || ambience !== k.ambience || post !== k.post) {
-      k.place = place;
+    const tier = graphics.tier, ambience = graphics.ambience, version = world.getEntitiesVersion();
+    if (world.chunkId !== k.place) {
+      k.place = world.chunkId;
+      k.kick = true;
+    }
+    if (tier !== k.tier || ambience !== k.ambience || post !== k.post) {
       k.tier = tier;
       k.ambience = ambience;
       k.post = post;
@@ -467,7 +477,12 @@ function WarmPass({ post }: { post: boolean }) {
       k.version = version;
       k.changed = now;
     }
-    if (!passDue(now) || !world.walkable || !placeMounted.current || loading.pending > 0 || now - loading.last < PASS_CALM_MS || now - k.changed < PASS_CALM_MS) return;
+    if (!world.landed || !placeMounted.current) return;
+    if (k.kick && now - k.changed >= KICK_MS) {
+      k.kick = false;
+      kickScene(gl as unknown as WarmRenderer, scene, camera, post);
+    }
+    if (!passDue(now) || loading.pending > 0 || now - loading.last < PASS_CALM_MS || now - k.changed < PASS_CALM_MS) return;
     runPass(gl as unknown as WarmRenderer, scene, camera, post);
   });
   return null;
@@ -509,21 +524,47 @@ function HoldForEffects() {
   return hold ? <Hold /> : null;
 }
 
+/** Lo más que se espera sin dibujar al viajar de un lugar a otro (ms): pasado esto, se dibuja lo que haya. */
+const TRAVEL_HOLD_MS = 6000;
+
 /**
- * Con la pantalla de carga puesta no se dibuja hasta que el lugar está preparado (su foto, sus
- * modelos y el repaso general: world/warm.ts). Nadie ve esas imágenes, y dibujarlas es compilar cada
- * shader esperando, uno tras otro y con la página congelada (y, antes de la foto del lugar, para unas
- * luces que no son las suyas); sin dibujar, la gráfica los compila todos a la vez y nadie espera. La
- * pantalla de carga tiene su plazo (splash.ts): pase lo que pase, al quitarse se dibuja. Mientras
- * dura no se monta el post-proceso (dibuja por su cuenta).
+ * Al llegar a un lugar no se dibuja hasta que está preparado (su foto, sus modelos y el repaso
+ * general: world/warm.ts). Dibujarlo a medio llegar es compilar cada shader esperando, uno tras otro y
+ * con la página congelada (medido al cruzar una puerta por primera vez: 1,5 s parada y varios parones
+ * más; el propio personaje se compila otra vez, porque cada lugar tiene sus luces); sin dibujar, la
+ * gráfica los compila todos a la vez y nadie espera.
+ *  - Al entrar, con la pantalla de carga puesta: nadie ve esas imágenes. Dura lo que ella (splash.ts
+ *    tiene su plazo: pase lo que pase, al quitarse se dibuja).
+ *  - Al viajar: se queda la última imagen del lugar anterior, con el aviso de viaje, y se pasa al
+ *    nuevo ya entero. Como mucho `TRAVEL_HOLD_MS`.
+ * Mientras tanto no se anda (`world.frozen`) y el post-proceso no dibuja (`enabled`). Solo donde la
+ * gráfica compila aparte (KHR_parallel_shader_compile; sin eso no hay nada que ganar: no dibujar sería
+ * dejar para el final lo que se iba compilando mientras llegaban las descargas) y nunca en las gafas.
+ * El cambio de lugar se ve al pintar (no en un efecto ni en `useFrame`): `Hold` se monta en el mismo
+ * paso en que se desmonta el lugar anterior, sin ninguna imagen entre medias.
  */
-function useSplashHold(): boolean {
+function useArrivalHold(place: string, xr: boolean): boolean {
   const gl = useThree((s) => s.gl);
-  // Solo donde la gráfica compila aparte (KHR_parallel_shader_compile). Sin eso no hay nada que
-  // ganar: no dibujar sería dejar para el final lo que se iba compilando mientras llegaban las descargas.
-  const [hold, setHold] = useState(() => splashActive() && gl.extensions.has("KHR_parallel_shader_compile"));
+  const can = !xr && gl.extensions.has("KHR_parallel_shader_compile");
+  const [state, setState] = useState(() => ({ place, hold: can && splashActive() }));
+  if (state.place !== place) setState({ place, hold: can });
+  const hold = state.hold && state.place === place;
+  const need = useRef(0);
+  const since = useRef(0);
+  // Cada lugar pide su repaso; hasta que no se haga uno que empiece después, no está preparado.
+  useLayoutEffect(() => {
+    need.current = requestPass();
+    since.current = performance.now();
+  }, [place]);
+  useLayoutEffect(() => {
+    world.setFrozen(hold);
+    return () => world.setFrozen(false);
+  }, [hold]);
   useFrame(() => {
-    if (hold && (!splashActive() || gl.xr.isPresenting || (world.walkable && warmPasses() > 0))) setHold(false);
+    if (!hold) return;
+    const ready = world.landed && passServed() >= need.current;
+    const late = !splashActive() && performance.now() - since.current > TRAVEL_HOLD_MS;
+    if (ready || late || gl.xr.isPresenting) setState((v) => (v.hold ? { place: v.place, hold: false } : v));
   });
   return hold;
 }
@@ -653,7 +694,7 @@ function Scene({ active }: { active: boolean }) {
   // Con post-proceso la foto del cielo va en su esfera (PhotoSky): como fondo de la escena, el mapeo
   // de tonos del final la apagaba. Sin él (gafas, móviles), el fondo de siempre.
   const skyDome = f.post && !g.inXR;
-  const holding = useSplashHold();
+  const holding = useArrivalHold(place, g.inXR);
   return (
     <>
       <XRWatcher />
@@ -708,9 +749,9 @@ function Scene({ active }: { active: boolean }) {
       <PhotoTaker />
       <Recorder fps={f.clipFps} />
       <MaterialClock />
-      {f.post && !g.inXR && !holding && (
+      {f.post && !g.inXR && (
         <Suspense fallback={<HoldForEffects />}>
-          <Effects features={f} ambience={ambience} />
+          <Effects features={f} ambience={ambience} enabled={!holding} />
         </Suspense>
       )}
     </>

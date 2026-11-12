@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { assetUrl } from "../config";
 import { getLang, placeName, t, useLang, type Key } from "../i18n";
-import { usePlace } from "../net/world-store";
+import { useFrozen, usePlace } from "../net/world-store";
 import { districtOf } from "../net/districts";
 import { refreshProjects, useProjects } from "../net/projects";
 import type { Project } from "../net/account";
@@ -101,10 +101,14 @@ export function PortalCard() {
   );
 }
 
-/** Aviso breve al cruzar un portal hacia otro lugar. */
+/**
+ * Aviso breve al cruzar un portal hacia otro lugar. Mientras el lugar nuevo se prepara (aún se ve la
+ * última imagen del anterior: `world.frozen`), sigue puesto, se haya llegado por un portal o no.
+ */
 export function TravelToast() {
   const hud = usePortalHud();
   const place = usePlace();
+  const frozen = useFrozen();
   const [, tick] = useState(0);
   const tr = hud.travelling;
   useEffect(() => {
@@ -112,11 +116,12 @@ export function TravelToast() {
     const id = setTimeout(() => tick((n) => n + 1), 2200);
     return () => clearTimeout(id);
   }, [tr]);
-  if (!tr || Date.now() - tr.at > 2000) return null;
-  const name = tr.title || placeName(place);
+  const recent = tr && Date.now() - tr.at <= 2000 ? tr : null;
+  if (!recent && !frozen) return null;
+  const name = recent?.title || placeName(place);
   return (
     <div className={`pointer-events-none absolute left-1/2 top-1/3 -translate-x-1/2 px-5 py-3 text-lg text-cal ${box}`}>
-      {t(tr.soon ? "hud.soon" : "hud.travel", { place: name })}
+      {t(recent?.soon ? "hud.soon" : "hud.travel", { place: name })}
     </div>
   );
 }

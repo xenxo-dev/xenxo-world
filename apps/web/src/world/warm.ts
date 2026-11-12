@@ -333,10 +333,22 @@ export function prepare(gl: WarmRenderer, objects: readonly THREE.Object3D[], ca
 let wanted = false;
 let passing: (() => void) | null = null;
 let passes = 0;
+/** Cuántos se han pedido y hasta cuál se ha atendido (un repaso atiende todo lo pedido hasta que empieza). */
+let asked = 0;
+let served = 0;
 
-/** Pide un repaso general: el lugar no está preparado hasta que se haga. */
-export function requestPass() {
+/**
+ * Pide un repaso general: el lugar no está preparado hasta que se haga. Devuelve el número de la
+ * petición: estará atendida cuando `passServed()` llegue a él.
+ */
+export function requestPass(): number {
   wanted = true;
+  return ++asked;
+}
+
+/** Hasta qué petición se ha atendido (con un repaso que empezó después de pedirla). */
+export function passServed(): number {
+  return served;
 }
 
 /**
@@ -355,6 +367,7 @@ export function passDue(now = performance.now()): boolean {
 export function runPass(gl: WarmRenderer, scene: THREE.Scene, camera: THREE.Camera, post: boolean, maxWait = MAX_WAIT_MS) {
   if (passing) return;
   wanted = false;
+  const serving = asked;
   let live = true;
   const cancel = start(
     gl,
@@ -367,6 +380,7 @@ export function runPass(gl: WarmRenderer, scene: THREE.Scene, camera: THREE.Came
       live = false;
       passing = null;
       passes++;
+      served = serving;
     },
     maxWait,
   );
@@ -374,6 +388,16 @@ export function runPass(gl: WarmRenderer, scene: THREE.Scene, camera: THREE.Came
     live = false;
     cancel();
   };
+}
+
+/**
+ * Un adelanto del repaso: lanza ya la compilación de lo que hay en la escena, sin esperar a nada ni
+ * dar nada por hecho. Al llegar la foto de un lugar: lo que no es un modelo (el propio personaje, que
+ * con las luces de cada lugar es otro shader; lo hecho en código) se va compilando mientras llegan
+ * las descargas, en vez de empezar cuando acaban.
+ */
+export function kickScene(gl: WarmRenderer, scene: THREE.Scene, camera: THREE.Camera, post: boolean) {
+  compile(gl, scene, camera, scene, post);
 }
 
 /** Deja el repaso (se desmonta el mundo): ni pendiente ni en marcha. */

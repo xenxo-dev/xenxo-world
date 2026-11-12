@@ -100,7 +100,24 @@ class WorldStore {
    * llega a un sitio en alto (la parrilla del Circuito Vértigo, a 26 m) acababa en la calle de debajo.
    */
   get walkable(): boolean {
+    return this.status === "open" && this.arrived && !this.frozen;
+  }
+
+  /** ¿Ha llegado ya el lugar (conexión abierta y su foto), se dibuje ya o no? */
+  get landed(): boolean {
     return this.status === "open" && this.arrived;
+  }
+
+  /**
+   * Recién llegados a un lugar, mientras se prepara (sus modelos, sus shaders: World.tsx) no se dibuja:
+   * se sigue viendo la última imagen del anterior. Tampoco se anda (sería a ciegas), y el aviso de
+   * viaje sigue puesto.
+   */
+  frozen = false;
+  setFrozen(on: boolean) {
+    if (this.frozen === on) return;
+    this.frozen = on;
+    this.bump();
   }
 
   private bump() {
@@ -405,6 +422,11 @@ export function useChatVersion() {
 /** Re-renderiza solo cuando cambia de lugar (nexo, plaza…). */
 export function usePlace(): string {
   return useSyncExternalStore(world.subscribe, () => world.chunkId);
+}
+
+/** ¿Se está preparando el lugar al que se acaba de llegar (aún no se dibuja)? */
+export function useFrozen(): boolean {
+  return useSyncExternalStore(world.subscribe, () => world.frozen);
 }
 
 /** ¿Hay coches en este lugar? (Lo dice el servidor al llegar: WELCOME.cars.) */

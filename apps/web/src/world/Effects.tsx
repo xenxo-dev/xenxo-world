@@ -9,7 +9,8 @@ import { Bloom, EffectComposer, N8AO, SMAA, ToneMapping } from "@react-three/pos
 import { ToneMappingMode } from "postprocessing";
 import type { Ambience, Features } from "./graphics";
 
-export default function Effects({ features, ambience }: { features: Features; ambience: Ambience }) {
+/** `enabled`: dibuja (mientras se prepara un lugar recién llegado no se dibuja nada: World.tsx). */
+export default function Effects({ features, ambience, enabled = true }: { features: Features; ambience: Ambience; enabled?: boolean }) {
   const night = ambience === "night";
   const effects = [
     features.ao && <N8AO key="ao" halfRes aoRadius={1.6} distanceFalloff={1} intensity={night ? 1.5 : 2.4} />,
@@ -28,7 +29,7 @@ export default function Effects({ features, ambience }: { features: Features; am
   ].filter(Boolean) as ReactElement[];
 
   return (
-    <EffectComposer multisampling={features.antialias ? 4 : 0} enableNormalPass={false}>
+    <EffectComposer enabled={enabled} multisampling={features.antialias ? 4 : 0} enableNormalPass={false}>
       {effects}
     </EffectComposer>
   );
