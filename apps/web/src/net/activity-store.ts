@@ -7,6 +7,8 @@
 import { useSyncExternalStore } from "react";
 import { msg, type ClientMessage, type MessageOf, type ServerMessage } from "@xenxo/protocol";
 import { checkBadgesSoon } from "./badges";
+import { firstSteps } from "./first-steps";
+import { rivalGap, rivalLap } from "./house-rival";
 import { gridHold, myRun, nextRound, roundFresh, type RoundPayload, type RoundState } from "./round";
 import { net } from "./session";
 
@@ -43,6 +45,8 @@ class ActivityStore {
   /** La ronda en la que corro; si no corro en ninguna, la última de la que ha llegado aviso. */
   round: RoundState | null = null;
   toast: ActivityToast | null = null;
+  /** Corriendo solo: lo que le saco (−) o me saca (+) el rival de la casa en la última puerta (ms). */
+  rival: { gap: number; gates: number } | null = null;
   private version = 0;
   private listeners = new Set<() => void>();
 
@@ -65,6 +69,7 @@ class ActivityStore {
     this.tiles = new Map();
     this.round = null;
     this.toast = null;
+    this.rival = null;
     this.bump();
   }
 
@@ -76,6 +81,15 @@ class ActivityStore {
   applyRound(p: RoundPayload, me: string | null, serverNow: number) {
     const now = performance.now();
     this.round = nextRound(this.round, p, me, now);
+    // El rival de la casa: en cada puerta mía, cuánto le saco (con la hora del servidor de la salida).
+    // (También en el aviso del final, que puede traer mi última puerta: la meta.)
+    const lap = this.round.mine && this.round.round === p.round && p.entrants.length === 1 ? rivalLap(p.race) : undefined;
+    const mine = p.entrants.find((e) => e.session_id === me);
+    if (!lap || !mine || p.state === "countdown") this.rival = null;
+    else if (mine.gates > (this.rival?.gates ?? 0)) {
+      const gap = rivalGap(lap, mine.gates, mine.ms ?? serverNow - p.go_at);
+      if (gap !== null) this.rival = { gap, gates: mine.gates };
+    }
     const run = this.round.round === p.round ? myRun(this.round, me) : null;
     if (run) this.race = { race: p.race, t0: now - (serverNow - p.go_at), next: run.next, total: run.total };
     else if (this.round.round === p.round && this.race?.race === p.race) this.race = null;
@@ -127,7 +141,9 @@ class ActivityStore {
         // Un conjunto nuevo: quien lo mira (Entities) se entera de que ha cambiado.
         this.collected = new Set(this.collected).add(m.payload.entity_id);
         this.toast = { kind: "collected", count: m.payload.count, total: m.payload.total, complete: m.payload.complete, note: m.payload.note, at: now };
-        if (m.payload.complete) this.badges();
+        firstSteps.mark("find");
+        // El primero de todos puede dar «Primeros pasos» (si ya terminó una carrera).
+        if (m.payload.complete || m.payload.count === 1) this.badges();
         this.bump();
         return;
       case "RACE": {
@@ -136,7 +152,10 @@ class ActivityStore {
         else if (p.state === "cp" && this.race) this.race = { ...this.race, next: p.next ?? this.race.next };
         else this.race = null;
         this.toast = { kind: "race", state: p.state, next: p.next, total: p.total, ms: p.ms, best: p.best, rank: p.rank, at: now };
-        if (p.state === "finish") this.badges();
+        if (p.state === "finish") {
+          firstSteps.mark("race");
+          this.badges();
+        }
         this.bump();
         return;
       }

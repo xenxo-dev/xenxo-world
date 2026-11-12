@@ -8,7 +8,7 @@ import { randomId, resolveAgent, signToken, verifyToken, type Principal } from "
 import { CALL_TTL_MS, REMOTE_METHODS, sha256B64, signRemote, TICKET_TTL_MS } from "./remote";
 import { currentRoutes, forgetRoutes, loadRoutes, nodeAccepts, nodeAlive, nodeUrl, publicJwk, snapshotKey } from "./nodes";
 import type { ChunkRoom, ShowcaseItem } from "./chunk-room";
-import { BADGES, earnedIn, type ActivityOf } from "./badges";
+import { ACROSS, BADGES, earnedAcross, earnedIn, type ActivityOf } from "./badges";
 import { notify, notifyConfigured } from "./notify";
 import { billboardSlots, cabinetSlots, DISTRICTS, districtById, parcelIndex, parcelSpawn } from "./districts";
 import { communityGates, SHOWCASE_SLOTS, type CommunityGate } from "./nexo";
@@ -922,6 +922,7 @@ async function bootResponse(env: Env, ctx: ExecutionContext): Promise<Response> 
     districts: districtsView(env, d.districts, d.community),
     projects: d.projects,
     jams: d.jams,
+    meetups: d.meetups,
     flags: d.flags,
     scores: JSON.parse(scores) as unknown,
     live: live.length
@@ -1550,12 +1551,18 @@ const worker = {
         if (path === "/me/badges/check" && req.method === "POST") {
           if (!(await dir.badgeCheckAllowed(uid))) return json({ badges: await dir.badgesOf(uid), new: [], throttled: true }, 200, h);
           const earned: string[] = [];
-          for (const district of new Set(BADGES.map((b) => b.district))) {
-            const d = districtById(district);
-            if (!d) continue;
-            const a = await chunk(env, d.chunk).activityOf(`usr_${uid}`).catch(() => null);
-            if (a) earned.push(...earnedIn(district, a as unknown as ActivityOf));
+          // Las de cada distrito, y las de cualquiera (primeros pasos) con lo de todos los abiertos.
+          const all: ActivityOf[] = [];
+          for (const d of DISTRICTS.filter((x) => !x.soon)) {
+            const a = await chunk(env, d.chunk).activityOf(`usr_${uid}`).catch((e) => {
+              if (isCapacityError(e)) throw e;
+              return null;
+            });
+            if (!a) continue;
+            all.push(a as unknown as ActivityOf);
+            if (BADGES.some((b) => b.district === d.id)) earned.push(...earnedIn(d.id, a as unknown as ActivityOf));
           }
+          if (BADGES.some((b) => b.district === ACROSS)) earned.push(...earnedAcross(all));
           const fresh = await dir.grantBadges(uid, earned);
           if (fresh.length) {
             const me = await dir.card(uid);
@@ -1879,6 +1886,15 @@ const worker = {
           await clearParcel(env, place?.district, mhide[1]!, await dir.projectAgents(mhide[1]!));
           ctx.waitUntil(syncShowcase(env, dir));
           return json(r.data, 200, h);
+        }
+        if (path === "/mod/meetups" && req.method === "POST") {
+          const r = await dir.createMeetup(modId, await readJson(req));
+          return r.ok ? json({ meetup: r.data }, 201, h) : failure(r, h);
+        }
+        const mmeet = path.match(/^\/mod\/meetups\/(\d{1,9})$/);
+        if (mmeet && req.method === "DELETE") {
+          const r = await dir.cancelMeetup(modId, Number(mmeet[1]), new URL(req.url).searchParams.get("note"));
+          return r.ok ? json(r.data, 200, h) : failure(r, h);
         }
         if (path === "/mod/jams" && req.method === "POST") {
           const r = await dir.createJam(modId, await readJson(req));

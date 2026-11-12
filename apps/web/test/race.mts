@@ -12,7 +12,7 @@
  *
  *   npm run test:race -w @xenxo/web
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { NodeIO } from "@gltf-transform/core";
 import { ALL_EXTENSIONS } from "@gltf-transform/extensions";
 import { MeshoptDecoder } from "meshoptimizer";
@@ -24,6 +24,7 @@ import {
 import { SEED_ASSETS } from "../../realtime/src/seed-assets.ts";
 import { crashWith, gridHold, myRun, nextRound, PODIUM_MS, startLights, stillRacing, type RoundPayload, type RoundState } from "../src/net/round.ts";
 import { CarSim, loadRapier, type StaticSource } from "../src/world/vehicle/physics.ts";
+import { ghostPose, rivalGap, setRivalLap, soloRival, type GhostLap } from "../src/net/house-rival.ts";
 
 let fails = 0;
 const check = (ok: boolean, what: string) => {
@@ -480,6 +481,78 @@ const settle = (secs = 1) => {
     ok &&= Number.isFinite(st.x + st.y + st.z + st.speed) && st.contacts >= 2;
   }
   check(ok, "sacar el coche varias veces seguidas: siempre queda apoyado y con números de verdad");
+}
+
+// El rival de la casa (src/world/vehicle/ghosts/gp.json): la misma carrera desde el segundo cajón,
+// grabada a 10 por segundo con el coche de verdad. Quien corre solo la ve como un coche fantasma
+// (world/vehicle/Ghost.tsx). Si cambian la pista, la física o el piloto: GHOSTS=write npm run test:race.
+{
+  const gates = [...race.cps.map((p) => ({ p, r: race.radius })), { p: race.finish.p, r: race.finish.radius }];
+  const round: Round = {
+    id: 9, key: "system:gp", race: "gp", owner: "system", state: "countdown", openedAt: 0, goAt: 0, laps: race.laps, perLap: gates.length,
+    minMs: minRoundMs(gates.map((g) => g.p), race.laps), slots: race.grid.length, entrants: new Map([["casa", { session_id: "casa", sub: "casa", ranked: false, name: "casa", slot: 1, gates: 0 }]]),
+  };
+  const slot = race.grid[1]!;
+  sim.spawn(slot[0]!, slot[1]! + 0.1, slot[2]!, ((race.start.yaw + 180) * Math.PI) / 180);
+  settle();
+  const head = () => [st.x, st.y + 1.6, st.z];
+  startRound(round, () => near(head(), race.start.p, race.start.radius));
+  turboAt.clear();
+  const r2 = (v: number) => Math.round(v * 100) / 100, r4 = (v: number) => Math.round(v * 10000) / 10000;
+  const frames: number[] = [], at_: number[] = [];
+  let s = nearestS(slot[0]!, slot[2]!), t = 0, tick = 0, missed = "";
+  while (round.entrants.get("casa")!.ms === undefined && t < 240) {
+    if (tick++ % 6 === 0) frames.push(r2(st.x), r2(st.y), r2(st.z), r4(st.qx), r4(st.qy), r4(st.qz), r4(st.qw), Math.round(st.speed * 10) / 10);
+    autopilot(s, t);
+    t += 1 / 60;
+    s = progress(s);
+    const e = round.entrants.get("casa")!;
+    const g = nextGate(e.gates, round.perLap);
+    const gate = g === "finish" ? gates[gates.length - 1]! : gates[g]!;
+    const dx = st.x - gate.p[0]!, dz = st.z - gate.p[2]!;
+    if (dx * dx + dz * dz <= gate.r * gate.r && Math.abs(st.y - gate.p[1]!) <= 4 + gate.r) {
+      if (passGate(round, "casa", g, t * 1000)) at_.push(Math.round(t * 1000));
+      else missed ||= `puerta ${e.gates + 1}`;
+    }
+  }
+  // Un segundo más, pasada la meta (frenando): el fantasma no se para en seco.
+  for (let i = 0; i < 60; i++) {
+    if (tick++ % 6 === 0) frames.push(r2(st.x), r2(st.y), r2(st.z), r4(st.qx), r4(st.qy), r4(st.qz), r4(st.qw), Math.round(st.speed * 10) / 10);
+    sim.update(1 / 60, { throttle: -0.6, steer: 0, handbrake: false });
+  }
+  const ms = round.entrants.get("casa")!.ms;
+  const rec = { race: "gp", hz: 10, ms, gates: at_, frames };
+  const file = new URL("../src/world/vehicle/ghosts/gp.json", import.meta.url);
+  if (process.env.GHOSTS === "write") writeFileSync(file, JSON.stringify(rec) + "\n");
+  let saved: { ms?: number; gates?: number[] } = {};
+  try {
+    saved = JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    /* sin grabar */
+  }
+  console.log(`  rival de la casa: ${r1((ms ?? 0) / 1000)} s desde el segundo cajón, ${frames.length / 8} posiciones grabadas (la guardada: ${r1((saved.ms ?? 0) / 1000)} s)`);
+  check(ms !== undefined && !missed && at_.length === gates.length * race.laps, `el rival de la casa termina pasando por sus ${gates.length * race.laps} puertas${missed ? ` (falla: ${missed})` : ""}`);
+  check(saved.ms !== undefined && Math.abs(saved.ms - (ms ?? 0)) < 1500 && saved.gates?.length === at_.length, "y su vuelta guardada está al día (si no: GHOSTS=write npm run test:race -w @xenxo/web)");
+  // Lo que hace el cliente con ella (src/net/house-rival.ts).
+  const lap = rec as GhostLap;
+  setRivalLap(lap);
+  const base = { round: 3, race: "gp", key: "system:gp", state: "running", laps: 2, per_lap: gates.length, slots: 8, go_at: 0, at: 0 };
+  const one = { ...base, mine: true, live: true, entrants: [{ session_id: "yo", name: "yo", slot: 0, gates: 3 }] } as unknown as RoundState;
+  const two = { ...one, entrants: [...one.entrants, { session_id: "otro", name: "otro", slot: 1, gates: 2 }] } as unknown as RoundState;
+  check(soloRival(one) === lap && soloRival(two) === null && soloRival({ ...one, live: false } as RoundState) === null && soloRival({ ...one, state: "done" } as RoundState) === null, "el rival de la casa sale solo si corro (o espero) solo en la ronda");
+  const p0 = ghostPose(lap, -5000, { x: 0, y: 0, z: 0, qx: 0, qy: 0, qz: 0, qw: 1, speed: 0 });
+  const pEnd = ghostPose(lap, 9e6, { x: 0, y: 0, z: 0, qx: 0, qy: 0, qz: 0, qw: 1, speed: 0 });
+  const nF = lap.frames.length / 8;
+  check(Math.hypot(p0.x - slot[0]!, p0.z - slot[2]!) < 0.6 && Math.abs(pEnd.x - lap.frames[(nF - 1) * 8]!) < 1e-6, "antes de la salida espera en el segundo cajón, y al acabar se queda donde paró");
+  let jump = 0;
+  const pa = { x: 0, y: 0, z: 0, qx: 0, qy: 0, qz: 0, qw: 1, speed: 0 }, pb = { ...pa };
+  for (let tt = 0; tt < lap.ms; tt += 1000 / 60) {
+    ghostPose(lap, tt, pa);
+    ghostPose(lap, tt + 1000 / 60, pb);
+    jump = Math.max(jump, Math.hypot(pb.x - pa.x, pb.y - pa.y, pb.z - pa.z) * 60);
+  }
+  check(jump < 70, `entre dos frames no da saltos (lo más rápido: ${r1(jump)} m/s)`);
+  check(rivalGap(lap, 1, lap.gates[0]! + 800) === 800 && rivalGap(lap, 1, lap.gates[0]! - 300) === -300 && rivalGap(lap, 0, 5000) === null, "y la diferencia en cada puerta: + si me saca, − si le saco");
 }
 
 console.log(fails ? `\n${fails} comprobaciones fallan` : "\nTodo bien.");

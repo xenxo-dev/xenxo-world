@@ -1260,7 +1260,7 @@ await scenario("actividades: el servidor comprueba la cercanía, el orden y el r
   assert(exp.ok && exp.data.activities.some((x) => x.chunk === chunkId && x.collected.length === 2), "la exportación incluye las actividades");
 }, 40_000);
 
-await scenario("Rastro de datos (Distrito Cero): 12 fragmentos del sistema con su historia; los de la pasarela solo desde arriba", async () => {
+await scenario("Rastro de datos (Distrito Cero): 12 fragmentos del sistema con su historia; los de la pasarela solo desde arriba (y encontrar sin correr no da «Primeros pasos»)", async () => {
   const chunkId = "c_-1_-1";
   const api = new Api(baseUrl);
   await api.register(`conf rastro ${randomUUID().slice(0, 6)}`);
@@ -1315,6 +1315,7 @@ await scenario("Rastro de datos (Distrito Cero): 12 fragmentos del sistema con s
   u.close();
   const got = await api.call<{ new: { id: string }[]; badges: { id: string }[] }>("POST", "/me/badges/check");
   assert(got.ok && got.data.new.some((b) => b.id === "cero_rastro"), `insignia «Rastro de datos» (${JSON.stringify(got)})`);
+  assert(!got.data.new.some((b) => b.id === "primeros_pasos"), "encontrar algo sin haber terminado ninguna carrera no da «Primeros pasos»");
   const again = await api.call<{ badges: { id: string }[] }>("GET", "/me/badges");
   assert(again.ok && again.data.badges.filter((b) => b.id === "cero_rastro").length === 1, "una sola vez");
   const soon = await api.call<{ throttled?: boolean }>("POST", "/me/badges/check");
@@ -1617,7 +1618,7 @@ await scenario("Ruta de las Azoteas (Vertical): parkour solo aquí (WELCOME.park
   }
 });
 
-await scenario("Niveles de Vertical: seis carreras (dos fáciles, dos medias y dos para tryhards) con su salida, sus puntos en los tejados, su meta, su cartel y su marcador de la semana; seis retos escondidos con su marcador; y el nivel 6 y los retos, hechos de verdad, dan sus insignias y un cofre (un arma al azar que pasa a la cuenta, se usa en Distrito Cero y sale en la exportación)", async () => {
+await scenario("Niveles de Vertical: seis carreras (dos fáciles, dos medias y dos para tryhards) con su salida, sus puntos en los tejados, su meta, su cartel y su marcador de la semana; seis retos escondidos con su marcador; y el nivel 6 y los retos, hechos de verdad, dan sus insignias (y «Primeros pasos») y un cofre (un arma al azar que pasa a la cuenta, se usa en Distrito Cero y sale en la exportación)", async () => {
   const chunkId = "c_-1_1";
   const api = new Api(baseUrl);
   await api.register(`conf niveles ${randomUUID().slice(0, 6)}`);
@@ -1698,6 +1699,8 @@ await scenario("Niveles de Vertical: seis carreras (dos fáciles, dos medias y d
   const got = await api.call<{ new: { id: string }[] }>("POST", "/me/badges/check");
   const ids = got.ok ? got.data.new.map((b) => b.id) : [];
   assert(ids.includes("vertical_salto") && ids.includes("vertical_retos"), `insignias «Salto de fe» y «Tryhard» (${JSON.stringify(got)})`);
+  // Algo encontrado y una carrera terminada (aquí, en el mismo distrito): primeros pasos, también.
+  assert(ids.includes("primeros_pasos"), `y «Primeros pasos» (${JSON.stringify(ids)})`);
   // El arma pasa a la cuenta (lo comprueba el servidor con el distrito) y la sesión nueva la lleva.
   const armed = await api.call<{ weapons: string[]; new: string[]; token?: string; principal?: { w?: string[] } }>("POST", "/me/weapons/check");
   assert(armed.ok && armed.data.new.includes(loot!.weapon) && armed.data.weapons.includes(loot!.weapon) && !!armed.data.token && !!armed.data.principal?.w?.includes(loot!.weapon), `el arma, a la cuenta (${JSON.stringify(armed)})`);
@@ -2840,6 +2843,45 @@ await scenario("arranque: GET /boot trae en una petición lo que el panel pedía
   assert(b.live !== null && Number.isInteger(b.live.online) && b.live.entities > 0, "cuánta gente hay y qué hay construido");
   assert(["signups", "chat", "sandbox"].every((k) => typeof b.flags[k] === "boolean"), "los interruptores de emergencia");
   assert(!JSON.stringify(b).includes("usr_") || !/usr_[A-Za-z0-9_-]{6,}/.test(JSON.stringify(b)), "sin ids internos de nadie");
+});
+
+await scenario("quedadas: moderación anuncia un día y un sitio (con su jam, si va con una), sale en /boot sin datos de nadie, se cancela con motivo y lo raro se rechaza", async () => {
+  const someone = new Api(baseUrl);
+  await someone.register(`conf quedada ${randomUUID().slice(0, 6)}`);
+  const at = Date.now() + 3 * 86_400_000;
+  const meet = { starts_at: new Date(at).toISOString(), place: "arcade", spot: "gp", title: { es: "Carrera de prueba", en: "Test race" }, about: { es: "Todos a la parrilla", en: "Everyone to the grid" } };
+  const denied = await someone.call("POST", "/mod/meetups", meet);
+  assert(!denied.ok && denied.status === 403, "solo moderación anuncia quedadas");
+  if (!adminKey) return console.log("    (sin XENXO_ADMIN_KEY: se omite el resto: las quedadas las anuncia moderación)");
+  const mod = new Api(baseUrl);
+  await mod.agentToken(adminKey);
+  const bad = async (b: Record<string, unknown>, what: string) => {
+    const r = await mod.call("POST", "/mod/meetups", { ...meet, ...b });
+    assert(!r.ok && r.status >= 400 && r.status < 500, `${what} se rechaza (${JSON.stringify(r)})`);
+  };
+  await bad({ starts_at: new Date(Date.now() - 3_600_000).toISOString() }, "en el pasado");
+  await bad({ starts_at: new Date(Date.now() + 200 * 86_400_000).toISOString() }, "con más de 120 días");
+  await bad({ place: "agora" }, "en un distrito cerrado");
+  await bad({ place: "nexo" }, "en el nexo (se va en solitario)");
+  await bad({ title: "x" }, "sin título");
+  await bad({ ends_at: at + 13 * 3_600_000 }, "de más de 12 horas");
+  await bad({ spot: "../../x" }, "con un sitio raro");
+  await bad({ jam: "no-existe-esta-jam" }, "con una jam que no existe");
+  const made = await mod.call<{ meetup: { id: number; starts_at: number; ends_at: number; place: string; spot: string } }>("POST", "/mod/meetups", meet);
+  assert(made.ok && made.data.meetup.starts_at === at && made.data.meetup.ends_at === at + 2 * 3_600_000 && made.data.meetup.spot === "gp", `anunciada, de dos horas si no se dice (${JSON.stringify(made)})`);
+  const id = made.data.meetup.id;
+  const boot = (await (await fetch(new URL("/boot", baseUrl))).json()) as { meetups?: { id: number; title: { es: string }; place: string }[] };
+  const seen = boot.meetups?.find((m) => m.id === id);
+  assert(!!seen && seen.title.es === "Carrera de prueba" && seen.place === "arcade", `sale en /boot (${JSON.stringify(boot.meetups)})`);
+  assert(!/created_by|usr_|admin:/.test(JSON.stringify(boot.meetups)), "sin quién la anunció");
+  const log = await mod.call<{ log: { action: string; target_id: string }[] }>("GET", "/mod/log");
+  assert(!log.ok || log.data.log.some((l) => l.action === "meetup_create" && l.target_id === String(id)), "queda en el registro de moderación");
+  const gone = await mod.call("DELETE", `/mod/meetups/${id}?note=${encodeURIComponent("se cambia de día")}`);
+  assert(gone.ok, `se cancela (${JSON.stringify(gone)})`);
+  const again = await mod.call("DELETE", `/mod/meetups/${id}`);
+  assert(!again.ok && again.status === 404, "dos veces, no");
+  const after = (await (await fetch(new URL("/boot", baseUrl))).json()) as { meetups?: { id: number }[] };
+  assert(!(after.meetups ?? []).some((m) => m.id === id), "y ya no sale en /boot");
 });
 
 await scenario("contadores de visitas: sumas por día de visitas, entradas, lugares y cuentas, con la etiqueta del enlace; solo los ve moderación", async () => {

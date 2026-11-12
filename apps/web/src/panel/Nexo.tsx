@@ -9,6 +9,7 @@ import { travel } from "../net/session";
 import { fitsHere, visitorDevice } from "../games/device";
 import { gameName, openGame } from "../games/state";
 import { JamBlock } from "./Jam";
+import { MeetupBlock } from "./Meetup";
 import { useRoles } from "./Moderation";
 import { ScoresBlock } from "./Scores";
 import { Block, card } from "./ui";
@@ -71,6 +72,7 @@ export function NexoSection({ onEnter, onCreate }: { onEnter: () => void; onCrea
           </button>
         </div>
       </section>
+      <MeetupBlock onEnter={onEnter} />
       <JamBlock />
       <Block title={t("nav.nexo")}>
         <p className="-mt-2 mb-5 max-w-prose text-[15px] leading-relaxed text-soft">{t("nexo.intro")}</p>

@@ -16,6 +16,7 @@ import type { Project } from "./account";
 import { withCampaign } from "./campaign";
 import type { DistrictInfo } from "./districts";
 import type { Jam } from "./jams";
+import type { Meetup } from "./meetups";
 import { checkOutage, noteFull } from "./outage";
 import type { DistrictBoards } from "./scores";
 
@@ -37,6 +38,8 @@ export interface Boot {
   districts: DistrictInfo[];
   projects: Project[];
   jams: Jam[];
+  /** Quedadas por venir (un servidor de antes no las manda). */
+  meetups?: Meetup[];
   scores: { districts: DistrictBoards[]; at: number };
   live: LiveState | null;
   flags: Flags;

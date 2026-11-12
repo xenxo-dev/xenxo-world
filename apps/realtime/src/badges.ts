@@ -6,15 +6,31 @@
 
 export interface Badge {
   id: string;
-  /** Distrito donde se gana (su chunk sale de districts.ts). */
+  /** Distrito donde se gana (su chunk sale de districts.ts); `xenxo`: en cualquiera (`ACROSS`). */
   district: string;
-  rule: { kind: "hunt"; key: string } | { kind: "race"; key: string; under_ms?: number } | { kind: "points"; key: string; total: number };
+  rule:
+    | { kind: "hunt"; key: string }
+    | { kind: "race"; key: string; under_ms?: number }
+    | { kind: "points"; key: string; total: number }
+    /** Primeros pasos: algo encontrado y una carrera terminada, en los distritos que sea. */
+    | { kind: "first" };
   name: { es: string; en: string };
   desc: { es: string; en: string };
   color: string;
 }
 
+/** El «distrito» de las insignias que se ganan en cualquiera. */
+export const ACROSS = "xenxo";
+
 export const BADGES: Badge[] = [
+  {
+    id: "primeros_pasos",
+    district: ACROSS,
+    rule: { kind: "first" },
+    name: { es: "Primeros pasos", en: "First Steps" },
+    desc: { es: "Cruzó una puerta del nexo, encontró algo escondido y terminó una carrera.", en: "Went through a nexus gate, found something hidden and finished a race." },
+    color: "#a26bff",
+  },
   {
     id: "cero_rastro",
     district: "cero",
@@ -143,6 +159,7 @@ export const BADGES: Badge[] = [
 
 /** Lo que un distrito guarda de una cuenta (ChunkRoom.activityOf), lo justo para las reglas. */
 export interface ActivityOf {
+  collected: { set_key: string }[];
   hunts_completed: { set_key: string }[];
   best_times: { race_key: string; ms: number }[];
   daily_points: { board_key: string; points: number }[];
@@ -159,6 +176,16 @@ export function earnedIn(district: string, a: ActivityOf): string[] {
     if (r.kind === "points" && a.daily_points.filter((p) => p.board_key === r.key).reduce((s, p) => s + p.points, 0) >= r.total) out.push(b.id);
   }
   return out;
+}
+
+/**
+ * Las que se ganan en cualquier distrito (`ACROSS`), con lo que guarda cada uno: `all` es lo de
+ * todos los distritos que se han podido preguntar.
+ */
+export function earnedAcross(all: ActivityOf[]): string[] {
+  const found = all.some((a) => a.collected.length > 0);
+  const raced = all.some((a) => a.best_times.length > 0);
+  return BADGES.filter((b) => b.district === ACROSS && b.rule.kind === "first" && found && raced).map((b) => b.id);
 }
 
 /** Ficha pública de una insignia (para el carné y el panel). */

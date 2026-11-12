@@ -36,6 +36,7 @@ import { COMMUNITY_SCHEMA, communityChunk, MAX_DISTRICT_SAVES_PER_DAY, submissio
 import { isSystemAsset } from "./assets";
 import type { DistrictSubmission } from "@xenxo/protocol";
 import { BADGES, badgeInfo } from "./badges";
+import { MEETUP_MAX_OPEN, MEETUP_SCHEMA, readMeetup, type Meetup } from "./meetups";
 import { badJamDates, JAM_SCHEMA, jamPhase, jamRanking, jamText, jamTime, MAX_ENTRIES_PER_USER, validJamSlug, type Jam, type JamResult } from "./jam";
 import type { GameManifest } from "@xenxo/protocol";
 import {
@@ -275,6 +276,7 @@ export class Directory extends DurableObject<Env> {
     `);
     // Jams: convocatorias, juegos apuntados y votos (ver jam.ts).
     this.sql.exec(JAM_SCHEMA);
+    this.sql.exec(MEETUP_SCHEMA);
     // Insignias de las actividades (badges.ts): las comprueba el Worker con los distritos.
     this.sql.exec(`
       CREATE TABLE IF NOT EXISTS badges (user_id TEXT NOT NULL, badge_id TEXT NOT NULL, earned_at INTEGER NOT NULL, PRIMARY KEY (user_id, badge_id));
@@ -1937,6 +1939,43 @@ export class Directory extends DurableObject<Env> {
     return null;
   }
 
+  /* --- Quedadas (meetups.ts) ------------------------------------------------------------------ */
+
+  /** Las que no han acabado ni se han cancelado, la primera la más próxima. */
+  listMeetups(now = Date.now()): Meetup[] {
+    return this.sql
+      .exec<{ id: number; starts_at: number; ends_at: number; place: string; spot: string | null; title: string; about: string; jam: string | null }>(
+        "SELECT id, starts_at, ends_at, place, spot, title, about, jam FROM meetups WHERE cancelled = 0 AND ends_at > ? ORDER BY starts_at LIMIT ?",
+        now, MEETUP_MAX_OPEN,
+      )
+      .toArray()
+      .map((r) => ({ ...r, title: JSON.parse(r.title), about: JSON.parse(r.about) }));
+  }
+
+  /** Anunciar una quedada (moderación). Queda en el registro. */
+  createMeetup(moderator: string, b: Record<string, unknown>): Result<Meetup> {
+    const m = readMeetup(b);
+    if (typeof m === "string") return fail(400, "bad_message", m);
+    if (m.jam && !this.jamRow(m.jam)) return fail(404, "not_found", "esa jam no existe");
+    if (this.listMeetups().length >= MEETUP_MAX_OPEN) return fail(409, "too_many", `como mucho ${MEETUP_MAX_OPEN} quedadas por venir a la vez`);
+    const id = this.sql
+      .exec<{ id: number }>(
+        "INSERT INTO meetups (starts_at, ends_at, place, spot, title, about, jam, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+        m.starts_at, m.ends_at, m.place, m.spot, JSON.stringify(m.title), JSON.stringify(m.about), m.jam, moderator, Date.now(),
+      )
+      .one().id;
+    this.logDecision(moderator, "meetup_create", "meetup", String(id), null);
+    return ok({ id, ...m });
+  }
+
+  /** Cancelar una quedada (moderación), con su motivo si se da. */
+  cancelMeetup(moderator: string, id: number, note: unknown): Result<{ cancelled: number }> {
+    const n = this.sql.exec("UPDATE meetups SET cancelled = 1 WHERE id = ? AND cancelled = 0", id).rowsWritten;
+    if (!n) return fail(404, "not_found", "esa quedada no existe o ya está cancelada");
+    this.logDecision(moderator, "meetup_cancel", "meetup", String(id), typeof note === "string" ? note.trim().slice(0, 500) || null : null);
+    return ok({ cancelled: id });
+  }
+
   /** Crear una jam (moderación). */
   createJam(moderator: string, b: Record<string, unknown>): Result<Jam> {
     if (!validJamSlug(b.slug)) return fail(400, "bad_slug", "slug: de 3 a 40 letras minúsculas, números o guiones");
@@ -2656,7 +2695,7 @@ export class Directory extends DurableObject<Env> {
    */
   bootData(pending: unknown = []) {
     this.statsAdd(pending);
-    return { districts: this.districts(), community: this.communityDistricts(), projects: this.listProjects(), jams: this.listJams(), flags: this.flags() };
+    return { districts: this.districts(), community: this.communityDistricts(), projects: this.listProjects(), jams: this.listJams(), flags: this.flags(), meetups: this.listMeetups() };
   }
 
   /** Copia propia: qué tablas hay y cuántas filas tiene cada una. */

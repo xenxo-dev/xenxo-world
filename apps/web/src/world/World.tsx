@@ -4,7 +4,7 @@ import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { XR, createXRStore, useXR } from "@react-three/xr";
 import { CHUNK_SIZE, PLACES } from "@xenxo/protocol";
-import { usePlace, usePlaceTheme, world } from "../net/world-store";
+import { useCars, usePlace, usePlaceTheme, world } from "../net/world-store";
 import { Avatars } from "./Avatars";
 import { Entities, SkipOnError } from "./Entities";
 import { ENV_SIZE, graphics, useGraphics, type Ambience, type Features } from "./graphics";
@@ -38,6 +38,7 @@ import { PeopleFx } from "./people/PeopleFx";
 import { ShotFx } from "./people/ShotFx";
 import { LootChests } from "./LootChests";
 import { VRTeleport } from "./xr/VRTeleport";
+import { HouseRival } from "./vehicle/Ghost";
 import skyDay from "./sky-day.json";
 import { splashActive, splashDone, splashProgress } from "../splash";
 
@@ -681,6 +682,7 @@ function Scene({ active }: { active: boolean }) {
   const place = usePlace();
   const inPlaza = place === PLACES.plaza;
   const inNexo = place === PLACES.nexo;
+  const cars = useCars();
   // Todos los lugares siguen el ambiente elegido (día, noche o la hora): cada distrito tiene su
   // versión de día y de noche. Los distritos usan la luz abierta del nexo.
   const ambience: Ambience = g.ambience;
@@ -767,6 +769,12 @@ function Scene({ active }: { active: boolean }) {
         <PlaceMounted />
       </Suspense>
       <Player active={active} />
+      {/* El rival de la casa, donde hay coches (y nunca en las gafas): escondido hasta que corres solo. */}
+      {cars && !g.inXR && (
+        <Suspense fallback={null}>
+          <HouseRival />
+        </Suspense>
+      )}
       {!inNexo && <PeopleFx />}
       {!inNexo && !inPlaza && <ShotFx />}
       {g.inXR && <VRTeleport />}

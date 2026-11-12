@@ -12,7 +12,7 @@
  *
  *   npm run test:race -w @xenxo/web
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { NodeIO } from "@gltf-transform/core";
 import { ALL_EXTENSIONS } from "@gltf-transform/extensions";
 import { MeshoptDecoder } from "meshoptimizer";
@@ -430,6 +430,58 @@ const fromS = (s: number, v = 0) => {
     for (const y of [-0.5, 0, 0.3, 2, 8, 20]) if (fallen(y, a, b)) never = false;
   }
   check(never, "en el Gran Premio no se da a nadie por caído: ni al pie del looping ni en el salto");
+}
+
+// El rival de la casa (src/world/vehicle/ghosts/vertigo.json): la misma carrera desde el segundo cajón,
+// grabada a 10 por segundo con el coche de verdad. Quien corre solo la ve como un coche fantasma
+// (world/vehicle/Ghost.tsx). Si cambian la pista, la física o el piloto: GHOSTS=write npm run test:race.
+{
+  const gates = [...race.cps.map((p) => ({ p, r: race.radius })), { p: race.finish.p, r: race.finish.radius }];
+  const round: Round = {
+    id: 9, key: "system:vertigo", race: "vertigo", owner: "system", state: "countdown", openedAt: 0, goAt: 0, laps: race.laps, perLap: gates.length,
+    minMs: minRoundMs(gates.map((g) => g.p), race.laps), slots: race.grid.length, entrants: new Map([["casa", { session_id: "casa", sub: "casa", ranked: false, name: "casa", slot: 1, gates: 0 }]]),
+  };
+  const slot = race.grid[1]!;
+  sim.spawn(slot[0]!, slot[1]! + 0.05, slot[2]!, startYaw);
+  settle();
+  const head = () => [st.x, st.y + 1.6, st.z];
+  startRound(round, () => near(head(), race.start.p, race.start.radius));
+  turboAt.t = -9;
+  const r2 = (v: number) => Math.round(v * 100) / 100, r4 = (v: number) => Math.round(v * 10000) / 10000;
+  const frames: number[] = [], at_: number[] = [];
+  let s = nearestS(slot[0]!, slot[1]!, slot[2]!), t = 0, tick = 0, missed = "";
+  while (round.entrants.get("casa")!.ms === undefined && t < 300) {
+    if (tick++ % 6 === 0) frames.push(r2(st.x), r2(st.y), r2(st.z), r4(st.qx), r4(st.qy), r4(st.qz), r4(st.qw), Math.round(st.speed * 10) / 10);
+    pilot(s, t);
+    t += 1 / 60;
+    s = progress(s);
+    const e = round.entrants.get("casa")!;
+    const g = nextGate(e.gates, round.perLap);
+    const gate = g === "finish" ? gates[gates.length - 1]! : gates[g]!;
+    const dx = st.x - gate.p[0]!, dz = st.z - gate.p[2]!;
+    if (dx * dx + dz * dz <= gate.r * gate.r && Math.abs(st.y - gate.p[1]!) <= 4 + gate.r) {
+      if (passGate(round, "casa", g, t * 1000)) at_.push(Math.round(t * 1000));
+      else missed ||= `puerta ${e.gates + 1}`;
+    }
+  }
+  // Un segundo más, pasada la meta (frenando): el fantasma no se para en seco.
+  for (let i = 0; i < 60; i++) {
+    if (tick++ % 6 === 0) frames.push(r2(st.x), r2(st.y), r2(st.z), r4(st.qx), r4(st.qy), r4(st.qz), r4(st.qw), Math.round(st.speed * 10) / 10);
+    sim.update(1 / 60, { throttle: -0.6, steer: 0, handbrake: false });
+  }
+  const ms = round.entrants.get("casa")!.ms;
+  const rec = { race: "vertigo", hz: 10, ms, gates: at_, frames };
+  const file = new URL("../src/world/vehicle/ghosts/vertigo.json", import.meta.url);
+  if (process.env.GHOSTS === "write") writeFileSync(file, JSON.stringify(rec) + "\n");
+  let saved: { ms?: number; gates?: number[] } = {};
+  try {
+    saved = JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    /* sin grabar */
+  }
+  console.log(`  rival de la casa: ${r1((ms ?? 0) / 1000)} s desde el segundo cajón, ${frames.length / 8} posiciones grabadas (la guardada: ${r1((saved.ms ?? 0) / 1000)} s)`);
+  check(ms !== undefined && !missed && at_.length === gates.length * race.laps, `el rival de la casa termina pasando por sus ${gates.length * race.laps} puertas${missed ? ` (falla: ${missed})` : ""}`);
+  check(saved.ms !== undefined && Math.abs(saved.ms - (ms ?? 0)) < 1500 && saved.gates?.length === at_.length, "y su vuelta guardada está al día (si no: GHOSTS=write npm run test:race -w @xenxo/web)");
 }
 
 sim.dispose();

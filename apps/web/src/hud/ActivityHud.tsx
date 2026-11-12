@@ -1,12 +1,27 @@
 import { useEffect, useState } from "react";
 import { t, useLang } from "../i18n";
 import { accountToken } from "../net/account";
-import { formatRaceTime, useActivity, type RoundState } from "../net/activity-store";
+import { activity, formatRaceTime, useActivity, type RoundState } from "../net/activity-store";
+import { rivalLap, soloRival } from "../net/house-rival";
 import { myRun, roundFresh } from "../net/round";
 import { world } from "../net/world-store";
 import { self } from "../world/self";
 
 const box = "rounded-2xl border border-cal/15 bg-noche/80 backdrop-blur";
+
+/** «+1,2 s» / «−0,8 s» (lo que me saca o le saco al rival de la casa). */
+const gapText = (ms: number) => `${ms > 0 ? "+" : "−"}${(Math.abs(ms) / 1000).toFixed(1)} s`;
+
+/** Corriendo solo: cuánto le saco al rival de la casa en la última puerta. */
+function RivalLine() {
+  const r = activity.rival;
+  if (!r) return <div className={`${box} px-3 py-1 text-xs text-cal/80`}>{t("rival.racing")}</div>;
+  return (
+    <div className={`${box} px-3 py-1 text-xs text-cal/80`}>
+      {t("rival.name")} <span className={`display tabular-nums ${r.gap > 0 ? "text-rosa" : "text-lime-200"}`}>{gapText(r.gap)}</span>
+    </div>
+  );
+}
 
 /**
  * Una carrera de salida conjunta (ROUND): la cuenta atrás en la parrilla, el puesto y la vuelta
@@ -26,6 +41,7 @@ function RoundPanel({ r }: { r: RoundState }) {
       <>
         <div className="display text-7xl tabular-nums text-neon drop-shadow-[0_0_18px_rgba(0,0,0,0.9)]">{Math.ceil(left / 1000)}</div>
         <div className={`${box} px-4 py-2 text-sm text-cal`}>{t("round.grid", { n: r.entrants.length })}</div>
+        {soloRival(r) && <div className={`${box} max-w-72 px-3 py-1.5 text-center text-xs text-cal/80`}>{t("rival.grid")}</div>}
       </>
     );
   }
@@ -37,6 +53,7 @@ function RoundPanel({ r }: { r: RoundState }) {
         <div className={`${box} display px-4 py-1.5 text-lg tabular-nums text-cal`}>
           {t("round.place", { place: run.place, of: run.of })} · {t("round.lap", { lap: run.lap, laps: r.laps })}
         </div>
+        {soloRival(r) && <RivalLine />}
       </>
     );
   }
@@ -58,6 +75,11 @@ function RoundPanel({ r }: { r: RoundState }) {
           </li>
         ))}
       </ol>
+      {mine?.ms !== undefined && r.entrants.length === 1 && rivalLap(r.race) && (
+        <p className="mt-2 max-w-64 text-center text-xs text-cal/80">
+          {t(mine.ms < rivalLap(r.race)!.ms ? "rival.beat" : "rival.lost", { time: formatRaceTime(rivalLap(r.race)!.ms), gap: gapText(mine.ms - rivalLap(r.race)!.ms).replace(/^[+−]/, "") })}
+        </p>
+      )}
       {mine?.ms !== undefined && !accountToken() && <p className="meta mt-2 max-w-64 text-center text-xs text-soft">{t("round.guest")}</p>}
     </div>
   );

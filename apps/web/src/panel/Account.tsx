@@ -33,6 +33,7 @@ import { AVATAR_PRESETS, presetByHash, setChosenPreset, useChosenPreset } from "
 import type { PreviewPose } from "./AvatarPreview";
 import { CardSettings } from "./CardSettings";
 import { JamAdmin } from "./JamAdmin";
+import { MeetupAdmin } from "./Meetup";
 import { ModeratorsAdmin } from "./ModeratorsAdmin";
 import { NodesAdmin } from "./NodesAdmin";
 import { Moderation, useRoles } from "./Moderation";
@@ -88,6 +89,11 @@ export function AccountSection(props: CustomizeProps) {
       {moderator && (
         <Block title={t("jamAdmin.title")}>
           <JamAdmin />
+        </Block>
+      )}
+      {moderator && (
+        <Block title={t("meetupAdmin.title")}>
+          <MeetupAdmin />
         </Block>
       )}
       {moderator && (

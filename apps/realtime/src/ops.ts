@@ -58,7 +58,7 @@ export const BACKUP_TABLES = [
   "oidc_secrets", "oidc_clients", "oidc_grants",
   "reports", "moderators", "moderation_log", "flags",
   "community_districts", "community_files",
-  "jams", "jam_entries", "jam_votes",
+  "jams", "jam_entries", "jam_votes", "meetups",
   "nodes", "chunk_hosts",
   "stats",
 ] as const;

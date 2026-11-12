@@ -82,7 +82,21 @@ function paintOf(m: THREE.Material, color: string): THREE.Material {
   return out;
 }
 
-function useCarScene(name: string, light: boolean, pbr: boolean, paint?: string) {
+/** El fantasma (el rival de la casa, Ghost.tsx): medio transparente, sin tapar lo de detrás. */
+const ghosts = new Map<string, THREE.Material>();
+function ghostOf(m: THREE.Material): THREE.Material {
+  let out = ghosts.get(m.uuid);
+  if (!out) {
+    out = m.clone();
+    out.transparent = true;
+    out.opacity = 0.42;
+    out.depthWrite = false;
+    ghosts.set(m.uuid, out);
+  }
+  return out;
+}
+
+function useCarScene(name: string, light: boolean, pbr: boolean, paint?: string, ghost = false) {
   const entry = SEED_ASSETS[name];
   const lod = entry ? entry.lods[light ? entry.lods.length - 1 : 0] : undefined;
   const gltf = useGLTF(lod ? assetUrl(lod.hash) : "data:,", false, true);
@@ -94,22 +108,27 @@ function useCarScene(name: string, light: boolean, pbr: boolean, paint?: string)
       // La pintura principal, del color de cada coche (el resto, tal cual).
       let mat = paint && /^Paint 1/.test(m.material.name) ? paintOf(m.material, paint) : m.material;
       if (!pbr) mat = lightweight(mat);
+      if (ghost) {
+        mat = ghostOf(mat);
+        m.castShadow = false;
+        m.renderOrder = 3;
+      }
       m.material = mat;
     });
     return c;
-  }, [gltf, pbr, paint]);
+  }, [gltf, pbr, paint, ghost]);
 }
 
-export const CarModel = memo(function CarModel({ handle, paint }: { handle: CarHandle; paint: string }) {
+export const CarModel = memo(function CarModel({ handle, paint, ghost = false }: { handle: CarHandle; paint: string; ghost?: boolean }) {
   const g = useGraphics();
   const f = g.features;
   const light = f.lod === "light";
   const M = CAR.models;
-  const body = useCarScene(M.body, light, f.pbr, paint);
-  const doorL = useCarScene(M.doorL, light, f.pbr, paint);
-  const doorR = useCarScene(M.doorR, light, f.pbr, paint);
-  const wheelL = useCarScene(M.wheelL, light, f.pbr);
-  const wheelR = useCarScene(M.wheelR, light, f.pbr);
+  const body = useCarScene(M.body, light, f.pbr, paint, ghost);
+  const doorL = useCarScene(M.doorL, light, f.pbr, paint, ghost);
+  const doorR = useCarScene(M.doorR, light, f.pbr, paint, ghost);
+  const wheelL = useCarScene(M.wheelL, light, f.pbr, undefined, ghost);
+  const wheelR = useCarScene(M.wheelR, light, f.pbr, undefined, ghost);
   // Cuatro ruedas: dos de cada lado (clones de la misma geometría).
   const wheels = useMemo(() => CAR.wheels.map((w) => (w.left ? wheelL : wheelR).clone(true)), [wheelL, wheelR]);
   const hl = CAR.hingeL, hr = CAR.hingeR;

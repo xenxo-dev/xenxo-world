@@ -11,6 +11,7 @@ import { t, type Key } from "../i18n";
 import { OFFER_MS, people, usePeople } from "../net/people-store";
 import { answerPair, displayName, offerPair, react, setFight } from "../net/people";
 import { world } from "../net/world-store";
+import { firstSteps } from "../net/first-steps";
 import { input, onWheelKey } from "../world/input";
 import { CheerIcon, DanceIcon, hudIconButton, SitIcon, WaveIcon } from "./icons";
 import { PeopleIcon } from "./people-icons";
@@ -73,6 +74,7 @@ function Ring({ items, onPick }: { items: Item[]; onPick: () => void }) {
             onFocus={() => setHover(it)}
             onClick={() => {
               it.run();
+              firstSteps.mark("wheel");
               onPick();
             }}
             className={`${hudIconButton} absolute h-12 w-12 -translate-x-1/2 -translate-y-1/2 rounded-full`}

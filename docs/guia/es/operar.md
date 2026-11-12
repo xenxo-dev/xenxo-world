@@ -89,6 +89,10 @@ Cada cambio queda en el registro de moderación. Úsalos si algo se desmadra (un
 
 En *Cuenta → Moderación → Visitas* hay totales por día: visitas, entradas a un lugar (y a cuál), cuentas creadas y proyectos publicados. Si a un enlace le añades `?v=<etiqueta>` (`tudominio.com/d/vertical?v=tiktok-12`), salen también por etiqueta: sirve para saber qué vídeo o publicación trae gente. Son sumas: no se guarda quién, ni su dirección, ni nada que identifique a nadie.
 
+### Quedadas y jams
+
+En *Cuenta → Quedadas* anuncias un día y una hora para verse en el mundo (la plaza o un distrito abierto, y si quieres un sitio de su guía, como `gp`, la parrilla del Gran Premio de Arcade). Sale en la portada con cuenta atrás, en la hora de quien mira, con un botón para añadirla a su calendario y, desde un cuarto de hora antes, otro para entrar justo allí. Puede ir con una jam (*Cuenta → Jams*): la quedada de apertura y la jam se anuncian juntas. No se guarda quién va. Cancelar una queda en el registro de moderación.
+
 ## Actualizar
 
 Trae los cambios de xenxo a tu repositorio (`git fetch upstream && git merge upstream/main`) y empuja: el CI pasa las pruebas y el despliegue publica. Si tienes distritos en tu servidor, después ejecuta allí `update.sh`.

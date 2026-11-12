@@ -89,6 +89,10 @@ Every change is recorded in the moderation log. Use them when something gets out
 
 *Account → Moderation → Visits* shows daily totals: visits, entries into a place (and which one), accounts created and projects published. If you add `?v=<tag>` to a link (`yourdomain.com/d/vertical?v=tiktok-12`) they are also broken down by tag: that tells you which video or post brings people. They are sums: nothing about who, their address or anything that identifies anyone is stored.
 
+### Meetups and jams
+
+Under *Account → Meetups* you announce a day and time to meet in the world (the square or an open district, and if you like a spot from its guide, such as `gp`, the Arcade Grand Prix grid). It shows on the home page with a countdown, in each viewer's time, with a button to add it to their calendar and, from a quarter of an hour before, another to go straight there. It can go with a jam (*Account → Jams*): the opening meetup and the jam are announced together. Nobody's attendance is stored. Cancelling one is recorded in the moderation log.
+
 ## Updating
 
 Bring xenxo's changes into your repository (`git fetch upstream && git merge upstream/main`) and push: CI runs the tests and the deploy publishes. If you have districts on your server, run `update.sh` there afterwards.

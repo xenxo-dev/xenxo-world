@@ -16,6 +16,7 @@ import { ActivityHud } from "./hud/ActivityHud";
 import { LootCard } from "./hud/WeaponHud";
 import { SandboxTools } from "./hud/SandboxTools";
 import { GuideButton, GuideCard, NexoTip, TouchHint } from "./hud/GuideCard";
+import { FirstSteps } from "./hud/FirstSteps";
 import { CineBar, RecNotice } from "./hud/CineBar";
 import { useCine } from "./world/cine/state";
 import { errorText, placeName, t, useLang } from "./i18n";
@@ -270,6 +271,12 @@ export function App() {
           <LootCard />
           <SandboxTools />
           <GuideButton />
+          <FirstSteps
+            onSignup={() => {
+              setPanelSection("account");
+              setInWorld(false);
+            }}
+          />
           <GuideCard />
           <NexoTip />
           {touch && !driving.on && <TouchHint />}
