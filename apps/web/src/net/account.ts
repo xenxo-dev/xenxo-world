@@ -201,6 +201,52 @@ export async function register(displayName: string, ageConfirmed: boolean, accep
   const response = await startRegistration({ optionsJSON: options });
   // `src`: la etiqueta del enlace por el que se llegó (campaign.ts), para el contador de cuentas del día.
   adopt(await api("POST", "/auth/passkey/register/verify", { flow_id, response, ...(campaign() ? { src: campaign() } : {}) }));
+  // Recién creada: sus códigos de recuperación, para enseñarlos una vez (Cuenta → RecoveryCodes).
+  try {
+    showRecovery({ codes: await newRecoveryCodes() });
+  } catch {
+    /* se pueden generar después desde la cuenta */
+  }
+}
+
+/* --- Códigos de recuperación (sin email ni contraseña: para cuando se pierde la passkey) --- */
+
+/** Lo que la cuenta tiene que enseñar: códigos recién hechos (una sola vez) o que se acaba de entrar con uno. */
+export interface RecoveryNote {
+  codes?: string[];
+  recovered?: { left: number };
+}
+let recoveryNote: RecoveryNote | null = null;
+const recoveryListeners = new Set<() => void>();
+function showRecovery(n: RecoveryNote | null) {
+  recoveryNote = n;
+  for (const fn of recoveryListeners) fn();
+}
+export function useRecoveryNote(): [RecoveryNote | null, () => void] {
+  const n = useSyncExternalStore(
+    (fn) => {
+      recoveryListeners.add(fn);
+      return () => recoveryListeners.delete(fn);
+    },
+    () => recoveryNote,
+  );
+  return [n, () => showRecovery(null)];
+}
+
+/** Ocho códigos nuevos (los de antes dejan de valer). Pide haber entrado hace poco: si no, «reauth_needed». */
+export async function newRecoveryCodes(): Promise<string[]> {
+  return (await api<{ codes: string[] }>("POST", "/me/recovery")).codes;
+}
+/** Los genera y los deja para enseñarlos. */
+export async function regenerateRecovery() {
+  showRecovery({ codes: await newRecoveryCodes() });
+}
+
+/** Entra con un código de recuperación (vale una vez). */
+export async function recoverWith(code: string) {
+  const r = await api<{ token: string; user: User; principal: { exp: number }; recovery_left: number }>("POST", "/auth/recover", { code });
+  adopt(r);
+  showRecovery({ recovered: { left: r.recovery_left } });
 }
 
 export async function login() {
@@ -313,6 +359,8 @@ export async function completeGoogleReturn(): Promise<{ error: string | null; li
 export interface Logins {
   passkeys: { created_at: number; last_used: number | null }[];
   google: { created_at: number; last_used: number | null } | null;
+  /** Códigos de recuperación: cuántos quedan (null: ninguno hecho). */
+  recovery: { left: number; total: number; created_at: number } | null;
   google_available: boolean;
 }
 export async function myLogins(): Promise<Logins> {

@@ -2155,6 +2155,41 @@ await scenario("sesiones: «cerrar sesión en todos los dispositivos» impide re
   assert((await again.call("POST", "/me/session")).ok, "al volver a entrar, la sesión nueva vale");
 });
 
+await scenario("códigos de recuperación: ocho de un uso; se entra con uno (aunque se escriba en minúsculas o con espacios), no vale dos veces, hacer otros borra los de antes, el export no los lleva y se van con la cuenta", async () => {
+  const api = new Api(baseUrl);
+  const { user } = await api.register(`conf ${randomUUID().slice(0, 6)}`);
+  const none = await api.call<{ recovery: unknown }>("GET", "/me/logins");
+  assert(none.ok && none.data.recovery === null, "una cuenta nueva aún no tiene códigos");
+  const made = await api.call<{ codes: string[] }>("POST", "/me/recovery");
+  assert(made.ok && made.data.codes.length === 8 && new Set(made.data.codes).size === 8, "salen ocho códigos distintos");
+  assert(made.data.codes.every((c) => /^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/.test(c)), "con el formato XXXX-XXXX-XXXX (sin I, L, O ni U)");
+  const info = await api.call<{ recovery: { left: number; total: number } }>("GET", "/me/logins");
+  assert(info.ok && info.data.recovery.left === 8 && info.data.recovery.total === 8, "la cuenta dice cuántos quedan");
+  const [first, second] = made.data.codes as [string, string];
+  const other = new Api(baseUrl);
+  const typed = ` ${first.toLowerCase().replace(/-/g, " ")} `;
+  const inside = await other.call<{ token: string; recovery_left: number }>("POST", "/auth/recover", { code: typed });
+  assert(inside.ok && inside.data.recovery_left === 7, "con un código se entra (escrito como sea) y quedan 7");
+  other.token = inside.data.token;
+  const me = await other.call<{ id: string }>("GET", "/me");
+  assert(me.ok && me.data.id === user.id, "en la misma cuenta");
+  const twice = await new Api(baseUrl).call("POST", "/auth/recover", { code: first });
+  assert(!twice.ok && twice.status === 400 && twice.error === "recovery_invalid", "el mismo código no vale dos veces");
+  const junk = await new Api(baseUrl).call("POST", "/auth/recover", { code: "AAAA-BBBB-CCCC" });
+  assert(!junk.ok && junk.error === "recovery_invalid", "uno inventado, tampoco");
+  const remade = await other.call<{ codes: string[] }>("POST", "/me/recovery");
+  assert(remade.ok, "quien acaba de entrar con un código puede hacer otros");
+  const old = await new Api(baseUrl).call("POST", "/auth/recover", { code: second });
+  assert(!old.ok && old.error === "recovery_invalid", "al hacer otros, los de antes dejan de valer");
+  const exp = await other.call<{ recovery_codes: unknown[] }>("GET", "/me/export");
+  const raw = JSON.stringify(exp.ok ? exp.data : {});
+  assert(exp.ok && exp.data.recovery_codes.length === 8 && !remade.data.codes.some((c) => raw.includes(c)), "el export dice cuántos y cuándo, nunca los códigos");
+  const code = remade.data.codes[0]!;
+  assert((await other.call("DELETE", "/me")).ok, "borrar la cuenta");
+  const gone = await new Api(baseUrl).call("POST", "/auth/recover", { code });
+  assert(!gone.ok && gone.error === "recovery_invalid", "con la cuenta borrada, sus códigos ya no valen");
+});
+
 await scenario("puertas cerradas: un chunk inventado da 404; una denuncia con un id raro o un cuerpo enorme se rechaza", async () => {
   for (const id of ["c_9_9", "c_1000_987654", "x"]) {
     const r = await fetch(new URL(`/chunk/${id}/state`, baseUrl));

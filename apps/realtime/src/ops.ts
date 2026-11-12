@@ -53,7 +53,7 @@ export const statsDay = (now = Date.now()) => new Date(now).toISOString().slice(
  * a nadie. Una tabla nueva con datos de la gente se añade aquí.
  */
 export const BACKUP_TABLES = [
-  "users", "credentials", "logins", "skins", "badges", "counters",
+  "users", "credentials", "logins", "recovery_codes", "skins", "badges", "counters",
   "projects", "uploads", "agent_keys",
   "oidc_secrets", "oidc_clients", "oidc_grants",
   "reports", "moderators", "moderation_log", "flags",

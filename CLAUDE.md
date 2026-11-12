@@ -119,6 +119,7 @@ Lee esto antes de cambiar nada. Son contratos, no sugerencias.
 - Nada externo en los GLB (sin URIs, sin Draco): los clientes no descargan nada de terceros.
 - El navegador del visitante no habla con terceros (GitHub va por `/github/repos`; las fuentes van empaquetadas). Única excepción, elegida por la persona: «Entrar con Google», que es una redirección (sin scripts de Google en la web), pide solo `openid` y guarda la huella del identificador, nunca el identificador.
 - El número de jugador sale de un contador (`counters.next_player`): nunca se reutiliza.
+- **Recuperar la cuenta** (sin email): más passkeys, Google vinculado y **códigos de recuperación** (`recovery.ts`, tabla `recovery_codes`): ocho de un solo uso que se enseñan una vez (al darse de alta con passkey y desde Cuenta), de los que se guarda solo la huella; generarlos pide haber entrado hace menos de 15 min (`RECOVERY_FRESH_MS`, `reauth_needed`) y borra los de antes. `POST /auth/recover` entra con uno (pasa por `limit()`). Web: `panel/Recovery.tsx`. Escenario «códigos de recuperación».
 - «Entrar con xenxo» (OIDC, `oidc.ts` + `directory.ts`): solo clientes públicos con PKCE S256, `redirect_uri` exacta, códigos de un uso, `sub` distinto por juego y nunca el id interno. La clave privada Ed25519 se crea y vive en el `Directory`: no se exporta, no va a secretos ni al código. La pantalla de permiso no se puede incrustar (`_headers`). Si tocas el flujo, el escenario «Entrar con xenxo» de la conformidad tiene que seguir pasando.
 
 ## Juegos de fuera (fase 4)

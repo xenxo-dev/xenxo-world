@@ -16,6 +16,7 @@ import { fetchDevManifest, fetchManifest } from "./games";
 import { defaultAvatarFor, MAX_AGENT_KEYS_PER_PROJECT, MAX_SKINS, type ChunkHostRow, type CommunityDistrict, type Directory, type UserRow } from "./directory";
 import { allowed, type LimitKind, type RateLimiter } from "./ratelimit";
 import { statTag, type Flags, type StatItem } from "./ops";
+import { RECOVERY_FRESH_MS } from "./recovery";
 
 export { ChunkRoom } from "./chunk-room";
 export { Directory } from "./directory";
@@ -1223,6 +1224,12 @@ const worker = {
         return r.ok ? json(await userToken(r.data, env), 200, h) : failure(r, h);
       }
 
+      /* --- Entrar con un código de recuperación (recovery.ts): vale una vez --- */
+      if (path === "/auth/recover" && req.method === "POST") {
+        const r = await dir.recover((await readJson(req)).code);
+        return r.ok ? json({ ...(await userToken(r.data.user, env)), recovery_left: r.data.left }, 200, h) : failure(r, h);
+      }
+
       /* --- Entrar con Google (opcional) --- */
       if (path === "/auth/methods" && req.method === "GET") {
         return json({ passkey: true, google: googleEnabled(env) }, 200, { ...h, "Cache-Control": "public, max-age=60" });
@@ -1506,6 +1513,12 @@ const worker = {
         }
         if (path === "/me/logins/google" && req.method === "DELETE") {
           const r = await dir.unlinkGoogle(uid);
+          return r.ok ? json(r.data, 200, h) : failure(r, h);
+        }
+        // Códigos de recuperación nuevos: solo recién entrado (una sesión robada no se queda la cuenta).
+        if (path === "/me/recovery" && req.method === "POST") {
+          if (Date.now() - (principal!.auth ?? 0) > RECOVERY_FRESH_MS) return json({ error: "reauth_needed", message: "vuelve a entrar para generar códigos nuevos" }, 403, h);
+          const r = await dir.newRecoveryCodes(uid);
           return r.ok ? json(r.data, 200, h) : failure(r, h);
         }
         if (path === "/me/passkeys/options" && req.method === "POST") {

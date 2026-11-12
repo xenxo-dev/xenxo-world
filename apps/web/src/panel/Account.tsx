@@ -44,6 +44,7 @@ import { Block, Button, card, input, Label, Notice, Segmented } from "./ui";
 import { recipeInGlb } from "../fundas/recipe";
 import type { FundaEditing } from "./FundaStudio";
 import { InAppNotice } from "./InAppNotice";
+import { RecoverForm, RecoveryNotice, RecoveryRow } from "./Recovery";
 import { useFlags } from "../net/boot";
 
 export interface CustomizeProps {
@@ -551,6 +552,7 @@ export function SignedOut() {
           )}
         </div>
         {google && <p className="mt-2 text-xs text-cal/40">{t("account.googleNote")}</p>}
+        <RecoverForm />
       </div>
       {error && <Notice tone="error">{error}</Notice>}
     </div>
@@ -575,6 +577,7 @@ function SignedIn() {
 
   return (
     <div className={`${card} p-4`}>
+      <RecoveryNotice />
       <p className="text-sm text-cal/80">
         {t("account.signedAs", { name: user.display_name })}
         {user.player_no != null && (
@@ -688,6 +691,7 @@ function LoginMethods({ onNote }: { onNote: (n: { tone: "ok" | "error"; text: st
             )}
           </li>
         )}
+        <RecoveryRow info={info} onNote={onNote} reload={() => void load()} />
       </ul>
       {info.google && info.passkeys.length === 0 && <p className="mt-1 text-xs text-cal/40">{t("account.addPasskeyHint")}</p>}
     </div>

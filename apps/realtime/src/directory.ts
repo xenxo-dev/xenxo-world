@@ -21,6 +21,7 @@ import {
 import { isoBase64URL } from "@simplewebauthn/server/helpers";
 import type { Env } from "./index";
 import { randomId } from "./auth";
+import { newRecoveryCode, normalizeRecoveryCode, RECOVERY_CODES } from "./recovery";
 import { isAvatarPreset } from "./avatar-presets-check";
 import { assetKey } from "./assets";
 import { AVATAR_PRESETS } from "./avatar-presets";
@@ -227,6 +228,10 @@ export class Directory extends DurableObject<Env> {
         provider TEXT NOT NULL, subject TEXT NOT NULL, user_id TEXT NOT NULL, created_at INTEGER NOT NULL, last_used INTEGER,
         PRIMARY KEY (provider, subject));
       CREATE TABLE IF NOT EXISTS counters (k TEXT PRIMARY KEY, v INTEGER NOT NULL);
+      -- Códigos de recuperación (recovery.ts): solo su huella; cada uno vale una vez.
+      CREATE TABLE IF NOT EXISTS recovery_codes (
+        hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at INTEGER NOT NULL, used_at INTEGER);
+      CREATE INDEX IF NOT EXISTS recovery_user ON recovery_codes (user_id);
       -- «Entrar con xenxo» (OpenID Connect). Claves de firma Ed25519: la privada no sale de aquí.
       CREATE TABLE IF NOT EXISTS oidc_keys (
         kid TEXT PRIMARY KEY, private_jwk TEXT NOT NULL, public_jwk TEXT NOT NULL, created_at INTEGER NOT NULL, active INTEGER NOT NULL);
@@ -762,6 +767,47 @@ export class Directory extends DurableObject<Env> {
     return ok({ linked: true });
   }
 
+  /* ---------------------------------------------------------------- */
+  /* Códigos de recuperación (recovery.ts)                              */
+  /* ---------------------------------------------------------------- */
+
+  /** Ocho códigos nuevos (los de antes dejan de valer). Se devuelven una sola vez. */
+  async newRecoveryCodes(userId: string): Promise<Result<{ codes: string[] }>> {
+    if (!this.user(userId)) return fail(404, "not_found", "la cuenta no existe");
+    const codes = Array.from({ length: RECOVERY_CODES }, newRecoveryCode);
+    const hashes = await Promise.all(codes.map((c) => sha256Hex(`xenxo-recovery:${normalizeRecoveryCode(c)}`)));
+    const now = Date.now();
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec("DELETE FROM recovery_codes WHERE user_id = ?", userId);
+      for (const h of hashes) this.sql.exec("INSERT INTO recovery_codes (hash, user_id, created_at) VALUES (?, ?, ?)", h, userId, now);
+    });
+    return ok({ codes });
+  }
+
+  /** Cuántos le quedan y de cuándo son (sin los códigos: no se guardan). */
+  recoveryInfo(userId: string): { left: number; total: number; created_at: number } | null {
+    const r = this.sql
+      .exec<{ total: number; left: number; created_at: number | null }>(
+        "SELECT COUNT(*) AS total, SUM(CASE WHEN used_at IS NULL THEN 1 ELSE 0 END) AS left, MAX(created_at) AS created_at FROM recovery_codes WHERE user_id = ?",
+        userId,
+      )
+      .one();
+    return r.total ? { left: r.left ?? 0, total: r.total, created_at: r.created_at ?? 0 } : null;
+  }
+
+  /** Entrar con un código: vale una vez. */
+  async recover(input: unknown): Promise<Result<{ user: UserRow; left: number }>> {
+    const code = normalizeRecoveryCode(input);
+    if (!code) return fail(400, "recovery_invalid", "ese código no es válido o ya se usó");
+    const hash = await sha256Hex(`xenxo-recovery:${code}`);
+    const row = this.sql.exec<{ user_id: string }>("SELECT user_id FROM recovery_codes WHERE hash = ? AND used_at IS NULL", hash).toArray()[0];
+    if (!row) return fail(400, "recovery_invalid", "ese código no es válido o ya se usó");
+    this.sql.exec("UPDATE recovery_codes SET used_at = ? WHERE hash = ?", Date.now(), hash);
+    const user = this.user(row.user_id);
+    if (!user) return fail(400, "recovery_invalid", "ese código no es válido o ya se usó");
+    return ok({ user, left: this.recoveryInfo(row.user_id)?.left ?? 0 });
+  }
+
   /** Formas de entrar de una cuenta (para sus ajustes). */
   logins(userId: string) {
     const google = this.sql.exec<{ created_at: number; last_used: number | null }>(
@@ -771,6 +817,7 @@ export class Directory extends DurableObject<Env> {
     return {
       passkeys: this.sql.exec("SELECT created_at, last_used FROM credentials WHERE user_id = ? ORDER BY created_at", userId).toArray(),
       google: google ?? null,
+      recovery: this.recoveryInfo(userId),
     };
   }
 
@@ -1041,6 +1088,8 @@ export class Directory extends DurableObject<Env> {
       passkeys: this.sql.exec("SELECT id, created_at, last_used, transports FROM credentials WHERE user_id = ?", id).toArray(),
       // De Google solo guardamos el hash de su identificador, no el identificador ni ningún dato de la cuenta.
       other_logins: this.sql.exec("SELECT provider, subject AS subject_hash, created_at, last_used FROM logins WHERE user_id = ?", id).toArray(),
+      // Códigos de recuperación: cuándo se hicieron y cuáles se usaron (los códigos no se guardan).
+      recovery_codes: this.sql.exec("SELECT created_at, used_at FROM recovery_codes WHERE user_id = ?", id).toArray(),
       projects: this.sql.exec("SELECT * FROM projects WHERE user_id = ?", id).toArray(),
       uploads: this.sql.exec("SELECT hash, kind, ts FROM uploads WHERE uploader = ?", `usr_${id}`).toArray(),
       skins: this.skins(id),
@@ -1087,6 +1136,7 @@ export class Directory extends DurableObject<Env> {
       this.sql.exec(`DELETE FROM uploads WHERE uploader IN (${marks})`, ...uploaders);
       this.sql.exec("DELETE FROM credentials WHERE user_id = ?", id);
       this.sql.exec("DELETE FROM logins WHERE user_id = ?", id);
+      this.sql.exec("DELETE FROM recovery_codes WHERE user_id = ?", id);
       this.sql.exec("DELETE FROM skins WHERE user_id = ?", id);
       this.sql.exec("DELETE FROM agent_keys WHERE user_id = ?", id);
       this.sql.exec("DELETE FROM oidc_grants WHERE user_id = ?", id);
