@@ -9,7 +9,7 @@
   "resolution": "4k",
   "quality": "high"
  },
- "use": "Fondo panorámico del nexo (apps/web/public/sky/nexo-{night,day}-{4,8}k.webp), unido con stitch.py",
+ "use": "Fue el fondo panorámico del nexo, unido con stitch.py. Ya no se sirve en el mundo (el fondo es una ciudad en 3D: apps/web/src/world/NexoSkyline.tsx); se conserva como referencia de estilo",
  "panels": {
   "night-a": "Ultra-wide photorealistic panoramic photograph at night, seen from a platform floating high above a vast futuristic cyberpunk megacity. Horizon at the vertical middle. Dense skyscrapers with glowing windows, neon accents in cyan, magenta and violet, holographic billboards with abstract shapes and no readable text, light trails of flying traffic, haze. Deep starry sky with a faint purple nebula, a huge ringed gas giant planet with violet and teal bands upper left and a small pale moon. No foreground, no people, no text, no logos, no watermark.",
   "night-b": "Same scene description: arcologies and a few colossal towers, starry sky with the Milky Way, faint teal aurora-like glow, an orbital space station high on the right. No planet, no people, no text, no logos, no watermark.",

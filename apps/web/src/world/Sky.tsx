@@ -14,11 +14,7 @@ export const SKY = {
   night: { top: "#04060f", horizon: "#3a1c5c", ground: "#06070d", fog: "#120d26" },
 } as const;
 
-/**
- * `top`: otro azul para lo alto (en el nexo, el de su panorámica). `pano`: este cielo continúa una
- * foto (la del nexo) y tiene que verse igual que ella con y sin post-proceso (display.ts).
- */
-export function Sky({ ambience, top, pano = false }: { ambience: Ambience; top?: string; pano?: boolean }) {
+export function Sky({ ambience }: { ambience: Ambience }) {
   const material = useMemo(
     () =>
       new THREE.ShaderMaterial({
@@ -31,7 +27,6 @@ export function Sky({ ambience, top, pano = false }: { ambience: Ambience; top?:
           ground: { value: new THREE.Color() },
           night: { value: 0 },
           time: { value: 0 },
-          pano: { value: 0 },
         },
         vertexShader: /* glsl */ `
           varying vec3 vDir;
@@ -41,9 +36,8 @@ export function Sky({ ambience, top, pano = false }: { ambience: Ambience; top?:
           }`,
         fragmentShader: /* glsl */ `
           uniform vec3 top; uniform vec3 horizon; uniform vec3 ground;
-          uniform float night; uniform float time; uniform float pano;
+          uniform float night; uniform float time;
           varying vec3 vDir;
-          ${DISPLAY_GLSL}
           float hash(vec3 p) {
             p = fract(p * 0.3183099 + 0.1);
             p *= 17.0;
@@ -61,10 +55,6 @@ export function Sky({ ambience, top, pano = false }: { ambience: Ambience; top?:
             float star = step(0.9965, h) * smoothstep(0.05, 0.35, y);
             star *= 0.6 + 0.4 * sin(time * 1.7 + h * 91.0);
             c += night * star * vec3(1.6, 1.6, 2.0);
-            // Sin post-proceso estos números llegan tal cual a la pantalla. Con él pasan por el mapeo
-            // de tonos y salen más claros: junto a la foto del nexo se notaría el salto, así que ahí
-            // se dejan como se ven sin él.
-            if (pano > 0.5 && xenxoLinearOut()) c = xenxoShown(sRGBTransferEOTF(vec4(min(c, vec3(1.0)), 1.0)).rgb);
             gl_FragColor = vec4(c, 1.0);
           }`,
       }),
@@ -73,12 +63,11 @@ export function Sky({ ambience, top, pano = false }: { ambience: Ambience; top?:
 
   useEffect(() => {
     const k = SKY[ambience];
-    material.uniforms.top!.value.set(top ?? k.top);
+    material.uniforms.top!.value.set(k.top);
     material.uniforms.horizon!.value.set(k.horizon);
     material.uniforms.ground!.value.set(k.ground);
     material.uniforms.night!.value = ambience === "night" ? 1 : 0;
-    material.uniforms.pano!.value = pano ? 1 : 0;
-  }, [ambience, top, pano, material]);
+  }, [ambience, material]);
 
   // La esfera va con la cámara: si se quedara en el origen, en los distritos (256 m) parte de ella
   // quedaría más lejos que el plano lejano (400 m) y se vería recortada como una cúpula.

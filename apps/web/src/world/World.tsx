@@ -22,9 +22,8 @@ import { Portals } from "./Portals";
 import { PhotoSky, Sky, SKY } from "./Sky";
 import { patchFog } from "./display";
 import { Skyline } from "./Skyline";
-import { NexoBackdrop } from "./NexoBackdrop";
-import { PANO_TONES } from "./nexo-tones";
 import { NexoCity } from "./NexoCity";
+import { NexoPlanet, NexoSky } from "./NexoSky";
 import { DistrictSkyline } from "./DistrictSkyline";
 import { Citizens, Traffic } from "./CityLife";
 import { Residents, SlidingDoors } from "./Interiors";
@@ -65,6 +64,9 @@ const Effects = lazy(loadEffects);
 if (graphics.features.post) void loadEffects().catch(() => {});
 
 const CENTER = new THREE.Vector3(CHUNK_SIZE / 2, 0, CHUNK_SIZE / 2);
+
+/** La bruma del nexo para lo que no es su megaciudad: el tono medio de su horizonte (city-air.ts). */
+const NEXO_FOG = { day: "#b6bcc8", night: "#2f2f6b" } as const;
 
 /* ------------------------------------------------------------------ */
 /* Luz                                                                  */
@@ -224,17 +226,20 @@ function skyEnvironment(gl: THREE.WebGLRenderer, tex: THREE.Texture): THREE.Text
   return out;
 }
 
-/** Cielo de nubes de día: la textura (para el fondo) y su mapa de entorno. null mientras carga. */
-function useDaySky(enabled: boolean) {
+/**
+ * Cielo de nubes de día: la textura (para el fondo) y, con `env`, su mapa de entorno (solo lo usan
+ * los materiales con brillo). null mientras carga.
+ */
+function useDaySky(enabled: boolean, env: boolean) {
   const gl = useThree((s) => s.gl);
-  const [sky, setSky] = useState<{ tex: THREE.Texture; env: THREE.Texture } | null>(null);
+  const [sky, setSky] = useState<{ tex: THREE.Texture; env: THREE.Texture | null } | null>(null);
   useEffect(() => {
     if (!enabled) return;
     let alive = true;
     let made: THREE.Texture | null = null;
     void loadDaySky().then((tex) => {
       if (!alive) return;
-      made = skyEnvironment(gl, tex);
+      made = env ? skyEnvironment(gl, tex) : null;
       setSky({ tex, env: made });
     });
     return () => {
@@ -242,7 +247,7 @@ function useDaySky(enabled: boolean) {
       made?.dispose();
       setSky(null);
     };
-  }, [enabled, gl]);
+  }, [enabled, env, gl]);
   return enabled ? sky : null;
 }
 
@@ -687,9 +692,11 @@ function Scene({ active }: { active: boolean }) {
   const soundTheme = inPlaza ? "plaza" : inNexo ? "nexo" : (DISTRICT_IDS.get(place) ?? hint?.id ?? "community");
   useEffect(() => ambient.setPlace(soundTheme, ambience), [soundTheme, ambience]);
   const sky = SKY[ambience];
-  // El cielo de nubes (HDRI) es de la plaza; el nexo lleva su panorámica.
-  const realSky = ambience === "day" && f.pbr && !inNexo;
-  const daySky = useDaySky(realSky);
+  // El cielo de nubes (HDRI), de día, donde hay materiales que lo reflejan; en el nexo, siempre: es
+  // el cielo de su megaciudad (de noche lleva el suyo, NexoSky), pero no su entorno: lo de delante
+  // (la plataforma, las islas) sigue con el de estudio, con el que está ajustada su luz (`nexoDay`).
+  const realSky = ambience === "day" && (f.pbr || inNexo);
+  const daySky = useDaySky(realSky, f.pbr && !inNexo);
   const dayEnv = daySky?.env ?? null;
   const skyReady = !!daySky;
   // Con post-proceso la foto del cielo va en su esfera (PhotoSky): como fondo de la escena, el mapeo
@@ -706,11 +713,17 @@ function Scene({ active }: { active: boolean }) {
       <FpsGuard />
       {daySky && !skyDome ? <primitive key="sky" attach="background" object={daySky.tex} /> : <color key="color" attach="background" args={[sky.fog]} />}
       {daySky && skyDome && <PhotoSky map={daySky.tex} />}
-      <fog attach="fog" args={[sky.fog, ambience === "night" ? 45 : 70, ambience === "night" ? 230 : 260]} />
-      {!skyReady && <Sky ambience={ambience} top={inNexo ? PANO_TONES[ambience].top : undefined} pano={inNexo} />}
+      {/* En el nexo se ve hasta el horizonte: su bruma es el aire de la megaciudad (city-air.ts), que
+          a doscientos metros apenas se nota. Con la de los demás lugares, las islas del otro lado
+          saldrían más borrosas que las torres que tienen detrás. */}
+      <fog
+        attach="fog"
+        args={inNexo ? [NEXO_FOG[ambience], 0, ambience === "night" ? 2500 : 2200] : [sky.fog, ambience === "night" ? 45 : 70, ambience === "night" ? 230 : 260]}
+      />
+      {inNexo && ambience === "night" ? <NexoSky rich={f.pbr} deep={f.post && !g.inXR} /> : !skyReady && <Sky ambience={ambience} />}
       {inPlaza && <Skyline count={f.skyline} ambience={ambience} pbr={f.pbr} />}
-      {inNexo && <NexoBackdrop ambience={ambience} hd={f.textures >= 1024} />}
-      {inNexo && <NexoCity ambience={ambience} density={f.nexoCity} features={f} />}
+      {inNexo && <NexoPlanet ambience={ambience} />}
+      {inNexo && <NexoCity ambience={ambience} density={f.nexoCity} features={f} sky={daySky?.tex ?? null} />}
       {!inNexo && !inPlaza && <DistrictSkyline chunk={place} density={f.nexoCity} ambience={ambience} />}
       {!inNexo && !inPlaza && (
         <Suspense fallback={null}>

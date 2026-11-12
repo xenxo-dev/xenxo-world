@@ -45,9 +45,10 @@ resultados para entrenar modelos de IA, y esa restricción acompaña a estas im�
 
 - **Conceptos de las cuatro ciudades** (`docs/conceptos/`, con su `meta.json`): ocho imágenes de
   referencia de estilo para Distrito Cero, Arcade, Píxel y Taller. No se sirven en el mundo.
-- **Fondo panorámico del nexo** (`tools/materials/generated/nexo-panorama/`, servido como
-  `apps/web/public/sky/nexo-*.webp`): megaciudad cyberpunk y espacio, de noche y de día. Seis
-  paneles generados con Higgsfield (GPT Image 2.5, plan Plus, 26-10-2026) y unidos con `stitch.py`.
+- **Panorámica de la megaciudad** (`tools/materials/generated/nexo-panorama/`): megaciudad cyberpunk
+  y espacio, de noche y de día. Seis paneles generados con Higgsfield (GPT Image 2.5, plan Plus,
+  26-10-2026) y unidos con `stitch.py`. Fue el fondo del nexo; ya no se sirve en el mundo (ese
+  fondo es ahora una ciudad en 3D hecha en código) y se conserva como referencia de estilo.
 - **Modelos 3D de la vida de las ciudades** (`tools/models/generated/`, cada uno con su
   `meta.json`): coche volador (`hover_car`), dron de reparto (`drone`) y máquina expendedora
   (`vending`) y máquina recreativa de Arcade (`arcade_cabinet`). Generados con Higgsfield (Tripo, plan Plus, 27-10-2026); `tools/forge/pack.mjs` los

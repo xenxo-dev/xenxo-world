@@ -3,6 +3,9 @@ Une los tres paneles del fondo del nexo (generados con IA, ver meta.json) en una
 vuelta entera sin costuras: cada panel funde con el siguiente (y el último con el primero) y se
 alinean sus horizontes. Saca WebP de 8192 px (escritorio) y 4096 px (gafas y móvil).
 
+El mundo ya no usa esta panorámica (el fondo del nexo es una ciudad en 3D, NexoSkyline.tsx): lo que
+saca este script no está en el repo. Se conserva por si hace falta la imagen para otra cosa.
+
   python3 tools/materials/generated/nexo-panorama/stitch.py
 """
 from __future__ import annotations

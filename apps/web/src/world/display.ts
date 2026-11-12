@@ -2,10 +2,11 @@
  * Los mismos colores con y sin post-proceso.
  *
  * Sin post-proceso (gafas, móviles, nivel ligero) cada material sale ya como se ve: los que llevan
- * luz, con su mapeo de tonos; una foto (la panorámica del nexo, el cielo de día) o un tono medido en
- * ella, tal cual. Con post-proceso (escritorio) todo se pinta antes en un búfer lineal y el mapeo de
- * tonos (ACES) se le pasa al final a la imagen entera: también a las fotos, que salían apagadas y
- * lechosas, y a la bruma, que se mezclaba en lineal y de día espesaba el doble.
+ * luz, con su mapeo de tonos; una foto (el cielo de día), un tono medido en ella o lo que se pinta a
+ * juego con ella (la megaciudad del nexo), tal cual. Con post-proceso (escritorio) todo se pinta
+ * antes en un búfer lineal y el mapeo de tonos (ACES) se le pasa al final a la imagen entera: también
+ * a las fotos, que salían apagadas y lechosas, y a la bruma, que se mezclaba en lineal y de día
+ * espesaba el doble.
  *
  * Aquí está lo que hace falta para que lo que ya es «como se ve» llegue igual a la pantalla por los
  * dos caminos:

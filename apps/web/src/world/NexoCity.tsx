@@ -1,20 +1,19 @@
 /**
- * La megaciudad del nexo, en 3D: la plataforma flota sobre una ciudad de verdad. Abajo, manzanas
- * de torres con sus calles y su tráfico; entre medias, coches voladores en sus carriles (por debajo
- * de la plataforma y de las islas, y a lo lejos entre los rascacielos); y alrededor, megatorres que
- * suben por encima del horizonte. Debajo de la plataforma, su casco con anillos de luz.
+ * La megaciudad del nexo, en 3D: la plataforma flota sobre una ciudad de verdad que llega al
+ * horizonte. Los edificios, el suelo y el horizonte están en NexoSkyline.tsx; aquí, lo que se
+ * mueve (coches voladores en sus carriles, por debajo de la plataforma y de las islas y a lo lejos
+ * por las avenidas, entre las megatorres; y los coches de las calles de abajo), el casco bajo la
+ * plataforma, con sus anillos de luz, y las piezas que comparte con la ciudad de alrededor de cada
+ * distrito (DistrictSkyline.tsx): cajas, suelo y coches de luz.
  *
  * Decorado del cliente (no son datos del mundo: no se visita ni se construye) y pensado para la
  * Quest: pocos draw calls, todo instanciado, sin texturas en la ciudad (ventanas, calles y luces
  * salen del shader) y sin trabajo por frame en la CPU (los coches se mueven en el shader con el
- * reloj). Los coches voladores son el modelo de los distritos (life_car), simplificado al cargar
- * según `FEATURES.flyerTris`. Cuánta ciudad se dibuja lo dice `FEATURES.nexoCity`. De día y de noche.
- *
- * Lo lejano es la panorámica (NexoBackdrop): la ciudad en 3D solo se ve mirando hacia abajo y se
- * desvanece (con un tramado, sin transparencias) justo donde empieza la foto, con la bruma del
- * mismo tono que su pie. Así no hay dos ciudades distintas una delante de otra.
+ * reloj). Los coches voladores de cerca son el modelo de los distritos (life_car), simplificado al
+ * cargar según `FEATURES.flyerTris`. Cuánta ciudad se dibuja lo dice `FEATURES.nexoCity`. De día y
+ * de noche. El aire (reloj, ambiente y bruma) es el de city-air.ts.
  */
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
@@ -23,121 +22,21 @@ import { CHUNK_SIZE } from "@xenxo/protocol";
 import { SEED_ASSETS } from "../../../realtime/src/seed-assets";
 import { assetUrl } from "../config";
 import type { Ambience, Features } from "./graphics";
-import { DISPLAY_GLSL } from "./display";
+import { AIR_GLSL, OUT_GLSL, air, NEON, rng, setAir, tickAir } from "./city-air";
 import { SkipOnError } from "./Entities";
 import { lightweight, paintedLights } from "./materials";
-import { footTexture, PANO_TONES } from "./nexo-tones";
-import { SKY } from "./Sky";
+import { GROUND, NexoSkyline, PITCH, ROAD, SUPER } from "./NexoSkyline";
+
+export { NEON, rng };
 
 const C = CHUNK_SIZE / 2;
-/** Suelo de la ciudad de abajo (la plataforma está en y = 0). */
-const GROUND = -110;
-/** Paso de la cuadrícula de calles y ancho de la calzada (m). */
-const PITCH = 40;
-const ROAD = 12;
-/** Hasta dónde llega la ciudad desde el centro (la cámara ve hasta 400 m). */
-const EXTENT = 300;
+
+const shared = air;
+const HAZE = AIR_GLSL;
+const OUT = OUT_GLSL;
 
 /* ------------------------------------------------------------------ */
-/* Uniformes compartidos (un reloj y el ambiente para todo)            */
-/* ------------------------------------------------------------------ */
-
-const shared = {
-  uTime: { value: 0 },
-  uNight: { value: 1 },
-  uHaze: { value: new THREE.Color(SKY.night.fog) },
-  uDensity: { value: 0.0042 },
-  /** 1 en el nexo: la ciudad se desvanece donde empieza la panorámica (ver CUT) y toma sus colores. */
-  uCut: { value: 0 },
-  /** Tono de la foto alrededor (nexo-tones.ts), su ganancia y cuánto se tiñe la ciudad de él. */
-  uFoot: { value: footTexture },
-  uFootGain: { value: 1 },
-  uGrade: { value: 0.4 },
-};
-
-/**
- * Pendiente (alto / distancia en planta, desde la cámara) a la que acaba la foto del nexo: por
- * encima de CUT_HI solo se ve la foto; por debajo de CUT_LO, la ciudad en 3D; entre medias, un
- * tramado de las dos. La foto es opaca hasta unos −0,44 y se funde con el abismo hacia −0,48.
- */
-const CUT_LO = -0.445;
-const CUT_HI = -0.39;
-
-/** Generador con semilla: la misma ciudad para todos. */
-export function rng(seed: number) {
-  let s = seed >>> 0;
-  return () => {
-    s = (s + 0x6d2b79f5) >>> 0;
-    let t = s;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-const HAZE = /* glsl */ `
-  ${DISPLAY_GLSL}
-  uniform vec3 uHaze; uniform float uDensity; uniform float uNight;
-  uniform float uCut; uniform sampler2D uFoot; uniform float uFootGain; uniform float uGrade;
-  // El tono de la foto del nexo en la dirección de este punto (la misma vuelta que su cilindro).
-  vec3 panoTone(vec3 w) {
-    vec2 d = w.xz - vec2(${C.toFixed(1)});
-    float u = fract(atan(d.x, d.y) / 6.2831853);
-    return texture2D(uFoot, vec2(1.0 - u, 0.5)).rgb * uFootGain;
-  }
-  float panoSlope(vec3 w) {
-    return (w.y - cameraPosition.y) / max(length(w.xz - cameraPosition.xz), 1.0);
-  }
-  // mapped: el color ya viene con el mapeo de tonos (los materiales de three, como los coches).
-  vec3 hazeOf(vec3 col, vec3 w, bool mapped) {
-    vec3 tone = uHaze;
-    if (uCut > 0.5) {
-      // Lo propio de la ciudad, con el mismo mapeo de tonos de siempre; la foto y su tono, sin él.
-      #ifdef TONE_MAPPING
-        if (!mapped) col = toneMapping(col);
-      #else
-        // Con post-proceso ningún material trae el mapeo hecho (se pasa al final): aquí, a mano.
-        if (xenxoLinearOut()) col = xenxoAces(col);
-      #endif
-      tone = panoTone(w);
-      // Gradación: el color de la foto en esa dirección, conservando el brillo de cada cosa.
-      float l = dot(col, vec3(0.299, 0.587, 0.114));
-      float tl = max(dot(tone, vec3(0.299, 0.587, 0.114)), 0.03);
-      col = mix(col, tone * (l / tl), uGrade);
-      // Junto al borde de la foto, su color: el tramado entre las dos casi no se nota.
-      col = mix(col, tone, smoothstep(${(CUT_LO - 0.04).toFixed(2)}, ${CUT_HI.toFixed(2)}, panoSlope(w)) * 0.6);
-    }
-    float h = 1.0 - exp(-distance(w, cameraPosition) * uDensity);
-    // Bruma del abismo: lo más hondo se pierde en ella.
-    float mist = smoothstep(-55.0, -125.0, w.y) * mix(0.28, 0.65, uNight) * mix(1.0, mix(0.55, 0.3, uNight), uCut);
-    return mix(col, tone, clamp(max(h, mist), 0.0, 1.0));
-  }
-  vec3 haze(vec3 col, vec3 w) { return hazeOf(col, w, false); }
-  float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-  // En el nexo, lo que se ve casi de frente (hacia el horizonte) es la foto: aquí no se pinta.
-  void panoCut(vec3 w) {
-    if (uCut < 0.5) return;
-    float keep = smoothstep(${CUT_HI.toFixed(2)}, ${CUT_LO.toFixed(2)}, panoSlope(w));
-    float dither = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
-    if (keep < dither) discard;
-  }
-`;
-
-// En el nexo, sin mapeo de tonos: la foto no lo lleva y, si no, la ciudad sale más apagada y de
-// otro color que ella. Alrededor de los distritos, como el resto de la escena.
-const OUT = /* glsl */ `
-  #ifdef TONE_MAPPING
-    if (uCut < 0.5) gl_FragColor.rgb = toneMapping(gl_FragColor.rgb);
-  #else
-    // Con post-proceso, en el nexo el color ya es el que se tiene que ver (el de la foto): que el
-    // mapeo de tonos del final lo deje igual (display.ts).
-    if (uCut > 0.5) gl_FragColor.rgb = xenxoShown(gl_FragColor.rgb);
-  #endif
-  #include <colorspace_fragment>
-`;
-
-/* ------------------------------------------------------------------ */
-/* Edificios: torres de la ciudad de abajo y megatorres                 */
+/* Edificios de alrededor de los distritos (los del nexo: NexoSkyline)  */
 /* ------------------------------------------------------------------ */
 
 /** kind: 0 = torre con ventanas, 1 = panel de neón (anuncio sin letras), 2 = baliza que parpadea. */
@@ -150,53 +49,6 @@ export interface Box {
   d: number;
   tint: string;
   kind: 0 | 1 | 2;
-}
-
-const FACADE_DAY = ["#5f7d99", "#7b93a8", "#4f6b85", "#8fa5b5", "#6a8597", "#9aa6b2", "#3f5a73", "#8a8f99"];
-export const NEON = ["#36d9ff", "#ff4fd8", "#a26bff", "#ff4f8b", "#4fa3ff", "#6dffd8"];
-
-function cityBoxes(density: number): Box[] {
-  const r = rng(4242);
-  const out: Box[] = [];
-  const pick = <T,>(a: T[]) => a[Math.floor(r() * a.length)]!;
-  const n = Math.ceil(EXTENT / PITCH);
-  // Manzanas: de una a tres torres por manzana, más altas lejos del centro (se ven desde arriba).
-  for (let i = -n; i < n; i++) {
-    for (let j = -n; j < n; j++) {
-      const bx = C + i * PITCH + ROAD / 2;
-      const bz = C + j * PITCH + ROAD / 2;
-      const block = PITCH - ROAD;
-      const dist = Math.hypot(bx + block / 2 - C, bz + block / 2 - C);
-      if (dist > EXTENT) continue;
-      // Donde no hay torres (menos densidad o una plaza), un bloque bajo: desde arriba, sin solares vacíos.
-      if (r() > density || r() < 0.08) {
-        const ph = 6 + r() * 10;
-        out.push({ x: bx + block / 2, y0: GROUND, z: bz + block / 2, w: block - 3, h: ph, d: block - 3, tint: pick(FACADE_DAY), kind: 0 });
-        continue;
-      }
-      const towers = 1 + Math.floor(r() * 3);
-      for (let k = 0; k < towers; k++) {
-        const w = 7 + r() * (block / towers - 8);
-        const d = 8 + r() * (block - 10);
-        const x = bx + (block / towers) * k + w / 2 + 0.6;
-        const z = bz + d / 2 + r() * (block - d - 1);
-        const far = Math.min(1, dist / 220);
-        // Por debajo del aire de los coches voladores (y > −50): no se cruzan con ellos ni con las islas.
-        const h = 18 + r() * (25 + far * 25);
-        const top = Math.min(GROUND + h, -52 - r() * 8);
-        out.push({ x, y0: GROUND, z, w, h: top - GROUND, d, tint: pick(FACADE_DAY), kind: 0 });
-        // Anuncios de neón en una cara y balizas en las azoteas.
-        if (r() < 0.35) {
-          const ph = 6 + r() * 10;
-          const py = GROUND + (top - GROUND) * (0.45 + r() * 0.4) - ph / 2;
-          const side = r() < 0.5 ? -1 : 1;
-          out.push({ x: x + side * (w / 2 + 0.15), y0: py, z, w: 0.25, h: ph, d: Math.min(d * 0.6, 6), tint: pick(NEON), kind: 1 });
-        }
-        if (r() < 0.3) out.push({ x, y0: top, z, w: 0.6, h: 1.2, d: 0.6, tint: "#ff3b3b", kind: 2 });
-      }
-    }
-  }
-  return out;
 }
 
 const BUILDING_VS = /* glsl */ `
@@ -217,7 +69,6 @@ const BUILDING_FS = /* glsl */ `
   varying vec3 vW; varying vec3 vN; varying vec3 vTint; varying vec2 vInfo;
   ${HAZE}
   void main() {
-    panoCut(vW);
     vec3 n = normalize(vN);
     float kind = vInfo.y;
     float sun = 0.58 + 0.42 * max(dot(n, normalize(vec3(0.45, 0.8, 0.3))), 0.0);
@@ -263,12 +114,7 @@ const BUILDING_FS = /* glsl */ `
     ${OUT}
   }`;
 
-function Buildings({ density }: { density: number }) {
-  const boxes = useMemo(() => cityBoxes(density), [density]);
-  return <CityBoxes boxes={boxes} />;
-}
-
-/** Cajas de la ciudad en un solo draw call (también las usa el horizonte de los distritos). */
+/** Cajas de la ciudad en un solo draw call (el horizonte de los distritos). */
 export function CityBoxes({ boxes }: { boxes: Box[] }) {
   const mesh = useMemo(() => {
     const geo = new THREE.BoxGeometry(1, 1, 1);
@@ -308,7 +154,6 @@ const GROUND_FS = /* glsl */ `
   varying vec3 vW;
   ${HAZE}
   void main() {
-    panoCut(vW);
     vec2 g = mod(vW.xz - vec2(${(C - ROAD / 2).toFixed(1)}), ${PITCH.toFixed(1)});
     // Calzada: los primeros ${ROAD} m de cada paso, en X o en Z.
     float rx = step(g.x, ${ROAD.toFixed(1)});
@@ -331,11 +176,7 @@ const GROUND_FS = /* glsl */ `
     ${OUT}
   }`;
 
-function Ground() {
-  return <CityGround y={GROUND} size={EXTENT * 2.2} />;
-}
-
-/** Suelo de calles con farolas (también el de alrededor de los distritos). */
+/** Suelo de calles con farolas (el de alrededor de los distritos). */
 export function CityGround({ y, size }: { y: number; size: number }) {
   const mesh = useMemo(() => {
     const geo = new THREE.PlaneGeometry(size, size);
@@ -368,7 +209,7 @@ export interface Car {
   glow: string;
 }
 
-/** Coches voladores: anillos bajo la plataforma y las islas, a lo lejos y autopistas aéreas rectas. */
+/** Coches voladores de cerca: anillos bajo la plataforma y las islas, alrededor, y autopistas aéreas rectas. */
 function flyers(density: number): Car[] {
   const r = rng(77);
   const out: Car[] = [];
@@ -387,13 +228,37 @@ function flyers(density: number): Car[] {
   ring(82, -27, 16, -22);
   ring(120, -36, 18, 24);
   ring(170, -24, 16, -26);
-  // A lo lejos, delante de la panorámica.
+  // Alrededor, entre el paseo de fuera y las primeras megatorres.
   ring(190, 22, 14, 28);
   ring(220, 46, 12, -30);
-  // Autopistas aéreas rectas que cruzan la ciudad, en los dos sentidos.
+  // Autopistas aéreas rectas que cruzan por debajo, en los dos sentidos.
   for (const [ang, off, y] of [[0.3, 60, -40], [1.9, -40, -46], [3.6, 90, -33], [5.0, -110, -50]] as const) {
     straight(out, r, ang, off, y, 12 * density, 26);
     straight(out, r, ang + Math.PI, -off - 6, y + 3, 12 * density, 24);
+  }
+  return out;
+}
+
+/**
+ * El tráfico de las avenidas, a lo lejos: coches de luz entre las megatorres, a varias alturas y
+ * en los dos sentidos. Por las avenidas (cada 120 m), que son los pasillos que dejan las torres.
+ */
+function avenueCars(density: number): Car[] {
+  const r = rng(79);
+  const out: Car[] = [];
+  const levels = [-58, -28, 34, 78, 128, 190];
+  for (let k = -6; k <= 6; k++) {
+    // Lejos del nexo (de cerca se ve que son solo luces): de la tercera avenida hacia fuera.
+    if (Math.abs(k) < 3) continue;
+    const reach = 1320;
+    const n = 10 * density;
+    for (let axis = 0; axis < 2; axis++) {
+      const angle = axis * (Math.PI / 2);
+      const y1 = levels[Math.floor(r() * 6)]! + r() * 8;
+      const y2 = levels[Math.floor(r() * 6)]! + r() * 8;
+      straight(out, r, angle, k * SUPER + 5, y1, n, 46 + r() * 22, undefined, reach * 2);
+      straight(out, r, angle + Math.PI, -k * SUPER + 5, y2, n, 46 + r() * 22, undefined, reach * 2);
+    }
   }
   return out;
 }
@@ -412,10 +277,9 @@ function streetCars(density: number): Car[] {
   return out;
 }
 
-function straight(out: Car[], r: () => number, angle: number, offset: number, y: number, n: number, speed: number, glow?: string) {
+/** Una recta de `len` m centrada en el nexo: en los extremos los coches aparecen y se van entre la bruma. */
+function straight(out: Car[], r: () => number, angle: number, offset: number, y: number, n: number, speed: number, glow?: string, len = 470) {
   const count = Math.max(2, Math.round(n));
-  // En los extremos aparecen y se van entre la bruma.
-  const len = 470;
   const dx = Math.cos(angle), dz = Math.sin(angle);
   const x0 = C - dx * len / 2 - dz * offset, z0 = C - dz * len / 2 + dx * offset;
   for (let i = 0; i < count; i++) {
@@ -424,7 +288,7 @@ function straight(out: Car[], r: () => number, angle: number, offset: number, y:
 }
 
 const CAR_VS = /* glsl */ `
-  uniform float uTime;
+  uniform float uTime; uniform float uNight; uniform float uNexo;
   attribute vec4 aA; attribute vec4 aB; attribute vec3 aGlow;
   varying vec3 vL; varying vec3 vW; varying vec3 vGlow; varying float vFade;
   void main() {
@@ -440,8 +304,9 @@ const CAR_VS = /* glsl */ `
       pos = vec3(aA.x + dir.x * t, aA.z, aA.y + dir.y * t);
       vFade = smoothstep(0.0, 40.0, t) * smoothstep(aA.w, aA.w - 40.0, t);
     }
-    // De lejos crecen un poco: que se sigan viendo como puntos de luz.
-    float s = clamp(distance(pos, cameraPosition) / 80.0, 1.0, 2.4);
+    // De lejos crecen un poco: que se sigan viendo como puntos de luz (en el nexo, de día, menos:
+    // son coches entre torres, no luces).
+    float s = clamp(distance(pos, cameraPosition) / 80.0, 1.0, mix(2.4, mix(1.5, 2.0, uNight), uNexo));
     vec3 lp = position * vec3(1.4, 0.7, 3.6) * s;
     vec3 w = vec3(lp.x * dir.y + lp.z * dir.x, lp.y, -lp.x * dir.x + lp.z * dir.y) + pos;
     vL = position; vW = w; vGlow = aGlow;
@@ -452,23 +317,22 @@ const CAR_FS = /* glsl */ `
   varying vec3 vL; varying vec3 vW; varying vec3 vGlow; varying float vFade;
   ${HAZE}
   void main() {
-    panoCut(vW);
-    vec3 body = mix(vec3(0.5, 0.55, 0.62), vec3(0.03, 0.035, 0.05), uNight);
+    vec3 body = mix(mix(vec3(0.5, 0.55, 0.62), vec3(0.2, 0.22, 0.26), uNexo), vec3(0.03, 0.035, 0.05), uNight);
     vec3 col = body;
     if (vL.z > 0.42) col = vec3(1.0, 0.95, 0.85) * mix(1.0, 1.6, uNight);
     else if (vL.z < -0.42) col = vec3(1.0, 0.12, 0.15) * mix(0.9, 1.5, uNight);
     else if (vL.y < -0.42) col = vGlow * mix(0.7, 1.4, uNight);
     else if (abs(vL.y) < 0.08) col = vGlow * mix(0.5, 1.1, uNight);
-    gl_FragColor = vec4(mix(uHaze, haze(col, vW), vFade), 1.0);
+    gl_FragColor = vec4(mix(airTone(vW), haze(col, vW), vFade), 1.0);
     ${OUT}
   }`;
 
 function Traffic({ density, features, ambience }: { density: number; features: Features; ambience: Ambience }) {
-  const street = useMemo(() => streetCars(density), [density]);
+  const lights = useMemo(() => [...streetCars(density), ...avenueCars(density)], [density]);
   const air = useMemo(() => flyers(density), [density]);
   return (
     <>
-      <CarsMesh list={street} />
+      <CarsMesh list={lights} />
       <Suspense fallback={null}>
         <SkipOnError>
           <Flyers list={air} features={features} ambience={ambience} />
@@ -509,6 +373,23 @@ const FLYER_HEAD = /* glsl */ `
     float c = cos(roll), s = sin(roll);
     p = vec3(p.x * c - p.y * s, p.x * s + p.y * c, p.z);
     return vec3(p.x * dir.y + p.z * dir.x, p.y, -p.x * dir.x + p.z * dir.y);
+  }
+`;
+
+/** Lo que sustituye al mapeo de tonos de three en el coche: el mismo mapeo y, con él, su aire. */
+const FLYER_AIR = /* glsl */ `
+  {
+    vec3 c = gl_FragColor.rgb;
+    #ifdef TONE_MAPPING
+      c = toneMapping(c);
+    #else
+      if (xenxoLinearOut()) c = xenxoAces(c);
+    #endif
+    c = mix(airTone(vFlyW), airShown(c, vFlyW), vFade);
+    #ifndef TONE_MAPPING
+      c = xenxoShown(c);
+    #endif
+    gl_FragColor.rgb = c;
   }
 `;
 
@@ -556,7 +437,7 @@ function Flyers({ list, features, ambience }: { list: Car[]; features: Features;
     const base = src.material as THREE.Material;
     const lit = paintedLights(features.pbr ? base : lightweight(base), ambience);
     const m = lit.clone() as THREE.MeshStandardMaterial;
-    // Su bruma es la de la ciudad (la de la escena no tiene el tono de la panorámica).
+    // Su bruma es la de la ciudad (la de la escena no sabe de direcciones ni de alturas).
     m.fog = false;
     const prev = lit.onBeforeCompile;
     const prevKey = lit.customProgramCacheKey.bind(lit);
@@ -570,12 +451,11 @@ function Flyers({ list, features, ambience }: { list: Car[]; features: Features;
           "#include <beginnormal_vertex>\nvec3 fPos; vec2 fDir; float fRoll; flyer(fPos, fDir, fRoll);\nobjectNormal = turn(objectNormal, fDir, fRoll);",
         )
         .replace("#include <begin_vertex>", "#include <begin_vertex>\ntransformed = turn(transformed, fDir, fRoll) + fPos;\nvFlyW = transformed;");
+      // Su aire va donde el mapeo de tonos (antes de pasar al espacio de color de salida: después,
+      // el color ya no es lineal y la mezcla con el tono del aire saldría más oscura).
       shader.fragmentShader = shader.fragmentShader
         .replace("#include <common>", `#include <common>\nvarying vec3 vFlyW; varying float vFade;\n${HAZE}`)
-        .replace(
-          "#include <fog_fragment>",
-          "#include <fog_fragment>\ngl_FragColor.rgb = mix(uHaze, hazeOf(gl_FragColor.rgb, vFlyW, true), vFade);\nif (uCut > 0.5) gl_FragColor.rgb = xenxoShown(gl_FragColor.rgb);",
-        );
+        .replace("#include <tonemapping_fragment>", FLYER_AIR);
     };
     m.customProgramCacheKey = () => `nexo-flyer|${prevKey()}`;
     return m;
@@ -688,80 +568,30 @@ function Hull() {
   return <primitive object={mesh} />;
 }
 
-/* ------------------------------------------------------------------ */
-/* Abismo: por debajo del horizonte, más allá de la ciudad, solo bruma  */
-/* ------------------------------------------------------------------ */
-
-const ABYSS_FS = /* glsl */ `
-  varying vec3 vDir;
-  ${HAZE}
-  void main() {
-    // Por encima del horizonte, transparente (cielo y panorámica); por debajo, la bruma (en el
-    // nexo, del tono de la foto en esa dirección).
-    float a = smoothstep(0.02, -0.06, normalize(vDir).y);
-    vec3 tone = uCut > 0.5 ? panoTone(cameraPosition + normalize(vDir) * 300.0) : uHaze;
-    gl_FragColor = vec4(tone, a);
-    ${OUT}
-  }`;
-
-function Abyss() {
-  const mesh = useMemo(() => {
-    const m = new THREE.Mesh(
-      new THREE.SphereGeometry(360, 32, 16),
-      new THREE.ShaderMaterial({
-        uniforms: shared,
-        side: THREE.BackSide,
-        transparent: true,
-        depthWrite: false,
-        vertexShader: /* glsl */ `varying vec3 vDir; void main() { vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-        fragmentShader: ABYSS_FS,
-      }),
-    );
-    m.frustumCulled = false;
-    // Antes que la panorámica (−1) y que todo lo demás.
-    m.renderOrder = -2;
-    return m;
-  }, []);
-  useFrame(({ camera }) => mesh.position.copy(camera.position));
-  useEffect(() => () => disposeMesh(mesh), [mesh]);
-  return <primitive object={mesh} />;
-}
-
 function disposeMesh(m: THREE.Mesh | THREE.InstancedMesh) {
   m.geometry.dispose();
   (m.material as THREE.Material).dispose();
 }
 
-/** Reloj y ambiente: lo único que cambia por frame (dos números, sin objetos nuevos). */
-export function CityClock({ ambience, pano = false }: { ambience: Ambience; pano?: boolean }) {
-  useEffect(() => {
-    const night = ambience === "night";
-    shared.uNight.value = night ? 1 : 0;
-    // En el nexo, la bruma tiene el tono del pie de la panorámica (así la ciudad en 3D se funde
-    // con la foto); alrededor de los distritos, la de su cielo.
-    shared.uHaze.value.set(pano ? PANO_TONES[ambience].foot : night ? SKY.night.fog : "#bcd0e2");
-    // En el nexo, menos bruma: la foto es nítida y con contraste; con más, la ciudad sale lechosa.
-    shared.uDensity.value = pano ? (night ? 0.0022 : 0.0016) : night ? 0.0042 : 0.0017;
-    shared.uCut.value = pano ? 1 : 0;
-    // La foto de noche se pinta un 15 % más clara (NexoBackdrop): su tono, igual.
-    shared.uFootGain.value = night ? 1.15 : 1;
-    shared.uGrade.value = night ? 0.45 : 0.4;
-  }, [ambience, pano]);
-  useFrame((_, dt) => {
-    // Con un tope: al volver de otra pestaña los coches no dan un salto enorme.
-    shared.uTime.value = (shared.uTime.value + Math.min(dt, 0.1)) % 3600;
-  });
+/**
+ * Reloj y ambiente de la ciudad: lo único que cambia por frame (un número, sin objetos nuevos).
+ * `nexo`: el aire de la megaciudad (city-air.ts); `sky`: la foto del cielo de día, cuando llega.
+ */
+export function CityClock({ ambience, nexo = false, sky = null }: { ambience: Ambience; nexo?: boolean; sky?: THREE.Texture | null }) {
+  // Antes de que se dibuje nada con él (en un efecto corriente podría colarse una imagen con el
+  // aire del lugar anterior).
+  useLayoutEffect(() => setAir(nexo, ambience, sky), [ambience, nexo, sky]);
+  useFrame((_, dt) => tickAir(dt));
   return null;
 }
 
-export function NexoCity({ ambience, density, features }: { ambience: Ambience; density: number; features: Features }) {
+/** `sky`: la foto del cielo de día (World.tsx), para que el cristal la refleje y el aire tome su horizonte. */
+export function NexoCity({ ambience, density, features, sky }: { ambience: Ambience; density: number; features: Features; sky: THREE.Texture | null }) {
   if (density <= 0) return null;
   return (
     <>
-      <CityClock ambience={ambience} pano />
-      <Abyss />
-      <Ground />
-      <Buildings density={density} />
+      <CityClock ambience={ambience} nexo sky={sky} />
+      <NexoSkyline density={density} rich={features.post} />
       <Traffic density={density} features={features} ambience={ambience} />
       <Hull />
     </>
