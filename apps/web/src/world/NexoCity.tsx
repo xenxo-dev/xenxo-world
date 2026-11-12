@@ -3,8 +3,8 @@
  * horizonte. Los edificios, el suelo y el horizonte están en NexoSkyline.tsx; aquí, lo que se
  * mueve (coches voladores en sus carriles, por debajo de la plataforma y de las islas y a lo lejos
  * por las avenidas, entre las megatorres; y los coches de las calles de abajo), el casco bajo la
- * plataforma, con sus anillos de luz, y las piezas que comparte con la ciudad de alrededor de cada
- * distrito (DistrictSkyline.tsx): cajas, suelo y coches de luz.
+ * plataforma, con sus anillos de luz, y lo que comparte con la ciudad de alrededor de cada
+ * distrito (DistrictSkyline.tsx): los coches de luz y el reloj.
  *
  * Decorado del cliente (no son datos del mundo: no se visita ni se construye) y pensado para la
  * Quest: pocos draw calls, todo instanciado, sin texturas en la ciudad (ventanas, calles y luces
@@ -22,7 +22,7 @@ import { CHUNK_SIZE } from "@xenxo/protocol";
 import { SEED_ASSETS } from "../../../realtime/src/seed-assets";
 import { assetUrl } from "../config";
 import type { Ambience, Features } from "./graphics";
-import { AIR_GLSL, OUT_GLSL, air, NEON, rng, setAir, tickAir } from "./city-air";
+import { AIR_GLSL, OUT_GLSL, air, NEON, rng, setAir, tickAir, type AirLook } from "./city-air";
 import { SkipOnError } from "./Entities";
 import { lightweight, paintedLights } from "./materials";
 import { GROUND, NexoSkyline, PITCH, ROAD, SUPER } from "./NexoSkyline";
@@ -34,168 +34,6 @@ const C = CHUNK_SIZE / 2;
 const shared = air;
 const HAZE = AIR_GLSL;
 const OUT = OUT_GLSL;
-
-/* ------------------------------------------------------------------ */
-/* Edificios de alrededor de los distritos (los del nexo: NexoSkyline)  */
-/* ------------------------------------------------------------------ */
-
-/** kind: 0 = torre con ventanas, 1 = panel de neón (anuncio sin letras), 2 = baliza que parpadea. */
-export interface Box {
-  x: number;
-  y0: number;
-  z: number;
-  w: number;
-  h: number;
-  d: number;
-  tint: string;
-  kind: 0 | 1 | 2;
-}
-
-const BUILDING_VS = /* glsl */ `
-  attribute vec3 aTint;
-  attribute vec2 aInfo;
-  varying vec3 vW; varying vec3 vN; varying vec3 vTint; varying vec2 vInfo;
-  void main() {
-    vec4 w = modelMatrix * instanceMatrix * vec4(position, 1.0);
-    vW = w.xyz;
-    vN = normal;
-    vTint = aTint;
-    vInfo = aInfo;
-    gl_Position = projectionMatrix * viewMatrix * w;
-  }`;
-
-const BUILDING_FS = /* glsl */ `
-  uniform float uTime;
-  varying vec3 vW; varying vec3 vN; varying vec3 vTint; varying vec2 vInfo;
-  ${HAZE}
-  void main() {
-    vec3 n = normalize(vN);
-    float kind = vInfo.y;
-    float sun = 0.58 + 0.42 * max(dot(n, normalize(vec3(0.45, 0.8, 0.3))), 0.0);
-    vec3 col;
-    if (kind > 1.5) {
-      float blink = step(0.55, fract(uTime * 0.6 + vInfo.x));
-      col = vTint * mix(0.8, 0.6 + 2.2 * blink, uNight);
-    } else if (kind > 0.5) {
-      float v = fract(vW.y * 0.06 - uTime * 0.12 + vInfo.x);
-      col = vTint * mix(0.75, 1.25, uNight) * (0.8 + 0.2 * sin(v * 6.2831));
-    } else if (n.y > 0.5) {
-      // Azoteas: oscuras, con alguna máquina (manchas) y su borde.
-      vec2 rp = fract(vW.xz / 4.0);
-      float unit = step(0.7, hash(floor(vW.xz / 4.0) + vInfo.x * 11.0)) * step(0.15, rp.x) * step(rp.x, 0.85) * step(0.15, rp.y) * step(rp.y, 0.85);
-      col = mix(vTint * mix(0.38, 0.55, unit) * sun, vec3(0.025, 0.028, 0.045), uNight);
-    } else {
-      // Fachada: muro cortina de vidrio (bandas por planta y montantes) o, en algunas torres,
-      // ventanas sueltas en un muro. De lejos, su media (sin parpadeos).
-      vec2 uv = abs(n.x) > 0.5 ? vec2(vW.z, vW.y) : vec2(vW.x, vW.y);
-      float curtain = step(0.38, vInfo.x);
-      vec2 cell = uv / mix(vec2(3.2, 3.6), vec2(1.7, 3.6), curtain);
-      vec2 id = floor(cell);
-      vec2 f = fract(cell);
-      float punched = step(0.16, f.x) * step(f.x, 0.84) * step(0.2, f.y) * step(f.y, 0.82);
-      float band = step(0.1, f.x) * step(0.16, f.y) * step(f.y, 0.9);
-      float win = mix(punched, band, curtain);
-      float fw = max(fwidth(cell.x), fwidth(cell.y));
-      float detail = 1.0 - smoothstep(0.2, 0.65, fw);
-      float lit = step(hash(id + vInfo.x * 37.0 + n.xz * 13.0), mix(0.3, 0.42, curtain));
-      vec3 warm = mix(vec3(1.0, 0.72, 0.4), vec3(0.5, 0.8, 1.0), step(0.72, hash(id * 1.7 + vInfo.x)));
-      // El vidrio refleja el cielo: más claro arriba y cuanto más de canto se mira.
-      float sky = clamp((vW.y - ${GROUND.toFixed(1)}) / 120.0, 0.0, 1.0);
-      float fres = pow(1.0 - abs(dot(n, normalize(cameraPosition - vW))), 2.5);
-      vec3 glass = mix(vec3(0.045, 0.07, 0.11), vec3(0.2, 0.29, 0.4), sky) + fres * vec3(0.16, 0.2, 0.25);
-      vec3 frame = vTint * mix(0.5, 0.34, curtain) * sun;
-      // También de día hay plantas con luz (como en la foto), más suaves.
-      glass += warm * 0.35 * win * lit * detail;
-      vec3 day = mix(frame, glass * (0.75 + 0.25 * sun), mix(mix(0.5, 0.78, curtain), win, detail));
-      vec3 night = mix(vTint * 0.045 + vec3(0.015, 0.016, 0.03), warm * 1.05, mix(0.3 * 0.54, win * lit, detail));
-      col = mix(day, night, uNight);
-    }
-    gl_FragColor = vec4(haze(col, vW), 1.0);
-    ${OUT}
-  }`;
-
-/** Cajas de la ciudad en un solo draw call (el horizonte de los distritos). */
-export function CityBoxes({ boxes }: { boxes: Box[] }) {
-  const mesh = useMemo(() => {
-    const geo = new THREE.BoxGeometry(1, 1, 1);
-    geo.translate(0, 0.5, 0);
-    const tint = new Float32Array(boxes.length * 3);
-    const info = new Float32Array(boxes.length * 2);
-    const col = new THREE.Color();
-    const m = new THREE.InstancedMesh(
-      geo,
-      new THREE.ShaderMaterial({ uniforms: shared, vertexShader: BUILDING_VS, fragmentShader: BUILDING_FS }),
-      boxes.length,
-    );
-    const o = new THREE.Object3D();
-    boxes.forEach((b, i) => {
-      o.position.set(b.x, b.y0, b.z);
-      o.scale.set(b.w, Math.max(0.1, b.h), b.d);
-      o.updateMatrix();
-      m.setMatrixAt(i, o.matrix);
-      col.set(b.tint);
-      tint.set([col.r, col.g, col.b], i * 3);
-      info.set([(i * 0.61803) % 1, b.kind], i * 2);
-    });
-    geo.setAttribute("aTint", new THREE.InstancedBufferAttribute(tint, 3));
-    geo.setAttribute("aInfo", new THREE.InstancedBufferAttribute(info, 2));
-    m.frustumCulled = false;
-    return m;
-  }, [boxes]);
-  useEffect(() => () => disposeMesh(mesh), [mesh]);
-  return <primitive object={mesh} />;
-}
-
-/* ------------------------------------------------------------------ */
-/* Suelo: calles con sus líneas y farolas, manzanas                     */
-/* ------------------------------------------------------------------ */
-
-const GROUND_FS = /* glsl */ `
-  varying vec3 vW;
-  ${HAZE}
-  void main() {
-    vec2 g = mod(vW.xz - vec2(${(C - ROAD / 2).toFixed(1)}), ${PITCH.toFixed(1)});
-    // Calzada: los primeros ${ROAD} m de cada paso, en X o en Z.
-    float rx = step(g.x, ${ROAD.toFixed(1)});
-    float rz = step(g.y, ${ROAD.toFixed(1)});
-    float road = max(rx, rz);
-    // Línea central discontinua y luz de las farolas en los bordes.
-    float cx = rx * (1.0 - rz) * step(abs(g.x - ${(ROAD / 2).toFixed(1)}), 0.18) * step(0.5, fract(vW.z / 6.0));
-    float cz = rz * (1.0 - rx) * step(abs(g.y - ${(ROAD / 2).toFixed(1)}), 0.18) * step(0.5, fract(vW.x / 6.0));
-    float line = max(cx, cz);
-    vec2 lp = vec2(min(g.x, ${ROAD.toFixed(1)} - g.x), min(g.y, ${ROAD.toFixed(1)} - g.y));
-    float lampX = rx * smoothstep(2.2, 0.0, length(vec2(lp.x, mod(vW.z, 14.0) - 7.0)));
-    float lampZ = rz * smoothstep(2.2, 0.0, length(vec2(lp.y, mod(vW.x, 14.0) - 7.0)));
-    float lamp = max(lampX, lampZ);
-    // De día, manzanas con algo de verde (parques y patios) y calzada oscura.
-    float park = step(0.72, hash(floor((vW.xz - vec2(${(C - ROAD / 2).toFixed(1)})) / ${PITCH.toFixed(1)})));
-    vec3 block = mix(vec3(0.2, 0.22, 0.26), vec3(0.16, 0.27, 0.18), park);
-    vec3 day = mix(block, vec3(0.08, 0.09, 0.11), road) + line * vec3(0.5, 0.45, 0.2);
-    vec3 night = mix(vec3(0.02, 0.022, 0.035), vec3(0.035, 0.03, 0.05), road) + line * vec3(0.5, 0.4, 0.15) + lamp * vec3(1.0, 0.62, 0.28) * 0.9;
-    gl_FragColor = vec4(haze(mix(day, night, uNight), vW), 1.0);
-    ${OUT}
-  }`;
-
-/** Suelo de calles con farolas (el de alrededor de los distritos). */
-export function CityGround({ y, size }: { y: number; size: number }) {
-  const mesh = useMemo(() => {
-    const geo = new THREE.PlaneGeometry(size, size);
-    geo.rotateX(-Math.PI / 2);
-    geo.translate(C, y, C);
-    const m = new THREE.Mesh(
-      geo,
-      new THREE.ShaderMaterial({
-        uniforms: shared,
-        vertexShader: /* glsl */ `varying vec3 vW; void main() { vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
-        fragmentShader: GROUND_FS,
-      }),
-    );
-    m.frustumCulled = false;
-    return m;
-  }, [y, size]);
-  useEffect(() => () => disposeMesh(mesh), [mesh]);
-  return <primitive object={mesh} />;
-}
 
 /* ------------------------------------------------------------------ */
 /* Tráfico: coches voladores y coches de la calle                       */
@@ -575,12 +413,13 @@ function disposeMesh(m: THREE.Mesh | THREE.InstancedMesh) {
 
 /**
  * Reloj y ambiente de la ciudad: lo único que cambia por frame (un número, sin objetos nuevos).
- * `nexo`: el aire de la megaciudad (city-air.ts); `sky`: la foto del cielo de día, cuando llega.
+ * `nexo`: el aire de la megaciudad (city-air.ts); `sky`: la foto del cielo de día, cuando llega;
+ * `post`: se pinta con post-proceso; `look`: lo que el lugar le pide a su aire.
  */
-export function CityClock({ ambience, nexo = false, sky = null }: { ambience: Ambience; nexo?: boolean; sky?: THREE.Texture | null }) {
+export function CityClock({ ambience, nexo = false, sky = null, post = false, look }: { ambience: Ambience; nexo?: boolean; sky?: THREE.Texture | null; post?: boolean; look?: AirLook }) {
   // Antes de que se dibuje nada con él (en un efecto corriente podría colarse una imagen con el
   // aire del lugar anterior).
-  useLayoutEffect(() => setAir(nexo, ambience, sky), [ambience, nexo, sky]);
+  useLayoutEffect(() => setAir(nexo, ambience, sky, post, look), [ambience, nexo, sky, post, look]);
   useFrame((_, dt) => tickAir(dt));
   return null;
 }

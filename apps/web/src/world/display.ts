@@ -15,7 +15,9 @@
  *    color «como se ve» de forma que el mapeo del final lo devuelva igual; lo muy claro, con un
  *    hombro suave para no pasar de 1 y que no lo encienda el bloom).
  *  - la bruma de los materiales de Three.js (`fog_fragment`): si es clara (de día), en ese búfer se
- *    mezcla como en la pantalla; la oscura (de noche) sigue como estaba.
+ *    mezcla como en la pantalla; la oscura (de noche) sigue como estaba. En los distritos la bruma
+ *    es el aire de su ciudad de alrededor (city-air.ts, `districtFog`): exponencial, del tono del
+ *    horizonte, y siempre mezclada como en la pantalla.
  *
  * Se sabe en qué camino se está por la conversión de salida que Three.js pone a cada shader
  * (`linearToOutputTexel`): hacia la pantalla o las gafas, sRGB; hacia un búfer, ninguna.
@@ -65,13 +67,16 @@ export function patchFog() {
   patched = true;
   THREE.ShaderChunk.fog_fragment = /* glsl */ `
 #ifdef USE_FOG
+	float xenxoAir = 0.0;
 	#ifdef FOG_EXP2
 		float fogFactor = 1.0 - exp( - fogDensity * fogDensity * vFogDepth * vFogDepth );
 	#else
 		float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );
+		// xenxo (city-air.ts): con fogNear negativo es el aire de la ciudad de alrededor de un distrito, exponencial (su espesor por metro es -fogNear).
+		if ( fogNear < 0.0 ) { fogFactor = 1.0 - exp( fogNear * vFogDepth ); xenxoAir = 1.0; }
 	#endif
-	// xenxo (display.ts): en el búfer lineal del post-proceso, la bruma clara se mezcla como en la pantalla.
-	float xenxoBright = linearToOutputTexel( vec4( 0.5, 0.5, 0.5, 1.0 ) ).r < 0.6 ? smoothstep( 0.08, 0.3, dot( fogColor, vec3( 0.2126, 0.7152, 0.0722 ) ) ) : 0.0;
+	// xenxo (display.ts): en el búfer lineal del post-proceso, la bruma clara (y ese aire, siempre) se mezcla como en la pantalla.
+	float xenxoBright = linearToOutputTexel( vec4( 0.5, 0.5, 0.5, 1.0 ) ).r < 0.6 ? max( xenxoAir, smoothstep( 0.08, 0.3, dot( fogColor, vec3( 0.2126, 0.7152, 0.0722 ) ) ) ) : 0.0;
 	if ( xenxoBright > 0.0 ) {
 		vec3 xenxoMixed = pow( mix( pow( max( gl_FragColor.rgb, vec3( 0.0 ) ), vec3( 0.4545 ) ), pow( fogColor, vec3( 0.4545 ) ), fogFactor ), vec3( 2.2 ) );
 		gl_FragColor.rgb = mix( mix( gl_FragColor.rgb, fogColor, fogFactor ), xenxoMixed, xenxoBright );

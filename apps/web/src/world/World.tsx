@@ -24,7 +24,8 @@ import { patchFog } from "./display";
 import { Skyline } from "./Skyline";
 import { NexoCity } from "./NexoCity";
 import { NexoPlanet, NexoSky } from "./NexoSky";
-import { DistrictSkyline } from "./DistrictSkyline";
+import { DistrictSkyline, useSkylineLook } from "./DistrictSkyline";
+import { districtFog } from "./city-air";
 import { Citizens, Traffic } from "./CityLife";
 import { Residents, SlidingDoors } from "./Interiors";
 import { Weather } from "./Weather";
@@ -702,6 +703,22 @@ function Scene({ active }: { active: boolean }) {
   // Con post-proceso la foto del cielo va en su esfera (PhotoSky): como fondo de la escena, el mapeo
   // de tonos del final la apagaba. Sin él (gafas, móviles), el fondo de siempre.
   const skyDome = f.post && !g.inXR;
+  // La bruma. En el nexo se ve hasta el horizonte: es el aire de su megaciudad (city-air.ts), que a
+  // doscientos metros apenas se nota (con la de la plaza, las islas del otro lado saldrían más
+  // borrosas que las torres que tienen detrás). En un distrito, el aire de su ciudad de alrededor:
+  // lo del fondo del distrito y las torres que tiene detrás, con la misma.
+  const inDistrict = !inNexo && !inPlaza;
+  const look = useSkylineLook(place);
+  const dayTex = daySky?.tex ?? null;
+  const fog = useMemo<[THREE.ColorRepresentation, number, number]>(
+    () =>
+      inNexo
+        ? [NEXO_FOG[ambience], 0, ambience === "night" ? 2500 : 2200]
+        : inDistrict
+          ? districtFog(ambience, dayTex, skyDome, look)
+          : [SKY[ambience].fog, ambience === "night" ? 45 : 70, ambience === "night" ? 230 : 260],
+    [inNexo, inDistrict, ambience, dayTex, skyDome, look],
+  );
   const holding = useArrivalHold(place, g.inXR);
   return (
     <>
@@ -713,19 +730,13 @@ function Scene({ active }: { active: boolean }) {
       <FpsGuard />
       {daySky && !skyDome ? <primitive key="sky" attach="background" object={daySky.tex} /> : <color key="color" attach="background" args={[sky.fog]} />}
       {daySky && skyDome && <PhotoSky map={daySky.tex} />}
-      {/* En el nexo se ve hasta el horizonte: su bruma es el aire de la megaciudad (city-air.ts), que
-          a doscientos metros apenas se nota. Con la de los demás lugares, las islas del otro lado
-          saldrían más borrosas que las torres que tienen detrás. */}
-      <fog
-        attach="fog"
-        args={inNexo ? [NEXO_FOG[ambience], 0, ambience === "night" ? 2500 : 2200] : [sky.fog, ambience === "night" ? 45 : 70, ambience === "night" ? 230 : 260]}
-      />
+      <fog attach="fog" args={fog} />
       {inNexo && ambience === "night" ? <NexoSky rich={f.pbr} deep={f.post && !g.inXR} /> : !skyReady && <Sky ambience={ambience} />}
       {inPlaza && <Skyline count={f.skyline} ambience={ambience} pbr={f.pbr} />}
       {inNexo && <NexoPlanet ambience={ambience} />}
-      {inNexo && <NexoCity ambience={ambience} density={f.nexoCity} features={f} sky={daySky?.tex ?? null} />}
-      {!inNexo && !inPlaza && <DistrictSkyline chunk={place} density={f.nexoCity} ambience={ambience} />}
-      {!inNexo && !inPlaza && (
+      {inNexo && <NexoCity ambience={ambience} density={f.nexoCity} features={f} sky={dayTex} />}
+      {inDistrict && <DistrictSkyline chunk={place} density={f.nexoCity} ambience={ambience} sky={dayTex} rich={f.post} post={skyDome} />}
+      {inDistrict && (
         <Suspense fallback={null}>
           {/* Decorado: si un modelo no carga, se queda sin él (nunca tumba la escena). */}
           <SkipOnError>
