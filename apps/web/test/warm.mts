@@ -1,18 +1,22 @@
 /**
- * Prueba de world/warm.ts sin navegador ni gráfica: un modelo entra en la escena cuando sus shaders
- * están compilados y sus texturas subidas, y las texturas suben de una en una.
+ * Prueba de world/warm.ts sin navegador ni gráfica: lo que se va a ver se prepara antes (shaders
+ * compilados, texturas subidas), cada modelo antes de entrar en la escena y la escena entera con el
+ * repaso general.
  *
  * - La cola de texturas: solo las que ya tienen imagen, cada una una vez, y un tope de tiempo por
  *   imagen (una grande se lleva la imagen entera; varias pequeñas caben en la misma).
- * - `prepare`: avisa cuando están los shaders Y las texturas, nunca dentro de la propia llamada; dos
- *   modelos que comparten textura la esperan los dos; si algo no llega, avisa al cabo del plazo; y
- *   quien se desmonta deja de esperar.
+ * - `prepare`: avisa cuando están los shaders (todos los del renderizador: un material puede tener
+ *   varios programas) Y las texturas, nunca dentro de la propia llamada; dos modelos que comparten
+ *   textura la esperan los dos; si algo no llega, avisa al cabo del plazo; y quien se desmonta deja
+ *   de esperar.
  * - Con post-proceso se compila la variante del búfer (y el renderizador queda como estaba).
+ * - El repaso general: cuándo toca, que compila la escena entera y que hasta que acaba el lugar no
+ *   está preparado.
  *
  *   npm run test:warm -w @xenxo/web
  */
 import * as THREE from "three";
-import { MAX_WAIT_MS, prepare, queueTexture, setWarmRenderer, texturesOf, tickWarm, UPLOAD_BUDGET_MS, warmBusy, warmQueued, type WarmRenderer } from "../src/world/warm";
+import { dropPass, MAX_WAIT_MS, passDue, POLL_MS, prepare, queueTexture, requestPass, runPass, setDirectTone, SETTLE_MS, setWarmRenderer, texturesOf, tickWarm, UPLOAD_BUDGET_MS, warmBusy, warmHold, warmPasses, warmQueued, warmSettled, type WarmRenderer } from "../src/world/warm";
 
 let fails = 0;
 const check = (ok: boolean, what: string) => {
@@ -20,19 +24,40 @@ const check = (ok: boolean, what: string) => {
   if (!ok) fails++;
 };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** Lo que tarda en enterarse de que los shaders han acabado (se mira cada `POLL_MS`). */
+const noticed = () => sleep(POLL_MS * 2 + 10);
 
-/** Un renderizador de mentira: apunta lo que se le pide y deja decidir cuándo acaba de compilar. */
+/**
+ * Un renderizador de mentira: apunta lo que se le pide y deja decidir cuándo acaba de compilar. Cada
+ * material nuevo es un programa; con `parallel` (KHR_parallel_shader_compile) tarda hasta `finish()`,
+ * sin ella se da por hecho al momento (no se puede saber).
+ */
 function fake() {
   const log: string[] = [];
   const uploads: THREE.Texture[] = [];
   let target: THREE.WebGLRenderTarget | null = null;
-  const compiling: { object: THREE.Object3D; target: THREE.WebGLRenderTarget | null; done: () => void }[] = [];
-  const gl: WarmRenderer & { cost: number; clock: number } = {
+  const compiles: { object: THREE.Object3D; target: THREE.WebGLRenderTarget | null; tone: THREE.ToneMapping }[] = [];
+  const programs: { ready: boolean; isReady(): boolean }[] = [];
+  const seen = new Set<THREE.Material>();
+  const gl: WarmRenderer & { cost: number; clock: number; parallel: boolean } = {
     cost: 1,
     clock: 0,
+    parallel: true,
     xr: { isPresenting: false },
-    extensions: { has: () => true },
-    compile: (object) => void compiling.push({ object, target, done: () => {} }),
+    toneMapping: THREE.NoToneMapping,
+    info: { programs },
+    compile: (object) => {
+      compiles.push({ object, target, tone: gl.toneMapping });
+      object.traverse((o) => {
+        const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
+        for (const mat of !m ? [] : Array.isArray(m) ? m : [m]) {
+          if (seen.has(mat)) continue;
+          seen.add(mat);
+          const p = { ready: !gl.parallel, isReady: () => p.ready };
+          programs.push(p);
+        }
+      });
+    },
     getRenderTarget: () => target,
     getActiveCubeFace: () => 0,
     getActiveMipmapLevel: () => 0,
@@ -40,13 +65,16 @@ function fake() {
       target = t;
       log.push(t ? "búfer" : "lienzo");
     },
-    compileAsync: (object) => new Promise<void>((done) => compiling.push({ object, target, done })),
     initTexture: (t) => {
       uploads.push(t);
       gl.clock += gl.cost;
     },
   };
-  return { gl, log, uploads, compiling, now: () => gl.clock };
+  /** La gráfica acaba de compilar lo que tenía (todo, o solo los `n` primeros que faltaban). */
+  const finish = (n = Infinity) => {
+    for (const p of programs) if (!p.ready && n-- > 0) p.ready = true;
+  };
+  return { gl, log, uploads, compiles, programs, finish, now: () => gl.clock };
 }
 
 /** Una textura ya cargada (o aún sin imagen). */
@@ -143,9 +171,9 @@ console.log("Preparar un modelo");
   let ready = 0;
   prepare(f.gl, [model(t1, t2)], camera, scene, false, () => ready++);
   check(ready === 0, "nunca avisa dentro de la propia llamada");
-  check(f.compiling.length === 1 && f.compiling[0]!.target === null && f.log.length === 0, "sin post-proceso compila la variante del lienzo, sin tocar el renderizador");
-  f.compiling[0]!.done();
-  await sleep(0);
+  check(f.compiles.length === 1 && f.compiles[0]!.target === null && f.log.length === 0, "sin post-proceso compila la variante del lienzo, sin tocar el renderizador");
+  f.finish();
+  await noticed();
   check(ready === 0, "con los shaders listos pero sin sus texturas, aún no");
   tickWarm(f.now);
   await sleep(0);
@@ -154,25 +182,38 @@ console.log("Preparar un modelo");
   await sleep(0);
   check(ready === 1, "con todo, avisa");
   tickWarm(f.now);
-  await sleep(5);
+  await noticed();
   check(ready === 1, "y una sola vez");
 
   // Al revés: primero las texturas y después los shaders.
   ready = 0;
   prepare(f.gl, [model(tex(), tex())], camera, scene, false, () => ready++);
   drain(f);
-  await sleep(0);
+  await noticed();
   check(ready === 0, "con las texturas subidas pero los shaders compilando, aún no");
-  f.compiling.at(-1)!.done();
-  await sleep(0);
+  f.finish();
+  await noticed();
   check(ready === 1, "al acabar de compilar, avisa");
+
+  // Un material con dos programas (el mismo en una malla suelta y en una instanciada): Three.js solo
+  // sabe esperar al último; aquí se espera a todos.
+  ready = 0;
+  prepare(f.gl, [model(tex(64), tex(64))], camera, scene, false, () => ready++);
+  drain(f);
+  f.finish(1);
+  await noticed();
+  check(ready === 0, "con uno de sus dos programas aún compilando, no se enseña");
+  f.finish();
+  await noticed();
+  check(ready === 1, "con los dos, sí");
 
   // Un modelo cuyas texturas ya han subido y cuyos shaders ya existen: al momento (pero después).
   ready = 0;
-  prepare(f.gl, [model(t1)], camera, scene, false, () => ready++);
-  f.compiling.at(-1)!.done();
+  const again = model(t1);
+  prepare(f.gl, [again], camera, scene, false, () => ready++);
+  f.finish();
   check(ready === 0, "un modelo ya preparado tampoco avisa dentro de la llamada…");
-  await sleep(0);
+  await noticed();
   check(ready === 1 && warmQueued() === 0, "…pero sí enseguida, sin esperar a ninguna imagen");
 
   // Dos modelos que comparten una textura que aún no ha subido.
@@ -181,7 +222,8 @@ console.log("Preparar un modelo");
   prepare(f.gl, [model(shared)], camera, scene, false, () => a++);
   prepare(f.gl, [model(shared, tex(256))], camera, scene, false, () => b++);
   check(warmQueued() === 2, "la textura compartida está una vez en la cola");
-  for (const c of f.compiling) c.done();
+  f.finish();
+  await noticed();
   tickWarm(f.now);
   await sleep(0);
   check(a === 1 && b === 0, "al subir, avisa a quien solo esperaba esa…");
@@ -191,16 +233,15 @@ console.log("Preparar un modelo");
 
   // Varias piezas a la vez (un coche): una sola señal, cuando están todas.
   ready = 0;
-  const n0 = f.compiling.length;
-  prepare(f.gl, [model(tex(256)), model(tex(256)), model()], camera, scene, false, () => ready++);
-  check(f.compiling.length === n0 + 3, "las piezas se compilan todas a la vez");
+  const n0 = f.compiles.length;
+  prepare(f.gl, [model(tex(256)), model(tex(256)), model(tex(256))], camera, scene, false, () => ready++);
+  check(f.compiles.length === n0 + 3, "las piezas se compilan todas a la vez");
   drain(f);
-  f.compiling[n0]!.done();
-  f.compiling[n0 + 1]!.done();
-  await sleep(0);
+  f.finish(2);
+  await noticed();
   check(ready === 0, "falta una pieza: aún no");
-  f.compiling[n0 + 2]!.done();
-  await sleep(0);
+  f.finish();
+  await noticed();
   check(ready === 1, "con todas, una señal");
 }
 
@@ -209,26 +250,32 @@ console.log("Con post-proceso");
   const f = fake();
   setWarmRenderer(f.gl);
   prepare(f.gl, [model()], camera, scene, true, () => {});
-  check(f.compiling[0]!.target !== null, "se compila la variante del búfer (lineal, sin mapeo de tonos)");
+  check(f.compiles[0]!.target !== null, "se compila la variante del búfer (lineal, sin mapeo de tonos)");
   check(f.log.join(",") === "búfer,lienzo" && f.gl.getRenderTarget() === null, "y el renderizador queda pintando donde pintaba");
-  f.compiling[0]!.done();
+  f.finish();
+  await noticed();
+  // Al bajar a un nivel sin post-proceso, este aún no ha repuesto el mapeo de tonos del lienzo
+  // cuando se preparan los modelos del nivel nuevo.
+  setDirectTone(THREE.ACESFilmicToneMapping);
+  prepare(f.gl, [model()], camera, scene, false, () => {});
+  check(f.compiles.at(-1)!.target === null && f.compiles.at(-1)!.tone === THREE.ACESFilmicToneMapping, "sin post-proceso se compila con el mapeo de tonos del lienzo, aunque el post-proceso aún no lo haya repuesto");
+  check(f.gl.toneMapping === THREE.NoToneMapping, "y el renderizador queda con el que tenía");
+  prepare(f.gl, [model()], camera, scene, true, () => {});
+  check(f.gl.toneMapping === THREE.NoToneMapping && f.compiles.at(-1)!.target !== null, "con post-proceso no se toca (en el búfer no hay mapeo de tonos)");
+  setDirectTone(null);
+  await noticed();
 }
 
 console.log("Sin compilación en paralelo (KHR_parallel_shader_compile)");
 {
   const f = fake();
   setWarmRenderer(f.gl);
-  f.gl.extensions = { has: () => false };
-  let asyncCalls = 0;
-  f.gl.compileAsync = () => {
-    asyncCalls++;
-    return Promise.resolve();
-  };
+  f.gl.parallel = false;
   let ready = 0;
-  prepare(f.gl, [model()], camera, scene, true, () => ready++);
-  check(f.compiling.length === 1 && f.compiling[0]!.target !== null && asyncCalls === 0, "los shaders se lanzan igual (en su variante), sin pedir lo que el navegador no tiene");
+  prepare(f.gl, [model(), model()], camera, scene, true, () => ready++);
+  check(f.compiles.length === 2 && f.compiles[0]!.target !== null, "los shaders se lanzan igual, en su variante");
   check(ready === 0 && f.gl.getRenderTarget() === null, "tampoco avisa dentro de la llamada, y el renderizador queda como estaba");
-  await sleep(0);
+  await noticed();
   check(ready === 1, "y se enseña enseguida: lo que falte esperará al dibujarlo, como antes");
 }
 
@@ -238,36 +285,42 @@ console.log("Cuando algo no llega");
   setWarmRenderer(f.gl);
   // Los shaders no acaban nunca: se enseña al cabo del plazo.
   let ready = 0;
-  prepare(f.gl, [model()], camera, scene, false, () => ready++, 40);
-  await sleep(15);
+  prepare(f.gl, [model(tex(64))], camera, scene, false, () => ready++, 80);
+  drain(f);
+  await sleep(40);
   check(ready === 0, "antes del plazo, esperando");
-  await sleep(60);
+  await sleep(90);
   check(ready === 1, `pasado el plazo (en el mundo, ${MAX_WAIT_MS / 1000} s), se enseña igualmente`);
-  f.compiling[0]!.done();
-  await sleep(0);
+  f.finish();
+  await noticed();
   check(ready === 1, "y si luego acaba, no avisa otra vez");
-  // compileAsync que falla o que lanza: como si hubiera acabado.
+  // compile que lanza: como si hubiera acabado.
   ready = 0;
-  f.gl.compileAsync = () => Promise.reject(new Error("no compila"));
-  prepare(f.gl, [model()], camera, scene, false, () => ready++, 5000);
-  await sleep(0);
-  check(ready === 1, "si la compilación falla, se enseña (se compilará al dibujarlo, como antes)");
-  ready = 0;
-  f.gl.compileAsync = () => {
+  const compile = f.gl.compile;
+  f.gl.compile = () => {
     throw new Error("sin contexto");
   };
   prepare(f.gl, [model()], camera, scene, true, () => ready++, 5000);
-  await sleep(0);
-  check(ready === 1 && f.gl.getRenderTarget() === null, "y si lanza, también (y el renderizador queda como estaba)");
+  await noticed();
+  check(ready === 1 && f.gl.getRenderTarget() === null, "si la compilación lanza, se enseña (se compilará al dibujarlo, como antes) y el renderizador queda como estaba");
+  f.gl.compile = compile;
+  // Un renderizador que no deja preguntar por sus programas: no se espera.
+  ready = 0;
+  const h = fake();
+  setWarmRenderer(h.gl);
+  h.gl.info = { programs: null };
+  prepare(h.gl, [model()], camera, scene, false, () => ready++, 5000);
+  await noticed();
+  check(ready === 1, "y si no se puede preguntar por los programas, tampoco se espera");
   // Quien se desmonta deja de esperar.
   ready = 0;
   const g = fake();
   setWarmRenderer(g.gl);
   const stop = prepare(g.gl, [model(tex())], camera, scene, false, () => ready++, 30);
   stop();
-  g.compiling[0]!.done();
+  g.finish();
   drain(g);
-  await sleep(50);
+  await sleep(80);
   check(ready === 0, "quien se desmonta mientras se prepara ya no recibe el aviso (ni el del plazo)");
 }
 
@@ -276,33 +329,112 @@ console.log("¿Queda algo preparándose? (la pantalla de carga espera; la fluide
   const f = fake();
   setWarmRenderer(f.gl);
   drain(f);
-  check(!warmBusy(), "sin nada pendiente, no");
+  check(!warmBusy() && warmSettled(performance.now() + SETTLE_MS), "sin nada pendiente, no");
   let ready = 0;
   prepare(f.gl, [model(tex())], camera, scene, false, () => ready++, 5000);
-  check(warmBusy(), "con un modelo preparándose, sí");
-  f.compiling[0]!.done();
-  await sleep(0);
+  check(warmBusy() && !warmSettled(performance.now() + SETTLE_MS), "con un modelo preparándose, sí");
+  f.finish();
+  await noticed();
   check(warmBusy() && ready === 0, "mientras le falte una textura, también");
   drain(f);
   await sleep(0);
   check(!warmBusy() && ready === 1, "cuando se enseña, ya no");
   const stop = prepare(f.gl, [model()], camera, scene, false, () => ready++, 5000);
   stop();
-  stop();
-  check(!warmBusy(), "ni cuando quien esperaba se desmonta (aunque lo diga dos veces)");
-  prepare(f.gl, [model()], camera, scene, false, () => ready++, 30);
-  await sleep(60);
-  check(!warmBusy(), "ni cuando se acaba el plazo");
-  // Sin renderizador nadie va a vaciar la cola: no puede dejar la pantalla de carga puesta.
-  setWarmRenderer(null);
+  check(!warmBusy(), "ni cuando quien esperaba se desmonta");
   queueTexture(tex());
-  check(warmQueued() === 1 && !warmBusy(), "una cola que nadie va a vaciar (sin renderizador) no cuenta");
-  setWarmRenderer(f.gl);
-  check(warmBusy(), "con renderizador, la cola pendiente sí cuenta…");
+  check(warmBusy(), "con texturas por subir, sí");
   drain(f);
-  check(!warmBusy(), "…hasta que se vacía");
+  check(!warmBusy(), "y con la cola vacía, no");
+  // Lo que alguien dice que falta (el post-proceso, la primera foto de los reflejos).
+  const done = warmHold();
+  const other = warmHold();
+  check(warmBusy(), "con algo más por llegar (warmHold), sí");
+  done();
+  done();
+  check(warmBusy(), "soltarlo dos veces no suelta lo de otro");
+  other();
+  check(!warmBusy(), "y soltado todo, no");
+}
+
+console.log("El repaso general");
+{
+  const f = fake();
+  setWarmRenderer(f.gl);
+  drain(f);
+  await noticed();
+  const place = new THREE.Scene();
+  const loose = tex(512);
+  place.add(model(loose), model());
+  const before = warmPasses();
+  /** Pasado el momento que tarda en montarse lo recién preparado. */
+  const later = () => performance.now() + SETTLE_MS;
+  check(!passDue(later()), "sin pedirlo, no toca");
+  // Al llegar a un lugar: hasta que se haga, el lugar no está preparado.
+  requestPass();
+  check(warmBusy() && !warmSettled(later()), "pedido (lugar nuevo, otro nivel, otro ambiente), el lugar no está preparado");
+  check(passDue(later()), "y toca");
+  let shown = 0;
+  const stop = prepare(f.gl, [model(tex(64))], camera, place, false, () => shown++, 5000);
+  check(!passDue(later()), "…salvo que quede algún modelo preparándose (aún no está en la escena)");
+  f.finish();
+  drain(f);
+  await noticed();
+  check(shown === 1 && !passDue(), `ni nada más prepararse el último: React aún tiene que montarlo (${SETTLE_MS} ms)`);
+  check(passDue(later()), "pasado ese momento, toca");
+  stop();
+  const n0 = f.compiles.length, u0 = f.uploads.length;
+  runPass(f.gl, place, camera, true);
+  check(f.compiles.length === n0 + 1 && f.compiles.at(-1)!.object === place && f.compiles.at(-1)!.target !== null, "compila la escena entera, en la variante que se dibuja");
+  check(f.gl.getRenderTarget() === null, "y el renderizador queda como estaba");
+  check(warmBusy() && !passDue(later()) && warmPasses() === before, "mientras dura, el lugar sigue sin estar preparado (y no se lanza otro)");
+  drain(f);
+  check(f.uploads.length === u0 + 1 && f.uploads.includes(loose), "sube las texturas de lo que aún no se ha visto");
+  await noticed();
+  check(warmPasses() === before, "con shaders aún compilando, no ha acabado");
+  f.finish();
+  await noticed();
+  check(warmPasses() === before + 1 && !warmBusy() && warmSettled(later()), "al acabar, el lugar está preparado");
+  // Lo pedido mientras se hacía uno queda para el siguiente.
+  requestPass();
+  runPass(f.gl, place, camera, false);
+  requestPass();
+  await noticed();
+  check(warmPasses() === before + 2 && warmBusy() && passDue(later()), "lo pedido mientras se hacía uno queda para el siguiente");
+  // Un repaso que no acaba: a su plazo, se da por hecho.
+  place.add(model(tex(64)));
+  runPass(f.gl, place, camera, false, 60);
+  drain(f);
+  await sleep(120);
+  check(warmPasses() === before + 3 && !warmBusy(), "un repaso que no acaba se da por hecho a su plazo");
+  f.finish();
+  // Al desmontar el mundo no queda nada pendiente.
+  place.add(model(tex(64)));
+  requestPass();
+  runPass(f.gl, place, camera, false, 5000);
+  requestPass();
+  dropPass();
+  drain(f);
+  check(!warmBusy() && warmSettled(later()) && !passDue(later()), "al desmontar el mundo no queda ninguno pendiente ni en marcha");
+  f.finish();
+  await noticed();
+  check(warmPasses() === before + 3, "y el que estaba en marcha ya no cuenta");
+}
+
+console.log("Con la pantalla de carga puesta, las texturas suben más deprisa");
+{
+  const f = fake();
+  setWarmRenderer(f.gl);
+  drain(f);
+  f.gl.cost = 5;
+  for (let i = 0; i < 12; i++) queueTexture(tex(1024));
+  tickWarm(f.now);
+  check(warmQueued() === 11, `en el mundo, lo justo por imagen (${UPLOAD_BUDGET_MS} ms: una de 5 ms)`);
+  tickWarm(f.now, 24);
+  check(warmQueued() === 6, "con más margen (nadie nota una imagen larga), cinco en la misma");
+  drain(f);
 }
 
 setWarmRenderer(null);
-console.log(fails ? `\n${fails} fallos` : "\nTodo bien");
+console.log(fails ? `\n${fails} comprobación(es) fallida(s)` : "\nTodo bien: lo que se va a ver se prepara antes de enseñarlo.");
 process.exit(fails ? 1 : 0);

@@ -14,6 +14,7 @@ import { assetUrl } from "../../config";
 import { useGraphics } from "../graphics";
 import { lightweight } from "../materials";
 import type { Motion } from "../motion";
+import { useWarmed } from "../useWarmed";
 import { ARMS, NO_RIG_HAND, PALM, setMuzzle } from "./arms";
 
 const _m = new THREE.Vector3();
@@ -73,5 +74,7 @@ export function WeaponModel({ id, shadow = true }: { id: WeaponId; shadow?: bool
     });
     return c;
   }, [gltf, f.pbr, shadow]);
-  return <primitive object={scene} />;
+  // Entra con sus shaders compilados (world/warm.ts): sacar el arma no congela la página.
+  const shown = useWarmed(scene, f.post);
+  return shown ? <primitive object={shown} /> : null;
 }

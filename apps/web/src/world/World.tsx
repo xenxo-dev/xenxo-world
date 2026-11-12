@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
@@ -7,7 +7,7 @@ import { CHUNK_SIZE, PLACES } from "@xenxo/protocol";
 import { usePlace, usePlaceTheme, world } from "../net/world-store";
 import { Avatars } from "./Avatars";
 import { Entities, SkipOnError } from "./Entities";
-import { graphics, useGraphics, type Ambience, type Features } from "./graphics";
+import { ENV_SIZE, graphics, useGraphics, type Ambience, type Features } from "./graphics";
 import { FpsWatch, LOADED_MS } from "./perf";
 import { attachDesktopInput, input } from "./input";
 import { PhotoTaker } from "./Photo";
@@ -16,7 +16,7 @@ import { FRAME_PX, useCine } from "./cine/state";
 import { useCovered } from "./cover";
 import { self } from "./self";
 import { setMaxAnisotropy, tickMaterials } from "./materials";
-import { setWarmRenderer, tickWarm, warmBusy, type WarmRenderer } from "./warm";
+import { dropPass, passDue, requestPass, runPass, setDirectTone, setWarmRenderer, tickWarm, UPLOAD_BUDGET_MS, warmBusy, warmHold, warmPasses, warmSettled, type WarmRenderer } from "./warm";
 import { Player } from "./Player";
 import { Portals } from "./Portals";
 import { PhotoSky, Sky, SKY } from "./Sky";
@@ -56,8 +56,13 @@ export const xrStore = createXRStore({
 // La bruma, igual con y sin post-proceso: antes de que se compile ningún material.
 patchFog();
 
-/** Los efectos de pantalla completa solo se descargan en equipos que los usan. */
-const Effects = lazy(() => import("./Effects"));
+/**
+ * Los efectos de pantalla completa solo se descargan en equipos que los usan. Y en esos, cuanto
+ * antes: hasta que llegan no se dibuja nada (`Hold`), y se piden ya, no al montar la escena.
+ */
+const loadEffects = () => import("./Effects");
+const Effects = lazy(loadEffects);
+if (graphics.features.post) void loadEffects().catch(() => {});
 
 const CENTER = new THREE.Vector3(CHUNK_SIZE / 2, 0, CHUNK_SIZE / 2);
 
@@ -157,7 +162,6 @@ function Lighting({ profile, features }: { profile: LightProfile; features: Feat
   useEffect(() => {
     const light = sun.current;
     if (!light) return;
-    light.castShadow = features.shadows > 0;
     if (features.shadows) {
       light.shadow.mapSize.set(features.shadows, features.shadows);
       const cam = light.shadow.camera;
@@ -177,8 +181,11 @@ function Lighting({ profile, features }: { profile: LightProfile; features: Feat
     <>
       <hemisphereLight args={[L.hemi[0], L.hemi[1], L.hemi[2]]} />
       {features.avatarFill && L.fill > 0 && <AvatarFill intensity={L.fill} />}
+      {/* Que da sombra se dice al crearla (no después, en un efecto): va dentro de cada shader, y lo
+          que se compilara antes de saberlo no valdría (world/warm.ts). */}
       <directionalLight
         ref={sun}
+        castShadow={features.shadows > 0}
         position={[CENTER.x + L.sun.offset[0], L.sun.offset[1], CENTER.z + L.sun.offset[2]]}
         intensity={L.sun.intensity}
         color={L.sun.color}
@@ -203,6 +210,20 @@ function loadDaySky() {
   return dayTexture;
 }
 
+/**
+ * El mapa de entorno del cielo, del tamaño de todos (`ENV_SIZE`): la foto pasa primero a un cubo de
+ * ese tamaño. (Directamente saldría del doble, y al llegar se recompilarían todos los materiales.)
+ */
+function skyEnvironment(gl: THREE.WebGLRenderer, tex: THREE.Texture): THREE.Texture {
+  const cube = new THREE.WebGLCubeRenderTarget(ENV_SIZE);
+  cube.fromEquirectangularTexture(gl, tex);
+  const pmrem = new THREE.PMREMGenerator(gl);
+  const out = pmrem.fromCubemap(cube.texture).texture;
+  pmrem.dispose();
+  cube.dispose();
+  return out;
+}
+
 /** Cielo de nubes de día: la textura (para el fondo) y su mapa de entorno. null mientras carga. */
 function useDaySky(enabled: boolean) {
   const gl = useThree((s) => s.gl);
@@ -213,9 +234,7 @@ function useDaySky(enabled: boolean) {
     let made: THREE.Texture | null = null;
     void loadDaySky().then((tex) => {
       if (!alive) return;
-      const pmrem = new THREE.PMREMGenerator(gl);
-      made = pmrem.fromEquirectangular(tex).texture;
-      pmrem.dispose();
+      made = skyEnvironment(gl, tex);
       setSky({ tex, env: made });
     });
     return () => {
@@ -231,19 +250,27 @@ function useDaySky(enabled: boolean) {
 /* Reflejos                                                             */
 /* ------------------------------------------------------------------ */
 
+/** Lo más que la foto de los reflejos espera a que el lugar esté entero (s). */
+const PHOTO_WAIT_S = 8;
+
 /**
  * Entorno para los materiales con brillo:
  *  - Siempre: un estudio neutro generado en la GPU (sin descargar HDRI).
  *  - Alta/Ultra: una «sonda» que fotografía la propia plaza (neones incluidos)
  *    al cargar y cuando cambia el mundo, para que el suelo mojado y el metal la reflejen.
+ *
+ * Hay entorno desde el primer momento y todos miden lo mismo (`ENV_SIZE`): que lo haya y su tamaño
+ * van dentro de cada shader, y un cambio los recompilaría todos (world/warm.ts). La foto se hace con
+ * el lugar entero (modelos en la escena y compilados), no a medio llegar; la primera, con la pantalla
+ * de carga aún puesta.
  */
-function Environment({ ambience, profile, probe, sky }: { ambience: Ambience; profile: LightProfile; probe: Features["probe"]; sky: THREE.Texture | null }) {
+function Environment({ ambience, profile, probe, sky }: { ambience: Ambience; profile: LightProfile; probe: boolean; sky: THREE.Texture | null }) {
   const gl = useThree((s) => s.gl);
   const scene = useThree((s) => s.scene);
   const base = sky ?? null;
   const room = useMemo(() => {
     const pmrem = new THREE.PMREMGenerator(gl);
-    const tex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    const tex = pmrem.fromScene(new RoomEnvironment(), 0.04, 0.1, 100, { size: ENV_SIZE }).texture;
     pmrem.dispose();
     return tex;
   }, [gl]);
@@ -251,7 +278,7 @@ function Environment({ ambience, profile, probe, sky }: { ambience: Ambience; pr
 
   const cube = useMemo(() => {
     if (!probe) return null;
-    const rt = new THREE.WebGLCubeRenderTarget(probe, { type: THREE.HalfFloatType, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter });
+    const rt = new THREE.WebGLCubeRenderTarget(ENV_SIZE, { type: THREE.HalfFloatType, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter });
     const cam = new THREE.CubeCamera(0.5, 320, rt);
     cam.position.set(CENTER.x, 2.2, CENTER.z + 4);
     return { rt, cam };
@@ -262,14 +289,30 @@ function Environment({ ambience, profile, probe, sky }: { ambience: Ambience; pr
   const dirty = useRef(true);
   const lastVersion = useRef(-1);
   const wait = useRef(1.2);
+  const age = useRef(0);
+  /** La foto que se enseña es de esta sonda (si no, el entorno es el de base). */
+  const shot = useRef<object | null>(null);
+  const hold = useRef<(() => void) | null>(null);
+  // El entorno de base, ya al montar (antes de que se compile nada) y mientras no haya foto.
+  useLayoutEffect(() => {
+    if (!cube || shot.current !== cube) scene.environment = base ?? room;
+  }, [scene, base, room, cube]);
   useEffect(() => {
     dirty.current = true;
     wait.current = 0.8;
+    age.current = 0;
+    // La pantalla de carga espera a la primera foto: son seis vistas de toda la escena en una imagen.
+    if (cube && splashActive()) hold.current ??= warmHold();
+    return () => {
+      hold.current?.();
+      hold.current = null;
+    };
   }, [ambience, cube, sky]);
 
   useFrame((_, dt) => {
     scene.environmentIntensity = cube ? (ambience === "night" ? 0.55 : profile === "daySun" ? 0.6 : 1) : LIGHTING[profile].env;
     if (!cube) {
+      shot.current = null;
       scene.environment = base ?? room;
       return;
     }
@@ -279,17 +322,25 @@ function Environment({ ambience, profile, probe, sky }: { ambience: Ambience; pr
     if (v !== lastVersion.current) {
       lastVersion.current = v;
       dirty.current = true;
+      age.current = 0;
       wait.current = Math.max(wait.current, 1);
     }
     if (!dirty.current) return;
     wait.current -= dt;
+    age.current += dt;
     if (wait.current > 0) return;
+    // Con el lugar entero: sus modelos en la escena y todo compilado (si no, la foto saldría sin
+    // ellos, o esperando a cada shader). Tiene su plazo.
+    if (!(world.walkable && warmSettled()) && age.current < PHOTO_WAIT_S) return;
     dirty.current = false;
     // La foto se hace con el entorno base (cielo o estudio), no con la propia foto.
     scene.environment = base ?? room;
     cube.cam.update(gl, scene);
     cube.rt.texture.needsPMREMUpdate = true;
     scene.environment = cube.rt.texture;
+    shot.current = cube;
+    hold.current?.();
+    hold.current = null;
   });
 
   return null;
@@ -298,6 +349,9 @@ function Environment({ ambience, profile, probe, sky }: { ambience: Ambience; pr
 /* ------------------------------------------------------------------ */
 /* Entrada, VR y rendimiento                                            */
 /* ------------------------------------------------------------------ */
+
+/** Lo que se dedica a subir texturas en cada imagen mientras está la pantalla de carga (ms). */
+const SPLASH_UPLOAD_MS = 24;
 
 /** Reloj de los materiales animados (agua), anisotropía máxima de la GPU y subida de texturas. */
 function MaterialClock() {
@@ -310,7 +364,8 @@ function MaterialClock() {
   }, [gl]);
   useFrame((s) => {
     tickMaterials(s.clock.elapsedTime);
-    tickWarm();
+    // Con la pantalla de carga puesta nadie nota una imagen larga: suben más deprisa.
+    tickWarm(undefined, splashActive() ? SPLASH_UPLOAD_MS : UPLOAD_BUDGET_MS);
   });
   return null;
 }
@@ -378,6 +433,114 @@ function FpsGuard() {
     const busy = splashActive() || loading.pending > 0 || now - loading.last < LOADED_MS || warmBusy();
     if (watch.frame(now, busy)) graphics.decline();
   });
+  return null;
+}
+
+/** Lo que se espera sin novedades (descargas, cambios del lugar) antes del repaso: lo que tarda en montarse lo recién llegado (ms). */
+const PASS_CALM_MS = 300;
+
+/**
+ * El repaso general (world/warm.ts): al llegar a un lugar, y al cambiar de nivel o de ambiente,
+ * cuando todo ha acabado de llegar (su foto, sus descargas y sus modelos, ya preparados) se compila
+ * lo que quede en la escena sin compilar, se vea o no. Hasta entonces el lugar no está preparado.
+ */
+function WarmPass({ post }: { post: boolean }) {
+  const seen = useRef({ place: "", tier: "", ambience: "", post: false, version: -1, changed: 0 });
+  useEffect(() => {
+    hookLoading();
+    return dropPass;
+  }, []);
+  useFrame(({ gl, scene, camera }) => {
+    if (gl.xr.isPresenting) return;
+    const now = performance.now();
+    const k = seen.current;
+    const place = world.chunkId, tier = graphics.tier, ambience = graphics.ambience, version = world.getEntitiesVersion();
+    if (place !== k.place || tier !== k.tier || ambience !== k.ambience || post !== k.post) {
+      k.place = place;
+      k.tier = tier;
+      k.ambience = ambience;
+      k.post = post;
+      requestPass();
+    }
+    // Cada cambio del lugar (su foto al llegar, sobre todo) trae cosas que montar: se espera a que pasen.
+    if (version !== k.version) {
+      k.version = version;
+      k.changed = now;
+    }
+    if (!passDue(now) || !world.walkable || !placeMounted.current || loading.pending > 0 || now - loading.last < PASS_CALM_MS || now - k.changed < PASS_CALM_MS) return;
+    runPass(gl as unknown as WarmRenderer, scene, camera, post);
+  });
+  return null;
+}
+
+/**
+ * Mientras esté montado no se dibuja nada (el lienzo se queda como estaba). Sin dibujar tampoco se
+ * ponen al día las matrices del mundo (lo hace el renderizador): se hace aquí, para quien las lea.
+ */
+function Hold() {
+  useFrame(({ scene, camera }) => {
+    scene.updateMatrixWorld();
+    if (camera.parent === null) camera.updateMatrixWorld();
+  }, 1);
+  return null;
+}
+
+/** Lo más que se espera sin dibujar al post-proceso (ms): si su módulo no llega, se dibuja sin él. */
+const EFFECTS_WAIT_MS = 6000;
+
+/**
+ * Con post-proceso, hasta que llega su módulo (se descarga aparte): sin esto, esas primeras imágenes
+ * se pintaban directamente en el lienzo, que es otra variante de cada shader, y todo lo que se veía
+ * se compilaba dos veces (esperando: en Windows, ~0,3 s cada material con luces).
+ */
+function HoldForEffects() {
+  const [hold, setHold] = useState(true);
+  useEffect(() => {
+    const done = warmHold();
+    const id = setTimeout(() => {
+      done();
+      setHold(false);
+    }, EFFECTS_WAIT_MS);
+    return () => {
+      clearTimeout(id);
+      done();
+    };
+  }, []);
+  return hold ? <Hold /> : null;
+}
+
+/**
+ * Con la pantalla de carga puesta no se dibuja hasta que el lugar está preparado (su foto, sus
+ * modelos y el repaso general: world/warm.ts). Nadie ve esas imágenes, y dibujarlas es compilar cada
+ * shader esperando, uno tras otro y con la página congelada (y, antes de la foto del lugar, para unas
+ * luces que no son las suyas); sin dibujar, la gráfica los compila todos a la vez y nadie espera. La
+ * pantalla de carga tiene su plazo (splash.ts): pase lo que pase, al quitarse se dibuja. Mientras
+ * dura no se monta el post-proceso (dibuja por su cuenta).
+ */
+function useSplashHold(): boolean {
+  const gl = useThree((s) => s.gl);
+  // Solo donde la gráfica compila aparte (KHR_parallel_shader_compile). Sin eso no hay nada que
+  // ganar: no dibujar sería dejar para el final lo que se iba compilando mientras llegaban las descargas.
+  const [hold, setHold] = useState(() => splashActive() && gl.extensions.has("KHR_parallel_shader_compile"));
+  useFrame(() => {
+    if (hold && (!splashActive() || gl.xr.isPresenting || (world.walkable && warmPasses() > 0))) setHold(false);
+  });
+  return hold;
+}
+
+/**
+ * ¿Está montado lo del lugar (entidades, portales, actividades)? Va dentro de su `Suspense`: mientras
+ * algo de ahí espera (la fuente de los carteles, que no pasa por el gestor de cargas), React no monta
+ * nada de lo demás, y un repaso general hecho entonces repasaría una escena vacía.
+ */
+const placeMounted = { current: false };
+function PlaceMounted() {
+  useLayoutEffect(() => {
+    placeMounted.current = true;
+    return () => {
+      placeMounted.current = false;
+    };
+  }, []);
   return null;
 }
 
@@ -490,10 +653,13 @@ function Scene({ active }: { active: boolean }) {
   // Con post-proceso la foto del cielo va en su esfera (PhotoSky): como fondo de la escena, el mapeo
   // de tonos del final la apagaba. Sin él (gafas, móviles), el fondo de siempre.
   const skyDome = f.post && !g.inXR;
+  const holding = useSplashHold();
   return (
     <>
       <XRWatcher />
       <SplashWatcher />
+      {holding && <Hold />}
+      <WarmPass post={f.post && !g.inXR} />
       {import.meta.env.DEV && <DevStats />}
       <FpsGuard />
       {daySky && !skyDome ? <primitive key="sky" attach="background" object={daySky.tex} /> : <color key="color" attach="background" args={[sky.fog]} />}
@@ -524,7 +690,7 @@ function Scene({ active }: { active: boolean }) {
       )}
       <Lighting profile={profile} features={lightFeatures} />
       {/* La sonda de reflejos es de la plaza: en los distritos se rehacía al cargar lo cercano al andar y los reflejos del suelo parpadeaban. */}
-      <Environment ambience={ambience} profile={profile} probe={inPlaza ? f.probe : 0} sky={dayEnv} />
+      <Environment ambience={ambience} profile={profile} probe={inPlaza && f.probe} sky={dayEnv} />
       {/* Los textos cargan su fuente de forma asíncrona: que nunca bloqueen la escena ni el panel. */}
       <Suspense fallback={null}>
         <Entities features={f} ambience={ambience} />
@@ -532,6 +698,7 @@ function Scene({ active }: { active: boolean }) {
         {!inNexo && <Activities />}
         {!inNexo && <LootChests />}
         <Avatars />
+        <PlaceMounted />
       </Suspense>
       <Player active={active} />
       {!inNexo && <PeopleFx />}
@@ -541,8 +708,8 @@ function Scene({ active }: { active: boolean }) {
       <PhotoTaker />
       <Recorder fps={f.clipFps} />
       <MaterialClock />
-      {f.post && !g.inXR && (
-        <Suspense fallback={null}>
+      {f.post && !g.inXR && !holding && (
+        <Suspense fallback={<HoldForEffects />}>
           <Effects features={f} ambience={ambience} />
         </Suspense>
       )}
@@ -591,6 +758,8 @@ export function World({ active, paused = false }: { active: boolean; paused?: bo
       // dibuja (la GPU es para lo que se ve).
       frameloop={paused || covered ? "never" : "always"}
       camera={{ fov: 70, near: 0.1, far: 400, position: [32, 14, 66] }}
+      // El mapeo de tonos de pintar en el lienzo, antes de que el post-proceso lo quite (world/warm.ts).
+      onCreated={({ gl }) => setDirectTone(gl.toneMapping)}
     >
       <XR store={xrStore}>
         <Scene active={active} />

@@ -9,7 +9,8 @@ import { prepare, type WarmRenderer } from "./warm";
 
 /**
  * ¿Están preparados estos modelos? Mientras no, quien lo usa sigue enseñando lo que tuviera (o nada).
- * `post`: hay post-proceso (`features.post`). En las gafas, siempre preparados.
+ * `post`: hay post-proceso (`features.post`). En las gafas, siempre preparados. Una lista vacía no
+ * se prepara (aún no hay modelo).
  */
 function useReady(objects: readonly THREE.Object3D[], post: boolean): readonly THREE.Object3D[] | null {
   const gl = useThree((s) => s.gl);
@@ -17,6 +18,7 @@ function useReady(objects: readonly THREE.Object3D[], post: boolean): readonly T
   const get = useThree((s) => s.get);
   const [ready, setReady] = useState<readonly THREE.Object3D[] | null>(null);
   useLayoutEffect(() => {
+    if (!objects.length) return;
     const w = gl as unknown as WarmRenderer;
     if (w.xr.isPresenting) {
       setReady(objects);
@@ -42,4 +44,15 @@ export function useWarmed<T extends THREE.Object3D>(object: T, post: boolean): T
  */
 export function useWarmedAll(objects: readonly THREE.Object3D[], post: boolean): boolean {
   return useReady(objects, post) === objects;
+}
+
+const NONE: readonly THREE.Object3D[] = [];
+
+/**
+ * ¿Está preparado justo este? (Un personaje: mientras no, se ve su muñeco de respaldo; el anterior
+ * ya no existe.) Con null (aún cargando), no.
+ */
+export function useWarmedNow(object: THREE.Object3D | null, post: boolean): boolean {
+  const list = useMemo(() => (object ? [object] : NONE), [object]);
+  return useReady(list, post) === list && object !== null;
 }

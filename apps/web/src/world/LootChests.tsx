@@ -20,6 +20,7 @@ import { useGraphics } from "./graphics";
 import { lightweight } from "./materials";
 import { ARMS } from "./people/arms";
 import { WeaponModel } from "./people/HeldWeapon";
+import { useWarmedAll } from "./useWarmed";
 
 /** Dónde va la bisagra de la tapa respecto a la caja (m; la imprime tools/models/library/blasters.mjs). */
 const LID_HINGE: [number, number, number] = [0.229, 0.189, 0];
@@ -78,6 +79,9 @@ function LootChest({ chest }: { chest: Chest }) {
   const w = useWeapons();
   const body = usePiece("loot_crate", f.pbr, f.lod === "light");
   const lid = usePiece("loot_crate_lid", f.pbr, f.lod === "light");
+  // Las dos piezas entran a la vez, con sus shaders compilados (world/warm.ts).
+  const parts = useMemo(() => [body, lid], [body, lid]);
+  const ready = useWarmedAll(parts, f.post);
   const root = useRef<THREE.Group>(null);
   const lidRef = useRef<THREE.Group>(null);
   const prize = useRef<THREE.Group>(null);
@@ -116,10 +120,8 @@ function LootChest({ chest }: { chest: Chest }) {
 
   return (
     <group ref={root} position={[x, y + LIFT, z]}>
-      <primitive object={body} />
-      <group ref={lidRef} position={LID_HINGE}>
-        <primitive object={lid} />
-      </group>
+      {ready && <primitive object={body} />}
+      <group ref={lidRef} position={LID_HINGE}>{ready && <primitive object={lid} />}</group>
       <group ref={prize} visible={false}>
         {loot && (
           // Centrada (gira sobre sí misma) y de un metro más o menos, sea cual sea.

@@ -15,6 +15,13 @@ export type AmbiencePref = "auto" | Ambience;
 
 export const TIERS: Tier[] = ["low", "medium", "high", "ultra"];
 
+/**
+ * Lo que mide (px por cara) cada mapa de entorno: el estudio, el cielo de día y la foto de la sonda.
+ * Three.js lo mete en cada shader con brillo: si uno midiera distinto, al pasar de uno a otro se
+ * recompilarían todos los materiales, con la página esperando (world/warm.ts). Todos, lo mismo.
+ */
+export const ENV_SIZE = 256;
+
 /** Qué hace cada nivel. Una sola tabla: si algo cambia, cambia aquí. */
 export interface Features {
   dpr: [number, number];
@@ -30,8 +37,8 @@ export interface Features {
   bloom: boolean;
   ao: boolean;
   shadows: 0 | 1024 | 2048;
-  /** Resolución de la sonda de reflejos de la propia plaza (0 = sin sonda). */
-  probe: 0 | 128 | 256;
+  /** Sonda de reflejos: una foto de la propia plaza como mapa de entorno (a `ENV_SIZE`). */
+  probe: boolean;
   /** Luces puntuales de farolas y neones (light@1). */
   pointLights: boolean;
   /** Sin luces puntuales: charco de luz pintado en el suelo bajo cada light@1 (de noche). */
@@ -102,10 +109,10 @@ export interface Features {
 }
 
 export const FEATURES: Record<Tier, Features> = {
-  low: { dpr: [0.75, 1], antialias: false, pbr: false, post: false, bloom: false, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 48, flyerTris: 500, lod: "light", textures: 512, normalMaps: false, avatarFill: true, nexoCity: 0.5, pedestrians: 3, traffic: 8, crowd: 5, residents: 2, rain: 900, ragdolls: 2, springs: 5, shots: 8, clipFps: 24 },
-  medium: { dpr: [1, 1.5], antialias: true, pbr: true, post: true, bloom: true, ao: false, shadows: 0, probe: 0, pointLights: false, lightPools: true, skyline: 96, flyerTris: 900, lod: "light", textures: 512, normalMaps: true, avatarFill: true, nexoCity: 0.75, pedestrians: 5, traffic: 14, crowd: 8, residents: 3, rain: 1600, ragdolls: 3, springs: 12, shots: 12, clipFps: 30 },
-  high: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: false, shadows: 1024, probe: 128, pointLights: true, lightPools: false, skyline: 150, flyerTris: 1800, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1, pedestrians: 7, traffic: 22, crowd: 12, residents: 4, rain: 3200, ragdolls: 5, springs: 25, shots: 20, clipFps: 30 },
-  ultra: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: true, shadows: 2048, probe: 256, pointLights: true, lightPools: false, skyline: 220, flyerTris: 2700, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1, pedestrians: 9, traffic: 30, crowd: 16, residents: 6, rain: 4800, ragdolls: 8, springs: 40, shots: 28, clipFps: 60 },
+  low: { dpr: [0.75, 1], antialias: false, pbr: false, post: false, bloom: false, ao: false, shadows: 0, probe: false, pointLights: false, lightPools: true, skyline: 48, flyerTris: 500, lod: "light", textures: 512, normalMaps: false, avatarFill: true, nexoCity: 0.5, pedestrians: 3, traffic: 8, crowd: 5, residents: 2, rain: 900, ragdolls: 2, springs: 5, shots: 8, clipFps: 24 },
+  medium: { dpr: [1, 1.5], antialias: true, pbr: true, post: true, bloom: true, ao: false, shadows: 0, probe: false, pointLights: false, lightPools: true, skyline: 96, flyerTris: 900, lod: "light", textures: 512, normalMaps: true, avatarFill: true, nexoCity: 0.75, pedestrians: 5, traffic: 14, crowd: 8, residents: 3, rain: 1600, ragdolls: 3, springs: 12, shots: 12, clipFps: 30 },
+  high: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: false, shadows: 1024, probe: true, pointLights: true, lightPools: false, skyline: 150, flyerTris: 1800, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1, pedestrians: 7, traffic: 22, crowd: 12, residents: 4, rain: 3200, ragdolls: 5, springs: 25, shots: 20, clipFps: 30 },
+  ultra: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: true, shadows: 2048, probe: true, pointLights: true, lightPools: false, skyline: 220, flyerTris: 2700, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1, pedestrians: 9, traffic: 30, crowd: 16, residents: 6, rain: 4800, ragdolls: 8, springs: 40, shots: 28, clipFps: 60 },
 };
 
 /* ------------------------------------------------------------------ */
@@ -185,7 +192,7 @@ function portableClamp(f: Features, xr: boolean): Features {
     bloom: false,
     ao: false,
     shadows: 0,
-    probe: 0,
+    probe: false,
     pointLights: false,
     lightPools: true,
     skyline: Math.min(f.skyline, 96),
