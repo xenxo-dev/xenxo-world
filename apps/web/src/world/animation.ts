@@ -275,6 +275,7 @@ interface Layer {
 }
 
 const _q = new THREE.Quaternion();
+const _Z = new THREE.Vector3(0, 0, 1);
 
 export class VrmAnimator {
   private mixer: THREE.AnimationMixer;
@@ -305,6 +306,13 @@ export class VrmAnimator {
   private leap = new Leap();
   private cycle = Math.random();
   private readonly _w: Record<string, number> = {};
+  /**
+   * Con falda o túnica larga (springs.ts → `cloth`), de pie se juntan un poco los pies (rad que se
+   * cierra cada pierna): el reposo de la captura es de piernas abiertas y la prenda se abría como
+   * una tienda. Lo pone quien carga el personaje.
+   */
+  narrow = 0;
+  private idleW = 0;
   /** Los dedos (nodo normalizado y su giro de ahora, que va hacia la mano de base). */
   private fingers: { node: THREE.Object3D; bone: string; now: THREE.Quaternion }[] | null = null;
   private readonly _dur: Record<string, number> = {};
@@ -487,9 +495,11 @@ export class VrmAnimator {
       this.weights.set(name, w);
       sum += w;
     }
+    this.idleW = 0;
     for (const [name, action] of this.actions) {
       const w = sum > 0.001 ? this.weights.get(name)! / sum : name === "idle" ? 1 : 0;
       action.setEffectiveWeight(w);
+      if (name === "idle") this.idleW = w;
     }
     // Andar, trotar y correr, con la misma fase, que avanza con lo que se avanza sobre el suelo.
     for (const name of STRIDES) {
@@ -524,6 +534,7 @@ export class VrmAnimator {
       }
     }
     this.mixer.update(dt);
+    if (this.narrow > 0 && this.idleW > 0.01) this.narrowStance(this.narrow * this.idleW);
     this.handBase(dt, guard || (pkAction ? FIST_CLIPS.has(shot!.clip) : !!(live && known && FIST_CLIPS.has(known.clip))) ? "fist" : pkAction && OPEN_CLIPS.has(shot!.clip) ? "open" : "relaxed", speed);
 
     // Capas de arriba: los puños en guardia al andar y el gesto que sigue al moverse.
@@ -535,6 +546,17 @@ export class VrmAnimator {
     this.applyGesture(dt, gesture ?? null);
 
     this.rig.apply(dt, fx ?? null);
+  }
+
+  /** Los pies algo más juntos (de pie con falda larga): cada muslo hacia dentro y el pie, plano. */
+  private narrowStance(a: number) {
+    const h = this.vrm.humanoid;
+    for (const [leg, foot, sign] of [["leftUpperLeg", "leftFoot", -1], ["rightUpperLeg", "rightFoot", 1]] as const) {
+      const l = h.getNormalizedBoneNode(leg), f = h.getNormalizedBoneNode(foot);
+      if (!l || !f) continue;
+      l.quaternion.premultiply(_q.setFromAxisAngle(_Z, sign * a));
+      f.quaternion.premultiply(_q.setFromAxisAngle(_Z, -sign * a));
+    }
   }
 
   /**

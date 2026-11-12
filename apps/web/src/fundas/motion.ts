@@ -7,7 +7,7 @@
 import * as THREE from "three";
 import { VRM, VRMHumanoid, type VRM1Meta, type VRMHumanBones } from "@pixiv/three-vrm";
 import { VrmAnimator } from "../world/animation";
-import { addSprings, springBodyOf } from "../world/springs";
+import { addSprings, SKIRT_STANCE, springBodyOf } from "../world/springs";
 import type { Recipe } from "./recipe";
 import { buildSkinned, kitData } from "./three";
 
@@ -89,6 +89,7 @@ export async function buildMoving(r: Recipe): Promise<MovingFunda> {
     console.warn("[xenxo] sin física en el pelo", e);
   }
   const animator = new VrmAnimator(vrm);
+  if (springs?.cloth) animator.narrow = SKIRT_STANCE;
   let t = 0;
   let last: Act | null = null;
   return {

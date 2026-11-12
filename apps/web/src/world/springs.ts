@@ -81,9 +81,12 @@ const HAIR = { sectors: 6, seg: 0.085, maxJoints: 5, min: 0.06, stiffness: 1.35,
  * El vaivén de la ropa: un péndulo colgado de la cadera, de `length` (m, en el cuerpo de referencia),
  * tieso y frenado (es tela pesada, no un mechón): unos grados al arrancar, nada en reposo.
  */
-const CLOTH = { length: 0.55, stiffness: 20, gravity: 0, drag: 0.55 };
+/** Cuánto se cierra cada pierna de pie con falda o túnica larga (rad: unos 6°; animation.ts → narrow). */
+export const SKIRT_STANCE = 0.11;
+const CLOTH = { length: 0.55, stiffness: 20, gravity: 0, drag: 0.55, maxAngle: (9 * Math.PI) / 180 };
 
 const _m = new THREE.Matrix4();
+const _rest = new THREE.Quaternion();
 const _v = new THREE.Vector3();
 const _w = new THREE.Vector3();
 
@@ -194,8 +197,9 @@ export function addSprings(root: THREE.Object3D, body: SpringBody): Springs | nu
   // La ropa suelta: el péndulo de la cadera, y lo que la prenda pesó con la cadera, con él.
   const hipsIdx = skel.bones.indexOf(body.hips as THREE.Bone);
   const swayIdx = base + newBones.length;
+  let sway: THREE.Bone | null = null;
   if (cloth.length && hipsIdx >= 0) {
-    const sway = new THREE.Bone();
+    sway = new THREE.Bone();
     sway.name = "cloth_sway";
     body.hips.add(sway); // en la cadera, sin moverlo: en reposo, la cadera misma
     const tip = new THREE.Object3D();
@@ -225,7 +229,14 @@ export function addSprings(root: THREE.Object3D, body: SpringBody): Springs | nu
     hair: hairChains,
     cloth: cloth.length && hipsIdx >= 0 ? cloth.length : 0,
     joints,
-    update: (dt) => manager.update(dt),
+    update: (dt) => {
+      manager.update(dt);
+      // El vaivén, con tope: un tirón (un frame largo, un empujón, un salto de sitio) no abre la prenda.
+      if (sway) {
+        const a = 2 * Math.acos(Math.min(1, Math.abs(sway.quaternion.w)));
+        if (a > CLOTH.maxAngle) sway.quaternion.slerp(_rest, 1 - CLOTH.maxAngle / a);
+      }
+    },
     reset: () => manager.reset(),
   };
 }
@@ -320,6 +331,7 @@ function buildChains(pos: Float32Array, center: THREE.Vector3, rootY: number, se
 }
 
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
+
 
 /**
  * ¿Cuelga suelta por debajo de la cadera (falda, vestido, túnica, faldón)? Lo suelto cruza entre las

@@ -12,7 +12,7 @@ import { VrmAnimator } from "./animation";
 import type { Rig } from "./people/rig";
 import type { Motion } from "./motion";
 import { graphics } from "./graphics";
-import { addSprings, springBodyOf } from "./springs";
+import { addSprings, SKIRT_STANCE, springBodyOf } from "./springs";
 
 export const AVATAR_HEIGHT = 1.75;
 
@@ -207,6 +207,8 @@ function fromVrm(vrm: VRM, scene: THREE.Group, decor: boolean): LoadedAvatar {
     vrm.scene.add(proxy);
   }
   const animator = new VrmAnimator(vrm);
+  // Con falda o túnica larga, de pie con los pies algo más juntos (animation.ts → narrow).
+  if (springs?.cloth) animator.narrow = SKIRT_STANCE;
   let blinkIn = 2 + Math.random() * 3;
   let blinkT = -1;
 
@@ -264,7 +266,11 @@ function fromVrm(vrm: VRM, scene: THREE.Group, decor: boolean): LoadedAvatar {
           if (springIdle > 0.5 || !(springAt.distanceToSquared(_sp) < 9)) springs.reset();
           springs.update(dt);
           springIdle = 0;
-        } else springIdle += dt;
+        } else {
+          // Al dejar de moverlos, en reposo (si no, el pelo o la ropa se quedaban a medio vaivén).
+          if (springIdle === 0) springs.reset();
+          springIdle += dt;
+        }
         springAt.copy(_sp);
       }
     },
