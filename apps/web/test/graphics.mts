@@ -28,6 +28,13 @@ if (!DEVICE) {
     return [asked, t];
   };
 
+  console.log("Qué luces son de verdad");
+  {
+    const { placeOwned } = await import("../src/world/nearby.ts");
+    check(placeOwned("system") && placeOwned("dst_abc123"), "las del lugar (el sistema o la ficha de un distrito): son siempre las mismas mientras se está en él");
+    check(!placeOwned("prj_abc123") && !placeOwned("usr_abc123") && !placeOwned(""), "las de la gente (parcelas, zona de pruebas), no: cambiarían cuántas hay y, con ello, todos los shaders del lugar");
+  }
+
   console.log("Cuándo se baja un nivel");
   {
     // Lo que fallaba: tras unos segundos yendo bien, el vigilante de antes dejaba de mirar para siempre.

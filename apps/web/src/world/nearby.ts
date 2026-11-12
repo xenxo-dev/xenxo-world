@@ -17,6 +17,18 @@ let near = new Set<string>();
 let version = 0;
 const listeners = new Set<() => void>();
 
+/**
+ * ¿Es de quien hace el lugar (el sistema, o la ficha de un distrito de la comunidad)? Sus luces son
+ * siempre las mismas mientras se está en él. Las de la gente (parcelas, zona de pruebas) van y vienen,
+ * y cuántas luces puntuales hay va dentro de cada shader: con cada una que apareciera o se fuera se
+ * recompilarían todos los materiales del lugar, con la página parada, a todo el que estuviera allí.
+ * Por eso solo las del lugar son luces de verdad (Entities.tsx); las demás se pintan como un charco de
+ * luz en el suelo, en todos los niveles.
+ */
+export function placeOwned(owner: string): boolean {
+  return owner === "system" || owner.startsWith("dst_");
+}
+
 /** ¿Se dibuja esta entidad? En lugares pequeños, siempre. */
 export function isNear(entityId: string): boolean {
   return !world.big || near.has(entityId);
@@ -28,7 +40,9 @@ function recompute() {
   let changed = false;
   for (const e of world.entities.values()) {
     const t = e.components["transform@1"] as { p: number[]; parent: string | null } | undefined;
-    if (e.owner === "system" || !t || t.parent || !e.components["mesh@1"]) {
+    // Lo del sistema, siempre; y las luces de la ficha de un distrito (si no, al alejarse cambiaría
+    // cuántas hay: placeOwned).
+    if (e.owner === "system" || !t || t.parent || !e.components["mesh@1"] || (e.components["light@1"] && placeOwned(e.owner))) {
       next.add(e.entity_id);
       continue;
     }

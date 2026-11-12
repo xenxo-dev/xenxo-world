@@ -1,4 +1,4 @@
-import { isNear, useNearby } from "./nearby";
+import { isNear, placeOwned, useNearby } from "./nearby";
 import { Component, memo, Suspense, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { Billboard, Text, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
@@ -180,7 +180,7 @@ function glow(ambience: Ambience, bloom: boolean, dim = 1) {
 
 /**
  * En el nexo hay mucho neón junto (faro, anillos, líneas, pasarelas): con bloom, un 32 % menos de
- * brillo para que los tubos no se quemen en blanco ni tapen la panorámica del fondo.
+ * brillo para que los tubos no se quemen en blanco ni tapen la ciudad del fondo.
  */
 const NEXO_DIM = 0.68;
 
@@ -275,8 +275,10 @@ const EntityView = memo(function EntityView({
   const lod = mesh.success ? (features.lod === "detailed" ? mesh.data.lods[0] : mesh.data.lods[mesh.data.lods.length - 1]) : undefined;
   const shadows = features.shadows > 0;
   const lit = light.success && (light.data.when === "always" || ambience === "night");
-  const showLight = lit && features.pointLights;
-  const showPool = lit && features.lightPools && p[1] - POOL_FLOOR_Y < POOL_MAX_HEIGHT;
+  // Luz de verdad, solo las del lugar; las de la gente, un charco de luz en el suelo (nearby.ts: placeOwned).
+  const real = features.pointLights && placeOwned(entity.owner);
+  const showLight = lit && real;
+  const showPool = lit && (features.lightPools || (features.pointLights && !real)) && p[1] - POOL_FLOOR_Y < POOL_MAX_HEIGHT;
   const holo = hologram.success ? holoOf(hologram.data.color ?? "#4fe3ff", hologram.data.opacity) : null;
   // Colisión con la forma del modelo (su nivel más ligero), si la entidad lo pide.
   const collider = ColliderV1.safeParse(entity.components["collider@1"]);

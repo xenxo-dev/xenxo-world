@@ -7,9 +7,6 @@
   "bin": {
     "xenxo-district": "dist/xenxo-district.mjs"
   },
-  "exports": {
-    ".": "./src/check.ts"
-  },
   "files": [
     "dist",
     "README.md",

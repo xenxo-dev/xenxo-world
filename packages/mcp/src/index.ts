@@ -197,7 +197,7 @@ server.registerTool(
   "place_light",
   {
     title: "Colocar una luz",
-    description: `Places a point light (only ${"one"} per parcel; light clients may ignore it). ` + COORDS,
+    description: `Places a light (only ${"one"} per parcel). Visitors see it as a glow on the ground around it; it does not light your models (use a neon material for things that must shine). ` + COORDS,
     inputSchema: {
       position: Pos,
       color: Color,

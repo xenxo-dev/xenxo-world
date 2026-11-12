@@ -3,7 +3,7 @@
  * revisarlos. La carpeta se comprueba aquí con el mismo kit (@xenxo/district-kit) antes de subir
  * nada; el servidor lo vuelve a comprobar todo.
  */
-import { checkDistrictFolder, manifestFiles, resolveManifest, type KitProblem, type Lang } from "@xenxo/district-kit";
+import { checkDistrictFolder, manifestFiles, resolveManifest, type KitProblem, type Lang } from "@xenxo/district-kit/src/check";
 import { sha256Hash } from "@xenxo/assets";
 import type { DistrictSubmission } from "@xenxo/protocol";
 import { authedApi } from "./account";
