@@ -352,8 +352,8 @@ function Environment({ ambience, profile, probe, sky }: { ambience: Ambience; pr
 /* Entrada, VR y rendimiento                                            */
 /* ------------------------------------------------------------------ */
 
-/** Lo que se dedica a subir texturas en cada imagen mientras está la pantalla de carga (ms). */
-const SPLASH_UPLOAD_MS = 24;
+/** Lo que se dedica a subir texturas en cada imagen mientras no se dibuja (la pantalla de carga, un viaje) (ms). */
+const HELD_UPLOAD_MS = 24;
 
 /** Reloj de los materiales animados (agua), anisotropía máxima de la GPU y subida de texturas. */
 function MaterialClock() {
@@ -366,8 +366,9 @@ function MaterialClock() {
   }, [gl]);
   useFrame((s) => {
     tickMaterials(s.clock.elapsedTime);
-    // Con la pantalla de carga puesta nadie nota una imagen larga: suben más deprisa.
-    tickWarm(undefined, splashActive() ? SPLASH_UPLOAD_MS : UPLOAD_BUDGET_MS);
+    // Con la pantalla de carga puesta o llegando a un lugar (aún no se dibuja) nadie nota una imagen
+    // larga: suben más deprisa.
+    tickWarm(undefined, splashActive() || world.frozen ? HELD_UPLOAD_MS : UPLOAD_BUDGET_MS);
   });
   return null;
 }

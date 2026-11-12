@@ -10,6 +10,7 @@ import { fitsHere, visitorDevice } from "../games/device";
 import { gameName, openGame } from "../games/state";
 import { ReportButton } from "../panel/ReportButton";
 import { categoryColor, usePortalHud } from "../world/portals-state";
+import { splashActive } from "../splash";
 
 const box = "rounded-2xl border border-cal/10 bg-noche/85 backdrop-blur";
 
@@ -117,7 +118,8 @@ export function TravelToast() {
     return () => clearTimeout(id);
   }, [tr]);
   const recent = tr && Date.now() - tr.at <= 2000 ? tr : null;
-  if (!recent && !frozen) return null;
+  // Al entrar (con la pantalla de carga puesta) también se espera sin dibujar, pero eso no es un viaje.
+  if (!recent && !(frozen && !splashActive())) return null;
   const name = recent?.title || placeName(place);
   return (
     <div className={`pointer-events-none absolute left-1/2 top-1/3 -translate-x-1/2 px-5 py-3 text-lg text-cal ${box}`}>
