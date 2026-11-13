@@ -115,6 +115,8 @@ export const npcs = {
   knockShot: new Uint8Array(MAX_NPC),
   /** Por hueco: en el suelo (knock.ts). A quien está en el suelo no se le vuelve a dar. */
   down: new Uint8Array(MAX_NPC),
+  /** Por hueco: en una acción en pareja contigo (people/pair.ts): no es sólido para ti. */
+  ghost: new Uint8Array(MAX_NPC),
 };
 /**
  * Las demás personas (multijugador), según su última pose: pies x, y, z. Las escribe
@@ -229,7 +231,7 @@ function pushFromPeople(p: { x: number; z: number }, r: number, feet: number, he
   for (let k = 0; k < total; k++) {
     const i = npcAt(k);
     const ny = npcs.pos[i * 3 + 1]!;
-    if (ny > head || ny + 1.75 < feet - 0.6) continue;
+    if (ny > head || ny + 1.75 < feet - 0.6 || npcs.ghost[i]) continue;
     const dx = p.x + mx - npcs.pos[i * 3]!;
     const dz = p.z + mz - npcs.pos[i * 3 + 2]!;
     const d2 = dx * dx + dz * dz;

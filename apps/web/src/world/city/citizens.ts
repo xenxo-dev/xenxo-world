@@ -31,9 +31,9 @@
 import * as THREE from "three";
 import { PAIR_RANGE, type NpcHitKind, type NpcSnap, type PairAction } from "@xenxo/protocol";
 import { createMotion, type Motion } from "../motion";
-import { createFx } from "../people/rig";
+import { createFx, type PersonFx } from "../people/rig";
 import { PAIR, pairTargets } from "../people/pair";
-import { remoteFeet } from "../people/where";
+import { mine, remoteFeet, remoteFx } from "../people/where";
 import type { Body } from "../locomotion";
 import { clearLine, faceYaw, findPath, nearestNode, rng, seedOf, type CityNav, type Poi, type PoiKind } from "./nav";
 
@@ -137,7 +137,7 @@ export interface CityEnv {
   /** Tu parte de una acción en pareja con un ciudadano (selfPeople.startLocalPair). */
   pair(kind: PairAction, key: string): void;
   /** Los huecos de la gente (collision.ts → npcs): dónde están y los golpes que les llegan. */
-  npcs: { count: number; pos: Float32Array; knock: Float32Array; knockHead?: Uint8Array; knockShot?: Uint8Array };
+  npcs: { count: number; pos: Float32Array; knock: Float32Array; knockHead?: Uint8Array; knockShot?: Uint8Array; ghost?: Uint8Array };
   /** La red: sin ella, cada cliente los suyos. */
   link?: CityLink;
 }
@@ -526,13 +526,17 @@ export class CitySim {
 
   /** Al entrar en el distrito: que se les pueda encontrar (parejas, where.ts). */
   attach() {
-    for (const c of this.cast) remoteFeet.set(c.key, c.feet);
+    for (const c of this.cast) {
+      remoteFeet.set(c.key, c.feet);
+      remoteFx.set(c.key, c.motion.fx!);
+    }
   }
 
   /** Al irse (se puede volver a `attach`: React monta dos veces en desarrollo). */
   detach() {
     for (const c of this.cast) {
       remoteFeet.delete(c.key);
+      remoteFx.delete(c.key);
       if (c.knocked) this.env.knockReset(c.motion);
       c.knocked = false;
     }
@@ -930,7 +934,8 @@ export class CitySim {
         const p = now.w === myId ? me : now.w ? this.whereIs(now.w) : null;
         if (p) {
           _me.set(p.x, p.y, p.z);
-          pairTargets(now.q, c.t, body.x, body.y, body.z, _me, m.fx!);
+          // Contigo, con tu reloj (where.ts → `mine`): su estado llega con retraso.
+          pairTargets(now.q, mine.with === c.key ? mine.t : c.t, body.x, body.y, body.z, _me, m.fx!, this.fxOf(now.w === myId ? "me" : (now.w ?? "")));
         }
         if (now.w === myId && !c.pairMine) {
           c.pairMine = true;
@@ -1342,7 +1347,7 @@ export class CitySim {
         if (p) {
           _me.set(p.x, p.y, p.z);
           face = faceYaw(p.x - b.x, p.z - b.z);
-          pairTargets(c.pairKind, c.t, b.x, b.y, b.z, _me, m.fx!);
+          pairTargets(c.pairKind, mine.with === c.key ? mine.t : c.t, b.x, b.y, b.z, _me, m.fx!, this.fxOf(c.who));
         }
         m.emote = c.pairKind;
         if (c.t > c.dur || !p) {
@@ -1711,6 +1716,13 @@ export class CitySim {
   private turn(c: Citizen, want: number, dt: number, rate: number) {
     const d = wrap(want - c.yaw);
     c.yaw += Math.max(-rate * dt, Math.min(rate * dt, d));
+  }
+
+  /** Lo que el esqueleto de su pareja sabe de sí mismo (lo que mide), para las acciones en pareja. */
+  private fxOf(who: string): PersonFx | null {
+    if (!who || who === "fight") return null;
+    if (who === "me" || who === this.link?.me()) return mine.fx;
+    return remoteFx.get(who) ?? null;
   }
 
   private whereIs(who: string): { x: number; y: number; z: number; yaw: number } | null {
@@ -2216,6 +2228,8 @@ export class CitySim {
       npcs.pos[i * 3] = g.position.x;
       npcs.pos[i * 3 + 1] = g.position.y;
       npcs.pos[i * 3 + 2] = g.position.z;
+      // En pareja contigo no es sólido para ti: un abrazo es más cerca que dos cuerpos.
+      if (npcs.ghost) npcs.ghost[i] = mine.with === c.key ? 1 : 0;
       count = Math.max(count, i + 1);
     }
     // Los huecos libres por debajo del último, fuera de todo (no chocan ni se les puede dar).

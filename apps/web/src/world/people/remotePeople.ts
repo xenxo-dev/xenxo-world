@@ -23,7 +23,7 @@ import { impact, thud } from "./fight-audio";
 import { loadRagdolls, ragdolls } from "./ragdoll";
 import { createFx, type Lying, type PersonFx } from "./rig";
 import { PAIR, pairTargets } from "./pair";
-import { remoteFeet } from "./where";
+import { mine, remoteFeet, remoteFx } from "./where";
 
 type Phase = "none" | "react" | "fall" | "ground" | "roll" | "rise" | "clipfall" | "cliprise";
 const REACTIONS = new Set(["hit_head", "hit_body", "hit_back", "hit_stagger", "hit_down", "get_up", "pk_fall", "pk_crash"]);
@@ -349,10 +349,20 @@ export class RemotePeople {
     }
   }
 
-  /** Su parte de una acción en pareja: empieza cuando su pose la empieza. */
+  /**
+   * Su parte de una acción en pareja: empieza cuando su pose la empieza. Si la hace contigo, sus manos
+   * van con tu reloj (where.ts → `mine`): su pose llega con retraso y, con el suyo, en tu pantalla sus
+   * manos llegaban tarde a las tuyas (chocar los cinco ni se tocaba).
+   */
   private pairFrame(dt: number, x: number, y: number, z: number, netEmote: string | null) {
     const p = this.pair;
     if (!p) return;
+    if (p.partner === world.sessionId && mine.with === this.id) {
+      p.on = true;
+      p.t = mine.t;
+      pairTargets(p.kind, p.t, x, y, z, _o.set(self.x, self.y, self.z), this.fx, mine.fx);
+      return;
+    }
     if (!p.on) {
       if (netEmote === p.kind) p.on = true;
       else {
@@ -369,7 +379,7 @@ export class RemotePeople {
       this.fx.look.w = this.fx.reachL.w = this.fx.reachR.w = 0;
       return;
     }
-    pairTargets(p.kind, p.t, x, y, z, where, this.fx);
+    pairTargets(p.kind, p.t, x, y, z, where, this.fx, p.partner === world.sessionId ? mine.fx : (remoteFx.get(p.partner) ?? null));
   }
 }
 

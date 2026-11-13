@@ -8,7 +8,7 @@ import { t } from "../i18n";
 import { BUBBLE_MS, chat, useChatVersion, useWorldVersion, world, type PoseSample } from "../net/world-store";
 import { Catchup, cursor, seek } from "../net/playout";
 import { people } from "../net/people-store";
-import { remoteFeet } from "./people/where";
+import { remoteFeet, remoteFx } from "./people/where";
 import { self } from "./self";
 import { RemotePeople, type RemoteDraw } from "./people/remotePeople";
 import { freezable, walkAmount } from "./avatar-model";
@@ -223,8 +223,10 @@ function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; n
     const r = new RemotePeople(sessionId);
     rp.current = r;
     motion.fx = r.fx;
+    remoteFx.set(sessionId, r.fx);
     return () => {
       r.dispose();
+      if (remoteFx.get(sessionId) === r.fx) remoteFx.delete(sessionId);
       if (rp.current === r) rp.current = null;
     };
   }, [sessionId, motion]);

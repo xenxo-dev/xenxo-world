@@ -10,7 +10,13 @@
  * - cada mano mira hacia donde tiene que mirar: saludar, con la palma hacia delante; encogerse de
  *   hombros y llamar con la mano, con la palma hacia arriba; empujar, con la palma hacia delante…;
  * - ningún brazo se retuerce: lo que gira el antebrazo con la mano y lo que se dobla la muñeca, en
- *   todos los fotogramas de todos los gestos, dentro de lo que puede un brazo.
+ *   todos los fotogramas de todos los gestos, dentro de lo que puede un brazo;
+ * - en pareja (chocar los cinco, darse la mano, abrazarse), con dos personajes de tamaños distintos:
+ *   la misma distancia desde los dos lados, las palmas que se tocan (de frente, sin atravesarse ni
+ *   quedarse cortas), en el abrazo cada palma apoyada en el tronco de la otra persona y, a cada lado,
+ *   un brazo encima del otro; ningún brazo atraviesa a la otra persona; y quien se acerca llega a su
+ *   distancia a tiempo y sin pasarse, a cualquier tasa de imágenes;
+ * - el teléfono queda en la mano derecha, junto a la oreja y con la pantalla hacia la cara.
  *
  *   npm run test:gestures -w @xenxo/web          (PRINT=1: además, dónde queda cada mano)
  */
@@ -137,8 +143,11 @@ class Posed {
   private node(b: string) {
     return this.vrm.humanoid.getNormalizedBoneNode(b as VRMHumanBoneName)!;
   }
+  /** En el mundo (las parejas) y no en el marco de su pecho. */
+  inWorld = false;
   /** Un punto o una dirección del mundo, en el marco del pecho (x a su izquierda, y arriba, z delante). */
   private toChest(v: THREE.Vector3, dir: boolean) {
+    if (this.inWorld) return v;
     const chest = this.node("upperChest") ?? this.node("chest");
     const q = chest.getWorldQuaternion(new THREE.Quaternion()).invert();
     if (!dir) v.sub(chest.getWorldPosition(new THREE.Vector3()));
@@ -319,6 +328,199 @@ for (const p of presets) {
   // Y en lo que no se tocan las palmas, el esqueleto no mueve nada.
   rig.touch = touchAt("wave", 0.6);
   check(rig.touch === 0, `${who}: saludar no junta las palmas`);
+}
+
+/* ------------------------------------------------------------------ */
+/* En pareja: chocar los cinco, darse la mano y abrazarse               */
+/* ------------------------------------------------------------------ */
+
+{
+  const { PAIR, pairGap, pairStep, pairTargets } = await import("../src/world/people/pair.ts");
+  const { BODY, createFx } = await import("../src/world/people/rig.ts");
+  const hashOf = (id: string) => presets.find((p) => p.id === id)!.hash;
+  // De tamaños distintos (iris es la más baja; leo y nora, de los más altos).
+  const PAIRS: [string, string][] = [["iris", "kai"], ["kai", "leo"], ["mar", "nora"], ["iris", "leo"]];
+  for (const [aId, bId] of PAIRS) {
+    if (process.env.PAIR && !process.env.PAIR.includes(aId)) continue;
+    for (const kind of ["high_five", "handshake", "hug"] as const) {
+      const A = await vrmOf(hashOf(aId)), B = await vrmOf(hashOf(bId));
+      for (const v of [A, B]) if (v.humanoid.normalizedHumanBonesRoot.parent !== v.scene) v.scene.add(v.humanoid.normalizedHumanBonesRoot);
+      const fxA = createFx(), fxB = createFx();
+      fxA.rig = new Rig(A, async () => null);
+      fxB.rig = new Rig(B, async () => null);
+      const sa = fxA.rig.size, sb = fxB.rig.size;
+      // A cada uno le sale la misma distancia (con lo que mide cada uno).
+      const gap = pairGap(kind, sa, sb);
+      check(Math.abs(gap - pairGap(kind, sb, sa)) < 1e-9, `${aId} y ${bId}, ${kind}: la misma distancia desde los dos lados (${cm(gap)})`);
+      B.scene.position.set(0, 0, gap);
+      B.scene.rotation.y = Math.PI;
+      A.scene.updateMatrixWorld(true);
+      B.scene.updateMatrixWorld(true);
+      const pa = new Posed(A), pb = new Posed(B);
+      pa.inWorld = pb.inWorld = true;
+      pa.play(kind);
+      pb.play(kind);
+      const posA = new THREE.Vector3(0, 0, 0), posB = new THREE.Vector3(0, 0, gap);
+      const until = kind === "high_five" ? 0.62 : kind === "handshake" ? 0.9 : 1.3;
+      for (let t = 0; t <= until + 1e-6; t += 1 / 60) {
+        pa.at(t);
+        pb.at(t);
+        pairTargets(kind, t, 0, 0, 0, posB, fxA, fxB);
+        pairTargets(kind, t, 0, 0, gap, posA, fxB, fxA);
+        fxA.rig.apply(1 / 60, fxA);
+        fxB.rig.apply(1 / 60, fxB);
+        A.humanoid.normalizedHumanBonesRoot.updateMatrixWorld(true);
+        B.humanoid.normalizedHumanBonesRoot.updateMatrixWorld(true);
+      }
+      const ra = pa.hand("right"), rb = pb.hand("right"), la = pa.hand("left"), lb = pb.hand("left");
+      const who = `${aId} y ${bId}`;
+      if (PRINT) {
+        console.log(`    ${who} ${kind} (a ${cm(gap)}): A der. palma ${f3(ra.palm)} normal ${f3(ra.normal)} dedos ${f3(ra.fingers)} · B der. palma ${f3(rb.palm)} normal ${f3(rb.normal)} dedos ${f3(rb.fingers)}`);
+        if (kind === "hug") console.log(`    ${who} hug: A izq. palma ${f3(la.palm)} normal ${f3(la.normal)} · B izq. palma ${f3(lb.palm)} normal ${f3(lb.normal)}`);
+      }
+      // Ningún brazo retorcido: lo que gira el antebrazo con la mano y lo que se dobla la muñeca.
+      let twist = 0, wrist = 0;
+      for (const [p, sides] of [[pa, kind === "hug" ? ["left", "right"] : ["right"]], [pb, kind === "hug" ? ["left", "right"] : ["right"]]] as const)
+        for (const side of sides) {
+          const a = armOf(p, side);
+          twist = Math.max(twist, Math.abs(a.twist));
+          wrist = Math.max(wrist, a.wrist);
+        }
+      check(twist < 150 * DEG && wrist < 70 * DEG, `${who}, ${kind}: ningún brazo se retuerce (antebrazo y mano ${deg(twist)}, muñeca ${deg(wrist)})`);
+      // Los brazos no atraviesan el tronco de la otra persona (de los hombros a la cintura, un óvalo de
+      // su ancho y de su grosor): del hombro al codo y del codo a la muñeca, punto a punto.
+      const inside = (p: Posed, other: typeof sa, oz: number, dir: number) => {
+        let worst = 0;
+        // Su tronco (lo que abulta por delante y por detrás, con la ropa), algo por dentro.
+        const ax = other.side * 0.9, az = ((other.front + other.back) / 2) * 0.85;
+        oz += dir * ((other.front - other.back) / 2);
+        for (const side of ["left", "right"] as const) {
+          const S = p.joint(`${side}UpperArm`), E = p.joint(`${side}LowerArm`), W = p.joint(`${side}Hand`);
+          for (const [a, b] of [[S, E], [E, W]] as const)
+            for (let i = 0; i <= 10; i++) {
+              const q = a.clone().lerp(b, i / 10);
+              if (q.y < other.shoulder - 0.45 || q.y > other.shoulder - 0.05) continue;
+              const e = Math.hypot(q.x / ax, (q.z - oz) / az);
+              if (e < 1) worst = Math.max(worst, (1 - e) * Math.min(ax, az));
+            }
+        }
+        return worst;
+      };
+      const through = Math.max(inside(pa, sb, gap, -1), inside(pb, sa, 0, 1));
+      check(through < 0.01, `${who}, ${kind}: ningún brazo atraviesa a la otra persona (${cm(through)} dentro)`);
+      if (kind === "high_five") {
+        const face = ra.normal.angleTo(rb.normal.clone().negate());
+        const axis = ra.normal.clone().sub(rb.normal).normalize();
+        const gapC = rb.palm.clone().sub(ra.palm).dot(axis);
+        const slide = rb.palm.clone().sub(ra.palm).addScaledVector(axis, -gapC).length();
+        check(face < 15 * DEG, `${who}, chocar los cinco: las palmas, una frente a la otra (${deg(face)} de diferencia)`);
+        check(gapC > 0.015 && gapC < 0.045 && slide < 0.03, `${who}, chocar los cinco: se tocan (de centro a centro ${cm(gapC)}, desplazadas ${cm(slide)})`);
+        check(ra.fingers.y > 0.8 && rb.fingers.y > 0.8, `${who}, chocar los cinco: los dedos hacia arriba (${f3(ra.fingers)}, ${f3(rb.fingers)})`);
+        const low = Math.min(sa.shoulder, sb.shoulder);
+        check(ra.palm.y > low + 0.1, `${who}, chocar los cinco: por encima de los hombros (${cm(ra.palm.y - low)} sobre el más bajo)`);
+      } else if (kind === "handshake") {
+        const face = ra.normal.angleTo(rb.normal.clone().negate());
+        const axis = ra.normal.clone().sub(rb.normal).normalize();
+        const gapC = rb.palm.clone().sub(ra.palm).dot(axis);
+        const slide = rb.palm.clone().sub(ra.palm).addScaledVector(axis, -gapC).length();
+        check(face < 20 * DEG, `${who}, darse la mano: las palmas, una contra otra (${deg(face)} de diferencia)`);
+        check(gapC > 0.012 && gapC < 0.045 && slide < 0.04, `${who}, darse la mano: juntas (de centro a centro ${cm(gapC)}, desplazadas ${cm(slide)})`);
+        check(ra.fingers.z > 0.6 && rb.fingers.z < -0.6 && ra.thumb.y > 0.4 && rb.thumb.y > 0.4, `${who}, darse la mano: los dedos hacia la otra persona y el pulgar arriba`);
+        const short = sa.shoulder < sb.shoulder ? sa : sb, tall = short === sa ? sb : sa;
+        const below = short.shoulder - ra.palm.y;
+        check(below > 0.2 * short.arm && tall.shoulder - ra.palm.y < 0.8 * tall.arm, `${who}, darse la mano: por debajo de los hombros (${cm(below)} bajo el más bajo, ${cm(tall.shoulder - ra.palm.y)} bajo el más alto)`);
+        check(gap > sa.front + sb.front + 0.25, `${who}, darse la mano: a un brazo de distancia (${cm(gap)})`);
+      } else {
+        // Abrazo: cada palma apoyada en el tronco de la otra persona (en su óvalo a esa altura, de lado o
+        // por detrás, nunca dentro ni en el aire) y mirándolo; la derecha más alta que la izquierda.
+        const on = (h: HandAt, rig: InstanceType<typeof Rig>) => {
+          const c = new THREE.Vector3(), f = new THREE.Vector3(), l = new THREE.Vector3();
+          const band = { front: 0, back: 0, side: 0 };
+          // A la altura de la palma (entre su cintura y su pecho).
+          rig.torsoAt(0, c, f, l, band);
+          const y0 = c.y;
+          rig.torsoAt(1, c, f, l, band);
+          rig.torsoAt(Math.min(1, Math.max(0, (h.palm.y - y0) / (c.y - y0))), c, f, l, band);
+          const ex = band.side, ez = (band.front + band.back) / 2;
+          c.addScaledVector(f, (band.front - band.back) / 2);
+          const d = h.palm.clone().sub(c);
+          const u = d.dot(l) / ex, v = -d.dot(f) / ez;
+          const out = l.clone().multiplyScalar(u / ex).addScaledVector(f, -v / ez).normalize();
+          return { e: Math.hypot(u, v), v, faces: -h.normal.dot(out) };
+        };
+        const hands = [on(ra, fxB.rig), on(la, fxB.rig), on(rb, fxA.rig), on(lb, fxA.rig)];
+        const bad = hands.find((h) => h.e < 0.95 || h.e > 1.45 || h.v < -0.3 || h.faces < 0.6);
+        check(!bad, `${who}, abrazo: las palmas apoyadas en el tronco de la otra persona (${hands.map((h) => `${h.e.toFixed(2)}/${h.v.toFixed(2)}/${h.faces.toFixed(2)}`).join(" ")})`);
+        // A cada lado, un brazo encima del otro (la derecha de cada uno sobre la izquierda del otro, o los
+        // del más alto por encima): que no se crucen a la misma altura.
+        const side1 = ra.palm.y - lb.palm.y, side2 = rb.palm.y - la.palm.y;
+        check(Math.abs(side1) > 0.05 && Math.abs(side2) > 0.05, `${who}, abrazo: a cada lado, un brazo encima del otro (${cm(side1)} y ${cm(side2)})`);
+        check(gap >= sa.front + sb.front, `${who}, abrazo: pecho con pecho, sin meterse uno en otro (${cm(gap)})`);
+      }
+    }
+  }
+
+  // Quien la propone se acerca a su pareja (quieta) y llega a tiempo, sin pasarse: desde lejos (3 m,
+  // el máximo para proponerla) y desde cerca, a 30 y a 144 imágenes por segundo.
+  for (const kind of ["high_five", "handshake", "hug"] as const) {
+    const gap = pairGap(kind, BODY, BODY);
+    const [i0, i1] = PAIR[kind].reach;
+    for (const d0 of [3, 1.2])
+      for (const hz of [30, 144]) {
+        let d = d0, t = 0, closest = d0, arrived = Infinity;
+        while (t < PAIR[kind].s) {
+          d -= pairStep(kind, t, d, gap, 1 / hz);
+          closest = Math.min(closest, d);
+          t += 1 / hz;
+          if (arrived === Infinity && d <= gap + 0.03) arrived = t;
+        }
+        check(closest >= gap - 1e-6 && arrived <= Math.max((i0 + i1) / 2 + 0.25, 0.6), `${kind}, de ${d0} m a ${hz} Hz: llega a su distancia a tiempo (${arrived.toFixed(2)} s) y sin pasarse (${cm(closest - gap)})`);
+      }
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* El teléfono en la mano                                               */
+/* ------------------------------------------------------------------ */
+
+// Con el gesto del teléfono (su clip de captura), el teléfono queda en la mano derecha, junto a la
+// oreja y con la pantalla hacia la cara, en todos los personajes de serie (people/phone.ts).
+{
+  const { attachPhone } = await import("../src/world/people/phone.ts");
+  const phoneClip = await clip("phone");
+  for (const p of presets) {
+    const vrm = await vrmOf(p.hash);
+    if (vrm.humanoid.normalizedHumanBonesRoot.parent !== vrm.scene) vrm.scene.add(vrm.humanoid.normalizedHumanBonesRoot);
+    const rig = new Rig(vrm, async () => null);
+    const phone = attachPhone(vrm, rig, 1);
+    if (!phone) {
+      check(false, `${p.id}: el teléfono, en su mano`);
+      continue;
+    }
+    const mixer = new THREE.AnimationMixer(vrm.scene);
+    const action = mixer.clipAction(createVRMAnimationClip(phoneClip, vrm));
+    action.play();
+    // La pose del clip y, encima, el esqueleto llevando la mano a la oreja (rig.ts → phone).
+    for (let i = 0; i < 40; i++) {
+      action.time = 2;
+      mixer.update(0);
+      rig.phone = 1;
+      rig.apply(1 / 60, null);
+      vrm.scene.updateMatrixWorld(true);
+    }
+    const at = phone.getWorldPosition(new THREE.Vector3());
+    // La cabeza a la altura de la oreja (algo por encima de su hueso), en su marco: a su derecha (−x
+    // en reposo: miran hacia +z), arriba y delante.
+    const hn = vrm.humanoid.getNormalizedBoneNode("head")!;
+    const hq = hn.getWorldQuaternion(new THREE.Quaternion());
+    const ear = hn.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 0.06, 0).applyQuaternion(hq));
+    const right = new THREE.Vector3(-1, 0, 0).applyQuaternion(hq);
+    const screen = new THREE.Vector3(0, 0, 1).applyQuaternion(phone.getWorldQuaternion(new THREE.Quaternion()));
+    const d = at.clone().sub(ear);
+    const side = d.dot(right), dist = d.length(), faces = -screen.dot(right);
+    if (PRINT) console.log(`    ${p.id}: teléfono a ${cm(dist)} de la oreja (${cm(side)} a su derecha), pantalla hacia la cabeza ${faces.toFixed(2)}`);
+    check(dist < 0.13 && side > 0.06 && side < 0.12 && faces > 0.8, `${p.id}: el teléfono, en la oreja derecha y con la pantalla hacia la cara (a ${cm(dist)}, ${cm(side)} a su derecha; ${faces.toFixed(2)})`);
+  }
 }
 
 if (PRINT && process.env.ALL) {

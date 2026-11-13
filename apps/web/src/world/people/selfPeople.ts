@@ -25,7 +25,7 @@ import { canAttack, fightTarget, hitReady, sendHit, sendRespawn } from "../../ne
 import { DISTRICT_SPAWN } from "../../net/districts";
 import { teleport } from "../../net/session";
 import { world } from "../../net/world-store";
-import { remoteFeet } from "./where";
+import { mine, remoteFeet, remoteFx } from "./where";
 import { crowd, floorAt, NPC_CITY, npcs } from "../collision";
 import { knockBusy } from "../knock";
 import { placeBody, type Body } from "../locomotion";
@@ -33,8 +33,8 @@ import type { Motion } from "../motion";
 import { impact, thud, whoosh } from "./fight-audio";
 import { COMBO, COMBO_RESET, fallFor, FALL_MAX, HIT_AFTER_MS, LIE, LIE_KO, lightReaction, myStrike, parkourFallFor, RISE, STRIKES, strikeOf, type Strike, type StrikeMove } from "./fight";
 import { loadRagdolls, ragdolls } from "./ragdoll";
-import { PAIR, pairTargets } from "./pair";
-import { createFx, type Lying } from "./rig";
+import { PAIR, pairGap, pairStep, pairTargets } from "./pair";
+import { BODY, createFx, type Lying } from "./rig";
 
 type Phase = "none" | "react" | "fall" | "ground" | "roll" | "rise" | "clipfall" | "cliprise" | "pair";
 
@@ -46,6 +46,7 @@ const NPC_HIT: Record<string, number> = { punch: 1.8, cross: 2.3, hook: 3.2, kic
 
 /** Lo que el esqueleto de tu personaje recibe de la gente (Player lo pone en su `Motion`). */
 export const selfFx = createFx();
+mine.fx = selfFx;
 
 const me = {
   phase: "none" as Phase,
@@ -57,6 +58,8 @@ const me = {
   rolled: false,
   pair: "high_five" as PairAction,
   partner: "",
+  /** En pareja: se acerca (la ha propuesto, o es con alguien de la ciudad); quien acepta se queda quieto (pair.ts). */
+  lead: false,
   /** Cadera el frame anterior (para el golpe contra el suelo). */
   lastY: 0,
   lastVy: 0,
@@ -230,10 +233,13 @@ export function peopleFrame(dt: number, c: PeopleCtx, out: { lock: boolean; want
   if (pair && me.phase === "none" && !strike.def) {
     pendingPair = null;
     me.partner = pair.a === world.sessionId ? pair.b : pair.a;
+    me.lead = pair.a === world.sessionId || pair.a === pair.b;
     me.phase = "pair";
     me.t = 0;
     me.pair = pair.kind;
   } else if (pair && me.phase !== "none") pendingPair = null;
+  // Con quién estás en pareja (where.ts): si algo la corta (un golpe), deja de serlo ya.
+  if (me.phase !== "pair") mine.with = "";
 
   lookAround(c);
   if (strike.def) strikeFrame(dt, c, out);
@@ -579,24 +585,35 @@ function lookAround(c: PeopleCtx) {
   if (found) selfFx.look.w = 0.75;
 }
 
-/** Acción en pareja: ponerse a su distancia, mirarse y llevar las manos a donde se encuentran. */
+/**
+ * Acción en pareja: quien la propone se acerca a su distancia (pair.ts → pairStep), los dos se miran y
+ * llevan las manos a donde se encuentran. Mientras dura, la pareja no es sólida (PeopleFx.tsx,
+ * city/citizens.ts → `ghost`) y quien la dibuja mueve sus manos con tu reloj (where.ts → `mine`).
+ */
 function pairFrame(dt: number, c: PeopleCtx) {
   const spec = PAIR[me.pair];
   const { body, motion } = c;
   motion.emote = me.pair;
   motion.speed = 0;
+  mine.with = me.partner;
+  mine.t = me.t;
   if (!where(me.partner, _o)) {
     if (me.t >= spec.s) end(motion);
     return;
   }
   const dx = _o.x - body.x, dz = _o.z - body.z;
   const d = Math.hypot(dx, dz) || 1;
-  if (me.t < 0.45 && d > spec.gap + 0.04) {
-    const step = Math.min(d - spec.gap, dt * 2.6);
-    placeBody(body, body.x + (dx / d) * step, body.y, body.z + (dz / d) * step);
+  const other = remoteFx.get(me.partner) ?? null;
+  if (me.lead) {
+    const step = pairStep(me.pair, me.t, d, pairGap(me.pair, selfFx.rig?.size ?? BODY, other?.rig?.size ?? BODY), dt);
+    if (step > 0) {
+      placeBody(body, body.x + (dx / d) * step, body.y, body.z + (dz / d) * step);
+      // Las piernas, andando a ese paso (los brazos siguen con lo suyo).
+      motion.speed = step / Math.max(dt, 1e-3);
+    }
   }
   c.bodyYaw.current = Math.atan2(-dx, -dz);
-  pairTargets(me.pair, me.t, body.x, body.y, body.z, _o, selfFx);
+  pairTargets(me.pair, me.t, body.x, body.y, body.z, _o, selfFx, other);
   if (me.t >= spec.s) end(motion);
 }
 

@@ -268,8 +268,8 @@ export const GESTURES: Record<string, Def> = {
     keys: [
       { t: 0 },
       { t: 0.5, ...both({ at: [-0.02, -0.08, 0.4], pole: [1, -0.4, -0.4], twist: 30 }), l: "open", r: "open", p: { chest: [8, 0, 0], head: [4, 18, 0] } },
-      { t: 0.85, L: { at: [-0.24, -0.1, 0.3], pole: [1, -0.2, -0.2], twist: 40 }, R: { at: [0.22, 0.05, 0.3], pole: [-1, -0.1, -0.2], twist: 40 }, l: "relaxed", r: "relaxed", p: { chest: [10, 0, 0], head: [6, 22, 6] } },
-      { t: 1.75, L: { at: [-0.25, -0.09, 0.29], pole: [1, -0.2, -0.2], twist: 40 }, R: { at: [0.23, 0.06, 0.29], pole: [-1, -0.1, -0.2], twist: 40 }, l: "relaxed", r: "relaxed", p: { chest: [11, 0, 0], head: [6, 22, 6] } },
+      { t: 0.85, L: { at: [-0.24, -0.1, 0.3], pole: [1, -0.2, -0.2], twist: 40 }, R: { at: [0.22, 0.05, 0.3], pole: [-1, -0.1, -0.2], twist: 40 }, l: "open", r: "open", p: { chest: [10, 0, 0], head: [6, 22, 6] } },
+      { t: 1.75, L: { at: [-0.25, -0.09, 0.29], pole: [1, -0.2, -0.2], twist: 40 }, R: { at: [0.23, 0.06, 0.29], pole: [-1, -0.1, -0.2], twist: 40 }, l: "open", r: "open", p: { chest: [11, 0, 0], head: [6, 22, 6] } },
       { t: 2.3 },
     ],
   },

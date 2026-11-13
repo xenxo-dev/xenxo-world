@@ -16,6 +16,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { VRM } from "@pixiv/three-vrm";
 import { createVRMAnimationClip, VRMAnimationLoaderPlugin, type VRMAnimation } from "@pixiv/three-vrm-animation";
 import { buildGesture, buildGuard, interpolant, PROCEDURAL, touchAt } from "./people/gestures";
+import { onPhone } from "./people/phone";
 import { Rig, type PersonFx } from "./people/rig";
 import { ALL_FINGER_BONES, handTable, restFix, type BaseHand, type RestFix } from "./people/hands";
 
@@ -313,6 +314,8 @@ export class VrmAnimator {
    */
   narrow = 0;
   private idleW = 0;
+  /** Cuánto lleva la mano derecha a la oreja, con el teléfono (rig.ts → phone). */
+  private phoneW = 0;
   /** Cuánto se tocan las palmas en este frame (people/gestures.ts → touchAt), para el esqueleto. */
   private touch = 0;
   /** Los dedos (nodo normalizado y su giro de ahora, que va hacia la mano de base). */
@@ -543,7 +546,7 @@ export class VrmAnimator {
     }
     this.mixer.update(dt);
     if (this.narrow > 0 && this.idleW > 0.01) this.narrowStance(this.narrow * this.idleW);
-    this.handBase(dt, guard || (pkAction ? FIST_CLIPS.has(shot!.clip) : !!(live && known && FIST_CLIPS.has(known.clip))) ? "fist" : pkAction && OPEN_CLIPS.has(shot!.clip) ? "open" : "relaxed", speed);
+    this.handBase(dt, guard || (pkAction ? FIST_CLIPS.has(shot!.clip) : !!(live && known && FIST_CLIPS.has(known.clip))) ? "fist" : pkAction && OPEN_CLIPS.has(shot!.clip) ? "open" : "relaxed", speed, onPhone(emote, gesture) ? "hold" : null);
 
     // Capas de arriba: los puños en guardia al andar y el gesto que sigue al moverse.
     this.guardUpperW += ((guard && moving && !full && !pkAction ? 0.9 : 0) - this.guardUpperW) * Math.min(1, dt / 0.15);
@@ -559,6 +562,9 @@ export class VrmAnimator {
       this.touch = Math.max(this.touch, touchAt(known.clip, this.emoteAction.time) * w);
     }
     this.rig.touch = this.touch;
+    // Con el teléfono, la mano a la oreja (rig.ts → phone), entrando y saliendo con el gesto.
+    this.phoneW += ((onPhone(emote, gesture) ? 1 : 0) - this.phoneW) * Math.min(1, dt / 0.3);
+    this.rig.phone = this.phoneW < 0.005 ? 0 : this.phoneW;
 
     this.rig.apply(dt, fx ?? null);
     // Al final, lo que endereza la mano en reposo de este modelo (si hace falta): debajo de cualquier
@@ -583,7 +589,8 @@ export class VrmAnimator {
    * La mano de base (people/hands.ts) sobre lo que ha dejado el mezclador, menos lo que pesen en él
    * los gestos hechos en código (traen sus manos). Pasa de una forma a otra en una décima.
    */
-  private handBase(dt: number, shape: BaseHand, speed: number) {
+  /** La forma de las manos de base (y, si se dice, otra para la derecha: con el teléfono, people/phone.ts). */
+  private handBase(dt: number, shape: BaseHand, speed: number, right: BaseHand | null = null) {
     if (!this.fingers) {
       this.fingers = [];
       for (const bone of ALL_FINGER_BONES) {
@@ -595,13 +602,14 @@ export class VrmAnimator {
     for (const [name, a] of this.actions) if (PROCEDURAL.has(name)) made += a.getEffectiveWeight();
     const w = 1 - Math.min(1, made);
     const k = Math.min(1, dt / 0.1);
-    const t = handTable(shape, this.v0);
+    const t = handTable(shape, this.v0), tr = right ? handTable(right, this.v0) : t;
     // Corriendo a tope, la mano se suelta (algo más abierta).
     const loose = shape === "relaxed" ? THREE.MathUtils.smoothstep(speed, 4, 6) * 0.5 : 0;
     const open = handTable("open", this.v0);
     for (const f of this.fingers) {
-      _q.copy(t.get(f.bone)!);
-      if (loose > 0) _q.slerp(open.get(f.bone)!, loose);
+      const own = right !== null && f.bone.startsWith("right");
+      _q.copy((own ? tr : t).get(f.bone)!);
+      if (loose > 0 && !own) _q.slerp(open.get(f.bone)!, loose);
       f.now.slerp(_q, k);
       if (w > 0.001) f.node.quaternion.slerp(f.now, w);
     }

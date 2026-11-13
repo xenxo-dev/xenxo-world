@@ -9,6 +9,7 @@ import { clone as cloneSkinned } from "three/examples/jsm/utils/SkeletonUtils.js
 import { VRMLoaderPlugin, VRMUtils, type VRM } from "@pixiv/three-vrm";
 import { VRMLookAtQuaternionProxy } from "@pixiv/three-vrm-animation";
 import { VrmAnimator } from "./animation";
+import { attachPhone, detachPhone, onPhone } from "./people/phone";
 import type { Rig } from "./people/rig";
 import type { Motion } from "./motion";
 import { graphics } from "./graphics";
@@ -209,6 +210,8 @@ function fromVrm(vrm: VRM, scene: THREE.Group, decor: boolean): LoadedAvatar {
   const animator = new VrmAnimator(vrm);
   // Con falda o túnica larga, de pie con los pies algo más juntos (animation.ts → narrow).
   if (springs?.cloth) animator.narrow = SKIRT_STANCE;
+  // El teléfono del gesto «teléfono», escondido en su mano hasta que lo use (people/phone.ts).
+  const phone = attachPhone(vrm, animator.rig, vrm.scene.getWorldScale(new THREE.Vector3()).x);
   let blinkIn = 2 + Math.random() * 3;
   let blinkT = -1;
 
@@ -247,6 +250,7 @@ function fromVrm(vrm: VRM, scene: THREE.Group, decor: boolean): LoadedAvatar {
         }
       }
       vrm.update(dt);
+      if (phone) phone.visible = onPhone(m.emote, m.gesture);
       // Con el arma sacada: dónde ha quedado la mano derecha (ya con el IK), para ponerle el arma.
       if (m.weapon && handR) {
         handR.getWorldPosition(_hand);
@@ -278,6 +282,7 @@ function fromVrm(vrm: VRM, scene: THREE.Group, decor: boolean): LoadedAvatar {
     dispose: () => {
       animator.rig.cancelFall();
       animator.dispose();
+      detachPhone(phone);
       VRMUtils.deepDispose(vrm.scene);
     },
   };

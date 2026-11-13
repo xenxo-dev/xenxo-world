@@ -15,7 +15,8 @@
  * Sin objetos nuevos por frame.
  */
 import * as THREE from "three";
-import type { VRM, VRMHumanBoneName } from "@pixiv/three-vrm";
+import { VRMHumanBoneParentMap, type VRM, type VRMHumanBoneName } from "@pixiv/three-vrm";
+import { PHONE_HOLD } from "./phone";
 import type { VRMAnimation } from "@pixiv/three-vrm-animation";
 import type { Q4, RagdollHandle, RagdollJoint, RagdollPart, RagdollSpec, RagdollWorldApi, V3 } from "./ragdoll";
 
@@ -32,7 +33,64 @@ export interface Target {
   px: number;
   py: number;
   pz: number;
+  /**
+   * Solo para una mano, y se piden en cada frame (el esqueleto los vuelve a 0 al usarlos: quien use
+   * la mano para otra cosa no los hereda). `palm`: el punto es donde va el centro de la palma, no la
+   * muñeca (para que dos palmas se toquen). `nx, ny, nz` y `ux, uy, uz`: hacia dónde mira la palma y
+   * hacia dónde apuntan los dedos (mundo); sin ellos (a 0), la mano girada como la puso la animación.
+   */
+  palm: number;
+  nx: number;
+  ny: number;
+  nz: number;
+  ux: number;
+  uy: number;
+  uz: number;
 }
+
+/** Lo que mide un cuerpo (m, a su escala de verdad): para que las parejas se encuentren (pair.ts). */
+export interface BodySize {
+  /**
+   * Altura de los hombros (de pie, con los brazos abajo: la clavícula los baja un 6,5 % de lo que miden
+   * en la pose en T, medido en los avatares de serie con los gestos de pareja) y de la cabeza (desde los
+   * pies).
+   */
+  shoulder: number;
+  head: number;
+  /** Del hombro a la muñeca, medio ancho de hombros y la mano (de la muñeca a los nudillos). */
+  arm: number;
+  width: number;
+  hand: number;
+  /**
+   * El tronco por fuera, con la ropa (de su malla, en reposo; desde los pies): hasta dónde llega el
+   * pecho por delante y la espalda por detrás, a la altura del pecho y de la cintura, y su medio ancho
+   * a la altura del pecho.
+   */
+  front: number;
+  back: number;
+  waist: number;
+  side: number;
+}
+/** El tronco por fuera a una altura (m, desde su hueso): hasta dónde llega por delante, por detrás y a cada lado. */
+export interface TorsoBand {
+  front: number;
+  back: number;
+  side: number;
+}
+/** Un cuerpo cualquiera, para quien aún no ha cargado su avatar. */
+export const BODY: BodySize = { shoulder: 1.33, head: 1.62, arm: 0.5, width: 0.18, hand: 0.09, front: 0.14, back: 0.12, waist: 0.11, side: 0.16 };
+/** Lo que baja el hombro de la pose en T a de pie (ver `BodySize.shoulder`). */
+const SHOULDER_DOWN = 0.935;
+/**
+ * La oreja, por encima del hueso de la cabeza (m, en un cuerpo de 1,62 m de la cabeza al suelo); y con
+ * el teléfono, el centro de la palma: por fuera de la oreja (lo que miden el teléfono y la palma,
+ * people/phone.ts), más abajo y delante (m), y los dedos, algo hacia atrás.
+ */
+const EAR_UP = 0.06;
+const PHONE_OUT = PHONE_HOLD;
+const PHONE_DOWN = 0.05;
+const PHONE_FWD = 0.015;
+const PHONE_BACK = 0.4;
 
 /** Lo que la gente le pide al esqueleto de una persona (vive en su `Motion`). */
 export interface PersonFx {
@@ -50,7 +108,7 @@ export interface PersonFx {
   footL: Target;
   footR: Target;
 }
-const target = (): Target => ({ x: 0, y: 0, z: 0, w: 0, px: 0, py: 0, pz: 0 });
+const target = (): Target => ({ x: 0, y: 0, z: 0, w: 0, px: 0, py: 0, pz: 0, palm: 0, nx: 0, ny: 0, nz: 0, ux: 0, uy: 0, uz: 0 });
 export const createFx = (): PersonFx => ({ rig: null, look: target(), reachL: target(), reachR: target(), seat: target(), footL: target(), footR: target() });
 
 const DEG = Math.PI / 180;
@@ -514,8 +572,10 @@ export class Rig {
       this.applyFoot(1, fx.footR);
       this.applyLook(dt, fx.look);
       this.applyReach(dt, 0, fx.reachL);
-      this.applyReach(dt, 1, fx.reachR);
+      // Con el teléfono, la derecha va a la oreja (si no la pide otra cosa).
+      if (!(this.phone > 0.01 && fx.reachR.w < 0.01)) this.applyReach(dt, 1, fx.reachR);
     }
+    if (this.phone > 0.01 && !(fx && fx.reachR.w >= 0.01)) this.applyPhone(dt);
     if (this.touch > 0.01) this.applyMeet(this.touch);
     const need = Math.max(this.liftNeed[0]!, this.liftNeed[1]!);
     this.reachLift = Number.isFinite(need) ? need : 0;
@@ -632,7 +692,13 @@ export class Rig {
 
   /** IK de dos huesos del brazo hacia la muñeca pedida (mundo), respetando hacia dónde iba el codo. */
   private applyReach(dt: number, side: 0 | 1, t: Target) {
-    this.reachW[side] = this.reachW[side]! + (t.w - this.reachW[side]!) * Math.min(1, dt * 6);
+    const palm = t.palm;
+    _P.set(t.nx, t.ny, t.nz);
+    _F.set(t.ux, t.uy, t.uz);
+    t.palm = t.nx = t.ny = t.nz = t.ux = t.uy = t.uz = 0;
+    // Lo que va a la palma de otra persona (pair.ts) ya entra con su propia rampa, a tiempo para el
+    // golpe o el apretón: aquí se sigue deprisa (con la lenta, chocar los cinco llegaba tarde).
+    this.reachW[side] = this.reachW[side]! + (t.w - this.reachW[side]!) * Math.min(1, dt * (palm ? 16 : 6));
     const w = this.reachW[side]!;
     if (w < 0.01) return;
     const upper = this.n(side ? "rightUpperArm" : "leftUpperArm");
@@ -643,13 +709,203 @@ export class Rig {
     upper.getWorldPosition(_S);
     lower.getWorldPosition(_E);
     hand.getWorldPosition(_W);
+    // La mano como acabará (mundo): girada como se pide o como la puso la animación. De ahí, dónde cae
+    // la palma respecto a la muñeca. Con la palma pero sin los dedos, los dedos siguen al antebrazo
+    // (la muñeca se dobla solo lo justo para que la palma mire a donde se pide).
+    hand.getWorldQuaternion(_qh);
+    const rest = this.palmRest(side);
+    const follow = _P.lengthSq() > 0.25 && _F.lengthSq() < 0.25;
+    if (follow) _F.copy(_W).sub(_E);
+    const aim = rest && _P.lengthSq() > 0.25 && _F.lengthSq() > 1e-8 ? this.handAim(rest, _qt) : null;
+    let x = t.x, y = t.y, z = t.z;
+    if (palm && rest) {
+      _v.copy(rest.center).applyQuaternion(aim ?? _qh).multiplyScalar(this.worldScale());
+      x -= _v.x;
+      y -= _v.y;
+      z -= _v.z;
+    }
     const la = _S.distanceTo(_E), lb = _E.distanceTo(_W);
     if (w > 0.5) {
-      const hx = Math.hypot(t.x - _S.x, t.z - _S.z);
+      const hx = Math.hypot(x - _S.x, z - _S.z);
       const reach = (la + lb) * 0.97;
-      this.liftNeed[side] = t.y - _S.y - (hx < reach ? Math.sqrt(reach * reach - hx * hx) : 0);
+      this.liftNeed[side] = y - _S.y - (hx < reach ? Math.sqrt(reach * reach - hx * hx) : 0);
     }
-    this.reachArm(upper, lower, hand, t.x, t.y, t.z, w, t.px, t.py, t.pz);
+    this.reachArm(upper, lower, hand, x, y, z, w, t.px, t.py, t.pz);
+    // Con los dedos siguiendo al antebrazo: la mano, con el antebrazo ya donde va; y si cuenta la palma,
+    // otra vez el brazo hacia donde queda la muñeca con la mano así (con la del principio, la palma caía
+    // a unos centímetros).
+    for (let k = 0; aim && follow && k < 2; k++) {
+      lower.getWorldPosition(_E);
+      hand.getWorldPosition(_W);
+      _F.copy(_W).sub(_E);
+      this.handAim(rest!, _qt);
+      if (!palm) break;
+      _v.copy(rest!.center).applyQuaternion(_qt).multiplyScalar(this.worldScale());
+      upper.updateWorldMatrix(true, true);
+      upper.getWorldPosition(_S);
+      this.reachArm(upper, lower, hand, t.x - _v.x, t.y - _v.y, t.z - _v.z, w, t.px, t.py, t.pz);
+    }
+    if (aim) this.turnHand(side, lower, hand, _qt, w);
+  }
+
+  /**
+   * La mano girada (mundo) para que su palma mire a `_P` y sus dedos apunten a `_F`. En reposo, los
+   * dedos van de la muñeca a los nudillos y la palma hacia `normal` (palmRest: sale de los huesos, así
+   * vale igual para los VRM 0.x, que van girados media vuelta).
+   */
+  private handAim(rest: { normal: THREE.Vector3; center: THREE.Vector3 }, out: THREE.Quaternion): THREE.Quaternion | null {
+    _P.normalize();
+    _F.addScaledVector(_P, -_F.dot(_P));
+    if (_F.lengthSq() < 1e-6) return null;
+    _F.normalize();
+    _f0.copy(rest.center).normalize();
+    _f0.addScaledVector(rest.normal, -_f0.dot(rest.normal)).normalize();
+    _c0.crossVectors(_f0, rest.normal);
+    _m0.makeBasis(_f0, rest.normal, _c0).transpose();
+    _c0.crossVectors(_F, _P);
+    _m1.makeBasis(_F, _P, _c0).multiply(_m0);
+    return out.setFromRotationMatrix(_m1);
+  }
+
+  /**
+   * Gira la mano a `q` (mundo) con peso `w`. Lo que gira alrededor del antebrazo se lo reparte con él
+   * (el 60 %, como la supinación de los gestos, people/gestures.ts): todo en la muñeca la retorcía.
+   */
+  private turnHand(side: 0 | 1, lower: THREE.Object3D, hand: THREE.Object3D, q: THREE.Quaternion, w: number) {
+    const along = this.vrm.humanoid.normalizedRestPose[side ? "rightHand" : "leftHand"]?.position;
+    if (!along) return;
+    _ax.fromArray(along).normalize();
+    // Lo que le falta a la mano respecto al antebrazo, y su parte alrededor del eje del antebrazo.
+    lower.getWorldQuaternion(_qr);
+    _qa.copy(_qr).invert().multiply(q);
+    if (_qa.w < 0) _qa.set(-_qa.x, -_qa.y, -_qa.z, -_qa.w);
+    const tau = 2 * Math.atan2(_qa.x * _ax.x + _qa.y * _ax.y + _qa.z * _ax.z, _qa.w) * 0.6 * w;
+    lower.quaternion.multiply(_qb.setFromAxisAngle(_ax, tau));
+    hand.quaternion.slerp(_qa.premultiply(_qb.setFromAxisAngle(_ax, -tau)), w);
+  }
+
+  /** La escala del avatar en el mundo (los VRM de tamaño raro se escalan al cargarlos: avatar-model.ts). */
+  private worldScale() {
+    return this.vrm.scene.getWorldScale(_ws).x;
+  }
+
+  /** Lo que mide este cuerpo (se mide una vez, en su reposo). */
+  private bodySize: BodySize | null = null;
+  /** En el marco del modelo: hacia delante y hacia su izquierda (los VRM 0.x miran a −z); y el tronco por fuera a la altura de los huesos del pecho y de la cintura (m, desde cada hueso). */
+  private frame: { fwd: THREE.Vector3; left: THREE.Vector3; chest: TorsoBand; waist: TorsoBand; ear: { up: number; side: number } } | null = null;
+  get size(): BodySize {
+    if (this.bodySize) return this.bodySize;
+    const rest = this.vrm.humanoid.normalizedRestPose;
+    const s = this.worldScale();
+    // Dónde está cada hueso en reposo (en el marco del modelo): lo suyo más lo de los que tiene encima
+    // (los que falten no suman).
+    const at = (b: Bone) => {
+      const out = new THREE.Vector3();
+      for (let n: Bone | null = b; n; n = VRMHumanBoneParentMap[n] as Bone | null) {
+        const p = rest[n]?.position;
+        if (p) out.x += p[0]!, (out.y += p[1]!), (out.z += p[2]!);
+      }
+      return out;
+    };
+    const lu = at("leftUpperArm"), ru = at("rightUpperArm");
+    const head = at("head").y * s;
+    const len = (b: Bone) => new THREE.Vector3().fromArray(rest[b]?.position ?? [0, 0, 0]).length() * s;
+    const hand = (this.palmRest(0)?.size ?? 0) * s;
+    const arm = len("leftLowerArm") + len("leftHand");
+    const width = (lu.distanceTo(ru) / 2) * s;
+    const shoulder = ((lu.y + ru.y) / 2) * s;
+    // Hacia dónde mira y su izquierda: de los hombros (así vale igual para los VRM 0.x).
+    const left = lu.clone().sub(ru).setY(0).normalize();
+    const fwd = new THREE.Vector3().crossVectors(left, _up);
+    const chest = at(rest.upperChest ? "upperChest" : "chest"), spine = at("spine");
+    const k = head > 0.8 ? head / BODY.head : 1;
+    // La oreja: algo por encima del hueso de la cabeza (y lo que abulta allí la cabeza, con el pelo).
+    const earUp = EAR_UP * k;
+    const ear = at("head").add(new THREE.Vector3(0, earUp / s, 0));
+    const ok = width > 0.05 && fwd.lengthSq() > 0.5;
+    const bands = ok ? this.torso([chest, spine, ear], fwd, left, width / s, s) : null;
+    this.frame = bands ? { fwd, left, chest: bands[0]!, waist: bands[1]!, ear: { up: earUp, side: bands[2]!.side } } : null;
+    this.bodySize = {
+      shoulder: shoulder > 0.5 ? shoulder * SHOULDER_DOWN : BODY.shoulder,
+      head: head > 0.8 ? head : BODY.head,
+      arm: arm > 0.2 ? arm : BODY.arm,
+      width: width > 0.05 ? width : BODY.width,
+      hand: hand > 0.03 ? hand : BODY.hand,
+      front: bands ? bands[0]!.front + chest.dot(fwd) * s : BODY.front * k,
+      back: bands ? bands[0]!.back - chest.dot(fwd) * s : BODY.back * k,
+      waist: bands ? bands[1]!.back - spine.dot(fwd) * s : BODY.waist * k,
+      side: bands ? bands[0]!.side : BODY.side * k,
+    };
+    return this.bodySize;
+  }
+
+  /**
+   * El tronco por fuera, de su malla en reposo (la ropa cuenta: con chaqueta abulta más), en una franja
+   * de ±7 cm a la altura de cada hueso: hasta dónde llega por delante y por detrás de él (cerca del
+   * centro) y su medio ancho (sin los brazos, que en la pose en T van por fuera de los hombros); m.
+   */
+  private torso(bones: THREE.Vector3[], fwd: THREE.Vector3, left: THREE.Vector3, width: number, s: number): TorsoBand[] | null {
+    const scene = this.vrm.scene;
+    scene.updateMatrixWorld(true);
+    _m0.copy(scene.matrixWorld).invert();
+    const band = 0.07 / s;
+    const out = bones.map(() => ({ front: -Infinity, back: -Infinity, side: 0 }));
+    scene.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      const pos = mesh.isMesh ? mesh.geometry?.attributes.position : null;
+      if (!pos) return;
+      _m1.multiplyMatrices(_m0, mesh.matrixWorld);
+      for (let i = 0; i < pos.count; i++) {
+        _v.fromBufferAttribute(pos, i).applyMatrix4(_m1);
+        for (let k = 0; k < bones.length; k++) {
+          const b = bones[k]!, t = out[k]!;
+          if (Math.abs(_v.y - b.y) > band) continue;
+          _w.copy(_v).sub(b);
+          const lat = Math.abs(_w.dot(left)), z = _w.dot(fwd);
+          if (lat < width * 0.6) {
+            if (z > t.front) t.front = z;
+            if (-z > t.back) t.back = -z;
+          }
+          if (lat < width * 1.15 && lat > t.side) t.side = lat;
+        }
+      }
+    });
+    if (out.some((t) => !(t.front > -1e3 && t.back > -1e3) || t.side <= 0)) return null;
+    return out.map((t) => ({ front: t.front * s, back: t.back * s, side: t.side * s }));
+  }
+
+  /** Dónde está ahora (mundo) el hombro izquierdo (0) o el derecho (1). */
+  shoulderAt(side: 0 | 1, out: THREE.Vector3): boolean {
+    const n = this.n(side ? "rightUpperArm" : "leftUpperArm");
+    if (!n) return false;
+    n.getWorldPosition(out);
+    return true;
+  }
+
+  /**
+   * El tronco ahora (mundo; para que en pareja las manos se apoyen en él), a una altura por la línea
+   * del hueso de la cintura (`level` 0) al del pecho (1), y algo por debajo o por encima: por dónde
+   * pasa (`p`), hacia dónde mira (`fwd`) y su izquierda (`left`), con el cuerpo como esté (inclinado en
+   * el abrazo, también); y en `band`, lo que abulta por fuera desde ahí (fuera de los dos huesos, lo
+   * del más cercano). Sin su malla medida, false.
+   */
+  torsoAt(level: number, p: THREE.Vector3, fwd: THREE.Vector3, left: THREE.Vector3, band: TorsoBand): boolean {
+    if (!this.bodySize) void this.size;
+    const f = this.frame;
+    const chest = this.nodes.get("upperChest") ?? this.nodes.get("chest"), waist = this.nodes.get("spine");
+    if (!f || !chest || !waist) return false;
+    const k = level < 0 ? 0 : level > 1 ? 1 : level;
+    waist.getWorldPosition(p);
+    chest.getWorldPosition(_v);
+    p.lerp(_v, level);
+    waist.getWorldQuaternion(_qb);
+    _qb.slerp(chest.getWorldQuaternion(_qa), k);
+    fwd.copy(f.fwd).applyQuaternion(_qb);
+    left.copy(f.left).applyQuaternion(_qb);
+    band.front = f.waist.front + (f.chest.front - f.waist.front) * k;
+    band.back = f.waist.back + (f.chest.back - f.waist.back) * k;
+    band.side = f.waist.side + (f.chest.side - f.waist.side) * k;
+    return true;
   }
 
   /**
@@ -697,6 +953,49 @@ export class Rig {
   }
 
   /* ---------------------------------------------------------------- */
+  /* El teléfono                                                        */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Con el teléfono en la mano (people/phone.ts; lo pone el animador, 0–1, entrando y saliendo con el
+   * gesto): la mano derecha a su oreja, con la palma hacia la cabeza, los dedos hacia arriba y algo
+   * hacia atrás y el teléfono entre la palma y la oreja. La captura la dejaba a un palmo de la cabeza
+   * (cada avatar, a una distancia: sus brazos y sus hombros no son los del clip).
+   */
+  phone = 0;
+  private phoneT = target();
+  private applyPhone(dt: number) {
+    if (!this.bodySize) void this.size;
+    const f = this.frame, head = this.nodes.get("head");
+    if (!f || !head) return;
+    head.getWorldPosition(_ph);
+    head.getWorldQuaternion(_phQ);
+    _phR.copy(f.left).applyQuaternion(_phQ).negate();
+    _phU.set(0, 1, 0).applyQuaternion(_phQ);
+    _phF.copy(f.fwd).applyQuaternion(_phQ);
+    // El centro de la palma: por fuera de la oreja lo que miden el teléfono y la palma, y algo más
+    // abajo y delante (el teléfono, de la oreja hacia la boca).
+    _ph.addScaledVector(_phU, f.ear.up - PHONE_DOWN).addScaledVector(_phR, f.ear.side + PHONE_OUT).addScaledVector(_phF, PHONE_FWD);
+    const t = this.phoneT;
+    t.x = _ph.x;
+    t.y = _ph.y;
+    t.z = _ph.z;
+    t.w = this.phone;
+    // El codo, por fuera, abajo y algo delante.
+    t.px = _phR.x * 0.6 - _phU.x * 0.8 + _phF.x * 0.3;
+    t.py = _phR.y * 0.6 - _phU.y * 0.8 + _phF.y * 0.3;
+    t.pz = _phR.z * 0.6 - _phU.z * 0.8 + _phF.z * 0.3;
+    t.palm = 1;
+    t.nx = -_phR.x;
+    t.ny = -_phR.y;
+    t.nz = -_phR.z;
+    t.ux = _phU.x - _phF.x * PHONE_BACK;
+    t.uy = _phU.y - _phF.y * PHONE_BACK;
+    t.uz = _phU.z - _phF.z * PHONE_BACK;
+    this.applyReach(dt, 1, t);
+  }
+
+  /* ---------------------------------------------------------------- */
   /* Juntar las palmas                                                  */
   /* ---------------------------------------------------------------- */
 
@@ -705,6 +1004,11 @@ export class Rig {
    * (people/gestures.ts → `touchAt`) por lo que pese.
    */
   touch = 0;
+  /** La palma de una mano (0 izquierda, 1 derecha), en reposo y en el marco de la mano: hacia dónde mira, dónde queda su centro y lo que mide la mano (para colgarle algo: people/phone.ts). */
+  palm(side: 0 | 1) {
+    return this.palmRest(side);
+  }
+
   /** Por mano: hacia fuera de la palma, dónde queda su centro (respecto a la muñeca) y lo que mide; en reposo. */
   private palms: ({ normal: THREE.Vector3; center: THREE.Vector3; size: number } | null)[] | null = null;
 
@@ -738,15 +1042,16 @@ export class Rig {
     hr.updateWorldMatrix(true, false);
     hl.getWorldQuaternion(_ql);
     hr.getWorldQuaternion(_qrr);
-    _pl.copy(restL.center).applyQuaternion(_ql).add(hl.getWorldPosition(_v));
-    _pr.copy(restR.center).applyQuaternion(_qrr).add(hr.getWorldPosition(_v));
+    const sc = this.worldScale();
+    _pl.copy(restL.center).applyQuaternion(_ql).multiplyScalar(sc).add(hl.getWorldPosition(_v));
+    _pr.copy(restR.center).applyQuaternion(_qrr).multiplyScalar(sc).add(hr.getWorldPosition(_v));
     // Hacia dónde se juntan: de la palma derecha a la izquierda, entre lo que miran las dos.
     _nl.copy(restL.normal).applyQuaternion(_ql);
     _nr.copy(restR.normal).applyQuaternion(_qrr);
     _ax.copy(_nr).sub(_nl);
     if (_ax.lengthSq() < 0.5) return; // no se miran: no es una palmada
     _ax.normalize();
-    const gap = PALM_GAP * (restL.size + restR.size) * 0.5;
+    const gap = PALM_GAP * (restL.size + restR.size) * 0.5 * sc;
     const d = (_v.copy(_pl).sub(_pr).dot(_ax) - gap) * 0.5 * Math.min(1, w);
     if (Math.abs(d) < 5e-4) return;
     this.nudgeHand(0, hl, _ql, -d);
@@ -783,6 +1088,25 @@ const _pr = new THREE.Vector3();
 const _nl = new THREE.Vector3();
 const _nr = new THREE.Vector3();
 const _ax = new THREE.Vector3();
+const _qh = new THREE.Quaternion();
+const _ws = new THREE.Vector3();
+/** Girar una mano a lo pedido (applyReach → handAim, turnHand). */
+const _qt = new THREE.Quaternion();
+const _qa = new THREE.Quaternion();
+const _qb = new THREE.Quaternion();
+const _P = new THREE.Vector3();
+const _F = new THREE.Vector3();
+const _f0 = new THREE.Vector3();
+const _c0 = new THREE.Vector3();
+const _m0 = new THREE.Matrix4();
+const _m1 = new THREE.Matrix4();
+const _up = new THREE.Vector3(0, 1, 0);
+/** El teléfono (applyPhone). */
+const _ph = new THREE.Vector3();
+const _phR = new THREE.Vector3();
+const _phU = new THREE.Vector3();
+const _phF = new THREE.Vector3();
+const _phQ = new THREE.Quaternion();
 const _S = new THREE.Vector3();
 const _E = new THREE.Vector3();
 const _W = new THREE.Vector3();
