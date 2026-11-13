@@ -16,7 +16,9 @@
  *   quedarse cortas), en el abrazo cada palma apoyada en el tronco de la otra persona y, a cada lado,
  *   un brazo encima del otro; ningún brazo atraviesa a la otra persona; y quien se acerca llega a su
  *   distancia a tiempo y sin pasarse, a cualquier tasa de imágenes;
- * - el teléfono queda en la mano derecha, junto a la oreja y con la pantalla hacia la cara.
+ * - el teléfono queda en la mano derecha, junto a la oreja y con la pantalla hacia la cara;
+ * - colgado de un canto (parkour), cada mano agarrada a él con los dedos por encima y la muñeca casi
+ *   recta, sin que el antebrazo ni los dedos se metan en el bloque.
  *
  *   npm run test:gestures -w @xenxo/web          (PRINT=1: además, dónde queda cada mano)
  */
@@ -520,6 +522,75 @@ for (const p of presets) {
     const side = d.dot(right), dist = d.length(), faces = -screen.dot(right);
     if (PRINT) console.log(`    ${p.id}: teléfono a ${cm(dist)} de la oreja (${cm(side)} a su derecha), pantalla hacia la cabeza ${faces.toFixed(2)}`);
     check(dist < 0.13 && side > 0.06 && side < 0.12 && faces > 0.8, `${p.id}: el teléfono, en la oreja derecha y con la pantalla hacia la cara (a ${cm(dist)}, ${cm(side)} a su derecha; ${faces.toFixed(2)})`);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Colgado de un borde (parkour)                                        */
+/* ------------------------------------------------------------------ */
+
+// Colgado de un canto como en el juego (el cuerpo donde lo pone parkour/moves.ts, las manos con
+// parkour/ledge.ts y el dibujo subido lo que les falte a los brazos, como en Player.tsx): cada mano,
+// agarrada al canto con la palma contra la pared y los dedos por encima; ni los dedos ni el antebrazo
+// se meten en el bloque, y la muñeca va casi recta.
+{
+  // parkour/moves.ts no se puede cargar aquí (sin Vite no hay import.meta.env): sus medidas de colgado,
+  // tal cual (HANG_DROP; HANG_OFF − HANG_IN, de BODY_RADIUS + 0.05 − 0.18).
+  const HANG_DROP = 2.05, HANG_GAP = 0.32 + 0.05 - 0.18;
+  const { ledgeHands } = await import("../src/world/parkour/ledge.ts");
+  const { createFx } = await import("../src/world/people/rig.ts");
+  type Pk = Parameters<typeof ledgeHands>[0];
+  // La pared en z = WALL (el bloque, por detrás: z > WALL y por debajo de TOP), de cara a quien
+  // cuelga (que mira hacia +z): n = (0, 0, −1). El dibujo, a HANG_GAP de la pared.
+  const TOP = HANG_DROP, WALL = HANG_GAP;
+  const inBlock = (v: THREE.Vector3) => Math.min(v.z - WALL, TOP - v.y);
+  for (const p of presets) {
+    const vrm = await vrmOf(p.hash);
+    if (vrm.humanoid.normalizedHumanBonesRoot.parent !== vrm.scene) vrm.scene.add(vrm.humanoid.normalizedHumanBonesRoot);
+    const fx = createFx();
+    fx.rig = new Rig(vrm, async () => null);
+    const posed = new Posed(vrm);
+    posed.inWorld = true;
+    posed.play("pk_hang");
+    // Lo que lee parkour/ledge.ts de quien cuelga: cada mano en el canto, a ±21 cm (como placeHands).
+    const pk = { move: "hang", p: 0, nx: 0, nz: -1, hand: { lx: 0.21, ly: TOP, lz: WALL, rx: -0.21, ry: TOP, rz: WALL, w: 1 } } as unknown as Pk;
+    let lift = 0;
+    for (let i = 0; i < 90; i++) {
+      vrm.scene.position.y = lift;
+      vrm.scene.updateMatrixWorld(true);
+      posed.at((i / 60) % 1.6);
+      ledgeHands(pk, fx);
+      fx.rig.apply(1 / 60, fx);
+      vrm.scene.updateMatrixWorld(true);
+      // Como Player.tsx: colgado, el dibujo sube lo que les falte a los brazos o baja (hasta 30 cm) lo
+      // que les sobre (aquí, el suelo lejos).
+      lift = Math.min(0.6, Math.max(-0.3, lift + fx.rig.reachLift * Math.min(1, (1 / 60) * 14)));
+    }
+    const node = (b: string) => vrm.humanoid.getNormalizedBoneNode(b as VRMHumanBoneName)!;
+    const at = (b: string) => node(b).getWorldPosition(new THREE.Vector3());
+    let worst = 0, bend = 0, where = "";
+    const hands = (["left", "right"] as const).map((side) => {
+      const h = posed.hand(side);
+      // Lo que se mete en el bloque: el antebrazo (del codo a la muñeca, punto a punto), la muñeca, la
+      // palma y las articulaciones de los dedos.
+      const E = at(`${side}LowerArm`), W = at(`${side}Hand`);
+      const pts = [...Array.from({ length: 11 }, (_, k) => E.clone().lerp(W, k / 10)), h.palm];
+      for (const f of ["Index", "Middle", "Ring", "Little"]) for (const j of ["Proximal", "Intermediate", "Distal"]) pts.push(at(`${side}${f}${j}`));
+      for (const v of pts) {
+        const d = inBlock(v);
+        if (d > worst) [worst, where] = [d, side];
+      }
+      bend = Math.max(bend, armOf(posed, side).wrist);
+      // ¿Por encima del canto? La segunda articulación de los dedos (donde se doblan sobre él).
+      const over = Math.min(...["Index", "Middle", "Ring", "Little"].map((f) => at(`${side}${f}Distal`).y)) - TOP;
+      return { h, over };
+    });
+    if (PRINT) for (const { h, over } of hands) console.log(`    ${p.id}: palma ${f3(h.palm)} normal ${f3(h.normal)} dedos ${f3(h.fingers)} · puntas a ${cm(over)} del canto · subido ${cm(lift)}`);
+    const onWall = hands.every(({ h }) => h.palm.z > WALL - 0.045 && h.palm.z < WALL && h.normal.z > 0.8 && h.fingers.y > 0.7);
+    check(onWall, `${p.id}, colgado: cada mano agarrada al canto, con la palma contra la pared y los dedos hacia arriba`);
+    check(hands.every(({ over }) => over > -0.03 && over < 0.04), `${p.id}, colgado: los dedos, doblados por encima del canto (${hands.map(({ over }) => cm(over)).join(" y ")})`);
+    check(worst < 0.012, `${p.id}, colgado: ni el antebrazo ni la mano se meten en el bloque (${cm(worst)}${where ? `, la ${where === "left" ? "izquierda" : "derecha"}` : ""})`);
+    check(bend < 45 * DEG, `${p.id}, colgado: la muñeca, casi recta (${deg(bend)})`);
   }
 }
 

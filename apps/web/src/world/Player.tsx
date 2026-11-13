@@ -9,7 +9,7 @@ import type { AvatarRef } from "@xenxo/protocol";
 import { useAccount } from "../net/account";
 import { AvatarBody, ChatBubble } from "./Avatars";
 import { createMotion, smoothSpeed, type Motion } from "./motion";
-import { cameraReach, findSeat } from "./collision";
+import { cameraReach, findSeat, groundHeight } from "./collision";
 import { boost, poseFlush } from "../net/activity-store";
 import { STEP_UP, createBody, moveScale, placeBody, requestJump, stepBody } from "./locomotion";
 import { TurnLean } from "./leap";
@@ -31,6 +31,7 @@ import { fighterNear } from "../net/people";
 import { PoseSender, RACE_RANGE_M, SEND_EVERY_MS, SEND_TIGHT_MS, TIGHT_RANGE_M } from "../net/pose-send";
 import { preloadParkour, UPPER_EMOTES } from "./animation";
 import { createParkour, parkourStep, resetParkour } from "./parkour/moves";
+import { hangLift, ledgeHands } from "./parkour/ledge";
 import { gun, gunFrame, resetGun, SELF_GUN } from "./people/guns";
 import { HeldWeapon } from "./people/HeldWeapon";
 import { cineCamera } from "./cine/camera";
@@ -447,27 +448,25 @@ export function Player({ active }: { active: boolean }) {
         motion.vy = body.vy;
         motion.pk = parkour ? pk.emote : slideEmote();
         motion.pkP = parkour ? pk.p : slideP();
-        // Las manos en el borde o en la valla (IK del esqueleto, people/rig.ts).
+        // Las manos en el borde o en la valla: agarradas al canto o apoyadas encima (parkour/ledge.ts,
+        // con la IK del esqueleto, people/rig.ts).
         const fx = motion.fx;
         if (fx && parkour && pk.hand.w > 0.01) {
-          fx.reachL.x = pk.hand.lx;
-          fx.reachL.y = pk.hand.ly;
-          fx.reachL.z = pk.hand.lz;
-          fx.reachL.w = pk.hand.w;
-          fx.reachR.x = pk.hand.rx;
-          fx.reachR.y = pk.hand.ry;
-          fx.reachR.z = pk.hand.rz;
-          fx.reachR.w = pk.hand.w;
+          ledgeHands(pk, fx);
           pkHands.current = true;
         } else if (fx && pkHands.current) {
           fx.reachL.w = fx.reachR.w = 0;
           pkHands.current = false;
         }
         // Colgado o trepando: el dibujo sube lo que les falte a sus brazos para llegar al borde (cada
-        // avatar mide lo suyo: people/rig.ts → reachLift) y vuelve a su sitio al soltarse.
+        // avatar mide lo suyo: people/rig.ts → reachLift) y vuelve a su sitio al soltarse. Colgado,
+        // también baja lo que les sobre (con brazos largos colgaba con los codos doblados y la muñeca
+        // forzada), sin meter los pies en el suelo; al trepar, eso se recoge poco a poco.
         const rigNow = fx?.rig;
         if (parkour && (pk.move === "hang" || pk.move === "climb") && pk.hand.w > 0.5 && rigNow) {
-          pkLift.current = THREE.MathUtils.clamp(pkLift.current + rigNow.reachLift * Math.min(1, dt * 14), 0, 0.6);
+          const hanging = pk.move === "hang";
+          const floor = hanging ? groundHeight(body.x + pk.ox, body.z + pk.oz, 0.2, body.y + 0.1) + 0.05 - body.y : 0;
+          pkLift.current = hangLift(pkLift.current, rigNow.reachLift, dt, hanging, floor);
         } else pkLift.current *= 1 - Math.min(1, dt * 8);
 
         // El cuerpo gira hacia donde camina (la cámara puede mirar a otro lado); en primera

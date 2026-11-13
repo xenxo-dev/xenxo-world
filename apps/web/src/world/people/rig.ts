@@ -16,6 +16,7 @@
  */
 import * as THREE from "three";
 import { VRMHumanBoneParentMap, type VRM, type VRMHumanBoneName } from "@pixiv/three-vrm";
+import { ALL_FINGER_BONES, handTable, type BaseHand } from "./hands";
 import { PHONE_HOLD } from "./phone";
 import type { VRMAnimation } from "@pixiv/three-vrm-animation";
 import type { Q4, RagdollHandle, RagdollJoint, RagdollPart, RagdollSpec, RagdollWorldApi, V3 } from "./ragdoll";
@@ -38,8 +39,11 @@ export interface Target {
    * la mano para otra cosa no los hereda). `palm`: el punto es donde va el centro de la palma, no la
    * muñeca (para que dos palmas se toquen). `nx, ny, nz` y `ux, uy, uz`: hacia dónde mira la palma y
    * hacia dónde apuntan los dedos (mundo); sin ellos (a 0), la mano girada como la puso la animación.
+   * `shape`: cómo se doblan los dedos (people/hands.ts: agarrada a un canto, apoyada…); sin ella, como
+   * los puso la animación.
    */
   palm: number;
+  shape: BaseHand | null;
   nx: number;
   ny: number;
   nz: number;
@@ -57,10 +61,15 @@ export interface BodySize {
    */
   shoulder: number;
   head: number;
-  /** Del hombro a la muñeca, medio ancho de hombros y la mano (de la muñeca a los nudillos). */
+  /**
+   * Del hombro a la muñeca, medio ancho de hombros, la mano (de la muñeca a los nudillos) y, con los
+   * dedos rectos, del centro de la palma a la segunda articulación del dedo que la tenga más cerca (para
+   * agarrarse a un canto: parkour/ledge.ts).
+   */
   arm: number;
   width: number;
   hand: number;
+  grip: number;
   /**
    * El tronco por fuera, con la ropa (de su malla, en reposo; desde los pies): hasta dónde llega el
    * pecho por delante y la espalda por detrás, a la altura del pecho y de la cintura, y su medio ancho
@@ -78,7 +87,7 @@ export interface TorsoBand {
   side: number;
 }
 /** Un cuerpo cualquiera, para quien aún no ha cargado su avatar. */
-export const BODY: BodySize = { shoulder: 1.33, head: 1.62, arm: 0.5, width: 0.18, hand: 0.09, front: 0.14, back: 0.12, waist: 0.11, side: 0.16 };
+export const BODY: BodySize = { shoulder: 1.33, head: 1.62, arm: 0.5, width: 0.18, hand: 0.09, grip: 0.06, front: 0.14, back: 0.12, waist: 0.11, side: 0.16 };
 /** Lo que baja el hombro de la pose en T a de pie (ver `BodySize.shoulder`). */
 const SHOULDER_DOWN = 0.935;
 /**
@@ -108,7 +117,7 @@ export interface PersonFx {
   footL: Target;
   footR: Target;
 }
-const target = (): Target => ({ x: 0, y: 0, z: 0, w: 0, px: 0, py: 0, pz: 0, palm: 0, nx: 0, ny: 0, nz: 0, ux: 0, uy: 0, uz: 0 });
+const target = (): Target => ({ x: 0, y: 0, z: 0, w: 0, px: 0, py: 0, pz: 0, palm: 0, shape: null, nx: 0, ny: 0, nz: 0, ux: 0, uy: 0, uz: 0 });
 export const createFx = (): PersonFx => ({ rig: null, look: target(), reachL: target(), reachR: target(), seat: target(), footL: target(), footR: target() });
 
 const DEG = Math.PI / 180;
@@ -692,14 +701,16 @@ export class Rig {
 
   /** IK de dos huesos del brazo hacia la muñeca pedida (mundo), respetando hacia dónde iba el codo. */
   private applyReach(dt: number, side: 0 | 1, t: Target) {
-    const palm = t.palm;
+    const palm = t.palm, shape = t.shape;
     _P.set(t.nx, t.ny, t.nz);
     _F.set(t.ux, t.uy, t.uz);
     t.palm = t.nx = t.ny = t.nz = t.ux = t.uy = t.uz = 0;
+    t.shape = null;
     // Lo que va a la palma de otra persona (pair.ts) ya entra con su propia rampa, a tiempo para el
     // golpe o el apretón: aquí se sigue deprisa (con la lenta, chocar los cinco llegaba tarde).
     this.reachW[side] = this.reachW[side]! + (t.w - this.reachW[side]!) * Math.min(1, dt * (palm ? 16 : 6));
     const w = this.reachW[side]!;
+    if (!shape || w < 0.01) this.shaped[side] = false;
     if (w < 0.01) return;
     const upper = this.n(side ? "rightUpperArm" : "leftUpperArm");
     const lower = this.n(side ? "rightLowerArm" : "leftLowerArm");
@@ -746,6 +757,30 @@ export class Rig {
       this.reachArm(upper, lower, hand, t.x - _v.x, t.y - _v.y, t.z - _v.z, w, t.px, t.py, t.pz);
     }
     if (aim) this.turnHand(side, lower, hand, _qt, w);
+    if (shape) this.shapeFingers(dt, side, shape, w);
+  }
+
+  /** Por mano: sus dedos (los huesos normalizados) y cómo van ahora (para cambiar de forma sin saltos). */
+  private fingers: { node: THREE.Object3D; bone: string; now: THREE.Quaternion }[][] | null = null;
+  private shaped = [false, false];
+  /** Los dedos de una mano a una forma (people/hands.ts), con peso `w`; de una forma a otra, en una décima. */
+  private shapeFingers(dt: number, side: 0 | 1, shape: BaseHand, w: number) {
+    if (!this.fingers) {
+      this.fingers = [[], []];
+      for (const bone of ALL_FINGER_BONES) {
+        const node = this.nodes.get(bone);
+        if (node) this.fingers[bone.startsWith("right") ? 1 : 0]!.push({ node, bone, now: new THREE.Quaternion() });
+      }
+    }
+    const t = handTable(shape, this.vrm.meta?.metaVersion === "0");
+    const k = this.shaped[side] ? Math.min(1, dt / 0.1) : 1;
+    for (const f of this.fingers[side]!) {
+      // Al empezar, desde como los tenía la animación.
+      if (!this.shaped[side]) f.now.copy(f.node.quaternion);
+      f.now.slerp(t.get(f.bone)!, k);
+      f.node.quaternion.slerp(f.now, w);
+    }
+    this.shaped[side] = true;
   }
 
   /**
@@ -810,7 +845,17 @@ export class Rig {
     const lu = at("leftUpperArm"), ru = at("rightUpperArm");
     const head = at("head").y * s;
     const len = (b: Bone) => new THREE.Vector3().fromArray(rest[b]?.position ?? [0, 0, 0]).length() * s;
-    const hand = (this.palmRest(0)?.size ?? 0) * s;
+    const palm0 = this.palmRest(0);
+    const hand = (palm0?.size ?? 0) * s;
+    // La segunda articulación de cada dedo, a lo largo de ellos desde el centro de la palma: la más cerca.
+    let grip = Infinity;
+    if (palm0) {
+      const along = palm0.center.clone().normalize();
+      for (const f of ["Index", "Middle", "Ring", "Little"] as const) {
+        const k = rest[`left${f}Proximal` as Bone]?.position, m = rest[`left${f}Intermediate` as Bone]?.position;
+        if (k && m) grip = Math.min(grip, (new THREE.Vector3().fromArray(k).dot(along) + new THREE.Vector3().fromArray(m).length() - palm0.center.length()) * s);
+      }
+    }
     const arm = len("leftLowerArm") + len("leftHand");
     const width = (lu.distanceTo(ru) / 2) * s;
     const shoulder = ((lu.y + ru.y) / 2) * s;
@@ -831,6 +876,7 @@ export class Rig {
       arm: arm > 0.2 ? arm : BODY.arm,
       width: width > 0.05 ? width : BODY.width,
       hand: hand > 0.03 ? hand : BODY.hand,
+      grip: grip > 0.02 && grip < 0.15 ? grip : (hand > 0.03 ? hand : BODY.hand) * (BODY.grip / BODY.hand),
       front: bands ? bands[0]!.front + chest.dot(fwd) * s : BODY.front * k,
       back: bands ? bands[0]!.back - chest.dot(fwd) * s : BODY.back * k,
       waist: bands ? bands[1]!.back - spine.dot(fwd) * s : BODY.waist * k,

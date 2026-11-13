@@ -50,6 +50,8 @@ export const HANG_DROP = 2.05;
  */
 export const HANG_OFF = BODY_RADIUS + 0.05;
 export const HANG_IN = 0.18;
+/** Lo que dura trepar desde colgado (s): también lo dibuja así quien lo ve (Avatars.tsx). */
+export const HANG_CLIMB_S = 1.05;
 /** Bordes que se pillan: por encima de los pies, para subir directo y para colgarse. */
 const MANTLE_LO = 0.45;
 const MANTLE_HI = 1.35;
@@ -130,7 +132,10 @@ export interface Parkour {
   /** El dibujo desplazado respecto al cuerpo (m, mundo): los pies contra la pared. */
   ox: number;
   oz: number;
-  /** Las manos donde se apoyan (mundo) y su peso para la IK. */
+  /**
+   * Dónde se agarran o se apoyan las manos: el punto del canto de cada una (mundo; cómo va la mano ahí,
+   * parkour/ledge.ts) y su peso para la IK.
+   */
   hand: { lx: number; ly: number; lz: number; rx: number; ry: number; rz: number; w: number };
   /** Lo que ven los demás y la animación ("pk_vault"…); null sin parkour. */
   emote: string | null;
@@ -410,7 +415,10 @@ function setEdge(pk: Parkour, ex: number, top: number, ez: number, nx: number, n
   placeHands(pk, 0);
 }
 
-/** Las manos sobre el borde, a ambos lados (y, al moverse colgado, alternando el paso). */
+/**
+ * Las manos en el canto, a ambos lados (y, al moverse colgado, alternando el paso): el punto del canto
+ * de cada una; agarrada o apoyada, lo decide parkour/ledge.ts.
+ */
 function placeHands(pk: Parkour, step: number) {
   // Derecha de quien mira la pared (mira hacia −n): (n.z, −n.x)... con adelante (−nx, −nz), la derecha
   // es (−adelante.z, adelante.x) = (nz, −nx).
@@ -419,14 +427,12 @@ function placeHands(pk: Parkour, step: number) {
   const half = 0.21;
   const sl = -half + Math.max(0, -step) * 0.12;
   const sr = half + Math.max(0, step) * 0.12;
-  const inX = -pk.nx * 0.06;
-  const inZ = -pk.nz * 0.06;
-  pk.hand.lx = pk.lx + rx * sl + inX;
-  pk.hand.lz = pk.lz + rz * sl + inZ;
-  pk.hand.ly = pk.ly + 0.02;
-  pk.hand.rx = pk.lx + rx * sr + inX;
-  pk.hand.rz = pk.lz + rz * sr + inZ;
-  pk.hand.ry = pk.ly + 0.02;
+  pk.hand.lx = pk.lx + rx * sl;
+  pk.hand.lz = pk.lz + rz * sl;
+  pk.hand.ly = pk.ly;
+  pk.hand.rx = pk.lx + rx * sr;
+  pk.hand.rz = pk.lz + rz * sr;
+  pk.hand.ry = pk.ly;
 }
 
 /* ------------------------------------------------------------------ */
@@ -991,7 +997,7 @@ function startClimb(pk: Parkour, b: Body): boolean {
   pk.move = "climb";
   pk.t = 0;
   pk.p = 0;
-  pk.dur = 1.05;
+  pk.dur = HANG_CLIMB_S;
   pk.sx = b.x;
   pk.sy = b.y;
   pk.sz = b.z;

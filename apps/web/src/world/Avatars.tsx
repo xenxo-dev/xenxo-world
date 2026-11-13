@@ -18,7 +18,8 @@ import { groundHeight } from "./collision";
 import { CustomAvatar } from "./CustomAvatar";
 import { FONT_URL } from "./font";
 import { advance, createMotion, smoothSpeed, type Motion } from "./motion";
-import { HANG_DROP, HANG_IN, HANG_OFF } from "./parkour/moves";
+import { HANG_CLIMB_S, HANG_DROP, HANG_IN, HANG_OFF } from "./parkour/moves";
+import { hangLift, ledgeHandsAt, onTopAt } from "./parkour/ledge";
 import { presetFor } from "./presets";
 import { applyCarPose, CarModel, createCarHandle, createCarPose } from "./vehicle/CarModel";
 import { aimHands } from "./people/arms";
@@ -411,33 +412,30 @@ function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; n
       const k = Math.min(1, dt * 10);
       pkTilt.lean += ((pkE === "pk_wallrun_r" ? 0.4 : pkE === "pk_wallrun_l" ? -0.4 : 0) - pkTilt.lean) * k;
       pkTilt.pitch += ((pkE === "pk_wallup" ? 0.3 : 0) - pkTilt.pitch) * k;
-      // Colgado (o trepando desde ahí): el borde está HANG_DROP por encima de sus pies y HANG_OFF
-      // delante (las reglas de world/parkour); las manos en él y el cuerpo contra la pared.
+      // Colgado (o trepando desde ahí): el canto está HANG_DROP por encima de sus pies y HANG_OFF
+      // delante (las reglas de world/parkour); las manos en él, como las de quien juega
+      // (parkour/ledge.ts), y el cuerpo contra la pared.
       const hangE = pkE === "pk_hang" || pkE === "pk_shimmy_l" || pkE === "pk_shimmy_r";
       if (hangE) {
         pkHang.fx = -Math.sin(d.yaw);
         pkHang.fz = -Math.cos(d.yaw);
-        pkHang.x = d.x + pkHang.fx * (HANG_OFF + 0.06);
-        pkHang.z = d.z + pkHang.fz * (HANG_OFF + 0.06);
-        pkHang.y = d.y + HANG_DROP + 0.02;
+        pkHang.x = d.x + pkHang.fx * HANG_OFF;
+        pkHang.z = d.z + pkHang.fz * HANG_OFF;
+        pkHang.y = d.y + HANG_DROP;
         pkHang.t = 0;
         pkHang.on = true;
         if (pkE !== "pk_hang") pkHang.sh += dt * 0.9;
       } else if (pkE === "pk_climb" && pkHang.on) pkHang.t += dt;
       else pkHang.on = false;
-      const handW = !pkHang.on ? 0 : hangE || pkHang.t < 0.79 ? 1 : Math.max(0, 1 - (pkHang.t - 0.79) / 0.16);
+      // Las manos, hasta los tres cuartos de trepar (como moves.ts) y se sueltan en un momento.
+      const handW = !pkHang.on ? 0 : hangE || pkHang.t < HANG_CLIMB_S * 0.75 ? 1 : Math.max(0, 1 - (pkHang.t - HANG_CLIMB_S * 0.75) / (HANG_CLIMB_S * 0.15));
       const fxr = motion.fx;
       if (fxr && handW > 0.01) {
         const rx = -pkHang.fz, rz = pkHang.fx;
         const step = pkE === "pk_shimmy_r" ? Math.sin(pkHang.sh * 12) : pkE === "pk_shimmy_l" ? -Math.sin(pkHang.sh * 12) : 0;
         const sl = -0.21 + Math.max(0, -step) * 0.12, sr = 0.21 + Math.max(0, step) * 0.12;
-        fxr.reachL.x = pkHang.x + rx * sl;
-        fxr.reachL.y = pkHang.y;
-        fxr.reachL.z = pkHang.z + rz * sl;
-        fxr.reachR.x = pkHang.x + rx * sr;
-        fxr.reachR.y = pkHang.y;
-        fxr.reachR.z = pkHang.z + rz * sr;
-        fxr.reachL.w = fxr.reachR.w = handW;
+        const top = onTopAt(hangE ? "hang" : "climb", pkHang.t / HANG_CLIMB_S);
+        ledgeHandsAt(fxr, -pkHang.fx, -pkHang.fz, pkHang.x + rx * sl, pkHang.y, pkHang.z + rz * sl, pkHang.x + rx * sr, pkHang.y, pkHang.z + rz * sr, handW, top);
         pkHang.hands = true;
       } else if (fxr && pkHang.hands) {
         fxr.reachL.w = fxr.reachR.w = 0;
@@ -456,8 +454,10 @@ function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; n
       const inW = hangE ? 1 : pkHang.on ? Math.max(0, 1 - Math.max(0, pkHang.t - 0.44) / 0.5) : 0;
       pkHang.off += (inW - pkHang.off) * Math.min(1, dt * 12);
       const rigR = fxr?.rig;
-      if (handW > 0.5 && rigR) pkHang.lift = THREE.MathUtils.clamp(pkHang.lift + rigR.reachLift * Math.min(1, dt * 14), 0, 0.6);
-      else pkHang.lift *= 1 - Math.min(1, dt * 8);
+      if (handW > 0.5 && rigR) {
+        const floor = hangE ? groundHeight(d.x + pkHang.fx * HANG_IN, d.z + pkHang.fz * HANG_IN, 0.2, d.y + 0.1) + 0.05 - d.y : 0;
+        pkHang.lift = hangLift(pkHang.lift, rigR.reachLift, dt, hangE, floor);
+      } else pkHang.lift *= 1 - Math.min(1, dt * 8);
       if (!d.placed) body.current.position.set(d.x + pkHang.fx * HANG_IN * pkHang.off, d.y + pkHang.lift, d.z + pkHang.fz * HANG_IN * pkHang.off);
       // Sin esqueleto VRM (un GLB o el muñeco): en el suelo se tumba entero hacia donde le dieron.
       const want = !motion.fx?.rig && d.emote === "hit_down" ? DOWN_TILT : 0;

@@ -37,7 +37,7 @@ export const FINGER_BONES = { left: fingerBones("left"), right: fingerBones("rig
 export const ALL_FINGER_BONES = [...FINGER_BONES.left, ...FINGER_BONES.right];
 
 /** Las formas de base: relajada, puño, agarrar, abierta, estirada y juntos (aplaudir: casi rectos y el pulgar junto al índice). */
-export type BaseHand = "relaxed" | "fist" | "grip" | "open" | "flat" | "together" | "hold";
+export type BaseHand = "relaxed" | "fist" | "grip" | "open" | "flat" | "together" | "hold" | "hook";
 
 type Long = "Index" | "Middle" | "Ring" | "Little";
 /**
@@ -80,6 +80,13 @@ const SHAPES: Record<BaseHand, Shape> = {
     fingers: { Index: [4, 6, 3], Middle: [5, 7, 4], Ring: [6, 8, 4], Little: [7, 9, 5] },
     spread: { Index: -1, Middle: 0, Ring: -1, Little: -2 },
     thumb: [16, 6, 6],
+  },
+  // Colgado de un canto (parkour/ledge.ts): la palma contra la pared y los dedos por encima del canto
+  // (la primera falange recta, la segunda doblada en ángulo recto y la punta apoyada).
+  hook: {
+    fingers: { Index: [6, 86, 24], Middle: [6, 88, 26], Ring: [6, 86, 24], Little: [8, 82, 22] },
+    spread: { Index: -1, Middle: 0, Ring: -1, Little: -2 },
+    thumb: [18, 8, 8],
   },
   // Sujetando el teléfono contra la palma (people/phone.ts): los dedos juntos y casi rectos por su
   // dorso, y el pulgar por su canto.
