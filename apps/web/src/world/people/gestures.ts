@@ -8,8 +8,8 @@
  * (respecto a su hombro o a su cadera, en metros de un cuerpo de 1,70 m), hacia dónde apunta el codo
  * o la rodilla, la forma de la mano y cuánto se inclinan el tronco y la cabeza. Entre fotogramas,
  * curvas suaves (Catmull-Rom: sin paradas en cada pose) que se muestrean a 30 por segundo, y en cada
- * muestra se resuelven brazos y piernas con IK de dos huesos. Las formas de la mano (puño, relajada)
- * salen de la captura de movimiento de la propia biblioteca.
+ * muestra se resuelven brazos y piernas con IK de dos huesos. Las formas de la mano son las de
+ * people/hands.ts.
  *
  * Ejes de los huesos normalizados de VRM (pose en T, mirando a +Z, la izquierda de la persona en +X):
  * en tronco y cabeza, x > 0 se inclina hacia delante, y > 0 gira a su izquierda y z > 0 se dobla a su
@@ -24,7 +24,7 @@ type V3 = [number, number, number];
 type TorsoBone = "spine" | "chest" | "upperChest" | "neck" | "head" | "leftShoulder" | "rightShoulder";
 const TORSO: TorsoBone[] = ["spine", "chest", "upperChest", "neck", "head", "leftShoulder", "rightShoulder"];
 
-/** Formas de la mano: el puño y la relajada salen de la captura; las demás, de mezclarlas. */
+/** Formas de la mano: las de people/hands.ts y, mezclándolas, señalar, llamar con el dedo y el pulgar arriba. */
 export type Hand = "fist" | "relaxed" | "open" | "flat" | "point" | "grip" | "curl" | "thumb";
 
 /** Un brazo: muñeca respecto al hombro (m), hacia dónde va el codo, giro del antebrazo y muñeca (grados). */
@@ -624,9 +624,9 @@ function handShapes(): HandShapes {
       shapes.relaxed.set(bone, relaxed);
       shapes.fist.set(bone, fist);
       shapes.flat.set(bone, flat);
-      shapes.open.set(bone, flat.clone().slerp(relaxed, 0.35));
+      shapes.open.set(bone, fingerPose("open", bone));
       shapes.point.set(bone, index ? flat.clone().slerp(relaxed, 0.1) : fist.clone());
-      shapes.grip.set(bone, relaxed.clone().slerp(fist, thumb ? 0.3 : 0.6));
+      shapes.grip.set(bone, fingerPose("grip", bone));
       shapes.curl.set(bone, relaxed.clone().slerp(fist, thumb ? 0.2 : 0.85));
       shapes.thumb.set(bone, thumb ? flat.clone() : fist.clone());
     }

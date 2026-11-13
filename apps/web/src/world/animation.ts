@@ -17,7 +17,7 @@ import type { VRM } from "@pixiv/three-vrm";
 import { createVRMAnimationClip, VRMAnimationLoaderPlugin, type VRMAnimation } from "@pixiv/three-vrm-animation";
 import { buildGesture, buildGuard, interpolant, PROCEDURAL } from "./people/gestures";
 import { Rig, type PersonFx } from "./people/rig";
-import { ALL_FINGER_BONES, handTable, type BaseHand } from "./people/hands";
+import { ALL_FINGER_BONES, handTable, restFix, type BaseHand, type RestFix } from "./people/hands";
 
 /**
  * Gesto → clip. `once`: se reproduce una vez y vuelve al reposo; con `hold`, se queda en la última
@@ -316,8 +316,14 @@ export class VrmAnimator {
   /** Los dedos (nodo normalizado y su giro de ahora, que va hacia la mano de base). */
   private fingers: { node: THREE.Object3D; bone: string; now: THREE.Quaternion }[] | null = null;
   private readonly _dur: Record<string, number> = {};
+  /** Un VRM 0.x: sus ejes normalizados van girados media vuelta (people/hands.ts → forVrm0). */
+  private readonly v0: boolean;
+  /** Lo que hay que enderezar de su mano en reposo (las fundas: people/hands.ts → restFix). */
+  private readonly handFix: RestFix[];
 
   constructor(private vrm: VRM) {
+    this.v0 = vrm.meta?.metaVersion === "0";
+    this.handFix = restFix(vrm.humanoid, this.v0);
     this.mixer = new THREE.AnimationMixer(vrm.scene);
     this.rig = new Rig(vrm, () => loadVrma("stand_up"));
     this.mixer.addEventListener("finished", (e) => {
@@ -546,11 +552,16 @@ export class VrmAnimator {
     this.applyGesture(dt, gesture ?? null);
 
     this.rig.apply(dt, fx ?? null);
+    // Al final, lo que endereza la mano en reposo de este modelo (si hace falta): debajo de cualquier
+    // pose (la de los clips, la mano de base o la de un gesto). El mezclador escribe los dedos en cada
+    // frame, así que no se acumula.
+    for (const f of this.handFix) f.node.quaternion.premultiply(f.pre).multiply(f.post);
   }
 
   /** Los pies algo más juntos (de pie con falda larga): cada muslo hacia dentro y el pie, plano. */
   private narrowStance(a: number) {
     const h = this.vrm.humanoid;
+    if (this.v0) a = -a;
     for (const [leg, foot, sign] of [["leftUpperLeg", "leftFoot", -1], ["rightUpperLeg", "rightFoot", 1]] as const) {
       const l = h.getNormalizedBoneNode(leg), f = h.getNormalizedBoneNode(foot);
       if (!l || !f) continue;
@@ -568,17 +579,17 @@ export class VrmAnimator {
       this.fingers = [];
       for (const bone of ALL_FINGER_BONES) {
         const node = this.vrm.humanoid.getNormalizedBoneNode(bone as never);
-        if (node) this.fingers.push({ node, bone, now: handTable("relaxed").get(bone)!.clone() });
+        if (node) this.fingers.push({ node, bone, now: handTable("relaxed", this.v0).get(bone)!.clone() });
       }
     }
     let made = 0;
     for (const [name, a] of this.actions) if (PROCEDURAL.has(name)) made += a.getEffectiveWeight();
     const w = 1 - Math.min(1, made);
     const k = Math.min(1, dt / 0.1);
-    const t = handTable(shape);
+    const t = handTable(shape, this.v0);
     // Corriendo a tope, la mano se suelta (algo más abierta).
     const loose = shape === "relaxed" ? THREE.MathUtils.smoothstep(speed, 4, 6) * 0.5 : 0;
-    const open = handTable("open");
+    const open = handTable("open", this.v0);
     for (const f of this.fingers) {
       _q.copy(t.get(f.bone)!);
       if (loose > 0) _q.slerp(open.get(f.bone)!, loose);

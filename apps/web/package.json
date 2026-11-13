@@ -16,6 +16,7 @@
     "test:locomotion": "esbuild test/locomotion.mts --bundle --platform=node --format=esm --define:import.meta.env={} --log-level=warning --outfile=node_modules/.cache/xenxo/locomotion.mjs && node node_modules/.cache/xenxo/locomotion.mjs",
     "test:parkour": "esbuild test/parkour.mts --bundle --platform=node --format=esm --define:import.meta.env={} --log-level=warning --outfile=node_modules/.cache/xenxo/parkour.mjs && node node_modules/.cache/xenxo/parkour.mjs",
     "test:springs": "tsx test/springs.mts",
+    "test:hands": "tsx test/hands.mts",
     "test:race": "tsx test/race.mts && tsx test/vertigo.mts",
     "test:guide": "tsx test/guide.mts && esbuild test/arrive.mts --bundle --platform=node --format=esm --define:import.meta.env={} --log-level=warning --outfile=node_modules/.cache/xenxo/arrive.mjs && node node_modules/.cache/xenxo/arrive.mjs",
     "test:graphics": "esbuild test/graphics.mts --bundle --platform=node --format=esm --define:import.meta.env={} --log-level=warning --outfile=node_modules/.cache/xenxo/graphics.mjs && node node_modules/.cache/xenxo/graphics.mjs",

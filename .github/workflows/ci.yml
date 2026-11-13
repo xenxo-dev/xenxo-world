@@ -31,6 +31,8 @@ jobs:
       - run: HZ=24 npm run test:parkour -w @xenxo/web
       - run: HZ=144 npm run test:parkour -w @xenxo/web
       - run: npm run test:springs -w @xenxo/web
+      # Las manos: los dedos se doblan hacia la palma (no de lado), también en las fundas y en VRM 0.x.
+      - run: npm run test:hands -w @xenxo/web
       # Los sitios de «Qué hacer aquí» caen en huecos libres, los enlaces /d/… llevan adonde dicen.
       - run: npm run test:guide -w @xenxo/web
       # Las cámaras del modo cine hacen lo que dice su guía y no dejan la cámara en un sitio imposible.
