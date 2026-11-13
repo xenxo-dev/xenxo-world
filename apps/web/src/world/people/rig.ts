@@ -6,6 +6,9 @@
  *     su dirección (de frente, por la espalda o de lado) y vuelven solos, con su pequeño rebote.
  *   - Mirar a alguien: cuello y cabeza hacia un punto, con límites.
  *   - Llegar con la mano a un sitio (IK de dos huesos): chocar los cinco, darse la mano, abrazar.
+ *   - Juntar las palmas (aplaudir): el gesto dice cuándo se tocan (`touch`) y aquí se juntan a la
+ *     medida de cada avatar (lo ancho de hombros frente a lo largo de brazos cambia de uno a otro:
+ *     con la misma pose, a unos les quedaba un hueco y a otros se les atravesaban las manos).
  *   - Caer con física (people/ragdoll.ts): el cuerpo articulado manda sobre los huesos mientras
  *     cae y está en el suelo; al levantarse se funde con la animación desde la pose en que quedó.
  *
@@ -513,6 +516,7 @@ export class Rig {
       this.applyReach(dt, 0, fx.reachL);
       this.applyReach(dt, 1, fx.reachR);
     }
+    if (this.touch > 0.01) this.applyMeet(this.touch);
     const need = Math.max(this.liftNeed[0]!, this.liftNeed[1]!);
     this.reachLift = Number.isFinite(need) ? need : 0;
   }
@@ -645,7 +649,17 @@ export class Rig {
       const reach = (la + lb) * 0.97;
       this.liftNeed[side] = t.y - _S.y - (hx < reach ? Math.sqrt(reach * reach - hx * hx) : 0);
     }
-    _D.set(t.x, t.y, t.z).sub(_S);
+    this.reachArm(upper, lower, hand, t.x, t.y, t.z, w, t.px, t.py, t.pz);
+  }
+
+  /**
+   * IK de dos huesos de un brazo: la muñeca a (x, y, z) del mundo con peso `w` y el codo hacia (px,
+   * py, pz) o, sin eso, hacia donde ya iba. Hay que haber puesto en _S, _E y _W dónde están ahora el
+   * hombro, el codo y la muñeca.
+   */
+  private reachArm(upper: THREE.Object3D, lower: THREE.Object3D, hand: THREE.Object3D, x: number, y: number, z: number, w: number, px = 0, py = 0, pz = 0) {
+    const la = _S.distanceTo(_E), lb = _E.distanceTo(_W);
+    _D.set(x, y, z).sub(_S);
     let dist = _D.length();
     const max = (la + lb) * 0.995;
     const min = Math.abs(la - lb) + 0.01;
@@ -654,19 +668,19 @@ export class Rig {
     dist = _D.length();
     _U.copy(_D).normalize();
     // El codo hacia donde se pida o hacia donde ya iba (respecto a la recta hombro-mano nueva).
-    if (t.px || t.py || t.pz) _N.set(t.px, t.py, t.pz);
+    if (px || py || pz) _N.set(px, py, pz);
     else _N.copy(_E).sub(_S);
     _N.addScaledVector(_U, -_N.dot(_U));
     if (_N.lengthSq() < 1e-8) _N.set(0, -1, 0);
     _N.normalize();
-    const x = (la * la + dist * dist - lb * lb) / (2 * dist);
-    const h = Math.sqrt(Math.max(0, la * la - x * x));
+    const a = (la * la + dist * dist - lb * lb) / (2 * dist);
+    const h = Math.sqrt(Math.max(0, la * la - a * a));
     // Brazo: de hacia el codo de ahora a hacia el codo nuevo.
     _v.copy(_E).sub(_S).normalize();
-    _w.copy(_U).multiplyScalar(x).addScaledVector(_N, h).normalize();
+    _w.copy(_U).multiplyScalar(a).addScaledVector(_N, h).normalize();
     _q.setFromUnitVectors(_v, _w);
     upper.getWorldQuaternion(_q2).premultiply(_q);
-    upper.parent.getWorldQuaternion(_qr);
+    upper.parent!.getWorldQuaternion(_qr);
     _q3.copy(_qr).invert().multiply(_q2);
     upper.quaternion.slerp(_q3, w);
     upper.updateWorldMatrix(false, true);
@@ -681,9 +695,94 @@ export class Rig {
     _q3.copy(_qr).invert().multiply(_q2);
     lower.quaternion.slerp(_q3, w);
   }
+
+  /* ---------------------------------------------------------------- */
+  /* Juntar las palmas                                                  */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Cuánto se tocan ahora las palmas (0–1): lo pone el animador con lo que diga el gesto
+   * (people/gestures.ts → `touchAt`) por lo que pese.
+   */
+  touch = 0;
+  /** Por mano: hacia fuera de la palma, dónde queda su centro (respecto a la muñeca) y lo que mide; en reposo. */
+  private palms: ({ normal: THREE.Vector3; center: THREE.Vector3; size: number } | null)[] | null = null;
+
+  private palmRest(side: 0 | 1) {
+    if (!this.palms) {
+      const rest = this.vrm.humanoid.normalizedRestPose;
+      this.palms = (["left", "right"] as const).map((s) => {
+        const at = (b: string) => rest[`${s}${b}` as Bone]?.position;
+        const mid = at("MiddleProximal"), index = at("IndexProximal"), ring = at("RingProximal"), little = at("LittleProximal");
+        if (!mid || !index || !ring || !little) return null;
+        const v = (p: number[]) => new THREE.Vector3().fromArray(p);
+        const center = v(index).add(v(mid)).add(v(ring)).add(v(little)).multiplyScalar(0.25 * PALM_AT);
+        const normal = v(mid).cross(v(index).sub(v(little))).normalize();
+        if (s === "right") normal.negate();
+        return { normal, center, size: v(mid).length() };
+      });
+    }
+    return this.palms[side];
+  }
+
+  /**
+   * Junta las palmas a su medida: el centro de cada una (en la línea de los huesos, a medio camino de
+   * la muñeca a los nudillos) a la distancia de una palma de la otra, a lo largo de hacia donde miran,
+   * moviendo las dos muñecas lo mismo y sin girar las manos (la pose ya las pone una frente a otra).
+   */
+  private applyMeet(w: number) {
+    const restL = this.palmRest(0), restR = this.palmRest(1);
+    const hl = this.n("leftHand"), hr = this.n("rightHand");
+    if (!restL || !restR || !hl || !hr) return;
+    hl.updateWorldMatrix(true, false);
+    hr.updateWorldMatrix(true, false);
+    hl.getWorldQuaternion(_ql);
+    hr.getWorldQuaternion(_qrr);
+    _pl.copy(restL.center).applyQuaternion(_ql).add(hl.getWorldPosition(_v));
+    _pr.copy(restR.center).applyQuaternion(_qrr).add(hr.getWorldPosition(_v));
+    // Hacia dónde se juntan: de la palma derecha a la izquierda, entre lo que miran las dos.
+    _nl.copy(restL.normal).applyQuaternion(_ql);
+    _nr.copy(restR.normal).applyQuaternion(_qrr);
+    _ax.copy(_nr).sub(_nl);
+    if (_ax.lengthSq() < 0.5) return; // no se miran: no es una palmada
+    _ax.normalize();
+    const gap = PALM_GAP * (restL.size + restR.size) * 0.5;
+    const d = (_v.copy(_pl).sub(_pr).dot(_ax) - gap) * 0.5 * Math.min(1, w);
+    if (Math.abs(d) < 5e-4) return;
+    this.nudgeHand(0, hl, _ql, -d);
+    this.nudgeHand(1, hr, _qrr, d);
+  }
+
+  /** Lleva una muñeca `d` metros a lo largo de `_ax`, con la mano girada como estaba (`q`, en el mundo). */
+  private nudgeHand(side: 0 | 1, hand: THREE.Object3D, q: THREE.Quaternion, d: number) {
+    const upper = this.n(side ? "rightUpperArm" : "leftUpperArm");
+    const lower = this.n(side ? "rightLowerArm" : "leftLowerArm");
+    if (!upper || !lower || !upper.parent) return;
+    upper.updateWorldMatrix(true, true);
+    upper.getWorldPosition(_S);
+    lower.getWorldPosition(_E);
+    hand.getWorldPosition(_W);
+    _v.copy(_W).addScaledVector(_ax, d);
+    _qm.copy(q);
+    this.reachArm(upper, lower, hand, _v.x, _v.y, _v.z, 1);
+    lower.updateWorldMatrix(false, false);
+    lower.getWorldQuaternion(_qr);
+    hand.quaternion.copy(_qr.invert().multiply(_qm));
+  }
 }
 
 const _qf = new THREE.Quaternion();
+/** Juntar las palmas: hasta dónde de la muñeca a los nudillos cae el centro de la palma y a qué distancia quedan (por lo que mide la mano). */
+const PALM_AT = 0.55;
+const PALM_GAP = 0.3;
+const _ql = new THREE.Quaternion();
+const _qrr = new THREE.Quaternion();
+const _qm = new THREE.Quaternion();
+const _pl = new THREE.Vector3();
+const _pr = new THREE.Vector3();
+const _nl = new THREE.Vector3();
+const _nr = new THREE.Vector3();
+const _ax = new THREE.Vector3();
 const _S = new THREE.Vector3();
 const _E = new THREE.Vector3();
 const _W = new THREE.Vector3();

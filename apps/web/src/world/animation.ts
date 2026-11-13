@@ -15,7 +15,7 @@ import { cycleStep, Leap, PHASE0 } from "./leap";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { VRM } from "@pixiv/three-vrm";
 import { createVRMAnimationClip, VRMAnimationLoaderPlugin, type VRMAnimation } from "@pixiv/three-vrm-animation";
-import { buildGesture, buildGuard, interpolant, PROCEDURAL } from "./people/gestures";
+import { buildGesture, buildGuard, interpolant, PROCEDURAL, touchAt } from "./people/gestures";
 import { Rig, type PersonFx } from "./people/rig";
 import { ALL_FINGER_BONES, handTable, restFix, type BaseHand, type RestFix } from "./people/hands";
 
@@ -313,6 +313,8 @@ export class VrmAnimator {
    */
   narrow = 0;
   private idleW = 0;
+  /** Cuánto se tocan las palmas en este frame (people/gestures.ts → touchAt), para el esqueleto. */
+  private touch = 0;
   /** Los dedos (nodo normalizado y su giro de ahora, que va hacia la mano de base). */
   private fingers: { node: THREE.Object3D; bone: string; now: THREE.Quaternion }[] | null = null;
   private readonly _dur: Record<string, number> = {};
@@ -549,7 +551,14 @@ export class VrmAnimator {
     if (g) this.applyLayer("guard", g.time, this.guardUpperW);
     this.upperW += ((upper ? 1 : 0) - this.upperW) * Math.min(1, dt / (upper ? fade : 0.15));
     if (this.emoteAction && known) this.applyLayer(known.clip, this.emoteAction.time, this.upperW);
+    this.touch = 0;
     this.applyGesture(dt, gesture ?? null);
+    // Lo que se tocan las palmas (aplaudir): el esqueleto las junta a la medida de este avatar.
+    if (this.emoteAction && known && PROCEDURAL.has(known.clip)) {
+      const w = full ? this.emoteAction.getEffectiveWeight() : this.upperW;
+      this.touch = Math.max(this.touch, touchAt(known.clip, this.emoteAction.time) * w);
+    }
+    this.rig.touch = this.touch;
 
     this.rig.apply(dt, fx ?? null);
     // Al final, lo que endereza la mano en reposo de este modelo (si hace falta): debajo de cualquier
@@ -634,7 +643,9 @@ export class VrmAnimator {
       g.clip = null;
       return;
     }
-    this.applyLayer(g.clip, g.once ? Math.min(g.t, clip.duration) : g.t % clip.duration, g.w);
+    const time = g.once ? Math.min(g.t, clip.duration) : g.t % clip.duration;
+    this.applyLayer(g.clip, time, g.w);
+    this.touch = Math.max(this.touch, touchAt(g.clip, time) * g.w);
   }
 
   dispose() {

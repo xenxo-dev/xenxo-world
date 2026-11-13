@@ -36,8 +36,8 @@ const fingerBones = (side: "left" | "right") => FINGERS.flatMap((f) => JOINTS[f]
 export const FINGER_BONES = { left: fingerBones("left"), right: fingerBones("right") };
 export const ALL_FINGER_BONES = [...FINGER_BONES.left, ...FINGER_BONES.right];
 
-/** Las formas de base: relajada, puño, agarrar, abierta y estirada. */
-export type BaseHand = "relaxed" | "fist" | "grip" | "open" | "flat";
+/** Las formas de base: relajada, puño, agarrar, abierta, estirada y juntos (aplaudir: casi rectos y el pulgar junto al índice). */
+export type BaseHand = "relaxed" | "fist" | "grip" | "open" | "flat" | "together";
 
 type Long = "Index" | "Middle" | "Ring" | "Little";
 /**
@@ -75,6 +75,11 @@ const SHAPES: Record<BaseHand, Shape> = {
     fingers: { Index: [0, 0, 0], Middle: [0, 0, 0], Ring: [0, 0, 0], Little: [0, 0, 0] },
     spread: { Index: 0, Middle: 0, Ring: 0, Little: 0 },
     thumb: [0, 0, 0],
+  },
+  together: {
+    fingers: { Index: [4, 6, 3], Middle: [5, 7, 4], Ring: [6, 8, 4], Little: [7, 9, 5] },
+    spread: { Index: -1, Middle: 0, Ring: -1, Little: -2 },
+    thumb: [16, 6, 6],
   },
 };
 

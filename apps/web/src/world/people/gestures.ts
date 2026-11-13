@@ -25,7 +25,7 @@ type TorsoBone = "spine" | "chest" | "upperChest" | "neck" | "head" | "leftShoul
 const TORSO: TorsoBone[] = ["spine", "chest", "upperChest", "neck", "head", "leftShoulder", "rightShoulder"];
 
 /** Formas de la mano: las de people/hands.ts y, mezclándolas, señalar, llamar con el dedo y el pulgar arriba. */
-export type Hand = "fist" | "relaxed" | "open" | "flat" | "point" | "grip" | "curl" | "thumb";
+export type Hand = "fist" | "relaxed" | "open" | "flat" | "together" | "point" | "grip" | "curl" | "thumb";
 
 /** Un brazo: muñeca respecto al hombro (m), hacia dónde va el codo, giro del antebrazo y muñeca (grados). */
 interface Arm {
@@ -34,6 +34,14 @@ interface Arm {
   /** Giro del antebrazo (grados): positivo = palma hacia arriba (supinación), en los dos brazos. */
   twist?: number;
   wrist?: V3;
+  /**
+   * O, en vez de `twist` y `wrist`, hacia dónde mira la palma y hacia dónde apuntan los dedos (en el
+   * marco del tronco, como `at`): el giro del antebrazo y el de la muñeca salen de ahí. Para lo que
+   * se toca (aplaudir, empujar con las palmas): así la mano queda justo como se pide. Si un fotograma
+   * del brazo lo lleva, todos los de ese brazo (se interpola entre ellos).
+   */
+  palm?: V3;
+  fingers?: V3;
 }
 /** Una pierna: tobillo respecto a la cadera (m, en el marco de la pelvis), hacia dónde va la rodilla y el pie. */
 interface Leg {
@@ -60,6 +68,11 @@ interface Key {
   r?: Hand;
   /** Pose que se sostiene: aquí la curva se para (sin velocidad). */
   hold?: boolean;
+  /**
+   * Las palmas se tocan (0–1; sin esto, 0): el esqueleto las junta a la medida de cada avatar
+   * (rig.ts → `touch`), porque lo ancho de hombros frente a lo largo de brazos cambia de uno a otro.
+   */
+  touch?: number;
 }
 
 interface Def {
@@ -94,6 +107,8 @@ const mirror = (a: Arm): Arm => ({
   pole: a.pole ? [-a.pole[0], a.pole[1], a.pole[2]] : undefined,
   twist: a.twist,
   wrist: a.wrist ? [a.wrist[0], -a.wrist[1], -a.wrist[2]] : undefined,
+  palm: a.palm ? [-a.palm[0], a.palm[1], a.palm[2]] : undefined,
+  fingers: a.fingers ? [-a.fingers[0], a.fingers[1], a.fingers[2]] : undefined,
 });
 const both = (a: Arm) => ({ L: a, R: mirror(a) });
 
@@ -107,28 +122,43 @@ const DRIVE: Pick<Key, "L" | "R" | "l" | "r" | "LL" | "RL"> = {
   RL: { at: [-0.09, -0.36, 0.65], pole: [-0.4, 1, 0.5], foot: [8, 0, 0] },
 };
 
+/** Saludar con la mano (brazo derecho): la palma hacia delante (y algo hacia dentro, hacia quien tiene enfrente). */
+const WAVE_PALM: V3 = [0.15, 0, 1];
+/** Darse la mano (brazo derecho): la palma hacia la otra mano, el pulgar arriba y los dedos hacia delante. */
+const SHAKE_PALM: V3 = [0.97, -0.12, -0.2];
+const SHAKE_FINGERS: V3 = [0.2, -0.12, 0.97];
+/** Aplaudir (brazo izquierdo; el derecho, en espejo): las palmas juntas y abiertas. */
+const CLAP_SHUT: Arm = { at: [-0.167, -0.11, 0.225], pole: [0.5, -1, -0.2], palm: [-1, 0, 0], fingers: [0, 0.42, 0.91] };
+const CLAP_OPEN: Arm = { at: [-0.062, -0.1, 0.214], pole: [0.5, -1, -0.2], palm: [-0.94, 0, 0.34], fingers: [0.31, 0.42, 0.855] };
+
 export const GESTURES: Record<string, Def> = {
   /* --- Gestos --- */
   wave: {
     base: "idle",
     keys: [
       { t: 0 },
-      { t: 0.36, R: { at: [-0.11, 0.2, 0.09], pole: [-1, -1, 0], twist: 105, wrist: [0, 0, 0] }, r: "flat", p: { head: [-2, -5, -3], chest: [0, -3, 2] } },
-      { t: 0.6, R: { at: [-0.19, 0.19, 0.09], pole: [-1, -1, 0], twist: 105, wrist: [0, 0, 12] }, r: "flat" },
-      { t: 0.86, R: { at: [-0.05, 0.21, 0.09], pole: [-1, -1, 0], twist: 105, wrist: [0, 0, -14] }, r: "flat" },
-      { t: 1.12, R: { at: [-0.19, 0.19, 0.09], pole: [-1, -1, 0], twist: 105, wrist: [0, 0, 12] }, r: "flat" },
-      { t: 1.38, R: { at: [-0.05, 0.21, 0.09], pole: [-1, -1, 0], twist: 105, wrist: [0, 0, -14] }, r: "flat" },
-      { t: 1.64, R: { at: [-0.15, 0.2, 0.09], pole: [-1, -1, 0], twist: 105, wrist: [0, 0, 6] }, r: "flat", p: { head: [-2, -5, -3], chest: [0, -3, 2] } },
+      { t: 0.36, R: { at: [-0.11, 0.2, 0.09], pole: [-1, -1, 0], palm: WAVE_PALM, fingers: [-0.05, 1, 0] }, r: "open", p: { head: [-2, -5, -3], chest: [0, -3, 2] } },
+      { t: 0.6, R: { at: [-0.19, 0.19, 0.09], pole: [-1, -1, 0], palm: WAVE_PALM, fingers: [-0.38, 0.93, 0] }, r: "open" },
+      { t: 0.86, R: { at: [-0.05, 0.21, 0.09], pole: [-1, -1, 0], palm: WAVE_PALM, fingers: [0.22, 0.97, 0] }, r: "open" },
+      { t: 1.12, R: { at: [-0.19, 0.19, 0.09], pole: [-1, -1, 0], palm: WAVE_PALM, fingers: [-0.38, 0.93, 0] }, r: "open" },
+      { t: 1.38, R: { at: [-0.05, 0.21, 0.09], pole: [-1, -1, 0], palm: WAVE_PALM, fingers: [0.22, 0.97, 0] }, r: "open" },
+      { t: 1.64, R: { at: [-0.15, 0.2, 0.09], pole: [-1, -1, 0], palm: WAVE_PALM, fingers: [-0.2, 0.98, 0] }, r: "open", p: { head: [-2, -5, -3], chest: [0, -3, 2] } },
       { t: 2.2 },
     ],
   },
+  /**
+   * Aplaudir: delante del pecho, las palmas una frente a otra, los dedos hacia delante y algo arriba
+   * y los pulgares encima; se juntan de golpe y se abren un poco, como un libro, entre palmada y
+   * palmada. Dónde se tocan lo ajusta el esqueleto a cada avatar (`touch`).
+   */
   clap: {
     base: "idle",
     loop: true,
     keys: [
-      { t: 0, ...both({ at: [-0.06, -0.07, 0.3], pole: [1, -0.8, -0.5], twist: 8, wrist: [0, 30, 0] }), l: "flat", r: "flat", p: { chest: [3, 0, 0], head: [2, 0, 0] } },
-      { t: 0.15, ...both({ at: [-0.11, -0.06, 0.31], pole: [1, -0.8, -0.5], twist: 8, wrist: [0, 22, 0] }), l: "flat", r: "flat", p: { chest: [5, 0, 0], head: [4, 0, 0] }, hold: true },
-      { t: 0.42, ...both({ at: [-0.06, -0.07, 0.3], pole: [1, -0.8, -0.5], twist: 8, wrist: [0, 30, 0] }), l: "flat", r: "flat", p: { chest: [3, 0, 0], head: [2, 0, 0] } },
+      { t: 0, ...both(CLAP_OPEN), l: "together", r: "together", p: { chest: [3, 0, 0], head: [2, 0, 0] } },
+      { t: 0.13, ...both(CLAP_SHUT), l: "together", r: "together", p: { chest: [4, 0, 0], head: [3, 0, 0] }, hold: true, touch: 1 },
+      { t: 0.17, ...both(CLAP_SHUT), l: "together", r: "together", p: { chest: [4, 0, 0], head: [3, 0, 0] }, hold: true, touch: 1 },
+      { t: 0.42, ...both(CLAP_OPEN), l: "together", r: "together", p: { chest: [3, 0, 0], head: [2, 0, 0] } },
     ],
   },
   point: {
@@ -153,13 +183,13 @@ export const GESTURES: Record<string, Def> = {
     base: "idle",
     loop: true,
     keys: [
-      { t: 0, L: { at: [-0.12, -0.4, 0.17], pole: ELBOW_L, twist: 10 }, R: { at: [0.02, -0.3, 0.22], pole: ELBOW_R, twist: 30 }, l: "relaxed", r: "open", p: { chest: [-7, 0, 0], head: [-16, 0, 0], leftShoulder: [0, 0, 3], rightShoulder: [0, 0, -3] } },
-      { t: 0.14, L: { at: [-0.12, -0.39, 0.17], pole: ELBOW_L, twist: 10 }, R: { at: [0.02, -0.28, 0.22], pole: ELBOW_R, twist: 30 }, l: "relaxed", r: "open", p: { chest: [-3, 0, 0], head: [-9, 0, 0], leftShoulder: [0, 0, 7], rightShoulder: [0, 0, -7] } },
-      { t: 0.28, L: { at: [-0.12, -0.4, 0.17], pole: ELBOW_L, twist: 10 }, R: { at: [0.02, -0.3, 0.22], pole: ELBOW_R, twist: 30 }, l: "relaxed", r: "open", p: { chest: [-8, 0, 0], head: [-17, 0, 0], leftShoulder: [0, 0, 3], rightShoulder: [0, 0, -3] } },
-      { t: 0.42, L: { at: [-0.12, -0.39, 0.17], pole: ELBOW_L, twist: 10 }, R: { at: [0.02, -0.28, 0.22], pole: ELBOW_R, twist: 30 }, l: "relaxed", r: "open", p: { chest: [-2, 0, 0], head: [-8, 0, 0], leftShoulder: [0, 0, 7], rightShoulder: [0, 0, -7] } },
-      { t: 0.56, L: { at: [-0.12, -0.4, 0.17], pole: ELBOW_L, twist: 10 }, R: { at: [0.02, -0.3, 0.22], pole: ELBOW_R, twist: 30 }, l: "relaxed", r: "open", p: { chest: [4, 0, 0], head: [2, 0, 0], leftShoulder: [0, 0, 4], rightShoulder: [0, 0, -4] } },
-      { t: 0.7, L: { at: [-0.12, -0.39, 0.17], pole: ELBOW_L, twist: 10 }, R: { at: [0.02, -0.28, 0.22], pole: ELBOW_R, twist: 30 }, l: "relaxed", r: "open", p: { chest: [8, 0, 0], head: [6, 0, 0], leftShoulder: [0, 0, 7], rightShoulder: [0, 0, -7] } },
-      { t: 0.84, L: { at: [-0.12, -0.4, 0.17], pole: ELBOW_L, twist: 10 }, R: { at: [0.02, -0.3, 0.22], pole: ELBOW_R, twist: 30 }, l: "relaxed", r: "open", p: { chest: [-7, 0, 0], head: [-16, 0, 0], leftShoulder: [0, 0, 3], rightShoulder: [0, 0, -3] } },
+      { t: 0, L: { at: [-0.12, -0.4, 0.17], pole: ELBOW_L, twist: -10 }, R: { at: [0.02, -0.3, 0.22], pole: ELBOW_R, twist: 30 }, l: "relaxed", r: "open", p: { chest: [-7, 0, 0], head: [-16, 0, 0], leftShoulder: [0, 0, 3], rightShoulder: [0, 0, -3] } },
+      { t: 0.14, L: { at: [-0.12, -0.39, 0.17], pole: ELBOW_L, twist: -10 }, R: { at: [0.02, -0.28, 0.22], pole: ELBOW_R, twist: 30 }, l: "relaxed", r: "open", p: { chest: [-3, 0, 0], head: [-9, 0, 0], leftShoulder: [0, 0, 7], rightShoulder: [0, 0, -7] } },
+      { t: 0.28, L: { at: [-0.12, -0.4, 0.17], pole: ELBOW_L, twist: -10 }, R: { at: [0.02, -0.3, 0.22], pole: ELBOW_R, twist: 30 }, l: "relaxed", r: "open", p: { chest: [-8, 0, 0], head: [-17, 0, 0], leftShoulder: [0, 0, 3], rightShoulder: [0, 0, -3] } },
+      { t: 0.42, L: { at: [-0.12, -0.39, 0.17], pole: ELBOW_L, twist: -10 }, R: { at: [0.02, -0.28, 0.22], pole: ELBOW_R, twist: 30 }, l: "relaxed", r: "open", p: { chest: [-2, 0, 0], head: [-8, 0, 0], leftShoulder: [0, 0, 7], rightShoulder: [0, 0, -7] } },
+      { t: 0.56, L: { at: [-0.12, -0.4, 0.17], pole: ELBOW_L, twist: -10 }, R: { at: [0.02, -0.3, 0.22], pole: ELBOW_R, twist: 30 }, l: "relaxed", r: "open", p: { chest: [4, 0, 0], head: [2, 0, 0], leftShoulder: [0, 0, 4], rightShoulder: [0, 0, -4] } },
+      { t: 0.7, L: { at: [-0.12, -0.39, 0.17], pole: ELBOW_L, twist: -10 }, R: { at: [0.02, -0.28, 0.22], pole: ELBOW_R, twist: 30 }, l: "relaxed", r: "open", p: { chest: [8, 0, 0], head: [6, 0, 0], leftShoulder: [0, 0, 7], rightShoulder: [0, 0, -7] } },
+      { t: 0.84, L: { at: [-0.12, -0.4, 0.17], pole: ELBOW_L, twist: -10 }, R: { at: [0.02, -0.3, 0.22], pole: ELBOW_R, twist: 30 }, l: "relaxed", r: "open", p: { chest: [-7, 0, 0], head: [-16, 0, 0], leftShoulder: [0, 0, 3], rightShoulder: [0, 0, -3] } },
     ],
   },
   shrug: {
@@ -201,12 +231,12 @@ export const GESTURES: Record<string, Def> = {
     base: "idle",
     loop: true,
     keys: [
-      { t: 0, L: { at: [-0.06, -0.24, 0.33], pole: [0.7, -1, -0.6], twist: -60, wrist: [0, 0, -10] }, R: { at: [0.07, -0.25, 0.35], pole: [-0.7, -1, -0.6], twist: -80 }, l: "grip", r: "curl", p: { spine: [3, 0, 0], chest: [5, 0, 0], head: [3, 0, 0] } },
-      { t: 0.24, L: { at: [-0.02, -0.24, 0.33], pole: [0.7, -1, -0.6], twist: -60, wrist: [0, 0, -16] }, R: { at: [0.07, -0.27, 0.35], pole: [-0.7, -1, -0.6], twist: -80 }, l: "grip", r: "curl", p: { spine: [3, 0, 0], chest: [5, 1, 0], head: [3, 2, 0] } },
-      { t: 0.46, L: { at: [-0.05, -0.24, 0.36], pole: [0.7, -1, -0.6], twist: -60, wrist: [0, 0, -10] }, R: { at: [0.1, -0.25, 0.34], pole: [-0.7, -1, -0.6], twist: -80 }, l: "grip", r: "curl", p: { spine: [3, 0, 0], chest: [6, 0, 0], head: [4, 0, 0] } },
-      { t: 0.7, L: { at: [-0.1, -0.24, 0.33], pole: [0.7, -1, -0.6], twist: -60, wrist: [0, 0, -4] }, R: { at: [0.1, -0.27, 0.34], pole: [-0.7, -1, -0.6], twist: -80 }, l: "grip", r: "curl", p: { spine: [3, 0, 0], chest: [5, -1, 0], head: [3, -2, 0] } },
-      { t: 0.94, L: { at: [-0.06, -0.23, 0.31], pole: [0.7, -1, -0.6], twist: -60, wrist: [0, 0, -10] }, R: { at: [0.07, -0.25, 0.35], pole: [-0.7, -1, -0.6], twist: -80 }, l: "grip", r: "curl", p: { spine: [3, 0, 0], chest: [4, 0, 0], head: [2, 0, 0] } },
-      { t: 1.2, L: { at: [-0.06, -0.24, 0.33], pole: [0.7, -1, -0.6], twist: -60, wrist: [0, 0, -10] }, R: { at: [0.07, -0.25, 0.35], pole: [-0.7, -1, -0.6], twist: -80 }, l: "grip", r: "curl", p: { spine: [3, 0, 0], chest: [5, 0, 0], head: [3, 0, 0] } },
+      { t: 0, L: { at: [-0.06, -0.24, 0.33], pole: [0.7, -1, -0.6], twist: 60, wrist: [0, 0, -10] }, R: { at: [0.07, -0.25, 0.35], pole: [-0.7, -1, -0.6], twist: -80 }, l: "grip", r: "curl", p: { spine: [3, 0, 0], chest: [5, 0, 0], head: [3, 0, 0] } },
+      { t: 0.24, L: { at: [-0.02, -0.24, 0.33], pole: [0.7, -1, -0.6], twist: 60, wrist: [0, 0, -16] }, R: { at: [0.07, -0.27, 0.35], pole: [-0.7, -1, -0.6], twist: -80 }, l: "grip", r: "curl", p: { spine: [3, 0, 0], chest: [5, 1, 0], head: [3, 2, 0] } },
+      { t: 0.46, L: { at: [-0.05, -0.24, 0.36], pole: [0.7, -1, -0.6], twist: 60, wrist: [0, 0, -10] }, R: { at: [0.1, -0.25, 0.34], pole: [-0.7, -1, -0.6], twist: -80 }, l: "grip", r: "curl", p: { spine: [3, 0, 0], chest: [6, 0, 0], head: [4, 0, 0] } },
+      { t: 0.7, L: { at: [-0.1, -0.24, 0.33], pole: [0.7, -1, -0.6], twist: 60, wrist: [0, 0, -4] }, R: { at: [0.1, -0.27, 0.34], pole: [-0.7, -1, -0.6], twist: -80 }, l: "grip", r: "curl", p: { spine: [3, 0, 0], chest: [5, -1, 0], head: [3, -2, 0] } },
+      { t: 0.94, L: { at: [-0.06, -0.23, 0.31], pole: [0.7, -1, -0.6], twist: 60, wrist: [0, 0, -10] }, R: { at: [0.07, -0.25, 0.35], pole: [-0.7, -1, -0.6], twist: -80 }, l: "grip", r: "curl", p: { spine: [3, 0, 0], chest: [4, 0, 0], head: [2, 0, 0] } },
+      { t: 1.2, L: { at: [-0.06, -0.24, 0.33], pole: [0.7, -1, -0.6], twist: 60, wrist: [0, 0, -10] }, R: { at: [0.07, -0.25, 0.35], pole: [-0.7, -1, -0.6], twist: -80 }, l: "grip", r: "curl", p: { spine: [3, 0, 0], chest: [5, 0, 0], head: [3, 0, 0] } },
     ],
   },
 
@@ -215,9 +245,9 @@ export const GESTURES: Record<string, Def> = {
     base: "idle",
     keys: [
       { t: 0 },
-      { t: 0.42, R: { at: [-0.04, 0.27, 0.19], pole: [-1, -0.4, -0.3], twist: -15, wrist: [0, 0, -30] }, r: "open", p: { chest: [3, 6, 0], head: [-6, 4, 0] } },
-      { t: 0.62, R: { at: [0.01, 0.26, 0.3], pole: [-1, -0.4, -0.3], twist: -15, wrist: [0, 0, -20] }, r: "flat", p: { chest: [6, 8, 0], head: [-4, 4, 0] }, hold: true },
-      { t: 0.8, R: { at: [-0.03, 0.22, 0.24], pole: [-1, -0.4, -0.3], twist: -15, wrist: [0, 0, -12] }, r: "open", p: { chest: [3, 4, 0] } },
+      { t: 0.42, R: { at: [-0.04, 0.27, 0.19], pole: [-1, -0.4, -0.3], palm: [0.1, -0.05, 1], fingers: [0.15, 0.98, 0.1] }, r: "open", p: { chest: [3, 6, 0], head: [-6, 4, 0] } },
+      { t: 0.62, R: { at: [0.01, 0.26, 0.3], pole: [-1, -0.4, -0.3], palm: [0.12, -0.15, 0.98], fingers: [0.2, 0.96, 0.15] }, r: "flat", p: { chest: [6, 8, 0], head: [-4, 4, 0] }, hold: true },
+      { t: 0.8, R: { at: [-0.03, 0.22, 0.24], pole: [-1, -0.4, -0.3], palm: [0.1, -0.1, 0.99], fingers: [0.15, 0.97, 0.12] }, r: "open", p: { chest: [3, 4, 0] } },
       { t: 1.55 },
     ],
   },
@@ -225,11 +255,11 @@ export const GESTURES: Record<string, Def> = {
     base: "idle",
     keys: [
       { t: 0 },
-      { t: 0.45, R: { at: [0.06, -0.3, 0.36], pole: [-0.5, -1, -0.2], twist: -5, wrist: [0, 0, 0] }, r: "grip", p: { chest: [4, 6, 0], head: [3, 4, 0] } },
-      { t: 0.7, R: { at: [0.06, -0.24, 0.37], pole: [-0.5, -1, -0.2], twist: -5 }, r: "grip" },
-      { t: 0.92, R: { at: [0.06, -0.33, 0.37], pole: [-0.5, -1, -0.2], twist: -5 }, r: "grip" },
-      { t: 1.14, R: { at: [0.06, -0.25, 0.37], pole: [-0.5, -1, -0.2], twist: -5 }, r: "grip" },
-      { t: 1.36, R: { at: [0.06, -0.31, 0.37], pole: [-0.5, -1, -0.2], twist: -5 }, r: "grip", p: { chest: [4, 6, 0], head: [3, 4, 0] } },
+      { t: 0.45, R: { at: [0.06, -0.3, 0.36], pole: [-0.5, -1, -0.2], palm: SHAKE_PALM, fingers: SHAKE_FINGERS }, r: "grip", p: { chest: [4, 6, 0], head: [3, 4, 0] } },
+      { t: 0.7, R: { at: [0.06, -0.24, 0.37], pole: [-0.5, -1, -0.2], palm: SHAKE_PALM, fingers: SHAKE_FINGERS }, r: "grip" },
+      { t: 0.92, R: { at: [0.06, -0.33, 0.37], pole: [-0.5, -1, -0.2], palm: SHAKE_PALM, fingers: SHAKE_FINGERS }, r: "grip" },
+      { t: 1.14, R: { at: [0.06, -0.25, 0.37], pole: [-0.5, -1, -0.2], palm: SHAKE_PALM, fingers: SHAKE_FINGERS }, r: "grip" },
+      { t: 1.36, R: { at: [0.06, -0.31, 0.37], pole: [-0.5, -1, -0.2], palm: SHAKE_PALM, fingers: SHAKE_FINGERS }, r: "grip", p: { chest: [4, 6, 0], head: [3, 4, 0] } },
       { t: 1.9 },
     ],
   },
@@ -267,9 +297,9 @@ export const GESTURES: Record<string, Def> = {
     base: "guard",
     keys: [
       { t: 0 },
-      { t: 0.11, L: { at: [0.13, 0.0, 0.17], pole: [1, -0.1, -0.3], twist: -50 }, l: "fist", turn: [0, 6, 0], p: { spine: [1, 3, 0], chest: [1, 5, 0], head: [0, -6, 0] }, move: [0.015, -0.02, 0] },
-      { t: 0.25, L: { at: [0.02, 0.15, 0.3], pole: [1, 0.25, -0.15], twist: -80 }, l: "fist", turn: [0, -12, 0], p: { spine: [2, -7.5, 0], chest: [2, -10.5, -3], head: [-2, 22, 0] }, move: [0.03, -0.03, 0.02], hold: true },
-      { t: 0.31, L: { at: [0.01, 0.14, 0.29], pole: [1, 0.25, -0.15], twist: -80 }, l: "fist", turn: [0, -12.5, 0], p: { spine: [2, -7.8, 0], chest: [2, -10.8, -3], head: [-2, 23, 0] }, move: [0.03, -0.03, 0.02] },
+      { t: 0.11, L: { at: [0.13, 0.0, 0.17], pole: [1, -0.1, -0.3], twist: 50 }, l: "fist", turn: [0, 6, 0], p: { spine: [1, 3, 0], chest: [1, 5, 0], head: [0, -6, 0] }, move: [0.015, -0.02, 0] },
+      { t: 0.25, L: { at: [0.02, 0.15, 0.3], pole: [1, 0.25, -0.15], twist: 80 }, l: "fist", turn: [0, -12, 0], p: { spine: [2, -7.5, 0], chest: [2, -10.5, -3], head: [-2, 22, 0] }, move: [0.03, -0.03, 0.02], hold: true },
+      { t: 0.31, L: { at: [0.01, 0.14, 0.29], pole: [1, 0.25, -0.15], twist: 80 }, l: "fist", turn: [0, -12.5, 0], p: { spine: [2, -7.8, 0], chest: [2, -10.8, -3], head: [-2, 23, 0] }, move: [0.03, -0.03, 0.02] },
       { t: 0.6 },
     ],
   },
@@ -289,9 +319,9 @@ export const GESTURES: Record<string, Def> = {
     base: "guard",
     keys: [
       { t: 0 },
-      { t: 0.14, ...both({ at: [-0.05, -0.12, 0.17], pole: [0.6, -1, -0.6], twist: 15, wrist: [0, 0, 0] }), l: "open", r: "open", p: { chest: [2, 0, 0] }, move: [0, -0.01, 0.02] },
-      { t: 0.27, ...both({ at: [-0.08, 0.04, 0.44], pole: [0.6, -1, -0.3], twist: 10, wrist: [0, 0, 55] }), l: "flat", r: "flat", p: { spine: [3, 0, 0], chest: [6, 0, 0], head: [-4, 0, 0] }, move: [0, -0.02, 0.12], hold: true },
-      { t: 0.36, ...both({ at: [-0.08, 0.03, 0.43], pole: [0.6, -1, -0.3], twist: 10, wrist: [0, 0, 50] }), l: "flat", r: "flat", p: { spine: [3, 0, 0], chest: [6, 0, 0], head: [-4, 0, 0] }, move: [0, -0.02, 0.12] },
+      { t: 0.14, ...both({ at: [-0.05, -0.12, 0.17], pole: [0.6, -1, -0.6], palm: [-0.4, -0.25, 0.88], fingers: [0.12, 0.92, 0.35] }), l: "open", r: "open", p: { chest: [2, 0, 0] }, move: [0, -0.01, 0.02] },
+      { t: 0.27, ...both({ at: [-0.08, 0.04, 0.44], pole: [0.6, -1, -0.3], palm: [-0.2, -0.36, 0.91], fingers: [0.2, 0.88, 0.42] }), l: "flat", r: "flat", p: { spine: [3, 0, 0], chest: [6, 0, 0], head: [-4, 0, 0] }, move: [0, -0.02, 0.12], hold: true },
+      { t: 0.36, ...both({ at: [-0.08, 0.03, 0.43], pole: [0.6, -1, -0.3], palm: [-0.2, -0.34, 0.92], fingers: [0.19, 0.89, 0.4] }), l: "flat", r: "flat", p: { spine: [3, 0, 0], chest: [6, 0, 0], head: [-4, 0, 0] }, move: [0, -0.02, 0.12] },
       { t: 0.62 },
     ],
   },
@@ -299,9 +329,9 @@ export const GESTURES: Record<string, Def> = {
     base: "guard",
     keys: [
       { t: 0 },
-      { t: 0.13, R: { at: [0.0, -0.14, 0.14], pole: [-0.6, -1, -0.6], twist: 15 }, r: "open", p: { chest: [0, -10, 0] } },
-      { t: 0.26, R: { at: [0.06, 0.03, 0.46], pole: [-0.6, -1, -0.2], twist: 5, wrist: [0, 0, 55] }, r: "flat", p: { spine: [2, 8, 0], chest: [4, 14, 0], head: [-4, -8, 0] }, move: [0, -0.02, 0.08], hold: true },
-      { t: 0.34, R: { at: [0.06, 0.02, 0.45], pole: [-0.6, -1, -0.2], twist: 5, wrist: [0, 0, 50] }, r: "flat", p: { spine: [2, 8, 0], chest: [4, 14, 0], head: [-4, -8, 0] }, move: [0, -0.02, 0.08] },
+      { t: 0.13, R: { at: [0.0, -0.14, 0.14], pole: [-0.6, -1, -0.6], palm: [0.4, -0.25, 0.88], fingers: [-0.1, 0.92, 0.35] }, r: "open", p: { chest: [0, -10, 0] } },
+      { t: 0.26, R: { at: [0.06, 0.03, 0.46], pole: [-0.6, -1, -0.2], palm: [0.15, -0.36, 0.92], fingers: [-0.18, 0.88, 0.42] }, r: "flat", p: { spine: [2, 8, 0], chest: [4, 14, 0], head: [-4, -8, 0] }, move: [0, -0.02, 0.08], hold: true },
+      { t: 0.34, R: { at: [0.06, 0.02, 0.45], pole: [-0.6, -1, -0.2], palm: [0.15, -0.34, 0.93], fingers: [-0.17, 0.89, 0.4] }, r: "flat", p: { spine: [2, 8, 0], chest: [4, 14, 0], head: [-4, -8, 0] }, move: [0, -0.02, 0.08] },
       { t: 0.58 },
     ],
   },
@@ -574,8 +604,16 @@ const _dirA = new THREE.Vector3();
 const _dirB = new THREE.Vector3();
 const _bend = new THREE.Vector3();
 
-/** Brazo: giro del brazo, del antebrazo y de la mano (side 1 = izquierdo, −1 = derecho). */
-function solveArm(side: 1 | -1, arm: { at: number[]; pole: number[]; twist: number; wrist: number[] }, upper: THREE.Quaternion, lower: THREE.Quaternion, hand: THREE.Quaternion) {
+const _palm = new THREE.Vector3();
+const _fing = new THREE.Vector3();
+const _qh = new THREE.Quaternion();
+
+/**
+ * Brazo: giro del brazo, del antebrazo y de la mano (side 1 = izquierdo, −1 = derecho). Con `palm` y
+ * `fingers` (no nulos), la mano queda así; si no, con el giro del antebrazo y la muñeca de `twist` y
+ * `wrist`.
+ */
+function solveArm(side: 1 | -1, arm: { at: number[]; pole: number[]; twist: number; wrist: number[]; palm?: number[]; fingers?: number[] }, upper: THREE.Quaternion, lower: THREE.Quaternion, hand: THREE.Quaternion) {
   _t.set(arm.at[0]!, arm.at[1]!, arm.at[2]!);
   _p.set(arm.pole[0]!, arm.pole[1]!, arm.pole[2]!);
   twoBone(ARM[0], ARM[1], _t, _p, _dirA, _dirB, _bend);
@@ -585,9 +623,35 @@ function solveArm(side: 1 | -1, arm: { at: number[]; pole: number[]; twist: numb
   _y.crossVectors(_z, _x);
   basis(_x, _y, _z, upper);
   const phi = Math.acos(THREE.MathUtils.clamp(_dirA.dot(_dirB), -1, 1));
-  // Supinación repartida entre antebrazo y mano (sin «caramelo» en el codo).
-  const tw = arm.twist * DEG * side;
-  lower.setFromAxisAngle(Y, -side * phi).multiply(_qa.setFromAxisAngle(X, tw * 0.6));
+  lower.setFromAxisAngle(Y, -side * phi);
+  if (arm.palm && arm.fingers) {
+    _palm.set(arm.palm[0]!, arm.palm[1]!, arm.palm[2]!);
+    _fing.set(arm.fingers[0]!, arm.fingers[1]!, arm.fingers[2]!);
+    if (_palm.lengthSq() > 0.25 && _fing.lengthSq() > 0.25) {
+      // La mano que se pide: en reposo los dedos van por su X (−X la derecha), la palma mira a −Y y el
+      // pulgar a +Z (VRM, pose en T). Los dedos, perpendiculares a la palma.
+      _palm.normalize();
+      _fing.addScaledVector(_palm, -_fing.dot(_palm)).normalize();
+      _x.copy(_fing).multiplyScalar(side);
+      _y.copy(_palm).negate();
+      _z.crossVectors(_x, _y);
+      basis(_x, _y, _z, _qh);
+      // Lo que le falta respecto al antebrazo sin girar; su parte alrededor del antebrazo (X) se reparte
+      // entre antebrazo y mano, como la supinación de abajo, y el resto lo hace la muñeca.
+      _qa.copy(upper).multiply(lower).invert().multiply(_qh);
+      if (_qa.w < 0) _qa.set(-_qa.x, -_qa.y, -_qa.z, -_qa.w);
+      const tau = 2 * Math.atan2(_qa.x, _qa.w);
+      lower.multiply(_qb.setFromAxisAngle(X, tau * 0.6));
+      hand.setFromAxisAngle(X, -tau * 0.6).multiply(_qa);
+      return;
+    }
+  }
+  // Supinación repartida entre antebrazo y mano (sin «caramelo» en el codo). En los dos brazos es girar
+  // en negativo alrededor de X: el antebrazo va por +X en el izquierdo y por −X en el derecho, y en
+  // espejo un giro alrededor de X es el mismo (antes se multiplicaba por el lado y el izquierdo se
+  // giraba al revés: con `both`, una palma arriba y la otra abajo).
+  const tw = -arm.twist * DEG;
+  lower.multiply(_qa.setFromAxisAngle(X, tw * 0.6));
   hand.setFromEuler(_eu.set(arm.wrist[0]! * DEG, arm.wrist[1]! * DEG, arm.wrist[2]! * DEG, "XYZ")).premultiply(_qb.setFromAxisAngle(X, tw * 0.4));
 }
 
@@ -613,7 +677,7 @@ function solveLeg(leg: { at: number[]; pole: number[]; foot: number[] }, upper: 
 type HandShapes = Record<Hand, Map<string, THREE.Quaternion>>;
 function handShapes(): HandShapes {
   const shapes = {} as HandShapes;
-  for (const h of ["fist", "relaxed", "open", "flat", "point", "grip", "curl", "thumb"] as Hand[]) shapes[h] = new Map();
+  for (const h of ["fist", "relaxed", "open", "flat", "together", "point", "grip", "curl", "thumb"] as Hand[]) shapes[h] = new Map();
   for (const side of ["left", "right"] as const) {
     for (const bone of FINGER_BONES[side]) {
       const relaxed = fingerPose("relaxed", bone);
@@ -625,6 +689,7 @@ function handShapes(): HandShapes {
       shapes.fist.set(bone, fist);
       shapes.flat.set(bone, flat);
       shapes.open.set(bone, fingerPose("open", bone));
+      shapes.together.set(bone, fingerPose("together", bone));
       shapes.point.set(bone, index ? flat.clone().slerp(relaxed, 0.1) : fist.clone());
       shapes.grip.set(bone, fingerPose("grip", bone));
       shapes.curl.set(bone, relaxed.clone().slerp(fist, thumb ? 0.2 : 0.85));
@@ -677,7 +742,7 @@ export function buildGesture(name: string, src: GestureSources): VRMAnimation | 
   for (const [bone, tr] of baseRot) rotation.set(bone, resample(baseHand.has(bone) ? sampleBase(bone) : quatSampler(tr, baseDur), times, `${bone}.quaternion`));
   const translation = new Map<string, THREE.VectorKeyframeTrack>(base.humanoidTracks.translation as unknown as Map<string, THREE.VectorKeyframeTrack>);
 
-  const tmp: number[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+  const tmp: number[] = new Array(16).fill(0);
   const qBase = new THREE.Quaternion();
   const q = new THREE.Quaternion();
   const writeQ = (values: Float32Array, i: number, v: THREE.Quaternion) => {
@@ -776,7 +841,7 @@ export function buildGesture(name: string, src: GestureSources): VRMAnimation | 
   for (const limb of limbs) {
     const ch = channel(def, (k) => k[limb.key]);
     if (!ch) continue;
-    const pack = (a: Arm) => [...a.at, ...(a.pole ?? (limb.side > 0 ? ELBOW_L : ELBOW_R)), a.twist ?? 0, ...(a.wrist ?? [0, 0, 0])];
+    const pack = (a: Arm) => [...a.at, ...(a.pole ?? (limb.side > 0 ? ELBOW_L : ELBOW_R)), a.twist ?? 0, ...(a.wrist ?? [0, 0, 0]), ...(a.palm ?? [0, 0, 0]), ...(a.fingers ?? [0, 0, 0])];
     const curve = spline(ch.times, ch.values.map(pack), ch.holds, !!def.loop, duration);
     const sbs = limb.bones.map(sampleBase);
     const out = limb.bones.map(() => new Float32Array(n * 4));
@@ -790,16 +855,15 @@ export function buildGesture(name: string, src: GestureSources): VRMAnimation | 
       const v = curve(t, tmp);
       if (sh) {
         sh(t, qsh).invert();
-        _t.set(v[0]!, v[1]!, v[2]!).applyQuaternion(qsh);
-        v[0] = _t.x;
-        v[1] = _t.y;
-        v[2] = _t.z;
-        _t.set(v[3]!, v[4]!, v[5]!).applyQuaternion(qsh);
-        v[3] = _t.x;
-        v[4] = _t.y;
-        v[5] = _t.z;
+        // La muñeca, el codo, la palma y los dedos (de tres en tres; el giro y la muñeca van en medio).
+        for (const o of [0, 3, 10, 13]) {
+          _t.set(v[o]!, v[o + 1]!, v[o + 2]!).applyQuaternion(qsh);
+          v[o] = _t.x;
+          v[o + 1] = _t.y;
+          v[o + 2] = _t.z;
+        }
       }
-      solveArm(limb.side, { at: [v[0]!, v[1]!, v[2]!], pole: [v[3]!, v[4]!, v[5]!], twist: v[6]!, wrist: [v[7]!, v[8]!, v[9]!] }, qs[0]!, qs[1]!, qs[2]!);
+      solveArm(limb.side, { at: [v[0]!, v[1]!, v[2]!], pole: [v[3]!, v[4]!, v[5]!], twist: v[6]!, wrist: [v[7]!, v[8]!, v[9]!], palm: [v[10]!, v[11]!, v[12]!], fingers: [v[13]!, v[14]!, v[15]!] }, qs[0]!, qs[1]!, qs[2]!);
       const w = ch.weight(t);
       for (let b = 0; b < 3; b++) writeQ(out[b]!, i, w < 1 ? sbs[b]!(t, qBase).slerp(qs[b]!, w) : qs[b]!);
     });
@@ -915,3 +979,22 @@ export function buildGuard(idle: VRMAnimation, jab: VRMAnimation): VRMAnimation 
 
 /** Nombres de clip de los gestos hechos aquí (no hay archivo .vrma para ellos). */
 export const PROCEDURAL = new Set(Object.keys(GESTURES));
+
+/** Los gestos en que se tocan las palmas: sus fotogramas y cuánto se tocan en cada uno. */
+const TOUCH = new Map<string, { times: number[]; values: number[]; loop: boolean; dur: number }>();
+for (const [name, def] of Object.entries(GESTURES)) {
+  if (!def.keys.some((k) => k.touch)) continue;
+  TOUCH.set(name, { times: def.keys.map((k) => k.t), values: def.keys.map((k) => k.touch ?? 0), loop: !!def.loop, dur: def.keys[def.keys.length - 1]!.t });
+}
+
+/** Cuánto se tocan las palmas en el momento `t` (s) del gesto `name` (0 en los que no se tocan). */
+export function touchAt(name: string, t: number): number {
+  const c = TOUCH.get(name);
+  if (!c) return 0;
+  if (c.loop && c.dur > 0) t = ((t % c.dur) + c.dur) % c.dur;
+  const { times, values } = c;
+  if (t <= times[0]!) return values[0]!;
+  for (let i = 0; i < times.length - 1; i++)
+    if (t <= times[i + 1]!) return values[i]! + (values[i + 1]! - values[i]!) * smooth((t - times[i]!) / Math.max(1e-6, times[i + 1]! - times[i]!));
+  return values[values.length - 1]!;
+}
