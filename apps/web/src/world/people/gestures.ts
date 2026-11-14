@@ -264,27 +264,31 @@ export const GESTURES: Record<string, Def> = {
     ],
   },
   /**
-   * Abrazo (pair.ts lleva las manos a la espalda de la otra persona, la cadera hacia ella y aparta las
-   * cabezas): los brazos se abren para recibirla, la derecha más alta (va por encima de su hombro) y
-   * la izquierda más baja (por debajo de su brazo); los hombros se adelantan (la derecha, también
-   * arriba), el pecho gira algo a la izquierda y la cabeza se va a ese lado, por encima del hombro
-   * derecho de la otra persona, girada hacia fuera. Abrazados, se mecen despacio (el pecho gira a un
-   * lado y a otro) y, al soltarse, los brazos vuelven por donde vinieron (y quien se acercó da un paso
-   * atrás: pair.ts → `pairLeave`), con la cabeza aún a un lado hasta que se separan.
+   * Abrazo, como en una grabación de uno de verdad (pair.ts lleva las manos, la cadera hacia la otra
+   * persona y aparta las cabezas). Al empezar, el pecho se abre y los brazos se separan del cuerpo y van
+   * a su encuentro: la derecha alta, hacia su hombro (irá por encima), casi estirada; la izquierda,
+   * hacia su cintura (irá por debajo de su brazo). Abrazados, los hombros se adelantan (la derecha,
+   * también arriba), el pecho gira algo a la izquierda y la cabeza se va a ese lado, por encima del
+   * hombro derecho de la otra persona, girada hacia fuera; aprietan (los hombros suben un poco) y se
+   * mecen despacio, los dos hacia el mismo lado (el pecho gira a un lado y a otro). Al soltarse, las
+   * manos resbalan a sus brazos y la cabeza vuelve (se miran: pair.ts → look) y, al final, los brazos
+   * bajan.
    */
   hug: {
     base: "idle",
     keys: [
       { t: 0 },
-      { t: 0.4, R: { at: [-0.06, -0.12, 0.3], pole: [-1, -0.3, -0.3], twist: 10 }, L: { at: [0.08, -0.26, 0.26], pole: [1, -0.6, -0.3], twist: 20 }, l: "open", r: "open", p: { chest: [-2, 3, 0], upperChest: [-1, 2, 0], neck: [0, 5, 0], head: [-3, 8, 0] } },
-      { t: 0.7, R: { at: [-0.14, 0.02, 0.36], pole: [-1, 0.2, -0.3], twist: 20 }, L: { at: [0.16, -0.18, 0.34], pole: [1, -0.4, -0.3], twist: 30 }, p: { spine: [0, 2, 0], chest: [1, 4, 0], upperChest: [1, 3, 0], neck: [2, 12, -3], head: [1, 20, 2], rightShoulder: [0, 8, -4], leftShoulder: [0, -6, 0] } },
-      { t: 1.05, R: { at: [0.12, -0.08, 0.38], pole: [-1, 0.5, 0.2], twist: 30 }, L: { at: [-0.1, -0.3, 0.34], pole: [1, -0.4, 0.1], twist: 30 }, l: "together", r: "together", p: { spine: [1, 3, -2], chest: [2, 5, -2], upperChest: [1, 3, -1], neck: [2, 18, -5], head: [1, 28, 5], rightShoulder: [0, 12, -6], leftShoulder: [0, -9, 0] }, hold: true },
-      { t: 1.45, p: { chest: [2, 8, -2] } },
-      { t: 1.9, p: { chest: [2, 2, -2] } },
-      { t: 2.2, R: { at: [0.12, -0.08, 0.38], pole: [-1, 0.5, 0.2], twist: 30 }, L: { at: [-0.1, -0.3, 0.34], pole: [1, -0.4, 0.1], twist: 30 }, l: "together", r: "together", p: { spine: [1, 3, -2], chest: [2, 5, -2], upperChest: [1, 3, -1], neck: [2, 18, -5], head: [1, 28, 5], rightShoulder: [0, 12, -6], leftShoulder: [0, -9, 0] } },
-      { t: 2.5, R: { at: [-0.12, -0.08, 0.32], pole: [-1, 0, -0.3], twist: 20 }, L: { at: [0.14, -0.24, 0.3], pole: [1, -0.5, -0.3], twist: 25 }, l: "relaxed", r: "relaxed", p: { chest: [0, 3, 0], neck: [2, 17, -5], head: [1, 26, 4], rightShoulder: [0, 4, -2], leftShoulder: [0, -3, 0] } },
-      { t: 2.85, p: { neck: [1, 6, -2], head: [0, 8, 1] } },
-      { t: 3.15 },
+      { t: 0.3, R: { at: [-0.15, -0.22, 0.2], pole: [-1, -0.7, -0.3], twist: 10 }, L: { at: [0.15, -0.36, 0.16], pole: [1, -0.7, -0.3], twist: 15 }, l: "relaxed", r: "relaxed", p: { chest: [-3, 0, 0], upperChest: [-1, 0, 0], head: [-2, 0, 0] } },
+      { t: 0.7, R: { at: [-0.06, 0.16, 0.43], pole: [-1, -0.3, -0.3], twist: 15 }, L: { at: [0.13, -0.25, 0.4], pole: [1, -0.6, -0.2], twist: 35 }, l: "open", r: "open", p: { spine: [-2, 0, 0], chest: [-2, 2, 0], upperChest: [-2, 1, 0], neck: [-2, 0, 0], head: [-3, 2, 0] } },
+      { t: 1.2, R: { at: [0.12, -0.08, 0.38], pole: [-1, 0.5, 0.2], twist: 30 }, L: { at: [-0.1, -0.3, 0.34], pole: [1, -0.4, 0.1], twist: 30 }, l: "together", r: "together", p: { spine: [-1, 3, -2], chest: [0, 5, -2], upperChest: [0, 3, -1], neck: [1, 18, -5], head: [1, 28, 5], rightShoulder: [0, 12, -6], leftShoulder: [0, -9, 0] }, hold: true },
+      { t: 1.5, p: { spine: [-1, 3, -2], chest: [1, 8, -2], upperChest: [1, 3, -1], neck: [1, 18, -5], head: [1, 28, 5], rightShoulder: [0, 12, -10], leftShoulder: [0, -9, 4] } },
+      { t: 1.95, p: { chest: [0, 1, -2] } },
+      { t: 2.35, p: { chest: [0, 6, -2] } },
+      { t: 2.55, R: { at: [0.12, -0.08, 0.38], pole: [-1, 0.5, 0.2], twist: 30 }, L: { at: [-0.1, -0.3, 0.34], pole: [1, -0.4, 0.1], twist: 30 }, l: "together", r: "together", p: { spine: [-1, 3, -2], chest: [0, 5, -2], upperChest: [0, 3, -1], neck: [1, 18, -5], head: [1, 28, 5], rightShoulder: [0, 12, -6], leftShoulder: [0, -9, 0] } },
+      { t: 2.95, R: { at: [-0.06, -0.18, 0.34], pole: [-1, -1, -0.3], twist: 25 }, L: { at: [0.1, -0.3, 0.3], pole: [1, -1, -0.2], twist: 70 }, l: "relaxed", r: "relaxed", p: { spine: [-2, 0, 0], chest: [-4, 0, 0], upperChest: [-3, 0, 0], neck: [-3, 0, 0], head: [-4, 0, 4] } },
+      { t: 3.55, R: { at: [-0.06, -0.19, 0.34], pole: [-1, -1, -0.3], twist: 25 }, L: { at: [0.1, -0.31, 0.3], pole: [1, -1, -0.2], twist: 70 }, l: "relaxed", r: "relaxed", p: { spine: [-2, 0, 0], chest: [-4, 0, 0], upperChest: [-3, 0, 0], neck: [-3, 0, 0], head: [-4, 0, 3] } },
+      { t: 4.0, l: "relaxed", r: "relaxed" },
+      { t: 4.2 },
     ],
   },
 

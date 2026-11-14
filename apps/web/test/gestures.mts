@@ -363,38 +363,7 @@ for (const p of presets) {
       pa.play(kind);
       pb.play(kind);
       const posA = new THREE.Vector3(0, 0, 0), posB = new THREE.Vector3(0, 0, gap);
-      const until = kind === "high_five" ? 0.62 : kind === "handshake" ? 0.9 : 1.3;
-      // Dónde deja los pies la animación (en el último frame), para ver que el abrazo no los mueve.
-      const feet: THREE.Vector3[] = [];
-      for (let t = 0; t <= until + 1e-6; t += 1 / 60) {
-        // Como en el juego: las manos se buscan con la otra persona como quedó en el frame anterior
-        // (la gente, antes de animar a nadie) y después cada uno se anima y su esqueleto las lleva.
-        pairTargets(kind, t, 0, 0, 0, posB, fxA, fxB);
-        pairTargets(kind, t, 0, 0, gap, posA, fxB, fxA);
-        pa.at(t);
-        pb.at(t);
-        feet.length = 0;
-        for (const p of [pa, pb]) for (const f of ["leftFoot", "rightFoot"]) feet.push(p.joint(f));
-        fxA.rig.apply(1 / 60, fxA);
-        fxB.rig.apply(1 / 60, fxB);
-        A.humanoid.normalizedHumanBonesRoot.updateMatrixWorld(true);
-        B.humanoid.normalizedHumanBonesRoot.updateMatrixWorld(true);
-      }
-      const ra = pa.hand("right"), rb = pb.hand("right"), la = pa.hand("left"), lb = pb.hand("left");
-      const who = `${aId} y ${bId}`;
-      if (PRINT) {
-        console.log(`    ${who} ${kind} (a ${cm(gap)}): A der. palma ${f3(ra.palm)} normal ${f3(ra.normal)} dedos ${f3(ra.fingers)} · B der. palma ${f3(rb.palm)} normal ${f3(rb.normal)} dedos ${f3(rb.fingers)}`);
-        if (kind === "hug") console.log(`    ${who} hug: A izq. palma ${f3(la.palm)} normal ${f3(la.normal)} · B izq. palma ${f3(lb.palm)} normal ${f3(lb.normal)}`);
-      }
-      // Ningún brazo retorcido: lo que gira el antebrazo con la mano y lo que se dobla la muñeca.
-      let twist = 0, wrist = 0;
-      for (const [p, sides] of [[pa, kind === "hug" ? ["left", "right"] : ["right"]], [pb, kind === "hug" ? ["left", "right"] : ["right"]]] as const)
-        for (const side of sides) {
-          const a = armOf(p, side);
-          twist = Math.max(twist, Math.abs(a.twist));
-          wrist = Math.max(wrist, a.wrist);
-        }
-      check(twist < 150 * DEG && wrist < 70 * DEG, `${who}, ${kind}: ningún brazo se retuerce (antebrazo y mano ${deg(twist)}, muñeca ${deg(wrist)})`);
+      const until = kind === "high_five" ? 0.62 : kind === "handshake" ? 0.9 : 1.65;
       // Los brazos no atraviesan el tronco de la otra persona (de su cintura a sus hombros, en su óvalo a
       // cada altura, tal como está ahora: rig.ts → torsoAt): del hombro al codo y del codo a la muñeca.
       const inside = (p: Posed, rig: InstanceType<typeof Rig>) => {
@@ -427,6 +396,52 @@ for (const p of presets) {
         }
         return worst;
       };
+      // Como en el juego: las manos se buscan con la otra persona como quedó en el frame anterior
+      // (la gente, antes de animar a nadie) y después cada uno se anima y su esqueleto las lleva; al
+      // soltarse del abrazo, A (quien se acercó) da medio paso atrás (pairLeave).
+      const frame = (t: number) => {
+        if (kind === "hug") {
+          posA.z -= pairLeave(kind, t, posB.z - posA.z, gap, 1 / 60);
+          A.scene.position.copy(posA);
+          A.scene.updateMatrixWorld(true);
+        }
+        pairTargets(kind, t, posA.x, 0, posA.z, posB, fxA, fxB);
+        pairTargets(kind, t, posB.x, 0, posB.z, posA, fxB, fxA);
+        pa.at(t);
+        pb.at(t);
+        feet.length = 0;
+        for (const p of [pa, pb]) for (const f of ["leftFoot", "rightFoot"]) feet.push(p.joint(f));
+        fxA.rig.apply(1 / 60, fxA);
+        fxB.rig.apply(1 / 60, fxB);
+        A.humanoid.normalizedHumanBonesRoot.updateMatrixWorld(true);
+        B.humanoid.normalizedHumanBonesRoot.updateMatrixWorld(true);
+      };
+      // Dónde deja los pies la animación (en el último frame), para ver que el abrazo no los mueve.
+      const feet: THREE.Vector3[] = [];
+      // Mientras las manos rodean a la otra persona (desde delante de su costado hasta su espalda), ningún
+      // brazo la atraviesa.
+      let wrapThrough = 0;
+      let t = 0;
+      for (; t <= until + 1e-6; t += 1 / 60) {
+        frame(t);
+        if (kind === "hug" && t > 0.8 && t < 1.25) wrapThrough = Math.max(wrapThrough, inside(pa, fxB.rig), inside(pb, fxA.rig));
+      }
+      if (kind === "hug") check(wrapThrough < 0.04, `${aId} y ${bId}, abrazo: al rodearla, ningún brazo atraviesa a la otra persona (${cm(wrapThrough)} dentro, como mucho)`);
+      const ra = pa.hand("right"), rb = pb.hand("right"), la = pa.hand("left"), lb = pb.hand("left");
+      const who = `${aId} y ${bId}`;
+      if (PRINT) {
+        console.log(`    ${who} ${kind} (a ${cm(gap)}): A der. palma ${f3(ra.palm)} normal ${f3(ra.normal)} dedos ${f3(ra.fingers)} · B der. palma ${f3(rb.palm)} normal ${f3(rb.normal)} dedos ${f3(rb.fingers)}`);
+        if (kind === "hug") console.log(`    ${who} hug: A izq. palma ${f3(la.palm)} normal ${f3(la.normal)} · B izq. palma ${f3(lb.palm)} normal ${f3(lb.normal)}`);
+      }
+      // Ningún brazo retorcido: lo que gira el antebrazo con la mano y lo que se dobla la muñeca.
+      let twist = 0, wrist = 0;
+      for (const [p, sides] of [[pa, kind === "hug" ? ["left", "right"] : ["right"]], [pb, kind === "hug" ? ["left", "right"] : ["right"]]] as const)
+        for (const side of sides) {
+          const a = armOf(p, side);
+          twist = Math.max(twist, Math.abs(a.twist));
+          wrist = Math.max(wrist, a.wrist);
+        }
+      check(twist < 150 * DEG && wrist < 70 * DEG, `${who}, ${kind}: ningún brazo se retuerce (antebrazo y mano ${deg(twist)}, muñeca ${deg(wrist)})`);
       // (Abrazando, se aprieta: un antebrazo o una muñeca apoyados en su espalda hunden algo la ropa; y por
       // sus omóplatos el óvalo es el de su pecho, algo más grueso que su espalda de verdad.)
       const through = Math.max(inside(pa, fxB.rig), inside(pb, fxA.rig));
@@ -536,6 +551,34 @@ for (const p of presets) {
         let slid = 0;
         [pa, pb].forEach((p, i) => ["leftFoot", "rightFoot"].forEach((f, j) => (slid = Math.max(slid, p.joint(f).distanceTo(feet[i * 2 + j]!)))));
         check(slid < 0.012, `${who}, abrazo: los pies no se mueven (${cm(slid)})`);
+        // Al soltarse, como en la grabación: las manos resbalan de su espalda a sus brazos (sin atravesarla)
+        // mientras A da medio paso atrás, y se quedan un momento así: la de arriba de cada uno por fuera de
+        // su brazo, entre el hombro y el codo, mirándolo; la de abajo, por debajo de su antebrazo, con la
+        // palma hacia arriba.
+        let slideThrough = 0;
+        for (t += 1 / 60; t <= 3.25 + 1e-6; t += 1 / 60) {
+          frame(t);
+          if (t > 2.6 && t < 2.95) slideThrough = Math.max(slideThrough, inside(pa, fxB.rig), inside(pb, fxA.rig));
+        }
+        check(slideThrough < 0.04, `${who}, abrazo: al resbalar a sus brazos, ningún brazo atraviesa a la otra persona (${cm(slideThrough)} dentro, como mucho)`);
+        const onArm = (h: HandAt, a: THREE.Vector3, b: THREE.Vector3) => {
+          const ab = b.clone().sub(a);
+          const k = Math.min(1, Math.max(0, h.palm.clone().sub(a).dot(ab) / ab.lengthSq()));
+          const to = a.clone().addScaledVector(ab, k).sub(h.palm);
+          return { d: to.length(), up: to.clone().normalize().y, faces: h.normal.dot(to.normalize()), k };
+        };
+        // La de arriba, en su brazo (entre el hombro y el codo o, con alguien mucho más alto, junto al codo).
+        const upper = (h: HandAt, p: Posed) => {
+          const a = onArm(h, p.joint("leftUpperArm"), p.joint("leftLowerArm")), b = onArm(h, p.joint("leftLowerArm"), p.joint("leftHand"));
+          return b.d < a.d && b.k < 0.4 ? { ...b, k: 0.5 } : a;
+        };
+        const arms = [upper(pa.hand("right"), pb), upper(pb.hand("right"), pa)];
+        const fmt = (x: { d: number; faces: number; up: number }) => `${cm(x.d)}/${x.faces.toFixed(2)}`;
+        check(arms.every((x) => x.d > 0.02 && x.d < 0.1 && x.faces > 0.6 && x.k > 0.2), `${who}, abrazo: al soltarse, la mano de arriba en su brazo, por fuera y mirándolo (${arms.map(fmt).join(" ")})`);
+        const flanks = [on(pa.hand("left"), fxB.rig), on(pb.hand("left"), fxA.rig)];
+        check(flanks.every((h) => h.e > 0.95 && h.e < 1.45 && h.faces > 0.6 && h.v < 0.3), `${who}, abrazo: y la de abajo, en su costado (${flanks.map((h) => `${h.e.toFixed(2)}/${h.v.toFixed(2)}/${h.faces.toFixed(2)}`).join(" ")})`);
+        const apart = posB.z - posA.z - gap;
+        check(apart > 0.18 && apart < 0.26, `${who}, abrazo: al soltarse, medio paso atrás (${cm(apart)} más lejos que abrazados)`);
       }
     }
   }

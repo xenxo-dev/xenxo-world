@@ -124,6 +124,12 @@ export interface Embrace {
   lx: number;
   lz: number;
   /**
+   * La cabeza (rad, en el cuello y la cabeza): lo que se inclina hacia delante, sobre su pareja (`nod`),
+   * y lo que se ladea a su derecha, hacia la cabeza de su pareja (`roll`): mejilla con mejilla.
+   */
+  nod: number;
+  roll: number;
+  /**
    * Dónde quedaron las manos en la espalda de la otra persona (pair.ts; NaN, aún no): cuánto por encima
    * de su cintura (m) y cuánto la rodean (rad), la de arriba (`hr`, `ha`) y la de abajo (`lr`, `la`).
    * Abrazados, se quedan ahí: si no, al mecerse resbalaban por su espalda.
@@ -157,7 +163,7 @@ export const createFx = (): PersonFx => ({
   look: target(),
   reachL: target(),
   reachR: target(),
-  hug: { on: false, w: 0, x: 0, y: 0, z: 0, hx: 0, hz: 0, lean: 0, lx: 0, lz: 0, hr: NaN, ha: NaN, lr: NaN, la: NaN },
+  hug: { on: false, w: 0, x: 0, y: 0, z: 0, hx: 0, hz: 0, lean: 0, lx: 0, lz: 0, nod: 0, roll: 0, hr: NaN, ha: NaN, lr: NaN, la: NaN },
   seat: target(),
   footL: target(),
   footR: target(),
@@ -765,6 +771,19 @@ export class Rig {
       this.applyFoot(0, this.hugFeet[0]!, HUG_STRETCH);
       this.applyFoot(1, this.hugFeet[1]!, HUG_STRETCH);
     }
+    // La cabeza, sobre su pareja y ladeada hacia la suya (antes de medirla: su pareja la ve así), con el
+    // cuello y la cabeza: alrededor de su izquierda (hacia delante) y de hacia donde mira (a su derecha).
+    if (k > 0.002 && (h.nod || h.roll)) {
+      const neck = this.n("neck"), head = this.n("head");
+      if (neck && head) {
+        _hd.set(h.lx, 0, h.lz).normalize();
+        this.turnWorld(neck, _hd, h.nod * NOD_NECK * k);
+        this.turnWorld(head, _hd, h.nod * (1 - NOD_NECK) * k);
+        _ax.set(-_hd.z, 0, _hd.x);
+        this.turnWorld(neck, _ax, h.roll * NOD_NECK * k);
+        this.turnWorld(head, _ax, h.roll * (1 - NOD_NECK) * k);
+      }
+    }
     this.hugMeasured = on && this.headAt(this.headCenter);
     // La cabeza: la columna entera (cintura, pecho, pecho alto y cuello) se dobla lo mismo en cada
     // articulación hacia donde tiene que ir (de lo que mide de cada una a la cabeza sale cuánto) y la
@@ -1132,6 +1151,17 @@ export class Rig {
   }
 
   /**
+   * Dónde está ahora (mundo) una articulación de un brazo (el izquierdo, 0, o el derecho, 1): el hombro
+   * (0), el codo (1) o la muñeca (2). Para su pareja (pair.ts: al soltarse del abrazo, las manos en sus brazos).
+   */
+  armAt(side: 0 | 1, joint: 0 | 1 | 2, out: THREE.Vector3): boolean {
+    const n = this.n(ARM_JOINTS[side]![joint]!);
+    if (!n) return false;
+    n.getWorldPosition(out);
+    return true;
+  }
+
+  /**
    * El tronco ahora (mundo; para que en pareja las manos se apoyen en él), a una altura por la línea
    * del hueso de la cintura (`level` 0) al del pecho (1), y algo por debajo o por encima: por dónde
    * pasa (`p`), hacia dónde mira (`fwd`) y su izquierda (`left`), con el cuerpo como esté (inclinado en
@@ -1328,11 +1358,17 @@ export class Rig {
 const _qf = new THREE.Quaternion();
 /** El centro de la cabeza, por delante del hueso (m, en un cuerpo de 1,62 m de la cabeza al suelo). */
 const HEAD_FWD = 0.02;
+const ARM_JOINTS: [Bone, Bone, Bone][] = [
+  ["leftUpperArm", "leftLowerArm", "leftHand"],
+  ["rightUpperArm", "rightLowerArm", "rightHand"],
+];
 const FEET = ["leftFoot", "rightFoot"] as const;
 /** Abrazando, con los pies quietos: lo más que se estira cada pierna (de la cadera al tobillo, por lo que mide). */
 const HUG_STRETCH = 0.997;
 /** Al apartar la cabeza doblando la columna, lo que la cabeza se endereza (de lo que se ha doblado todo). */
 const HEAD_LEVEL = 0.75;
+/** Abrazo: de lo que se inclina o se ladea la cabeza, lo que hace el cuello (el resto, la cabeza). */
+const NOD_NECK = 0.35;
 /** El abrazo (applyEmbrace). */
 const _hc = new THREE.Vector3();
 const _hf = new THREE.Vector3();
