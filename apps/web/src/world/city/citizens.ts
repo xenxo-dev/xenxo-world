@@ -2064,7 +2064,7 @@ export class CitySim {
       if (!ma) continue;
       // Contigo: si estáis encima, se aparta él (a ti te frena tu propia colisión, collision.ts); si
       // empujas hacia él, le empujas (a tu paso, algo frenado) y lo dice.
-      if (!me.driving && Math.abs(me.y - a.body.y) < 1.2) {
+      if (!me.driving && mine.apart !== a.key && Math.abs(me.y - a.body.y) < 1.2) {
         const dx = a.body.x - me.x, dz = a.body.z - me.z;
         const d = Math.hypot(dx, dz);
         if (d < R + R_ME + CONTACT && d > 1e-6) {
@@ -2228,8 +2228,9 @@ export class CitySim {
       npcs.pos[i * 3] = g.position.x;
       npcs.pos[i * 3 + 1] = g.position.y;
       npcs.pos[i * 3 + 2] = g.position.z;
-      // En pareja contigo no es sólido para ti: un abrazo es más cerca que dos cuerpos.
-      if (npcs.ghost) npcs.ghost[i] = mine.with === c.key ? 1 : 0;
+      // En pareja contigo no es sólido para ti (un abrazo es más cerca que dos cuerpos), ni al acabar,
+      // hasta que os separáis (where.ts → `apart`).
+      if (npcs.ghost) npcs.ghost[i] = mine.with === c.key || mine.apart === c.key ? 1 : 0;
       count = Math.max(count, i + 1);
     }
     // Los huecos libres por debajo del último, fuera de todo (no chocan ni se les puede dar).

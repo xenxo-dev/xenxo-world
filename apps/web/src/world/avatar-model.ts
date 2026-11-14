@@ -223,7 +223,7 @@ function fromVrm(vrm: VRM, scene: THREE.Group, decor: boolean): LoadedAvatar {
         animator.update(dt, m.speed, m.airborne, m.pk ?? m.emote, !!m.fight, m.fx, m.gesture, m.pk ? m.pkP : undefined, m.vy);
       } else {
         // Respaldo: paso procedural sencillo hasta que cargan los clips.
-        const k = walkAmount(m.speed);
+        const k = walkAmount(Math.abs(m.speed));
         const s = Math.sin(m.phase);
         if (b.lUpperLeg) b.lUpperLeg.rotation.x = s * 0.55 * k;
         if (b.rUpperLeg) b.rUpperLeg.rotation.x = -s * 0.55 * k;
@@ -318,13 +318,14 @@ function fromGltf(source: THREE.Group, clips: THREE.AnimationClip[]): LoadedAvat
   return {
     object,
     update: (dt, m) => {
-      const { speed, phase } = m;
+      const { phase } = m;
+      const speed = Math.abs(m.speed);
       const k = walkAmount(speed);
       if (walk) {
         // Mezcla suave entre reposo y andar según la velocidad.
         blend += (k - blend) * Math.min(1, dt * 8);
         walk.setEffectiveWeight(blend);
-        walk.timeScale = 0.6 + speed / 3;
+        walk.timeScale = (0.6 + speed / 3) * (m.speed < 0 ? -1 : 1);
         idle?.setEffectiveWeight(1 - blend);
       } else {
         // Sin animación de andar: un pequeño rebote y balanceo al moverse.

@@ -564,7 +564,7 @@ export function Player({ active }: { active: boolean }) {
       } else if (!_pf.drawn) {
         // Con parkour, el cuerpo entero se inclina (correr por la pared) y los pies van contra ella.
         avatar.current.position.set(body.x + pk.ox, visY.current + pkLift.current, body.z + pk.oz);
-        const turn = turnLean.step(dt, bodyYaw.current, motion.speed, body.grounded && pk.move === "none" && !motion.pk);
+        const turn = turnLean.step(dt, bodyYaw.current, Math.abs(motion.speed), body.grounded && pk.move === "none" && !motion.pk);
         avatar.current.rotation.set(pk.pitch, bodyYaw.current, turn - pk.lean, "YXZ");
       }
       playerPos.set(body.x, body.y, body.z);

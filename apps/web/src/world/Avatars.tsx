@@ -100,7 +100,7 @@ export function DefaultAvatar({ color, motion }: { color: THREE.ColorRepresentat
 
   useFrame(() => {
     if (!root.current || !legL.current || !legR.current || !armL.current || !armR.current) return;
-    const k = walkAmount(motion.speed);
+    const k = walkAmount(Math.abs(motion.speed));
     const s = Math.sin(motion.phase);
     legL.current.rotation.x = s * 0.6 * k;
     legR.current.rotation.x = -s * 0.6 * k;
@@ -300,6 +300,9 @@ function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; n
     catchup.frame(rt, newest, _cur.over > 0, _a.x, _a.y, _a.z, dt);
     // La velocidad del paso sale de lo que dan las muestras solas; lo que se dibuja lleva además el desajuste.
     const step = Number.isNaN(last.x) ? 0 : Math.hypot(_a.x - last.x, _a.z - last.z);
+    // ¿Hacia atrás? (mira hacia −z sin girar: delante es (−sen, −cos) de su giro).
+    const yawNow = _e.setFromQuaternion(_qa, "YXZ").y;
+    const back = step > 1e-5 && (_a.x - last.x) * Math.sin(yawNow) + (_a.z - last.z) * Math.cos(yawNow) > 0.5 * step;
     // Y la vertical (para el salto y lo fuerte del aterrizaje: world/leap.ts), algo suavizada.
     const rise = Number.isNaN(last.x) || !(dt > 0) ? 0 : Math.max(-30, Math.min(30, (_a.y - last.y) / dt));
     motion.vy = (motion.vy ?? 0) + (rise - (motion.vy ?? 0)) * Math.min(1, dt * 15);
@@ -328,8 +331,9 @@ function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; n
     body.current.userData.frozen = motion.hidden || !!motion.skip;
     if (label.current) label.current.visible = far2 < NAME_FAR * NAME_FAR;
 
-    // Velocidad horizontal medida entre frames, suavizada: de ella sale el paso.
-    if (dt > 0) smoothSpeed(motion, step / dt, dt);
+    // Velocidad horizontal medida entre frames, suavizada: de ella sale el paso (hacia atrás si va de
+    // espaldas, `back`: al soltarse de un abrazo, el paso va al revés).
+    if (dt > 0) smoothSpeed(motion, (back ? -step : step) / dt, dt);
 
     // El coche. Aparcado, donde lo dejó (entre sus dos poses, como la persona). Con ella al volante
     // (lo dice su última pose), donde está ahora: a esas velocidades, dibujado con el retraso de las
@@ -470,7 +474,7 @@ function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; n
         _ty.setFromAxisAngle(_Y, d.yaw);
         body.current.quaternion.copy(_tq).multiply(_ty);
         body.current.position.y = Math.max(d.y, groundHeight(d.x, d.z, 0.24, d.y + 1.8));
-      } else if (!d.placed) body.current.rotation.set(pkTilt.pitch, d.yaw, pkTilt.lean + turnLean.step(dt, d.yaw, motion.speed, !motion.airborne && !pkE && !d.emote), "YXZ");
+      } else if (!d.placed) body.current.rotation.set(pkTilt.pitch, d.yaw, pkTilt.lean + turnLean.step(dt, d.yaw, Math.abs(motion.speed), !motion.airborne && !pkE && !d.emote), "YXZ");
       feetAt.set(body.current.position.x, d.placed ? body.current.position.y : d.y, body.current.position.z);
     }
   });

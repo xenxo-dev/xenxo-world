@@ -157,7 +157,7 @@ function hit(st: Knock, g: THREE.Object3D, x: number, y: number, z: number, yaw:
     st.yaw = yaw;
   }
   // La velocidad que llevaba (andando hacia donde mira).
-  const walk = st.phase === "none" || st.phase === "back" ? motion.speed : 0;
+  const walk = st.phase === "none" || st.phase === "back" ? Math.abs(motion.speed) : 0;
   const vx = -Math.sin(st.yaw) * walk, vz = -Math.cos(st.yaw) * walk;
   st.nx = nx;
   st.nz = nz;

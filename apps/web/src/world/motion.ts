@@ -5,7 +5,7 @@ import type { PersonFx } from "./people/rig";
  * (red o teclado) y quien lo dibuja. Mutable a propósito: se lee en useFrame.
  */
 export interface Motion {
-  /** Velocidad horizontal suavizada (m/s). */
+  /** Velocidad horizontal suavizada (m/s); negativa, si va hacia atrás (de cara a otro lado). */
   speed: number;
   /** Fase del ciclo de paso (radianes). La avanza quien dibuja. */
   phase: number;
@@ -60,8 +60,8 @@ export function advance(m: Motion, dt: number) {
   m.phase = (m.phase + m.speed * dt * RAD_PER_METER) % (Math.PI * 200);
 }
 
-/** Suaviza una velocidad medida a saltos (red) para que el paso no tiemble. */
+/** Suaviza una velocidad medida a saltos (red) para que el paso no tiemble (negativa: hacia atrás). */
 export function smoothSpeed(m: Motion, measured: number, dt: number) {
-  m.speed += (Math.min(measured, 8) - m.speed) * Math.min(1, dt * 6);
-  if (m.speed < 0.02) m.speed = 0;
+  m.speed += (Math.max(-8, Math.min(measured, 8)) - m.speed) * Math.min(1, dt * 6);
+  if (Math.abs(m.speed) < 0.02) m.speed = 0;
 }

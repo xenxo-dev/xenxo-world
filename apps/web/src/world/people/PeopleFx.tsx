@@ -234,8 +234,9 @@ export function PeopleFx() {
       for (const [id, buf] of world.poseBuffers) {
         if (n >= others.max) break;
         const s = buf[buf.length - 1];
-        // Tu pareja en una acción en pareja no es sólida para ti (un abrazo es más cerca que dos cuerpos).
-        if (!s || s.vehicle || now - s.t > 3000 || id === world.sessionId || id === mine.with) continue;
+        // Tu pareja en una acción en pareja no es sólida para ti (un abrazo es más cerca que dos cuerpos),
+        // ni al acabar, hasta que os separáis (where.ts → `apart`).
+        if (!s || s.vehicle || now - s.t > 3000 || id === world.sessionId || id === mine.with || id === mine.apart) continue;
         others.pos[n * 3] = s.head.p[0]!;
         others.pos[n * 3 + 1] = s.head.p[1]! - 1.6;
         others.pos[n * 3 + 2] = s.head.p[2]!;

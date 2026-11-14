@@ -6,6 +6,8 @@
  *     su dirección (de frente, por la espalda o de lado) y vuelven solos, con su pequeño rebote.
  *   - Mirar a alguien: cuello y cabeza hacia un punto, con límites.
  *   - Llegar con la mano a un sitio (IK de dos huesos): chocar los cinco, darse la mano, abrazar.
+ *   - Abrazar con el cuerpo (pair.ts → `hug`): la cadera hacia la pareja con los pies quietos, la
+ *     columna inclinada o doblada para que las cabezas pasen una junto a la otra.
  *   - Juntar las palmas (aplaudir): el gesto dice cuándo se tocan (`touch`) y aquí se juntan a la
  *     medida de cada avatar (lo ancho de hombros frente a lo largo de brazos cambia de uno a otro:
  *     con la misma pose, a unos les quedaba un hueco y a otros se les atravesaban las manos).
@@ -101,6 +103,37 @@ const PHONE_DOWN = 0.05;
 const PHONE_FWD = 0.015;
 const PHONE_BACK = 0.4;
 
+/**
+ * Lo que el abrazo le pide al cuerpo además de los brazos (pair.ts, en cada frame; el esqueleto gasta
+ * `on` y `w` al usarlos, así que deja de pesar en cuanto nadie lo pide).
+ */
+export interface Embrace {
+  /** Abrazando (aunque aún no pese): mide su tronco y su cabeza para su pareja (`Rig.frontHigh`…). */
+  on: boolean;
+  /** Peso (0–1). */
+  w: number;
+  /** Lo que se mueve la cadera (mundo, m), sin mover los pies: hacia su pareja y a un lado. */
+  x: number;
+  y: number;
+  z: number;
+  /** Lo que se aparta la cabeza (mundo, m) de la de su pareja. */
+  hx: number;
+  hz: number;
+  /** Lo que se inclina hacia delante (rad, en la cintura y el pecho), alrededor de su izquierda (mundo: lx, lz). */
+  lean: number;
+  lx: number;
+  lz: number;
+  /**
+   * Dónde quedaron las manos en la espalda de la otra persona (pair.ts; NaN, aún no): cuánto por encima
+   * de su cintura (m) y cuánto la rodean (rad), la de arriba (`hr`, `ha`) y la de abajo (`lr`, `la`).
+   * Abrazados, se quedan ahí: si no, al mecerse resbalaban por su espalda.
+   */
+  hr: number;
+  ha: number;
+  lr: number;
+  la: number;
+}
+
 /** Lo que la gente le pide al esqueleto de una persona (vive en su `Motion`). */
 export interface PersonFx {
   /** El esqueleto, cuando su avatar VRM está cargado (con el muñeco de respaldo, null). */
@@ -108,6 +141,7 @@ export interface PersonFx {
   look: Target;
   reachL: Target;
   reachR: Target;
+  hug: Embrace;
   /**
    * Dónde tiene que quedar su cadera (mundo): sentado en un asiento que no se mueve con él (el del
    * coche). Mida lo que mida el avatar y venga de la pose que venga, la cadera cae ahí.
@@ -118,7 +152,16 @@ export interface PersonFx {
   footR: Target;
 }
 const target = (): Target => ({ x: 0, y: 0, z: 0, w: 0, px: 0, py: 0, pz: 0, palm: 0, shape: null, nx: 0, ny: 0, nz: 0, ux: 0, uy: 0, uz: 0 });
-export const createFx = (): PersonFx => ({ rig: null, look: target(), reachL: target(), reachR: target(), seat: target(), footL: target(), footR: target() });
+export const createFx = (): PersonFx => ({
+  rig: null,
+  look: target(),
+  reachL: target(),
+  reachR: target(),
+  hug: { on: false, w: 0, x: 0, y: 0, z: 0, hx: 0, hz: 0, lean: 0, lx: 0, lz: 0, hr: NaN, ha: NaN, lr: NaN, la: NaN },
+  seat: target(),
+  footL: target(),
+  footR: target(),
+});
 
 const DEG = Math.PI / 180;
 
@@ -576,6 +619,7 @@ export class Rig {
     this.applySprings(dt);
     this.liftNeed[0] = this.liftNeed[1] = -Infinity;
     if (fx) {
+      this.applyEmbrace(dt, fx.hug);
       this.applySeat(fx.seat);
       this.applyFoot(0, fx.footL);
       this.applyFoot(1, fx.footR);
@@ -611,6 +655,164 @@ export class Rig {
     add("rightUpperArm", 0, 0, b.p * 0.35);
   }
 
+  /* ---------------------------------------------------------------- */
+  /* El abrazo                                                          */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Para su pareja en el abrazo (pair.ts), medidos en cada frame en que se abraza antes de apoyarse en
+   * ella: por dónde va su tronco por delante a la altura de su cintura y de su pecho (en el mundo:
+   * rig.ts → torsoAt, 0 y 1), la altura de sus hombros y, ya con la cadera donde va, el centro de su
+   * cabeza. `hugMeasured`: medidos en este abrazo (si no, no valen). Quien los usa ve los de hace un
+   * frame: sin apoyarse en lo que su pareja ya ha corregido (si no, los dos se corregían a la vez lo
+   * mismo y se pasaban).
+   */
+  readonly frontLow = new THREE.Vector3();
+  readonly frontHigh = new THREE.Vector3();
+  readonly headCenter = new THREE.Vector3();
+  /** Lo que se va el tronco en horizontal por cada metro que sube (inclinado, m/m; mundo: de la cintura al pecho). */
+  hugTiltX = 0;
+  hugTiltZ = 0;
+  hugTop = 0;
+  hugMeasured = false;
+  private hugW = 0;
+  private hugFeet = [target(), target()];
+
+  /** Medio ancho de la cabeza a la altura de las orejas, con el pelo (m). */
+  get headRadius(): number {
+    if (!this.bodySize) void this.size;
+    return this.frame?.ear.side ?? 0.09 * (this.bodySize!.head / BODY.head);
+  }
+
+  /** El centro de la cabeza ahora (mundo): a la altura de las orejas y algo por delante del hueso. */
+  headAt(out: THREE.Vector3): boolean {
+    const f = this.frame, head = this.nodes.get("head");
+    if (!f || !head) return false;
+    head.getWorldPosition(out);
+    head.getWorldQuaternion(_q);
+    out.addScaledVector(_v.set(0, 1, 0).applyQuaternion(_q), f.ear.up).addScaledVector(_w.copy(f.fwd).applyQuaternion(_q), HEAD_FWD * (this.bodySize!.head / BODY.head));
+    return true;
+  }
+
+  /**
+   * Abrazando: mide el pecho y la cabeza (para su pareja) y hace lo que pide pair.ts: inclinarse (si su
+   * pareja es mucho más baja), la cadera hacia su pareja y a un lado con los pies donde estaban (las
+   * piernas, con su IK: se doblan algo las rodillas) y la cabeza apartada de la suya (doblando la
+   * columna).
+   */
+  private applyEmbrace(dt: number, h: Embrace) {
+    const on = h.on;
+    this.hugW += ((on ? h.w : 0) - this.hugW) * Math.min(1, dt * 8);
+    h.on = false;
+    h.w = 0;
+    if (!on && this.hugW < 0.002) {
+      this.hugMeasured = false;
+      this.hugW = 0;
+      return;
+    }
+    if (!this.bodySize) void this.size;
+    const hips = this.parts[0] ?? this.n("hips");
+    const root = hips?.parent;
+    if (!hips || !root) return;
+    hips.updateWorldMatrix(true, true);
+    const k = this.hugW;
+    // Los pies, donde estaban (con su giro, applyFoot), para dejarlos ahí por mucho que se mueva la
+    // cadera (las rodillas, hacia donde iban).
+    const lean = k > 0.002 && h.lean > 1e-4;
+    const shift = k > 0.002 && (h.x || h.y || h.z);
+    if (lean || shift) {
+      for (let s = 0; s < 2; s++) {
+        const foot = this.n(FEET[s]!), t = this.hugFeet[s]!;
+        if (!foot) continue;
+        foot.getWorldPosition(_v);
+        t.x = _v.x;
+        t.y = _v.y;
+        t.z = _v.z;
+        t.w = 1;
+      }
+    }
+    // Inclinarse (quien es mucho más alto), como quien hace una reverencia: el pecho se queda donde
+    // estaba y la cadera va atrás (los hombros y la cabeza, hacia delante y abajo; si no, su pecho se
+    // metía en la cara de quien es más bajo). Antes de medir: su pareja lo ve ya inclinado.
+    if (lean) {
+      const chest = this.parts[PART.thorax]!;
+      chest.getWorldPosition(_hc);
+      _hd.set(h.lx, 0, h.lz).normalize();
+      const bones = this.hugSpine();
+      for (let i = 0; i < bones.length - 1; i++) this.turnWorld(bones[i]!, _hd, (h.lean * k) / (bones.length - 1));
+      _hc.sub(chest.getWorldPosition(_v));
+      _hc.y = 0;
+      this.moveHips(hips, root, _hc);
+    }
+    // El tronco por delante, en horizontal a la altura de cada hueso (inclinado, la sección horizontal
+    // es más larga: lo que abulta, entre el coseno), y lo que se inclina (de la cintura al pecho).
+    for (let i = 0; i < 2; i++) {
+      if (!this.torsoAt(i, _hc, _hf, _hl, _hb)) continue;
+      if (i) _a.sub(_hc).negate();
+      else _a.copy(_hc);
+      const fh = Math.hypot(_hf.x, _hf.z);
+      _hf.y = 0;
+      _hf.normalize();
+      (i ? this.frontHigh : this.frontLow).copy(_hc).addScaledVector(_hf, _hb.front / Math.max(0.6, fh));
+    }
+    _a.multiplyScalar(_a.y > 0.03 ? 1 / _a.y : 0);
+    this.hugTiltX = _a.x;
+    this.hugTiltZ = _a.z;
+    this.hugTop = Math.max(this.shoulderAt(0, _v) ? _v.y : 0, this.shoulderAt(1, _v) ? _v.y : 0);
+    // La cadera, adonde se pide; y las piernas, a los pies de antes.
+    if (shift) this.moveHips(hips, root, _hd.set(h.x * k, h.y * k, h.z * k));
+    if (lean || shift) {
+      this.applyFoot(0, this.hugFeet[0]!, HUG_STRETCH);
+      this.applyFoot(1, this.hugFeet[1]!, HUG_STRETCH);
+    }
+    this.hugMeasured = on && this.headAt(this.headCenter);
+    // La cabeza: la columna entera (cintura, pecho, pecho alto y cuello) se dobla lo mismo en cada
+    // articulación hacia donde tiene que ir (de lo que mide de cada una a la cabeza sale cuánto) y la
+    // cabeza se endereza casi del todo (si no, quedaba torcida, con la oreja en el hombro).
+    if (k > 0.002 && (h.hx || h.hz) && this.hugMeasured) {
+      const bones = this.hugSpine();
+      const head = this.n("head");
+      if (!bones.length || !head) return;
+      _hd.set(h.hx * k, 0, h.hz * k);
+      let levers = 0;
+      for (const b of bones) levers += b.getWorldPosition(_v).distanceTo(this.headCenter);
+      const angle = _hd.length() / Math.max(0.1, levers);
+      for (const b of bones) {
+        _a.copy(this.headCenter).sub(b.getWorldPosition(_v));
+        _ax.crossVectors(_a, _hd);
+        if (_ax.lengthSq() < 1e-10) continue;
+        this.turnWorld(b, _ax.normalize(), angle);
+      }
+      this.turnWorld(head, _ax, -angle * bones.length * HEAD_LEVEL);
+    }
+  }
+
+  /** Mueve la cadera `by` (mundo, m) y pone al día lo que cuelga de ella. */
+  private moveHips(hips: THREE.Object3D, root: THREE.Object3D, by: THREE.Vector3) {
+    root.getWorldQuaternion(_q).invert();
+    _v.copy(by).applyQuaternion(_q).divideScalar(root.getWorldScale(_ws).x || 1);
+    hips.position.add(_v);
+    hips.updateWorldMatrix(false, true);
+  }
+
+  /** La columna que se dobla para apartar la cabeza (sin repetir: hay VRM sin pecho alto). */
+  private spine: THREE.Object3D[] | null = null;
+  private hugSpine(): THREE.Object3D[] {
+    if (!this.spine) {
+      const all = [this.n("spine"), this.n("chest"), this.n("upperChest"), this.n("neck")];
+      this.spine = all.filter((b, i): b is THREE.Object3D => !!b && all.indexOf(b) === i);
+    }
+    return this.spine;
+  }
+
+  /** Gira un hueso `angle` rad alrededor de un eje del mundo (sobre su articulación) y pone al día lo que cuelga de él. */
+  private turnWorld(bone: THREE.Object3D, axis: THREE.Vector3, angle: number) {
+    bone.getWorldQuaternion(_q2).premultiply(_q.setFromAxisAngle(axis, angle));
+    bone.parent!.getWorldQuaternion(_qr);
+    bone.quaternion.copy(_qr.invert().multiply(_q2));
+    bone.updateWorldMatrix(false, true);
+  }
+
   /** La cadera, donde está el asiento (quien lo pide ya suaviza su peso: va pegado al coche). */
   private applySeat(t: Target) {
     if (t.w < 0.001) return;
@@ -626,9 +828,10 @@ export class Rig {
   /**
    * IK de dos huesos de la pierna hacia el tobillo pedido (mundo), con la rodilla hacia donde ya iba.
    * El pie conserva su giro en el mundo (el de la pose: apoyado en el pedal), se doble como se doble
-   * la pierna. Quien lo pide ya suaviza su peso.
+   * la pierna. Quien lo pide ya suaviza su peso. `stretch`: lo más que se estira (de pie, el reposo
+   * lleva las piernas casi rectas: con menos, los pies se levantaban del suelo).
    */
-  private applyFoot(side: 0 | 1, t: Target) {
+  private applyFoot(side: 0 | 1, t: Target, stretch = 0.94) {
     const w = Math.min(1, t.w);
     if (w < 0.001) return;
     const upper = this.n(side ? "rightUpperLeg" : "leftUpperLeg");
@@ -644,7 +847,7 @@ export class Rig {
     _D.set(t.x, t.y, t.z).sub(_S);
     let dist = _D.length();
     // Nunca del todo estirada (a quien no llega, la rodilla le queda algo doblada).
-    const max = (la + lb) * 0.94;
+    const max = (la + lb) * stretch;
     const min = Math.abs(la - lb) + 0.01;
     if (dist > max) _D.multiplyScalar(max / dist);
     else if (dist < min) _D.multiplyScalar(min / Math.max(dist, 1e-4));
@@ -1123,6 +1326,19 @@ export class Rig {
 }
 
 const _qf = new THREE.Quaternion();
+/** El centro de la cabeza, por delante del hueso (m, en un cuerpo de 1,62 m de la cabeza al suelo). */
+const HEAD_FWD = 0.02;
+const FEET = ["leftFoot", "rightFoot"] as const;
+/** Abrazando, con los pies quietos: lo más que se estira cada pierna (de la cadera al tobillo, por lo que mide). */
+const HUG_STRETCH = 0.997;
+/** Al apartar la cabeza doblando la columna, lo que la cabeza se endereza (de lo que se ha doblado todo). */
+const HEAD_LEVEL = 0.75;
+/** El abrazo (applyEmbrace). */
+const _hc = new THREE.Vector3();
+const _hf = new THREE.Vector3();
+const _hl = new THREE.Vector3();
+const _hd = new THREE.Vector3();
+const _hb: TorsoBand = { front: 0, back: 0, side: 0 };
 /** Juntar las palmas: hasta dónde de la muñeca a los nudillos cae el centro de la palma y a qué distancia quedan (por lo que mide la mano). */
 const PALM_AT = 0.55;
 const PALM_GAP = 0.3;

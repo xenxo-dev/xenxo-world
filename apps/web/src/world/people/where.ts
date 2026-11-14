@@ -19,5 +19,7 @@ export const remoteFx = new Map<string, PersonFx>();
  * con quién (`with`: su clave aquí, la sesión o el ciudadano; vacío si no hay) y por dónde va (`t`, s,
  * con tu reloj). Quien la hace contigo se dibuja con su pose, que llega con retraso: en tu pantalla,
  * sus manos van con tu reloj (remotePeople.ts, city/citizens.ts), o las vuestras no se encontraban.
+ * `apart`: con quien acabas de hacerla, que sigue sin ser sólido para ti hasta que os separáis
+ * (selfPeople.ts): al acabar un abrazo aún os tocáis.
  */
-export const mine: { fx: PersonFx | null; with: string; t: number } = { fx: null, with: "", t: 0 };
+export const mine: { fx: PersonFx | null; with: string; t: number; apart: string } = { fx: null, with: "", t: 0, apart: "" };

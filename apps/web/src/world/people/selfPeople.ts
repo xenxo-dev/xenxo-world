@@ -26,14 +26,14 @@ import { DISTRICT_SPAWN } from "../../net/districts";
 import { teleport } from "../../net/session";
 import { world } from "../../net/world-store";
 import { mine, remoteFeet, remoteFx } from "./where";
-import { crowd, floorAt, NPC_CITY, npcs } from "../collision";
+import { crowd, floorAt, NPC_CITY, npcs, OTHER_RADIUS, resolveCircle } from "../collision";
 import { knockBusy } from "../knock";
-import { placeBody, type Body } from "../locomotion";
+import { BODY_RADIUS, placeBody, STEP_UP, type Body } from "../locomotion";
 import type { Motion } from "../motion";
 import { impact, thud, whoosh } from "./fight-audio";
 import { COMBO, COMBO_RESET, fallFor, FALL_MAX, HIT_AFTER_MS, LIE, LIE_KO, lightReaction, myStrike, parkourFallFor, RISE, STRIKES, strikeOf, type Strike, type StrikeMove } from "./fight";
 import { loadRagdolls, ragdolls } from "./ragdoll";
-import { PAIR, pairGap, pairStep, pairTargets } from "./pair";
+import { PAIR, pairGap, pairLeave, pairStep, pairTargets } from "./pair";
 import { BODY, createFx, type Lying } from "./rig";
 
 type Phase = "none" | "react" | "fall" | "ground" | "roll" | "rise" | "clipfall" | "cliprise" | "pair";
@@ -149,6 +149,9 @@ const _o = new THREE.Vector3();
 const _n = { x: 0, y: 0, z: 0 };
 const _l: Lying = { x: 0, y: 0, z: 0, hx: 0, hz: 1, face: 0 };
 const _align = { x: 0, z: 0, yaw: 0 };
+const _back = { x: 0, z: 0 };
+/** Tras una acción en pareja, hasta dónde (m entre los dos) sigue sin chocar con quien la hizo contigo. */
+const APART = BODY_RADIUS + OTHER_RADIUS + 0.04;
 
 export interface PeopleCtx {
   body: Body;
@@ -238,8 +241,11 @@ export function peopleFrame(dt: number, c: PeopleCtx, out: { lock: boolean; want
     me.t = 0;
     me.pair = pair.kind;
   } else if (pair && me.phase !== "none") pendingPair = null;
-  // Con quién estás en pareja (where.ts): si algo la corta (un golpe), deja de serlo ya.
+  // Con quién estás en pareja (where.ts): si algo la corta (un golpe), deja de serlo ya. Y con quien
+  // acabas de estarlo, hasta que os separáis (al acabar un abrazo aún os tocáis: sin esto, la
+  // colisión os apartaba de golpe).
   if (me.phase !== "pair") mine.with = "";
+  if (mine.apart && (me.phase === "pair" || !where(mine.apart, _o) || Math.hypot(_o.x - c.body.x, _o.z - c.body.z) > APART)) mine.apart = "";
 
   lookAround(c);
   if (strike.def) strikeFrame(dt, c, out);
@@ -605,16 +611,30 @@ function pairFrame(dt: number, c: PeopleCtx) {
   const d = Math.hypot(dx, dz) || 1;
   const other = remoteFx.get(me.partner) ?? null;
   if (me.lead) {
-    const step = pairStep(me.pair, me.t, d, pairGap(me.pair, selfFx.rig?.size ?? BODY, other?.rig?.size ?? BODY), dt);
+    const gap = pairGap(me.pair, selfFx.rig?.size ?? BODY, other?.rig?.size ?? BODY);
+    const step = pairStep(me.pair, me.t, d, gap, dt);
+    const back = step > 0 ? 0 : pairLeave(me.pair, me.t, d, gap, dt);
     if (step > 0) {
       placeBody(body, body.x + (dx / d) * step, body.y, body.z + (dz / d) * step);
       // Las piernas, andando a ese paso (los brazos siguen con lo suyo).
       motion.speed = step / Math.max(dt, 1e-3);
+    } else if (back > 0) {
+      // Al soltarse del abrazo, un paso atrás de cara a la otra persona (las piernas, andando al revés:
+      // velocidad negativa), sin meterse en una pared.
+      _back.x = body.x - (dx / d) * back;
+      _back.z = body.z - (dz / d) * back;
+      resolveCircle(_back, BODY_RADIUS, body.y + STEP_UP, body.y + 1.2, false);
+      const moved = Math.hypot(_back.x - body.x, _back.z - body.z);
+      placeBody(body, _back.x, body.y, _back.z);
+      motion.speed = -moved / Math.max(dt, 1e-3);
     }
   }
   c.bodyYaw.current = Math.atan2(-dx, -dz);
   pairTargets(me.pair, me.t, body.x, body.y, body.z, _o, selfFx, other);
-  if (me.t >= spec.s) end(motion);
+  if (me.t >= spec.s) {
+    mine.apart = me.partner;
+    end(motion);
+  }
 }
 
 /* --- La gente de decorado --- */

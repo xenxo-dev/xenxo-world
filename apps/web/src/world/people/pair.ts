@@ -12,22 +12,29 @@
  * dónde mira la palma y apuntan los dedos, rig.ts): chocar los cinco, palma contra palma, de frente y
  * con los dedos arriba; darse la mano, las palmas de lado, una contra otra, los dedos hacia la otra
  * persona y el mismo vaivén para las dos; y el abrazo, cruzado (cada uno con la derecha por encima del
- * hombro de la otra persona y la izquierda por debajo de su brazo), las palmas en su espalda y los
- * codos por fuera de su cuerpo.
+ * hombro de la otra persona y la izquierda por debajo de su brazo), las palmas en su espalda (quietas
+ * donde quedan, con dos palmaditas) y los codos pegados a su cuerpo.
+ *
+ * El abrazo es además de cuerpo entero (`hugBody`; lo hace el esqueleto, rig.ts → `applyEmbrace`):
+ * pecho con pecho y la cadera hacia la otra persona sin mover los pies, cada cabeza por encima del hombro
+ * derecho de la otra (girada hacia fuera, sin meterse una en otra ni en el pecho del otro) y, si una es
+ * mucho más alta, inclinada sobre la otra. Antes se quedaban a 32 cm, inclinados en «A» y con las caras
+ * una contra otra.
  *
  * Se acerca quien la propone (`pairStep`, selfPeople.ts) y quien acepta se queda quieto: así quien se
  * mueve ve a su pareja donde está de verdad (a quien se mueve, por la red, se le ve un poco tarde) y se
- * para justo a su distancia. Mientras dura, no se chocan (collision.ts): un abrazo es más cerca que
- * dos cuerpos.
+ * para justo a su distancia; tras el abrazo, da un paso atrás (`pairLeave`). Mientras dura, no se chocan
+ * (collision.ts): un abrazo es más cerca que dos cuerpos.
  */
 import * as THREE from "three";
 import type { PairAction } from "@xenxo/protocol";
-import { BODY, type BodySize, type PersonFx, type Target, type TorsoBand } from "./rig";
+import { BODY, type BodySize, type PersonFx, type Rig, type Target, type TorsoBand } from "./rig";
+import type { BaseHand } from "./hands";
 
 /** Cuánto dura cada una (s) y cuándo entran y salen las manos (s). */
 export const PAIR: Record<PairAction, { s: number; reach: [number, number, number, number] }> = {
   high_five: { s: 1.55, reach: [0.22, 0.55, 0.78, 1.15] },
-  hug: { s: 2.3, reach: [0.4, 0.9, 1.8, 2.2] },
+  hug: { s: 3.15, reach: [0.5, 1.05, 2.15, 2.55] },
   handshake: { s: 1.9, reach: [0.28, 0.6, 1.5, 1.85] },
 };
 
@@ -48,31 +55,93 @@ const SHAKE_LEAST = 0.25;
 const SHAKE_PUMP = 0.026;
 const SHAKE_BEAT = 0.42;
 /**
- * Abrazo: entre los dos pechos (m), del centro de la palma a la espalda que toca (m) y, sin su
- * esqueleto, a qué altura bajo su hombro van las manos (por lo que mide su brazo).
+ * Abrazo, la distancia: de pie, el pecho no queda sobre los pies sino algo detrás (el reposo descansa
+ * sobre la pierna de atrás), por lo que mide el hombro desde el suelo (medido en los de serie); y lo que
+ * se deja de más (m) para que cada uno se acerque con la cadera (`Embrace`) hasta tocarse.
  */
-const HUG_GAP = 0.01;
+const HUG_TRUNK = 0.116;
+const HUG_GAP = 0.03;
+/**
+ * Abrazo, el cuerpo: lo que se aprietan los pechos (m, la ropa y lo blando), lo más que se mueve la
+ * cadera hacia la otra persona o hacia atrás (m), lo que se va cada uno a su izquierda (m en un cuerpo
+ * con los hombros a 1,33 m: así las cabezas pasan una junto a la otra) y lo que baja la cadera por cada
+ * metro que se mueve (con los pies quietos, la pierna de atrás no llegaba).
+ */
+const HUG_SQUEEZE = 0.015;
+const HUG_FWD = 0.08;
+const HUG_BACK = 0.05;
+const HUG_SIDE = 0.045;
+const HUG_DROP = 0.3;
+/**
+ * Abrazo con alguien mucho más bajo: desde cuánto más alto (m, de hombros), cuánto se inclina por cada
+ * metro de más (rad/m) y hasta dónde, y cuánto dobla las rodillas por cada metro de más (m/m) y hasta
+ * dónde (m).
+ */
+const HUG_TALL = 0.1;
+const HUG_LEAN = 0.6;
+const HUG_LEAN_MAX = 0.25;
+const HUG_KNEES = 0.2;
+const HUG_KNEES_MAX = 0.06;
+/** Por la cabeza de quien es más bajo: lo más que echa atrás la cadera quien es más alto, y la cabeza quien es más bajo (m). */
+const HUG_BACK_HEAD = 0.07;
+const HEAD_BACK = 0.12;
+/**
+ * Abrazo, las cabezas: lo que queda entre las dos (m); y cuándo entra y sale el cuerpo (s): llega
+ * antes que los brazos (las cabezas ya apartadas cuando quien se acerca llega) y se va después, cuando
+ * quien se acercó ya se aparta (`HUG_LEAVE`).
+ */
+const HEAD_GAP = 0.025;
+const HUG_BODY: [number, number, number, number] = [0.35, 0.8, 2.6, 3.0];
+/**
+ * Abrazo, al soltarse: quien se acercó da un paso atrás (de cara a la otra persona: el paso, al revés),
+ * de cuándo a cuándo (s) y hasta dónde (m entre los dos: algo más de lo que ocupan dos personas,
+ * collision.ts; así nadie empuja a nadie al acabar).
+ */
+const HUG_LEAVE: [number, number] = [2.45, 3.1];
+const HUG_AFTER = 0.66;
+/**
+ * Abrazo, las manos: del centro de la palma a la espalda que toca (m); la de arriba, cuánto bajo su
+ * hombro (m, en un cuerpo como `BODY`) y lo más por encima del tuyo; la de abajo, cuánto sobre su
+ * cintura; y, sin su esqueleto, a qué altura bajo su hombro están su cintura y su pecho (por su brazo).
+ */
 const HUG_PALM = 0.018;
+const HUG_HIGH_DOWN = 0.13;
+const HUG_HIGH_OVER = 0.06;
+const HUG_LOW_UP = 0.04;
+const HUG_DOWN = 0.75;
 const HUG_HIGH = 0.1;
 const HUG_LOW = 0.6;
 /**
- * Abrazo: hasta dónde rodea (de su costado, 0, hacia su columna, en radianes), en qué pasos y lo que se
- * estira el brazo para llegar (por lo que mide); y lo que separa, como poco, la altura de una mano de
- * la otra (m).
+ * Abrazo: hasta dónde rodea cada mano (de su costado, 0, hacia su columna, π/2, y algo más allá, en
+ * radianes), en qué pasos y lo que se estira el brazo para llegar (por lo que mide); y lo que separa,
+ * como poco, la altura de una mano de la otra a cada lado (m).
  */
-const HUG_AROUND = 1.3;
-const HUG_STEP = 0.13;
-const HUG_REACH = 0.84;
+const HUG_AROUND_HIGH = Math.PI / 2 + 0.12;
+const HUG_AROUND_LOW = Math.PI / 2;
+const HUG_STEP = 0.1;
+const HUG_REACH = 0.86;
 const HUG_APART = 0.08;
-/** Abrazo: de dónde a dónde de su tronco (0, su cintura; 1, su pecho: rig.ts → torsoAt). */
-const HUG_BOTTOM = -0.5;
-const HUG_TOP = 1.25;
+/**
+ * Abrazo: el codo que va por encima de su hombro, cuánto por encima de su articulación y por fuera (m) y
+ * cuánto por detrás (por lo que abulta de delante atrás): el brazo apoyado encima (y no metido en su
+ * hombro) y el antebrazo, a lo largo de su espalda (no hacia dentro).
+ */
+const HUG_OVER_UP = 0.13;
+const HUG_OVER_OUT = 0.07;
+const HUG_OVER_BACK = 0.6;
+/** Abrazo: el codo que va por su costado (no por encima de su hombro), algo por detrás (por lo que abulta de delante atrás): así el antebrazo rodea su espalda sin cortar la esquina. */
+const HUG_ELBOW_BACK = 0.45;
+/** Abrazo: dos palmaditas en la espalda con la mano de arriba (cuándo, cuánto duran, cuánto se separa, m). */
+const PATS = [1.5, 1.86];
+const PAT_S = 0.24;
+const PAT_LIFT = 0.035;
 const _p = new THREE.Vector3();
 const _n = new THREE.Vector3();
 const _c = new THREE.Vector3();
 const _f = new THREE.Vector3();
 const _l = new THREE.Vector3();
 const _s = new THREE.Vector3();
+const _e = new THREE.Vector3();
 const _band: TorsoBand = { front: 0, back: 0, side: 0 };
 /** Quien se acerca: a qué velocidad, como poco y como mucho (m/s). */
 const STEP_MIN = 1.4;
@@ -125,11 +194,12 @@ function meet(kind: PairAction, a: BodySize, b: BodySize, dy: number) {
     _g.hb = ahead(b, _g.y - dy, b.width - half, 0.99, -0.15, 0.72, 0.9);
     _g.gap = _g.ha + _g.hb;
   } else {
-    // Pecho con pecho (lo que abulta cada uno por delante, con la ropa).
+    // Pecho con pecho (lo que abulta cada uno por delante, con la ropa, desde donde queda su pecho de
+    // pie), con algo de sitio para que cada uno se acerque con la cadera.
     _g.y = 0;
-    _g.ha = a.front;
-    _g.hb = b.front;
-    _g.gap = a.front + b.front + HUG_GAP;
+    _g.ha = a.front - HUG_TRUNK * a.shoulder;
+    _g.hb = b.front - HUG_TRUNK * b.shoulder;
+    _g.gap = Math.max(0.05, _g.ha + _g.hb + HUG_GAP);
   }
   return _g;
 }
@@ -152,8 +222,19 @@ export function pairStep(kind: PairAction, t: number, d: number, gap: number, dt
   return Math.min(d - gap, v * dt);
 }
 
-/** Una mano: el centro de su palma a (x, y, z), el codo hacia (px, py, pz), la palma hacia n y los dedos hacia u (mundo; a 0, siguiendo al antebrazo). */
-function put(t: Target, w: number, x: number, y: number, z: number, px: number, py: number, pz: number, nx: number, ny: number, nz: number, ux: number, uy: number, uz: number) {
+/**
+ * Al acabar el abrazo, quien se acercó se aparta: cuánto este frame (m), de su distancia a HUG_AFTER
+ * (en las otras acciones ya quedan a esa distancia, 0). Solo se aparta: si ya está más lejos, nada.
+ */
+export function pairLeave(kind: PairAction, t: number, d: number, gap: number, dt: number): number {
+  if (kind !== "hug" || t <= HUG_LEAVE[0]) return 0;
+  const u = Math.min(1, (t - HUG_LEAVE[0]) / (HUG_LEAVE[1] - HUG_LEAVE[0]));
+  const want = gap + (Math.max(gap, HUG_AFTER) - gap) * u * u * (3 - 2 * u);
+  return Math.max(0, Math.min(want - d, STEP_MAX * dt));
+}
+
+/** Una mano: el centro de su palma a (x, y, z), el codo hacia (px, py, pz), la palma hacia n, los dedos hacia u (mundo; a 0, siguiendo al antebrazo) y cómo van (sin `shape`, como los ponga el gesto). */
+function put(t: Target, w: number, x: number, y: number, z: number, px: number, py: number, pz: number, nx: number, ny: number, nz: number, ux: number, uy: number, uz: number, shape: BaseHand | null = null) {
   t.x = x;
   t.y = y;
   t.z = z;
@@ -168,52 +249,119 @@ function put(t: Target, w: number, x: number, y: number, z: number, px: number, 
   t.ux = ux;
   t.uy = uy;
   t.uz = uz;
+  t.shape = shape;
 }
 
 /**
- * Abrazo: a qué altura van tus manos (en su tronco), con tu cintura y tu pecho a `myWaist` y
- * `myWaist + mySpan` y los suyos a `yourWaist`… Cada mano va por donde se puede abrazar el tronco del
- * otro (de algo por debajo de su cintura a algo por encima de su pecho) y, a cada lado, un brazo
- * encima del otro: tu derecha sobre su izquierda y su derecha sobre tu izquierda (cruzado), a la
- * altura en que coinciden los dos troncos; con mucha diferencia de altura, los brazos de quien es más
- * alto van por encima de los del otro. Igual desde los dos lados (en `_hh`).
+ * Abrazo, a qué altura va cada mano de alguien de hombros a `sh` (m, ahora) en el tronco de alguien
+ * con la cintura a `waist` y los hombros a `top` (lo que mide, `you`): la de arriba (`_hh.high`), por
+ * sus omóplatos, sin pasar mucho de tu hombro; la de abajo (`_hh.low`), algo sobre su cintura y como
+ * poco a HUG_APART de la de arriba, sin bajar más de lo que llega tu brazo (por debajo de tu hombro,
+ * HUG_DOWN de lo que mide).
  */
-const _hh = { right: 0, left: 0 };
-function hugHeights(myWaist: number, mySpan: number, yourWaist: number, yourSpan: number) {
-  // Por dónde pueden ir tus manos (en su tronco) y las suyas (en el tuyo).
-  const aLo = yourWaist + HUG_BOTTOM * yourSpan, aHi = yourWaist + HUG_TOP * yourSpan;
-  const bLo = myWaist + HUG_BOTTOM * mySpan, bHi = myWaist + HUG_TOP * mySpan;
-  const lo = Math.max(aLo, bLo), hi = Math.min(aHi, bHi);
-  const c = (lo + hi) / 2, d = Math.max(HUG_APART, (hi - lo) * 0.3);
-  const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
-  // A cada lado, el de encima (tu derecha; al otro lado, la suya) y el de debajo, como poco a
-  // HUG_APART: se abren hasta donde se pueda y, si así no cabe, al revés.
-  split(clamp(c + d, aLo, aHi), aLo, aHi, clamp(c - d, bLo, bHi), bLo, bHi);
-  _hh.right = _sp.o;
-  split(clamp(c + d, bLo, bHi), bLo, bHi, clamp(c - d, aLo, aHi), aLo, aHi);
-  _hh.left = _sp.u;
+const _hh = { high: 0, low: 0 };
+function hugHeights(sh: number, me: BodySize, waist: number, top: number, you: BodySize) {
+  const high = Math.max(waist + HUG_APART, Math.min(top - (HUG_HIGH_DOWN * you.shoulder) / BODY.shoulder, sh + HUG_HIGH_OVER));
+  const reach = sh - HUG_DOWN * me.arm;
+  _hh.high = high;
+  // Si tu brazo no llega tan abajo (con alguien mucho más bajo), las dos por sus omóplatos.
+  _hh.low = Math.max(Math.min(high - HUG_APART, Math.max(waist + HUG_LOW_UP, reach)), Math.min(reach, high));
 }
 
-/** Dos manos de un mismo lado (`o`, la que va encima, y `u`), cada una entre sus límites: separadas (en `_sp`). */
-const _sp = { o: 0, u: 0 };
-function split(o: number, oLo: number, oHi: number, u: number, uLo: number, uHi: number) {
-  for (let k = 0; k < 2; k++) {
-    const miss = HUG_APART - (o - u);
-    if (miss <= 0) break;
-    o = Math.min(oHi, o + (k ? miss : miss / 2));
-    u = Math.max(uLo, u - (k ? miss : miss / 2));
+/**
+ * Por dónde va por delante el tronco de `rig` a la altura `y` (m, a lo largo de n desde a): entre lo
+ * que midió en su cintura y en su pecho (rig.ts → `frontLow`, `frontHigh`), por debajo como en su
+ * cintura y, por encima, siguiendo su inclinación hasta sus hombros.
+ */
+function frontAt(rig: Rig, y: number, ax: number, az: number, nx: number, nz: number) {
+  const lo = rig.frontLow, hi = rig.frontHigh;
+  if (y >= hi.y) {
+    const up = Math.min(y, rig.hugTop) - hi.y;
+    return (hi.x + rig.hugTiltX * up - ax) * nx + (hi.z + rig.hugTiltZ * up - az) * nz;
   }
-  if (o - u < HUG_APART - 1e-6) {
-    // No cabe así: la otra encima.
-    for (let k = 0; k < 2; k++) {
-      const miss = HUG_APART - (u - o);
-      if (miss <= 0) break;
-      u = Math.min(uHi, u + (k ? miss : miss / 2));
-      o = Math.max(oLo, o - (k ? miss : miss / 2));
-    }
+  const k = hi.y - lo.y > 0.02 ? Math.max(0, (y - lo.y) / (hi.y - lo.y)) : 1;
+  return (lo.x + (hi.x - lo.x) * k - ax) * nx + (lo.z + (hi.z - lo.z) * k - az) * nz;
+}
+
+/**
+ * Abrazo, la otra mitad de cada uno (la de los brazos, en `pairTargets`): el cuerpo. Con lo que miden
+ * los dos esqueletos de hace un frame antes de apoyarse (rig.ts → `frontLow`, `headCenter`…):
+ *
+ * - quien es mucho más alto se inclina hacia quien es más bajo (y dobla algo las rodillas);
+ * - cada uno acerca la cadera la mitad de lo que queda entre los dos troncos (más lo que se aprietan)
+ *   donde más cerca están: a la altura de la cintura y del pecho de cada uno (con alturas distintas, el
+ *   pecho de uno va contra la tripa del otro);
+ * - cada uno se va algo a su izquierda (las cabezas, cada una por encima del hombro derecho de la otra
+ *   persona) y, si aun así las cabezas no caben, cada una se aparta la mitad de lo que falta, de lado;
+ * - y la cabeza de quien queda por debajo de los hombros de la otra persona no se mete en su pecho
+ *   (la mejilla en su pecho): la mitad la quita quien es más alto, echando atrás la cadera, y la otra
+ *   mitad quien es más bajo, con la cabeza.
+ *
+ * Sin el esqueleto de la otra persona, su pecho donde estaría de pie.
+ */
+function hugBody(w: number, ax: number, ay: number, az: number, b: THREE.Vector3, nx: number, nz: number, rx: number, rz: number, fx: PersonFx, other: PersonFx | null, me: BodySize, you: BodySize) {
+  const h = fx.hug, mine = fx.rig, rig = other?.rig;
+  h.on = true;
+  h.w = w;
+  // Con alguien mucho más bajo, inclinado hacia él (y algo agachado): de pie, sus brazos le colgaban.
+  const tall = Math.max(0, ay + me.shoulder - (b.y + you.shoulder) - HUG_TALL);
+  h.lean = Math.min(HUG_LEAN_MAX, tall * HUG_LEAN);
+  h.lx = -rx;
+  h.lz = -rz;
+  let fwd = 0;
+  const both = !!mine?.hugMeasured && !!rig?.hugMeasured;
+  // Lo que se mete la cabeza de cada uno en el pecho del otro (quien es más bajo, por debajo de sus
+  // hombros): la mitad la quita el otro echando atrás la cadera (poco: si no, los brazos cortos ya no
+  // le rodean) y la otra mitad, quien la mete, con la cabeza.
+  let into = 0, intoYou = 0;
+  if (both) {
+    const hc = mine!.headCenter, yc = rig!.headCenter;
+    if (hc.y < rig!.hugTop) into = Math.max(0, (hc.x - ax) * nx + (hc.z - az) * nz + mine!.headRadius + HEAD_GAP - frontAt(rig!, hc.y, ax, az, nx, nz));
+    if (yc.y < mine!.hugTop) intoYou = Math.max(0, frontAt(mine!, yc.y, ax, az, nx, nz) - ((yc.x - ax) * nx + (yc.z - az) * nz - rig!.headRadius - HEAD_GAP));
   }
-  _sp.o = o;
-  _sp.u = u;
+  if (mine?.hugMeasured) {
+    let gap = Infinity;
+    if (both) {
+      // Donde más cerca están: a la altura de la cintura y del pecho de cada uno, entre los dos troncos.
+      const lo = Math.max(mine.frontLow.y, rig!.frontLow.y), hi = Math.min(mine.frontHigh.y, rig!.frontHigh.y);
+      for (let i = 0; i < 4; i++) {
+        const y = (i & 2 ? rig! : mine)[i & 1 ? "frontHigh" : "frontLow"].y;
+        const at = hi > lo ? Math.min(hi, Math.max(lo, y)) : (lo + hi) / 2;
+        gap = Math.min(gap, frontAt(rig!, at, ax, az, nx, nz) - frontAt(mine, at, ax, az, nx, nz));
+      }
+    } else gap = (b.x - ax) * nx + (b.z - az) * nz - (you.front - HUG_TRUNK * you.shoulder) - frontAt(mine, mine.frontHigh.y, ax, az, nx, nz);
+    fwd = Math.min(HUG_FWD, Math.max(-HUG_BACK, (gap + HUG_SQUEEZE) / 2));
+    if (intoYou > 0) fwd = Math.max(-HUG_BACK_HEAD, Math.min(fwd, -intoYou / 2));
+  }
+  const side = (HUG_SIDE * me.shoulder) / BODY.shoulder;
+  h.x = nx * fwd - rx * side;
+  h.z = nz * fwd - rz * side;
+  h.y = -HUG_DROP * Math.hypot(fwd, side) - Math.min(HUG_KNEES_MAX, tall * HUG_KNEES);
+  h.hx = -nx * Math.min(HEAD_BACK, into / 2);
+  h.hz = -nz * Math.min(HEAD_BACK, into / 2);
+  if (!both) return;
+  const hc = mine!.headCenter, r = mine!.headRadius;
+  // Las cabezas: lo que falta de lado (a tu izquierda, −r) para que quepan, la mitad cada uno.
+  const dx = hc.x - rig!.headCenter.x, dy = hc.y - rig!.headCenter.y, dz = hc.z - rig!.headCenter.z;
+  const lat = -(dx * rx + dz * rz), along = dx * nx + dz * nz;
+  const need = r + rig!.headRadius + HEAD_GAP;
+  const lack = Math.sqrt(Math.max(0, need * need - dy * dy - along * along)) - Math.abs(lat);
+  if (lack > 0) {
+    const push = (lack / 2) * (lat >= 0 ? 1 : -1);
+    h.hx -= rx * push;
+    h.hz -= rz * push;
+  }
+}
+
+/**
+ * Abrazo: el punto de su tronco (el óvalo de centro `_c`, hacia delante `_f` y a su izquierda `_l`, de
+ * semiejes ex y ez) a `a` rad de su costado hacia su espalda (`sgn`: por su izquierda, 1, o por su
+ * derecha, −1), donde va el centro de tu palma (algo por fuera), en `_p`; y hacia fuera de él, en `_n`.
+ */
+function around(a: number, sgn: number, ex: number, ez: number) {
+  const cs = Math.cos(a), sn = Math.sin(a);
+  _n.copy(_l).multiplyScalar((sgn * cs) / ex).addScaledVector(_f, -sn / ez).normalize();
+  _p.copy(_c).addScaledVector(_l, sgn * ex * cs).addScaledVector(_f, -ez * sn).addScaledVector(_n, HUG_PALM);
 }
 
 /**
@@ -251,49 +399,95 @@ export function pairTargets(kind: PairAction, t: number, ax: number, ay: number,
     const f = (d * g.ha) / g.gap;
     put(fx.reachR, k, ax + nx * f + rx * half, ay + g.y + pump, az + nz * f + rz * half, rx * 0.5 - nx * 0.4, -1, rz * 0.5 - nz * 0.4, -rx, 0, -rz, nx, -0.15, nz);
   } else {
-    // Abrazo, cruzado: cada brazo rodea su tronco, la derecha por encima de la altura en que se cruzan
-    // los brazos y la izquierda por debajo (así, a cada lado, el brazo de uno va encima del del otro),
-    // y la palma se apoya en él, de lado y hacia la espalda todo lo que llegue el brazo (con brazos
-    // cortos o un tronco grueso, más hacia su costado), mirándolo y con los dedos siguiendo al
-    // antebrazo; el codo, por fuera. Con su esqueleto, en su tronco tal como está ahora (rig.ts →
-    // torsoAt: inclinado en el abrazo, también); sin él, donde estaría de pie.
+    // Abrazo, cruzado: tu derecha por encima de su hombro izquierdo y la palma en sus omóplatos; tu
+    // izquierda por debajo de su brazo derecho y la palma algo sobre su cintura (a cada lado, el brazo
+    // de uno encima del del otro). Cada palma, en su espalda todo lo que llegue el brazo (con brazos
+    // cortos o un tronco grueso, más hacia su costado), mirándola y con los dedos siguiendo al
+    // antebrazo; el codo, pegado a su cuerpo (el de arriba, sobre su hombro; el de abajo, por su
+    // costado). Con su esqueleto, en su tronco tal como está ahora (rig.ts → torsoAt: inclinado,
+    // también); sin él, donde estaría de pie. Y el cuerpo (`hugBody`): la cadera y la cabeza.
     const rig = other?.rig, mine = fx.rig;
-    // Por dónde se puede abrazar cada tronco (de algo por debajo de su cintura a algo por encima de su
-    // pecho: rig.ts → torsoAt) y dónde se cruzan los brazos: en medio de lo que tienen en común los dos.
-    const myWaist = mine?.torsoAt(0, _c, _f, _l, _band) ? _c.y : ay + me.shoulder - HUG_LOW * me.arm;
-    const myChest = mine?.torsoAt(1, _c, _f, _l, _band) ? _c.y : ay + me.shoulder - HUG_HIGH * me.arm;
+    const [b0, b1, b2, b3] = HUG_BODY;
+    const bw = t < b0 ? 0 : t < b1 ? (t - b0) / (b1 - b0) : t < b2 ? 1 : t < b3 ? 1 - (t - b2) / (b3 - b2) : 0;
+    hugBody(bw * bw * (3 - 2 * bw), ax, ay, az, b, nx, nz, rx, rz, fx, other, me, you);
+    // Las manos buscan su sitio mientras llegan; abrazados, se quedan en él (al mecerse, no resbalan).
+    const spot = fx.hug;
+    if (t < i0) spot.hr = spot.ha = spot.lr = spot.la = NaN;
+    const hold = t >= i1 && !Number.isNaN(spot.ha) && !Number.isNaN(spot.la);
+    if (t < i0 || t > o1) return;
+    // Su cintura y su pecho (rig.ts → torsoAt: 0 y 1), y por dónde va cada mano.
     const yourWaist = rig?.torsoAt(0, _c, _f, _l, _band) ? _c.y : b.y + you.shoulder - HUG_LOW * you.arm;
     const yourChest = rig?.torsoAt(1, _c, _f, _l, _band) ? _c.y : b.y + you.shoulder - HUG_HIGH * you.arm;
-    const yourSpan = yourChest - yourWaist || 0.2;
-    hugHeights(myWaist, myChest - myWaist || 0.2, yourWaist, yourSpan);
+    const yourSpan = yourChest - yourWaist > 0.05 ? yourChest - yourWaist : 0.15;
+    const yourTop = rig?.shoulderAt(0, _e) ? _e.y : b.y + you.shoulder;
+    const myTop = mine?.shoulderAt(1, _s) ? _s.y : ay + me.shoulder;
+    hugHeights(myTop, me, yourWaist, yourTop, you);
     const reach = HUG_REACH * (me.arm + me.hand * PALM_AT);
     for (let i = 0; i < 2; i++) {
       const high = i === 0;
       // La derecha va por su izquierda (que es tu derecha), la izquierda por su derecha.
       const sgn = high ? 1 : -1;
       if (!mine?.shoulderAt(high ? 1 : 0, _s)) _s.set(ax + rx * me.width * sgn, ay + me.shoulder, az + rz * me.width * sgn);
-      const y = high ? _hh.right : _hh.left;
-      if (!rig?.torsoAt(Math.min(HUG_TOP, Math.max(HUG_BOTTOM, (y - yourWaist) / yourSpan)), _c, _f, _l, _band)) {
+      const y = hold ? yourWaist + (high ? spot.hr : spot.lr) : high ? _hh.high : _hh.low;
+      if (!rig?.torsoAt((y - yourWaist) / yourSpan, _c, _f, _l, _band)) {
         // Sin su esqueleto: de pie, frente a ti.
         _c.set(b.x, y, b.z);
         _f.set(-nx, 0, -nz);
         _l.set(rx, 0, rz);
         _band.front = you.front;
-        _band.back = (you.back + you.waist) / 2;
+        _band.back = high ? you.back : you.waist;
         _band.side = you.side;
       }
-      // Su tronco a esa altura, un óvalo (centro y semiejes), y de su costado hacia su columna, todo lo
-      // que llegue tu brazo (desde tu hombro, donde está ahora).
+      // Su tronco a esa altura, un óvalo (centro y semiejes), y de su costado hacia su columna (y algo
+      // más allá), todo lo que llegue tu brazo (desde tu hombro, donde está ahora).
       const ex = _band.side, ez = (_band.front + _band.back) / 2;
       _c.addScaledVector(_f, (_band.front - _band.back) / 2);
-      for (let a = HUG_AROUND; ; a -= HUG_STEP) {
-        const cs = Math.cos(Math.max(0, a)), sn = Math.sin(Math.max(0, a));
-        _n.copy(_l).multiplyScalar((sgn * cs) / ex).addScaledVector(_f, -sn / ez).normalize();
-        _p.copy(_c).addScaledVector(_l, sgn * ex * cs).addScaledVector(_f, -ez * sn).addScaledVector(_n, HUG_PALM);
-        if (a <= 0 || _p.distanceTo(_s) <= reach) break;
+      // Lo más que llega: por pasos y, entre el último que no llega y el primero que sí, afinando. Abrazados,
+      // desde donde quedó la mano: solo se corre hacia su costado, y solo si ya no llega bien.
+      let a = hold ? (high ? spot.ha : spot.la) : high ? HUG_AROUND_HIGH : HUG_AROUND_LOW;
+      around(a, sgn, ex, ez);
+      if (_p.distanceTo(_s) > reach) {
+        let far = a;
+        while (a > 0) {
+          a = Math.max(0, a - HUG_STEP);
+          around(a, sgn, ex, ez);
+          if (_p.distanceTo(_s) <= reach) break;
+          far = a;
+        }
+        if (_p.distanceTo(_s) <= reach)
+          for (let k = 0, near = a; k < 4; k++) {
+            const mid = (near + far) / 2;
+            around(mid, sgn, ex, ez);
+            if (_p.distanceTo(_s) <= reach) near = a = mid;
+            else far = mid;
+          }
       }
-      if (high) put(fx.reachR, k * 0.95, _p.x, _p.y, _p.z, rx * 0.6, 0.8, rz * 0.6, -_n.x, -_n.y, -_n.z, 0, 0, 0);
-      else put(fx.reachL, k * 0.95, _p.x, _p.y, _p.z, -rx, -0.45, -rz, -_n.x, -_n.y, -_n.z, 0, 0, 0);
+      if (high) {
+        spot.hr = y - yourWaist;
+        spot.ha = a;
+      } else {
+        spot.lr = y - yourWaist;
+        spot.la = a;
+      }
+      around(a, sgn, ex, ez);
+      // Las palmaditas (la de arriba): se separa un poco y vuelve.
+      if (high)
+        for (const p0 of PATS) {
+          const u = (t - p0) / PAT_S;
+          if (u > 0 && u < 1) {
+            const lift = PAT_LIFT * Math.sin(u * Math.PI);
+            _p.addScaledVector(_n, lift);
+            _p.y += lift * 0.4;
+          }
+        }
+      // El codo: el de arriba, sobre su hombro (o por su costado, si no llega); el de abajo, por su
+      // costado, entre tu hombro y tu mano. Hacia donde se pide va el plano del brazo (rig.ts → reachArm).
+      const ey = high ? Math.min(yourTop + HUG_OVER_UP, _s.y + HUG_OVER_UP + 0.02) : (_s.y + _p.y) / 2 - 0.04;
+      const over = high && ey > yourTop - 0.04;
+      _e.copy(_c).addScaledVector(_l, sgn * (over ? you.width + HUG_OVER_OUT : _band.side + 0.05)).addScaledVector(_f, -(over ? HUG_OVER_BACK : HUG_ELBOW_BACK) * ez);
+      _e.y = ey;
+      _e.sub(_s);
+      put(high ? fx.reachR : fx.reachL, k * 0.97, _p.x, _p.y, _p.z, _e.x, _e.y, _e.z, -_n.x, -_n.y, -_n.z, 0, 0, 0, "together");
     }
   }
 }

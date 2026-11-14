@@ -409,11 +409,13 @@ export class VrmAnimator {
   }
 
   /**
-   * `speed` en m/s, `airborne` si está en el aire, `emote` el gesto pedido (o null), `fight` si
-   * está en modo pelea y `fx` lo que la gente le hace al esqueleto (golpes, parejas, caídas).
-   * Los pesos se suavizan para que las transiciones no den saltos.
+   * `speed` en m/s (negativa, hacia atrás: el paso va al revés), `airborne` si está en el aire,
+   * `emote` el gesto pedido (o null), `fight` si está en modo pelea y `fx` lo que la gente le hace al
+   * esqueleto (golpes, parejas, caídas). Los pesos se suavizan para que las transiciones no den saltos.
    */
   update(dt: number, speed: number, airborne: boolean, emote: string | null, fight = false, fx?: PersonFx | null, gesture?: string | null, pkP?: number, vy?: number) {
+    const back = speed < 0;
+    speed = Math.abs(speed);
     const target: Record<string, number> = {};
     const leap = this.leap;
     leap.step(dt, airborne, vy);
@@ -512,13 +514,14 @@ export class VrmAnimator {
       action.setEffectiveWeight(w);
       if (name === "idle") this.idleW = w;
     }
-    // Andar, trotar y correr, con la misma fase, que avanza con lo que se avanza sobre el suelo.
+    // Andar, trotar y correr, con la misma fase, que avanza con lo que se avanza sobre el suelo (y
+    // hacia atrás, retrocede: de cara a alguien, apartándose, pair.ts → pairLeave).
     for (const name of STRIDES) {
       const a = this.actions.get(name);
       this._w[name] = a ? (this.weights.get(name) ?? 0) : 0;
       this._dur[name] = a ? a.getClip().duration : 0;
     }
-    this.cycle = (this.cycle + cycleStep(dt, speed, this._w, this._dur)) % 1;
+    this.cycle = (this.cycle + (back ? 1 - cycleStep(dt, speed, this._w, this._dur) : cycleStep(dt, speed, this._w, this._dur))) % 1;
     for (const name of STRIDES) {
       const a = this.actions.get(name);
       if (!a) continue;
