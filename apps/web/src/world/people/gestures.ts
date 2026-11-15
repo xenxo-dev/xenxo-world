@@ -279,7 +279,7 @@ export const GESTURES: Record<string, Def> = {
     keys: [
       { t: 0 },
       { t: 0.3, R: { at: [-0.15, -0.22, 0.2], pole: [-1, -0.7, -0.3], twist: 10 }, L: { at: [0.15, -0.36, 0.16], pole: [1, -0.7, -0.3], twist: 15 }, l: "relaxed", r: "relaxed", p: { chest: [-3, 0, 0], upperChest: [-1, 0, 0], head: [-2, 0, 0] } },
-      { t: 0.7, R: { at: [-0.06, 0.16, 0.43], pole: [-1, -0.3, -0.3], twist: 15 }, L: { at: [0.13, -0.25, 0.4], pole: [1, -0.6, -0.2], twist: 35 }, l: "open", r: "open", p: { spine: [-2, 0, 0], chest: [-2, 2, 0], upperChest: [-2, 1, 0], neck: [-2, 0, 0], head: [-3, 2, 0] } },
+      { t: 0.7, R: { at: [-0.22, 0.1, 0.3], pole: [-1, -0.3, -0.3], twist: 15 }, L: { at: [0.22, -0.24, 0.28], pole: [1, -0.6, -0.2], twist: 35 }, l: "open", r: "open", p: { spine: [-2, 0, 0], chest: [-2, 2, 0], upperChest: [-2, 1, 0], neck: [-2, 0, 0], head: [-3, 2, 0] } },
       { t: 1.2, R: { at: [0.12, -0.08, 0.38], pole: [-1, 0.5, 0.2], twist: 30 }, L: { at: [-0.1, -0.3, 0.34], pole: [1, -0.4, 0.1], twist: 30 }, l: "together", r: "together", p: { spine: [-1, 3, -2], chest: [0, 5, -2], upperChest: [0, 3, -1], neck: [1, 18, -5], head: [1, 28, 5], rightShoulder: [0, 12, -6], leftShoulder: [0, -9, 0] }, hold: true },
       { t: 1.5, p: { spine: [-1, 3, -2], chest: [1, 8, -2], upperChest: [1, 3, -1], neck: [1, 18, -5], head: [1, 28, 5], rightShoulder: [0, 12, -10], leftShoulder: [0, -9, 4] } },
       { t: 1.95, p: { chest: [0, 1, -2] } },
