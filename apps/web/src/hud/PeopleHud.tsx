@@ -16,6 +16,8 @@ import { input, onWheelKey } from "../world/input";
 import { CheerIcon, DanceIcon, hudIconButton, SitIcon, WaveIcon } from "./icons";
 import { PeopleIcon } from "./people-icons";
 import { WeaponButtons, WeaponInventory } from "./WeaponHud";
+import CAPTURED from "../world/people/captured-gestures.json";
+import type { CapturedGesture } from "../world/animation";
 
 const box = "rounded-xl border border-cal/10 bg-noche/80 backdrop-blur";
 
@@ -45,6 +47,8 @@ const GESTURES: Item[] = [
   { id: "shake_head", icon: icon("shake_head"), label: "emote.shake_head", run: emote("shake_head") },
   { id: "phone", icon: icon("phone"), label: "emote.phone", run: emote("phone") },
   { id: "bow", icon: icon("bow"), label: "emote.bow", run: emote("bow") },
+  // Los grabados desde un vídeo (tools/gestures/add.mjs).
+  ...(CAPTURED as CapturedGesture[]).map((g) => ({ id: g.id, icon: icon("captured"), label: `emote.${g.id}` as Key, run: emote(g.id) })),
 ];
 const REACTION_ITEMS: Item[] = REACTIONS.map((r: Reaction) => ({ id: r, icon: icon(r), label: `react.${r}` as Key, run: () => react(r) }));
 const PAIR_ITEMS: Item[] = PAIR_ACTIONS.map((a: PairAction) => ({ id: a, icon: icon(a), label: `pair.${a}` as Key, run: () => void offerPair(a) }));

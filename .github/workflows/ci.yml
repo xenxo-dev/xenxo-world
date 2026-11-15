@@ -35,6 +35,9 @@ jobs:
       - run: npm run test:hands -w @xenxo/web
       # Los gestos: en espejo, cada mano hacia donde tiene que mirar y la palmada, sin atravesarse.
       - run: npm run test:gestures -w @xenxo/web
+      # Gestos desde un vídeo: lo que vería MediaPipe de un clip → el mismo movimiento en otro
+      # personaje; los archivos (.vrma con su ficha y .bvh) y el que añade uno al juego.
+      - run: npm run test:capture -w @xenxo/web
       # Los sitios de «Qué hacer aquí» caen en huecos libres, los enlaces /d/… llevan adonde dicen.
       - run: npm run test:guide -w @xenxo/web
       # Las cámaras del modo cine hacen lo que dice su guía y no dejan la cámara en un sitio imposible.

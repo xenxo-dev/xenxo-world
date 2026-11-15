@@ -3,7 +3,7 @@ title: Crear sobre xenxo.io
 nav: Crear sobre xenxo.io
 gate: Crear en xenxo.io
 order: 4
-description: Juegos con «Entrar con xenxo», distritos de la comunidad y agentes que construyen en tu parcela, sin desplegar el mundo.
+description: Juegos con «Entrar con xenxo», distritos de la comunidad, agentes que construyen en tu parcela y gestos desde un vídeo, sin desplegar el mundo.
 ---
 
 No hace falta montar tu propio xenxo para hacer cosas en él. Lo que usan los creadores es **MIT**: tu código sigue siendo tuyo.
@@ -59,6 +59,27 @@ El servidor comprueba que cada pieza quepa entera en la parcela (15 × 15 m y 12
 
 > [!NOTE]
 > Si `npm create xenxo` o `npm install` dan **404**, los paquetes aún no están publicados en npm. Créalo desde el repositorio: [«Mientras no esté en npm»](../../../packages/create-xenxo/README.md#mientras-no-esté-en-npm).
+
+## Gestos desde un vídeo
+
+En xenxo.io, *Crear → Gestos desde un vídeo* abre el **estudio de gestos**: eliges un vídeo corto de una persona haciendo el gesto (de cuerpo entero o de cintura para arriba, con buena luz y sin nadie más delante), marcas dónde empieza y dónde acaba, y se analiza **en tu navegador** con MediaPipe (Pose y Hand Landmarker, Apache-2.0, servidos desde xenxo): el vídeo no se envía ni se guarda. Lo ves en un personaje al lado del vídeo o tal como iría en el juego (quieto o andando), con estas opciones:
+
+- **Una vez** o **en bucle** (el final se funde con el principio).
+- **Solo de cintura para arriba**: las piernas son las de quien lo hace (de pie o andando); el estudio lo propone solo si no se ven las piernas.
+- **Sigue al andar**: al moverse, el gesto sigue en los brazos.
+- **Pisar el suelo** y el **suavizado** (cuánto se quita del temblor de los puntos).
+
+Se descarga en **`.vrma`** (VRM Animation: lo abren xenxo, Blender con su complemento de VRM, Unity o three-vrm) y en **`.bvh`**. El `.vrma` lleva dentro su ficha: el nombre en el juego (`a-z` y `_`, hasta 24) y sus nombres en español y en inglés.
+
+Para que esté en la rueda de gestos de xenxo, se añade **por código** desde el repositorio:
+
+```bash
+npm run gesture:add -- ~/Descargas/saludo_militar.vrma            # añadirlo
+npm run gesture:add -- ~/Descargas/saludo_militar.vrma --check    # solo comprobarlo
+npm run gesture:add -- ~/Descargas/saludo_militar.vrma --replace  # cambiar uno que ya está
+```
+
+Comprueba el archivo (su humanoide, un clip, la ficha, de 0,2 a 20 s y hasta 4 MB) y que el nombre no lo use otro gesto; lo copia a `apps/web/public/anims/`, lo apunta en `apps/web/src/world/people/captured-gestures.json` y pone sus nombres en `apps/web/src/i18n.ts`. Después, `npm run typecheck`, probarlo en el mundo (rueda de acciones → Gestos) y subirlo como cualquier cambio. Quien no tenga una versión nueva de la web no lo ve: los clientes ignoran los gestos que no conocen.
 
 ## Modelos 3D
 

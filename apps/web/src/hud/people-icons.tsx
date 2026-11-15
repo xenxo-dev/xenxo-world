@@ -33,6 +33,8 @@ export const PEOPLE_PATHS: Record<string, string[]> = {
   shake_head: [CIRCLE(10, 9, 5.5), "M15.5 15.5l5 5", "M20.5 15.5l-5 5"],
   phone: ["M6.5 3.5h3l1.5 4-2 1.5a11 11 0 0 0 6 6l1.5-2 4 1.5v3a2 2 0 0 1-2 2A16 16 0 0 1 4.5 5.5a2 2 0 0 1 2-2z"],
   bow: [CIRCLE(7.5, 9, 2), "M10.5 9.5l5 2.5", "M15.5 12v8.5", "M11.5 11l-1 5", "M15.5 15.5l2.5 5"],
+  // Un gesto grabado desde un vídeo (la persona dentro del fotograma).
+  captured: ["M3.5 5.5h17v13h-17z", CIRCLE(12, 9.3, 1.5), "M12 10.8v3.6", "M9 10.6l3 1.6 3-2.6", "M10.3 17.5l1.7-3.1 1.7 3.1"],
   // En pareja
   high_five: [
     "M8.5 20.5v-4.8L6 12.3V7a1.3 1.3 0 0 1 2.6 0v4",

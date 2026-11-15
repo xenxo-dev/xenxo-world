@@ -474,7 +474,9 @@ export const HelloMsg = envelope(
 /** El cliente NO dice qué entidad mueve: el servidor la deduce de la sesión. */
 /**
  * Gesto que el avatar está haciendo ("dance", "wave", "sit", "talk"…). Es texto libre corto:
- * cada cliente reproduce los que conoce y trata los demás como si no hubiera gesto.
+ * cada cliente reproduce los que conoce y trata los demás como si no hubiera gesto. Además de los
+ * de `EMOTES`, la web conoce los grabados desde un vídeo (los añade `npm run gesture:add`), con la
+ * misma regla y nunca con `pk_` delante.
  */
 export const Emote = z.string().regex(/^[a-z_]{1,24}$/);
 export const EMOTES = [

@@ -3,7 +3,7 @@ title: Build on xenxo.io
 nav: Build on xenxo.io
 gate: Build on xenxo.io
 order: 4
-description: Games with “Sign in with xenxo”, community districts and agents that build on your plot, without deploying the world.
+description: Games with “Sign in with xenxo”, community districts, agents that build on your plot and gestures from a video, without deploying the world.
 ---
 
 You don't need to run your own xenxo to make things in it. What creators use is **MIT**: your code stays yours.
@@ -59,6 +59,27 @@ The server checks each piece fits entirely within the plot (15 × 15 m and 12 m 
 
 > [!NOTE]
 > If `npm create xenxo` or `npm install` return **404**, the packages aren't on npm yet. Create it from the repository: [“Until it is on npm”](../../../packages/create-xenxo/README.md#mientras-no-esté-en-npm).
+
+## Gestures from a video
+
+On xenxo.io, *Create → Gestures from a video* opens the **gesture studio**: pick a short video of one person doing the gesture (full body or from the waist up, with good light and nobody else in front), mark where it starts and where it ends, and it's analysed **in your browser** with MediaPipe (Pose and Hand Landmarker, Apache-2.0, served from xenxo): the video is neither sent nor stored. You see it on a character next to the video or as it would play in the game (standing or walking), with these options:
+
+- **Once** or **looping** (the end blends into the start).
+- **Waist up only**: the legs are whatever the player is doing (standing or walking); the studio suggests it on its own when the legs can't be seen.
+- **Keeps going while walking**: when moving, the gesture stays on the arms.
+- **Feet on the ground** and **smoothing** (how much of the landmarks' jitter is removed).
+
+It downloads as **`.vrma`** (VRM Animation: xenxo, Blender with its VRM add-on, Unity or three-vrm open it) and as **`.bvh`**. The `.vrma` carries its details inside: the name in the game (`a-z` and `_`, up to 24) and its names in Spanish and English.
+
+To get it into xenxo's action wheel, it's added **through code** from the repository:
+
+```bash
+npm run gesture:add -- ~/Downloads/military_salute.vrma            # add it
+npm run gesture:add -- ~/Downloads/military_salute.vrma --check    # only check it
+npm run gesture:add -- ~/Downloads/military_salute.vrma --replace  # change one that's already in
+```
+
+It checks the file (its humanoid, one clip, the details, 0.2 to 20 s and up to 4 MB) and that no other gesture uses the name; it copies it to `apps/web/public/anims/`, lists it in `apps/web/src/world/people/captured-gestures.json` and adds its names to `apps/web/src/i18n.ts`. Then `npm run typecheck`, try it in the world (action wheel → Gestures) and ship it like any other change. Anyone on an older version of the web doesn't see it: clients ignore gestures they don't know.
 
 ## 3D models
 

@@ -27,6 +27,8 @@ export interface LoadedAvatar {
   update(dt: number, motion: Motion, view?: THREE.Vector3): void;
   /** El esqueleto (solo los VRM): golpes, miradas, parejas y caídas. */
   rig?: Rig;
+  /** El VRM (solo los VRM): sus medidas en reposo, para el estudio de gestos (capture/rest.ts). */
+  vrm?: VRM;
   dispose(): void;
 }
 
@@ -220,7 +222,7 @@ function fromVrm(vrm: VRM, scene: THREE.Group, decor: boolean): LoadedAvatar {
     update: (dt, m, view) => {
       if (animator.ready) {
         if (m.fx) m.fx.rig = animator.rig;
-        animator.update(dt, m.speed, m.airborne, m.pk ?? m.emote, !!m.fight, m.fx, m.gesture, m.pk ? m.pkP : undefined, m.vy);
+        animator.update(dt, m.speed, m.airborne, m.pk ?? m.emote, !!m.fight, m.fx, m.gesture, m.pk ? m.pkP : undefined, m.vy, m.emoteAt);
       } else {
         // Respaldo: paso procedural sencillo hasta que cargan los clips.
         const k = walkAmount(Math.abs(m.speed));
@@ -279,6 +281,7 @@ function fromVrm(vrm: VRM, scene: THREE.Group, decor: boolean): LoadedAvatar {
       }
     },
     rig: animator.rig,
+    vrm,
     dispose: () => {
       animator.rig.cancelFall();
       animator.dispose();

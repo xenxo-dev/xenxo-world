@@ -20,6 +20,10 @@
 /anims/*
   Cache-Control: public, max-age=604800
 
+# Los modelos de MediaPipe del estudio de gestos (unos 17 MB): solo los pide quien analiza un vídeo.
+/gestos/*
+  Cache-Control: public, max-age=604800
+
 /xr/*
   Cache-Control: public, max-age=604800
 

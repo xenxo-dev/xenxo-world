@@ -19,6 +19,7 @@ import { buildGesture, buildGuard, interpolant, PROCEDURAL, touchAt } from "./pe
 import { onPhone } from "./people/phone";
 import { Rig, type PersonFx } from "./people/rig";
 import { ALL_FINGER_BONES, handTable, restFix, type BaseHand, type RestFix } from "./people/hands";
+import CAPTURED from "./people/captured-gestures.json";
 
 /**
  * Gesto → clip. `once`: se reproduce una vez y vuelve al reposo; con `hold`, se queda en la última
@@ -85,6 +86,25 @@ export const EMOTE_CLIPS: Record<string, EmoteClip> = {
   // Parkour: el equilibrio sobre una viga va encima de andar (lo demás, en PK_SHOTS).
   pk_balance: { clip: "pk_balance", upper: true },
 };
+
+/**
+ * Gestos grabados desde un vídeo (el estudio de gestos, capture/, y `npm run gesture:add`, que los
+ * añade aquí): su clip es /anims/<id>.vrma y su nombre en la rueda, `emote.<id>` de i18n.ts. `fingers`:
+ * trae sus dedos (se vieron las manos), así que no lleva la mano de base.
+ */
+export interface CapturedGesture {
+  id: string;
+  once?: boolean;
+  upper?: boolean;
+  overlay?: boolean;
+  fingers?: boolean;
+  /** Lo que dura su clip (s): los de una vez acaban solos (Player.tsx). */
+  seconds?: number;
+}
+export const CAPTURED_GESTURES: CapturedGesture[] = CAPTURED;
+for (const g of CAPTURED_GESTURES) EMOTE_CLIPS[g.id] ??= { clip: g.id, once: g.once, upper: g.upper, overlay: g.overlay };
+/** Clips que traen sus propios dedos (además de lo hecho en código): ni mano de base ni se quitan de la capa de arriba. */
+const OWN_HANDS = new Set(CAPTURED_GESTURES.filter((g) => g.fingers).map((g) => g.id));
 
 /**
  * Parkour (world/parkour/moves.ts): qué clip se ve en cada momento de cada movimiento y en qué
@@ -212,6 +232,26 @@ export function loadVrma(name: string): Promise<VRMAnimation | null> {
   }
   cache.set(name, p);
   return p;
+}
+
+/**
+ * Un clip que no viene de /anims: el estudio de gestos (panel/GestureStudio.tsx) enseña con un
+ * personaje lo que acaba de sacar de un vídeo, tal como iría en el juego. Cada versión, con su nombre
+ * (los animadores guardan sus acciones por nombre); `forgetClip` suelta las que ya no se usan.
+ */
+export function provideClip(name: string, anim: VRMAnimation, def: Omit<EmoteClip, "clip">, ownHands: boolean) {
+  cache.set(name, Promise.resolve(anim));
+  EMOTE_CLIPS[name] = { clip: name, ...def };
+  if (def.upper || def.overlay) UPPER_EMOTES.add(name);
+  else UPPER_EMOTES.delete(name);
+  if (ownHands) OWN_HANDS.add(name);
+  else OWN_HANDS.delete(name);
+}
+export function forgetClip(name: string) {
+  cache.delete(name);
+  delete EMOTE_CLIPS[name];
+  UPPER_EMOTES.delete(name);
+  OWN_HANDS.delete(name);
 }
 
 /** Deja la cadera de un clip donde está en su primer fotograma (sin desplazamiento). */
@@ -371,8 +411,9 @@ export class VrmAnimator {
       const node = nodeName ? this.vrm.scene.getObjectByName(nodeName) : undefined;
       const bone = this.boneOf(node);
       if (!node || !bone) continue;
-      // Los dedos, solo de lo hecho en código (de la captura son siempre un puño: handBase).
-      const w = (name === "guard" ? GUARD_MASK : UPPER_MASK)[bone] ?? (isFinger(bone) && PROCEDURAL.has(name) ? 1 : 0);
+      // Los dedos, solo de lo hecho en código y de lo grabado con las manos a la vista (los de la
+      // biblioteca de captura son siempre un puño: handBase).
+      const w = (name === "guard" ? GUARD_MASK : UPPER_MASK)[bone] ?? (isFinger(bone) && (PROCEDURAL.has(name) || OWN_HANDS.has(name)) ? 1 : 0);
       if (!w) continue;
       l.nodes.push(node);
       l.weights.push(w);
@@ -412,8 +453,9 @@ export class VrmAnimator {
    * `speed` en m/s (negativa, hacia atrás: el paso va al revés), `airborne` si está en el aire,
    * `emote` el gesto pedido (o null), `fight` si está en modo pelea y `fx` lo que la gente le hace al
    * esqueleto (golpes, parejas, caídas). Los pesos se suavizan para que las transiciones no den saltos.
+   * `emoteAt`: el gesto, quieto en ese momento de su clip (s; el estudio de gestos, junto a su vídeo).
    */
-  update(dt: number, speed: number, airborne: boolean, emote: string | null, fight = false, fx?: PersonFx | null, gesture?: string | null, pkP?: number, vy?: number) {
+  update(dt: number, speed: number, airborne: boolean, emote: string | null, fight = false, fx?: PersonFx | null, gesture?: string | null, pkP?: number, vy?: number, emoteAt?: number) {
     const back = speed < 0;
     speed = Math.abs(speed);
     const target: Record<string, number> = {};
@@ -460,6 +502,14 @@ export class VrmAnimator {
       this.emoteAction = null;
     }
 
+    // Quieto en un momento de su clip: ni avanza ni se acaba.
+    if (this.emoteAction && known) {
+      if (emoteAt !== undefined) {
+        this.emoteAction.timeScale = 0;
+        this.emoteAction.time = Math.min(emoteAt, this.emoteAction.getClip().duration);
+        this.onceDone = false;
+      } else if (this.emoteAction.timeScale === 0) this.emoteAction.timeScale = known.speed ?? 1;
+    }
     const moving = speed >= 0.3 || airborne;
     const live = !!(known && this.emoteAction && !this.onceDone);
     const full = live && !known!.overlay && !moving;
@@ -602,7 +652,7 @@ export class VrmAnimator {
       }
     }
     let made = 0;
-    for (const [name, a] of this.actions) if (PROCEDURAL.has(name)) made += a.getEffectiveWeight();
+    for (const [name, a] of this.actions) if (PROCEDURAL.has(name) || OWN_HANDS.has(name)) made += a.getEffectiveWeight();
     const w = 1 - Math.min(1, made);
     const k = Math.min(1, dt / 0.1);
     const t = handTable(shape, this.v0), tr = right ? handTable(right, this.v0) : t;

@@ -3,12 +3,14 @@
  * ya tienes, un juego web, tu agente en tu parcela, tu distrito) y, al final, montar tu propia copia
  * o un nodo. Los comandos se copian con un toque; el detalle está en la guía (xenxo.io/docs).
  */
-import type { ReactNode } from "react";
+import { lazy, Suspense, useState, type ReactNode } from "react";
 import { NPM_PUBLISHED, SOURCE_URL } from "../content";
 import { t, useLang } from "../i18n";
 import { Block, Button, card, CopyBlock } from "./ui";
 
 const MCP_URL = `${typeof location !== "undefined" ? location.origin : "https://xenxo.io"}/mcp/xenxo-mcp.mjs`;
+/** El estudio de gestos (Three.js y MediaPipe): solo al abrirlo. */
+const GestureStudio = lazy(() => import("./GestureStudio"));
 const link = "text-sm text-azulejo-claro underline-offset-2 hover:underline";
 
 function Path({ n, title, text, children }: { n: string; title: string; text: string; children?: ReactNode }) {
@@ -42,6 +44,7 @@ export function Npm404() {
 
 export function CreateSection({ onProjects }: { onProjects: () => void }) {
   const lang = useLang();
+  const [studio, setStudio] = useState(false);
   const docs = lang === "en" ? "/docs/en/" : "/docs/";
   const mcp = NPM_PUBLISHED
     ? "claude mcp add --scope user xenxo -e XENXO_KEY=xk_… -- npx -y @xenxo/mcp"
@@ -84,6 +87,21 @@ export function CreateSection({ onProjects }: { onProjects: () => void }) {
             <CopyBlock text="npm create xenxo@latest mi-distrito -- --district" />
           </div>
           <Npm404 />
+        </Path>
+        <Path n="4" title={t("create.gestures.title")} text={t("create.gestures.text")}>
+          <div className="mt-3">
+            <Button onClick={() => setStudio(true)}>{t("create.gestures.go")}</Button>
+          </div>
+          <p className="mt-2">
+            <a className={link} href={`${docs}crear#${lang === "en" ? "gestures-from-a-video" : "gestos-desde-un-video"}`} target="_blank" rel="noreferrer">
+              {t("create.docs")} ↗
+            </a>
+          </p>
+          {studio && (
+            <Suspense fallback={null}>
+              <GestureStudio onClose={() => setStudio(false)} />
+            </Suspense>
+          )}
         </Path>
         <Path n="∞" title={t("create.host.title")} text={t("create.host.text")}>
           <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1">

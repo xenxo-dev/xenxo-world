@@ -15,6 +15,8 @@ export interface Motion {
   vy?: number;
   /** Gesto en curso ("dance", "wave", "sit"…) o null. */
   emote: string | null;
+  /** El gesto, quieto en ese momento de su clip (s): el estudio de gestos, al lado de su vídeo. */
+  emoteAt?: number;
   /** En modo pelea: guardia en reposo y puños arriba al andar. */
   fight?: boolean;
   /** Lo que la gente le pide a su esqueleto (golpes, parejas, caídas): people/rig.ts. */

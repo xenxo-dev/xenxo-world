@@ -29,7 +29,7 @@ import { cancelSlide, slideDir, slideEmote, slideP, slideStep, sliding, startSli
 import { people } from "../net/people-store";
 import { fighterNear } from "../net/people";
 import { PoseSender, RACE_RANGE_M, SEND_EVERY_MS, SEND_TIGHT_MS, TIGHT_RANGE_M } from "../net/pose-send";
-import { preloadParkour, UPPER_EMOTES } from "./animation";
+import { CAPTURED_GESTURES, preloadParkour, UPPER_EMOTES } from "./animation";
 import { createParkour, parkourStep, resetParkour } from "./parkour/moves";
 import { hangLift, ledgeHands } from "./parkour/ledge";
 import { gun, gunFrame, resetGun, SELF_GUN } from "./people/guns";
@@ -54,6 +54,8 @@ const EMOTE_SECONDS: Record<string, number> = {
   wave: 2.2, cheer: 1.65, clap: 2.6, point: 1.9, beckon: 2.2, laugh: 2.6, shrug: 1.45, bow: 1.85,
   fold_arms: 8, nod: 2.5, shake_head: 2.5, phone: 12, talk: 8,
 };
+// Los grabados desde un vídeo (animation.ts → CAPTURED_GESTURES): los de una vez, lo que dura su clip.
+for (const g of CAPTURED_GESTURES) if (g.once && g.seconds) EMOTE_SECONDS[g.id] ??= g.seconds;
 /** Lo que devuelve la gente cada frame (people/selfPeople.ts), sin crear objetos. */
 const _pf = { lock: false, wantX: 0, wantZ: 0, drawn: false };
 /** Cuándo se manda la pose (net/pose-send.ts): 5 Hz en marcha, lo que da el plan gratuito. */
