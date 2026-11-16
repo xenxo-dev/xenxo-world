@@ -245,7 +245,8 @@ const CheckpointMark = memo(function CheckpointMark({ zone, hot }: { zone: Zone;
   const color = COLORS[zone.role ?? "cp"];
   const tall = zone.role === "cp" ? 2.5 : 4.5;
   return (
-    <group position={[zone.x, zone.y + 0.03, zone.z]}>
+    // Por encima del suelo forjado (cuantizado, queda a unos 5 cm sobre 0): a 3 cm, el suelo lo tapaba.
+    <group position={[zone.x, zone.y + 0.08, zone.z]}>
       <mesh geometry={ringGeo} material={glow(color, hot ? 0.95 : 0.45)} scale={[zone.r, 1, zone.r]} />
       <mesh geometry={beamGeo} material={glow(color, hot ? 0.1 : 0.04)} scale={[zone.r * 0.98, tall, zone.r * 0.98]} position={[0, tall / 2, 0]} />
     </group>
@@ -386,7 +387,7 @@ function BoostPads({ zones }: { zones: Zone[] }) {
   return (
     <>
       {pads.map((z) => (
-        <group key={z.id} position={[z.x, z.y + 0.04, z.z]} rotation={[0, z.yaw ?? 0, 0]}>
+        <group key={z.id} position={[z.x, z.y + 0.09, z.z]} rotation={[0, z.yaw ?? 0, 0]}>
           <mesh geometry={ringGeo} material={glow("#36d9ff", 0.5)} scale={[z.r, 1, z.r]} />
           {CHEVRON_MATS.map((m, k) => (
             <mesh key={k} geometry={chevronGeo} material={m} scale={[z.r * 1.1, 1, z.r * 1.1]} position={[0, 0.01 * k, (0.55 - k * 0.55) * z.r]} />

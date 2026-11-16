@@ -2,7 +2,8 @@
  * Lo que se ve de la gente en el mundo (§9 octies): reacciones que flotan sobre la cabeza, destellos
  * de las acciones en pareja, el golpe de cada estilo de pelea (de dibujos, de 8 bits, eléctrico en
  * los duelos o una nube de polvo en los empujones), estrellas al quedar fuera de combate, la marca
- * del modo pelea y la vida de quien pelea (una barra encima). Todo con sprites de un grupo fijo (sin
+ * del modo pelea, la vida de quien pelea (una barra encima) y, en los juegos de pillar, quién la lleva
+ * (se ve a través de las paredes; si la llevas tú, también quién corre). Todo con sprites de un grupo fijo (sin
  * crear objetos por frame) y texturas pintadas una vez en un lienzo con los mismos trazos que los
  * iconos del HUD (la barra, en BAR_STEPS tramos).
  *
@@ -13,6 +14,7 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { FIGHT_HP, type FightStyle } from "@xenxo/protocol";
 import { HIT_MS, people, REACTION_MS, usePeople } from "../../net/people-store";
+import { tag } from "../../net/tag-store";
 import { world } from "../../net/world-store";
 import { PEOPLE_PATHS } from "../../hud/people-icons";
 import { mine, remoteFeet } from "./where";
@@ -34,6 +36,9 @@ const TINT: Record<string, string> = {
   high_five: "#36d9ff",
   hug: "#ff4fd8",
   handshake: "#6dff8a",
+  tag_it: "#ff4fd8",
+  infected: "#6dff8a",
+  tag_runner: "#36d9ff",
 };
 
 const SIZE = 128;
@@ -251,7 +256,8 @@ export function PeopleFx() {
     let i = 0;
     const now = performance.now();
     const t = state.clock.elapsedTime;
-    const put = (tex: THREE.Texture, x: number, y: number, z: number, scale: number, opacity: number, h = scale) => {
+    // `xray`: se ve a través de lo que haya delante (las marcas de los juegos de pillar).
+    const put = (tex: THREE.Texture, x: number, y: number, z: number, scale: number, opacity: number, h = scale, xray = false) => {
       if (i >= sprites.length) return;
       const s = sprites[i++]!;
       if (s.material.map !== tex) {
@@ -259,6 +265,7 @@ export function PeopleFx() {
         s.material.needsUpdate = true;
       }
       s.material.opacity = opacity;
+      s.material.depthTest = !xray;
       s.position.set(x, y, z);
       s.scale.set(scale, h, 1);
       s.visible = true;
@@ -308,6 +315,24 @@ export function PeopleFx() {
         if (!people.health.has(id)) continue;
         const step = Math.round((people.hpOf(id, st) / FIGHT_HP) * BAR_STEPS);
         put(barTexture(step), _f.x, _f.y + 2.25, _f.z, 0.56, 0.95, 0.07);
+      }
+    }
+    // Juegos de pillar: sobre quien la lleva (o está infectado), su marca, que da un saltito y se ve a
+    // través de las paredes (más apagada mientras aún no puede pillar). Si la llevas tú, una pequeña
+    // sobre quien corre: en una zona grande, así se encuentra a alguien.
+    if (tag.games.size) {
+      const st = world.serverNow();
+      const me = world.sessionId;
+      const hunting = !!me && tag.roleOf(me)?.role === "it";
+      for (const g of tag.games.values()) {
+        if (g.state !== "running") continue;
+        for (const pl of g.players) {
+          if (pl.role === "out" || !feetOf(pl.session_id, _f)) continue;
+          if (pl.role === "it") {
+            const bob = Math.abs(Math.sin(t * 3)) * 0.12;
+            put(iconTexture(g.mode === "tag" ? "tag_it" : "infected"), _f.x, _f.y + 2.35 + bob, _f.z, 0.42, (pl.ready_at ?? 0) > st ? 0.5 : 1, undefined, true);
+          } else if (hunting && pl.session_id !== me) put(iconTexture("tag_runner"), _f.x, _f.y + 2.2, _f.z, 0.22, 0.8, undefined, true);
+        }
       }
     }
     for (; i < sprites.length; i++) sprites[i]!.visible = false;

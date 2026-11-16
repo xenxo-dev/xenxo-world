@@ -58,6 +58,16 @@ export const PEOPLE_PATHS: Record<string, string[]> = {
   ],
   // La rueda de acciones
   actions: ["M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z", "M18.5 15l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"],
+  // Juegos de pillar: la lleva (una mano que toca, con chispas), infectado (un virus) y quien corre.
+  tag_it: [
+    "M9 20.5v-4.6l-2.4-3.4V7.4a1.3 1.3 0 0 1 2.6 0v3.8",
+    "M9.2 11.2V5.2a1.3 1.3 0 0 1 2.6 0v6",
+    "M11.8 11.2V4.6a1.3 1.3 0 0 1 2.6 0v6.6",
+    "M14.4 11.2V6.4a1.3 1.3 0 0 1 2.6 0v7.4c0 3.8-2.2 6.7-5.6 6.7H9",
+    "M19.6 4.6l1.6-1.6M20.3 8.2h1.9M3.4 4.6L4.9 6.1",
+  ],
+  infected: [CIRCLE(12, 12, 5), "M12 3v2.4M12 18.6V21M3 12h2.4M18.6 12H21M5.6 5.6l1.7 1.7M16.7 16.7l1.7 1.7M5.6 18.4l1.7-1.7M16.7 7.3l1.7-1.7", CIRCLE(10.4, 10.8, 0.9), CIRCLE(13.6, 13.4, 0.9)],
+  tag_runner: [CIRCLE(14.5, 4.8, 1.9), "M10.2 9.4l3.6-1.4 2.4 3.4 3.3 1", "M13.8 8l-2.1 5.4 3.1 2.5-1.3 4.6", "M11.7 13.4l-3.4.6-2.6 3.2", "M10.2 9.4l-3.2 2.2"],
   // Destellos (efecto al chocar los cinco, estrellas del fuera de combate)
   star: ["M12 3.5l2.5 5.3 5.8.7-4.3 4 1.1 5.7L12 16.4l-5.1 2.8 1.1-5.7-4.3-4 5.8-.7z"],
 };

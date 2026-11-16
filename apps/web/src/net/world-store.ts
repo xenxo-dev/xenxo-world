@@ -8,6 +8,7 @@
 import { activity, ACTIVITY_REF } from "./activity-store";
 import { people, PEOPLE_REF } from "./people-store";
 import { sandbox, SANDBOX_REF } from "./sandbox";
+import { tag, TAG_REF } from "./tag-store";
 
 /** Ref de los mensajes de la gente de las ciudades (npc-store.ts): sus errores no van al chat. */
 export const NPC_REF = "npc-";
@@ -206,6 +207,7 @@ class WorldStore {
     this.playouts.clear();
     chat.reset([]);
     activity.reset();
+    tag.reset();
     this.bump();
   }
 
@@ -223,8 +225,9 @@ class WorldStore {
         this.parkour = m.payload.parkour === true;
         this.cars = m.payload.cars === true;
         this.closed = m.payload.closed ?? [];
-        // Sesión nueva: si corría en una ronda, era con la anterior.
+        // Sesión nueva: si corría en una ronda, era con la anterior (y los juegos de pillar vuelven a llegar).
         activity.dropRound();
+        tag.reset();
         // Otro lugar puede ser otro servidor (un nodo de la comunidad), con otro reloj.
         this.clock.reset(m.payload.server_time, performance.now());
         // El lugar puede ser otro (las entidades se colocan respecto a él).
@@ -284,6 +287,10 @@ class WorldStore {
         this.clock.sample(m.payload.now, performance.now());
         activity.applyRound(m.payload, this.sessionId, this.serverNow());
         break;
+      case "TAG_ROUND":
+        this.clock.sample(m.payload.now, performance.now());
+        tag.apply(m.payload, this.sessionId);
+        break;
       case "PROGRESS":
       case "COLLECTED":
       case "RACE":
@@ -302,7 +309,7 @@ class WorldStore {
           activity.apply(m);
           break;
         }
-        if (m.payload.ref?.startsWith(PEOPLE_REF) || m.payload.ref?.startsWith(NPC_REF)) break;
+        if (m.payload.ref?.startsWith(PEOPLE_REF) || m.payload.ref?.startsWith(NPC_REF) || m.payload.ref?.startsWith(TAG_REF)) break;
         // Cerrado por moderación mientras se estaba dentro (interruptores de emergencia): se apunta
         // para que el chat o la zona de pruebas lo enseñen sin esperar a volver a entrar.
         if ((m.payload.detail as { reason?: string } | undefined)?.reason === "closed") {

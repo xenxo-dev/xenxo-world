@@ -116,6 +116,22 @@ export const BADGES: Badge[] = [
     color: "#a26bff",
   },
   {
+    id: "vertical_pilla",
+    district: "vertical",
+    rule: { kind: "points", key: "system:pilla", total: 1 },
+    name: { es: "Inalcanzable", en: "Untouchable" },
+    desc: { es: "Ganó una ronda de pilla-pilla por las azoteas de Vertical.", en: "Won a round of tag across the rooftops of Vertical." },
+    color: "#ff4f8b",
+  },
+  {
+    id: "cero_infeccion",
+    district: "cero",
+    rule: { kind: "points", key: "system:infeccion", total: 1 },
+    name: { es: "Paciente Cero", en: "Patient Zero" },
+    desc: { es: "Ganó una ronda de Infección en Distrito Cero: aguantó hasta el final o fue quien más contagió.", en: "Won a round of Infection in District Zero: lasted to the end or infected the most." },
+    color: "#6dff8a",
+  },
+  {
     id: "vertical_azoteas",
     district: "vertical",
     rule: { kind: "race", key: "system:azoteas" },

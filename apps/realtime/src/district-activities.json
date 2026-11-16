@@ -1,5 +1,5 @@
 {
-  "$comment": "Actividades del sistema en cada distrito (coordenadas del chunk: X este, Z sur, metros). Las siembra districts.ts como entidades con dueño `system` (collectible@1, checkpoint@1, scoreboard@1), sus carreras (`races`: salida, puntos y meta), placas de impulso (`boosts`), máquinas-portal (`cabinets`, las llena el Worker con los juegos del distrito), carteles (`labels`), tableros de baldosas (`tiles`), la zona de pruebas (`sandbox`: rectángulo donde cualquier cuenta construye con piezas básicas; se vacía cada día) y su atrezo modelado (`props`: pieza de seed-assets, posición, giro y caja de colisión). Las posiciones salen del diseño de cada ciudad (tools/forge/cero.py…): si mueves la ciudad, revisa esto. Los textos van como datos (`note`, `title`) en ES y EN. `billboards` (Distrito Cero): anuncios de fachada que el Worker llena con las portadas de los proyectos más nuevos (syncBillboards); la forja (cero.py) pone su marco en el mismo sitio.",
+  "$comment": "Actividades del sistema en cada distrito (coordenadas del chunk: X este, Z sur, metros). Las siembra districts.ts como entidades con dueño `system` (collectible@1, checkpoint@1, scoreboard@1), sus carreras (`races`: salida, puntos y meta), placas de impulso (`boosts`), máquinas-portal (`cabinets`, las llena el Worker con los juegos del distrito), carteles (`labels`), tableros de baldosas (`tiles`), juegos de pillar (`games`: su corro, tag@1, con su zona; el cartel y el marcador van en `labels` y `boards`), la zona de pruebas (`sandbox`: rectángulo donde cualquier cuenta construye con piezas básicas; se vacía cada día) y su atrezo modelado (`props`: pieza de seed-assets, posición, giro y caja de colisión). Las posiciones salen del diseño de cada ciudad (tools/forge/cero.py…): si mueves la ciudad, revisa esto. Los textos van como datos (`note`, `title`) en ES y EN. `billboards` (Distrito Cero): anuncios de fachada que el Worker llena con las portadas de los proyectos más nuevos (syncBillboards); la forja (cero.py) pone su marco en el mismo sitio.",
   "cero": {
     "hunts": [
       {
@@ -160,6 +160,26 @@
           "es": "RASTRO DE DATOS",
           "en": "DATA TRAIL"
         }
+      },
+      {
+        "kind": "points",
+        "id": "infeccion",
+        "period": "week",
+        "p": [
+          16.2,
+          2.2,
+          29.2
+        ],
+        "yaw": 90,
+        "size": [
+          2.6,
+          1.9
+        ],
+        "title": {
+          "es": "INFECCIÓN",
+          "en": "INFECTION"
+        },
+        "title_size": 0.4
       }
     ],
     "props": [
@@ -276,6 +296,22 @@
         ],
         "yaw": 0,
         "size": 0.3
+      },
+      {
+        "text": {
+          "es": "INFECCIÓN\nQuédate en el corro para jugar. Quien es pillado se infecta y pilla. Ganan quienes aguanten; si no, quien más pille.",
+          "en": "INFECTION\nStand in the ring to play. Whoever is caught is infected and hunts too. Survivors win; if none, the top hunter."
+        },
+        "p": [
+          16.2,
+          2.4,
+          34.8
+        ],
+        "yaw": 90,
+        "size": 0.15,
+        "width": 3.2,
+        "style": "sign",
+        "max_distance": 18
       }
     ],
     "billboards": [
@@ -374,6 +410,27 @@
           10,
           5.625
         ]
+      }
+    ],
+    "games": [
+      {
+        "id": "infeccion",
+        "mode": "infection",
+        "p": [
+          19,
+          0,
+          32
+        ],
+        "radius": 3,
+        "area": {
+          "c": [
+            32,
+            0,
+            32
+          ],
+          "r": 48
+        },
+        "seconds": 150
       }
     ]
   },
@@ -2750,6 +2807,22 @@
       },
       {
         "text": {
+          "es": "PILLA-PILLA POR LAS AZOTEAS\nQuédate en el corro para jugar. La lleva uno: si te toca, la llevas tú. Gana quien menos la lleve.",
+          "en": "ROOFTOP TAG\nStand in the ring to play. One player is it: if they touch you, you're it. Least time as it wins."
+        },
+        "p": [
+          46.9,
+          2.4,
+          46.2
+        ],
+        "yaw": 0,
+        "size": 0.15,
+        "width": 3.2,
+        "style": "sign",
+        "max_distance": 18
+      },
+      {
+        "text": {
           "es": "NIVEL 1 · FÁCIL\nPRIMEROS PISOS\nCuatro caravanas de esta pila. Salta hacia el borde, cuélgate y sube; luego, a la de encima, dando la vuelta.",
           "en": "LEVEL 1 · EASY\nFIRST FLOORS\nFour trailers up this stack. Jump for the edge, hang and climb; then on to the next one, going round."
         },
@@ -2908,6 +2981,28 @@
           "es": "BANDERINES",
           "en": "PENNANTS"
         }
+      },
+      {
+        "kind": "points",
+        "id": "pilla",
+        "period": "week",
+        "p": [
+          41.2,
+          2.0,
+          46.2
+        ],
+        "yaw": 0,
+        "size": [
+          2.4,
+          1.8
+        ],
+        "title": {
+          "es": "PILLA-PILLA",
+          "en": "ROOFTOP TAG"
+        },
+        "title_size": 0.3,
+        "title_y": 1.35,
+        "stand": true
       },
       {
         "kind": "race",
@@ -3145,6 +3240,27 @@
         "color": "#ffd08a",
         "intensity": 2.2,
         "range": 9
+      }
+    ],
+    "games": [
+      {
+        "id": "pilla",
+        "mode": "tag",
+        "p": [
+          44,
+          0,
+          50
+        ],
+        "radius": 3,
+        "area": {
+          "c": [
+            32,
+            0,
+            32
+          ],
+          "r": 50
+        },
+        "seconds": 120
       }
     ]
   }

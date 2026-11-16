@@ -1574,6 +1574,121 @@ await scenario("carreras de salida conjunta: la parrilla forma la ronda, se sale
   w.close();
 }, 60_000);
 
+await scenario("juegos de pillar: los corros del sistema (pilla-pilla en Vertical, infección en Cero); en uno de prueba, quedarse en el corro forma la ronda (pasar por encima no), empieza a la hora del servidor, quien la lleva espera, el toque cuenta solo de cerca y sin devolución, quien sale de la zona se queda fuera, a quien llega se le cuenta lo que hay en juego y gana quien menos la llevó, con su punto en el marcador", async () => {
+  // Los del sistema, con su corro (tag@1) y su marcador de puntos de la semana.
+  for (const [chunkId, id, mode] of [["c_-1_1", "pilla", "tag"], ["c_-1_-1", "infeccion", "infection"]] as const) {
+    const c = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-tag-mira" });
+    const lobby = c.snapshot.entities.find((e) => (e.components["tag@1"] as { id?: string } | undefined)?.id === id);
+    assert(lobby && (lobby.components["tag@1"] as { mode: string }).mode === mode && lobby.owner === "system", `${id}: su corro del sistema`);
+    assert(c.snapshot.entities.some((e) => { const b = e.components["scoreboard@1"] as { kind?: string; id?: string; period?: string } | undefined; return b?.kind === "points" && b.id === id && b.period === "week"; }), `${id}: su marcador de la semana`);
+    c.close();
+  }
+  if (!adminKey) return console.log("    (sin XENXO_ADMIN_KEY: se omite la ronda de prueba: su corro lo pone la administración)");
+  const chunkId = "c_1_0";
+  const game = `t${randomUUID().slice(0, 6)}`;
+  type P = [number, number, number];
+  // En un sitio al azar de las afueras de Arcade (y se quita al acabar): con un corro de una prueba
+  // anterior en el mismo sitio, quien se para ahí entraría en el de antes.
+  const L: P = [-80 + Math.round(Math.random() * 12), 0, -66 + Math.round(Math.random() * 12)];
+  const admin = await XenxoClient.connect({ baseUrl, chunkId, agentKey: adminKey });
+  const put = async (p: number[], extra: Record<string, unknown>) => {
+    const r = await admin.mutate({ op: "SPAWN", components: { "transform@1": { p, r: [0, 0, 0, 1], s: [1, 1, 1], parent: null }, ...extra } });
+    assert(r.type === "ACK", `spawn: ${JSON.stringify(r.payload)}`);
+    return (r.payload as { entity_id: string }).entity_id;
+  };
+  const lobby = await put(L, { "tag@1": { id: game, mode: "tag", radius: 3, area: { r: 20 }, seconds: 30 } });
+  const board = await put([L[0] + 5, 2, L[2]], { "scoreboard@1": { kind: "points", id: game, period: "week" } });
+
+  // Quien mira pasa por encima del corro corriendo: no entra.
+  const w = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-tag-pasa" });
+  await walk(w, [L[0] - 9, 1.6, L[2]], [L[0] + 8, 1.6, L[2]], 8, 200);
+  // Tres cuentas se quedan en el corro (y siguen mandando su pose, como un cliente de verdad).
+  const names = [0, 1, 2].map((k) => `conf pilla ${k} ${randomUUID().slice(0, 4)}`);
+  const players: XenxoClient[] = [];
+  for (const n of names) {
+    const api = new Api(baseUrl);
+    await api.register(n);
+    players.push(await XenxoClient.connect({ baseUrl, chunkId, token: api.token }));
+  }
+  const spot = new Map<XenxoClient, P>([[players[0]!, [L[0], 1.6, L[2]]], [players[1]!, [L[0] + 1.2, 1.6, L[2] + 0.8]], [players[2]!, [L[0] - 1, 1.6, L[2] - 1]]]);
+  spot.set(w, [L[0] + 8, 1.6, L[2]]);
+  let posing = true;
+  const poser = (async () => {
+    while (posing) {
+      for (const [c, p] of spot) c.pose(p);
+      await sleep(300);
+    }
+  })();
+  const walkTo = async (c: XenxoClient, to: P, speed = 6) => {
+    const from = spot.get(c)!;
+    spot.delete(c);
+    await walk(c, from, to, speed, 200);
+    spot.set(c, to);
+  };
+  const ours = (m: { payload: { entity_id: string } }) => m.payload.entity_id === lobby;
+  const sid = (c: XenxoClient) => c.welcome.session_id;
+  const tryTag = (c: XenxoClient, to: string) => {
+    const id = randomUUID();
+    const reply = c.next("ERROR", (m) => m.payload.ref === id, 1500).then((m) => (m.payload.detail as { reason?: string } | undefined)?.reason ?? m.payload.code, () => null);
+    c.sendRaw(msg("TAG", { to }, { id }));
+    return reply;
+  };
+  try {
+    const counting = (await w.next("TAG_ROUND", (m) => ours(m) && m.payload.state === "countdown" && m.payload.players.length === 3, 15_000)).payload;
+    assert(counting.min === 2 && counting.mode === "tag" && counting.game === game && !counting.players.some((p) => p.session_id === sid(w)), "con los que se quedan empieza la cuenta atrás (quien solo pasó no entra)");
+    assert((counting.go_at ?? 0) - counting.now >= 3000, "y da tiempo a verla");
+    const run = (await w.next("TAG_ROUND", (m) => ours(m) && m.payload.state === "running", 30_000)).payload;
+    // La hora del servidor, vista desde aquí (para esperar a que pase la ventaja).
+    const offset = run.now - Date.now();
+    const until = async (serverMs: number) => {
+      while (Date.now() + offset < serverMs) await sleep(100);
+    };
+    const it0 = run.players.find((p) => p.role === "it");
+    assert(run.players.length === 3 && run.players.filter((p) => p.role === "it").length === 1 && it0, "empieza: la lleva uno");
+    assert((it0.ready_at ?? 0) - run.now >= 4000 && run.end_at === (run.go_at ?? 0) + 30_000, "que espera la ventaja; la ronda dura lo que dice su corro");
+    const late = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-tag-llega" });
+    const told = await late.next("TAG_ROUND", (m) => ours(m) && m.payload.state === "running", 3000);
+    assert(told.payload.round === run.round, "a quien llega se le cuenta la ronda en juego");
+    late.close();
+    const it = players.find((c) => sid(c) === it0.session_id)!;
+    const [a, b] = players.filter((c) => c !== it);
+    assert((await tryTag(it, sid(a!))) === "ready", "durante la ventaja no se pilla");
+    // Los demás se dispersan; pasada la ventaja, de lejos no cuenta y de cerca sí.
+    await Promise.all([walkTo(a!, [L[0], 1.6, L[2] + 8]), walkTo(b!, [L[0] - 8, 1.6, L[2]])]);
+    await until((it0.ready_at ?? 0) + 300);
+    assert((await tryTag(it, sid(a!))) === "far", "de lejos no se pilla");
+    await walkTo(it, [L[0], 1.6, L[2] + 6.5]);
+    const caught = w.next("TAG_ROUND", (m) => ours(m) && m.payload.tag?.to === sid(a!), 4000);
+    assert((await tryTag(it, sid(a!))) === null, "de cerca, sí");
+    const after = (await caught).payload;
+    assert(after.tag!.from === sid(it) && after.players.find((p) => p.session_id === sid(a!))?.role === "it" && after.players.find((p) => p.session_id === sid(it))?.role === "runner", "la lleva el pillado");
+    // Sin devolución: a quien se la acaba de pasar no se le pilla enseguida.
+    await sleep(2300);
+    assert((await tryTag(a!, sid(it))) === "immune", "sin devolución");
+    // El tercero sale de la zona y no vuelve: se queda fuera.
+    const out = w.next("TAG_ROUND", (m) => ours(m) && m.payload.players.some((p) => p.session_id === sid(b!) && p.role === "out"), 12_000);
+    await walkTo(b!, [L[0] + 26, 1.6, L[2]], 8);
+    await out;
+    // Al acabar el tiempo gana quien menos la ha llevado (de los que siguen): quien empezó llevándola.
+    const done = (await w.next("TAG_ROUND", (m) => ours(m) && m.payload.state === "done", 30_000)).payload;
+    assert(done.end === "time" && done.winners?.length === 1 && done.winners[0] === sid(it), `gana quien menos la llevó (${JSON.stringify(done.players.map((p) => [p.role, p.it_ms]))})`);
+    const itMs = (id: string) => done.players.find((p) => p.session_id === id)!.it_ms;
+    assert(itMs(sid(it)) < itMs(sid(a!)) && itMs(sid(a!)) > 15_000, "cada uno con lo que la llevó");
+    // Su punto, en el marcador de la semana.
+    spot.set(it, [L[0] + 5, 1.6, L[2] + 2]);
+    await sleep(400);
+    const sc = await it.activity("SCORES_GET", board);
+    const winner = names[players.indexOf(it)];
+    assert(sc.type === "SCORES" && sc.payload.kind === "points" && sc.payload.rows.some((r) => r.name === winner && r.value >= 1), "y su punto en el marcador");
+  } finally {
+    posing = false;
+    await poser;
+    for (const c of [...players, w]) c.close();
+    for (const id of [lobby, board]) await admin.mutate({ op: "DESPAWN", entity_id: id, base_rev: 1 }).catch(() => null);
+    admin.close();
+  }
+}, 120_000);
+
 await scenario("Ruta de las Azoteas (Vertical): parkour solo aquí (WELCOME.parkour); carrera con salida, 7 puntos y meta, 8 banderines en alto, sus marcadores, las farolas del Patio (sin pasarse de las luces del chunk), las Pilas con la escalera de la Gran Pila (choca con su malla), y los gestos pk_* (también las caídas) llegan a los demás", async () => {
   const chunkId = "c_-1_1";
   const a = await XenxoClient.connect({ baseUrl, chunkId, displayName: "conf-pk-a" });

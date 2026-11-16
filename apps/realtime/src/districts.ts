@@ -13,6 +13,8 @@ import lives from "./district-interiors.json";
 interface DistrictActivities {
   hunts?: { id: string; piece: string; radius: number; items: { p: V3; note?: Record<string, string>; piece?: string }[] }[];
   tiles?: { id: string; p: V3; cols: number; rows: number; size: number }[];
+  /** Juegos de pillar (tag@1, §9 decies): el corro y su zona. Su cartel y su marcador van en `labels` y `boards`. */
+  games?: { id: string; mode: "tag" | "infection"; p: V3; radius: number; area: { c?: V3; r: number }; seconds: number }[];
   boards?: { kind: "race" | "hunt" | "points" | "builds"; id: string; period?: "all" | "week" | "day"; p: V3; yaw: number; size: [number, number]; title?: { es: string; en: string }; title_y?: number; title_size?: number }[];
   /** `mesh_collider`: se choca con la forma del modelo (collider@1.from_mesh; `half` es la caja de reserva). */
   props?: { piece: string; p: V3; yaw: number; half: V3; mesh_collider?: boolean }[];
@@ -355,6 +357,15 @@ export function districtSeed(d: District, toNexo: { p: V3; yaw: number }): Seede
       components: {
         "transform@1": { p: tb.p, r: [0, 0, 0, 1], s: [1, 1, 1], parent: null },
         "tiles@1": { id: tb.id, cols: tb.cols, rows: tb.rows, size: tb.size },
+      } as Components,
+    });
+  }
+  for (const gm of acts?.games ?? []) {
+    out.push({
+      id: `${d.id}_tag_${gm.id}`,
+      components: {
+        "transform@1": { p: gm.p, r: [0, 0, 0, 1], s: [1, 1, 1], parent: null },
+        "tag@1": { id: gm.id, mode: gm.mode, radius: gm.radius, area: gm.area, seconds: gm.seconds },
       } as Components,
     });
   }

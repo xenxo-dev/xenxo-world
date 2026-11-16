@@ -20,6 +20,7 @@ import {
   CollectibleV1,
   ScoreboardV1,
   TilesV1,
+  TagV1,
   ComponentsStrict,
   ENTITY_SCHEMA,
   EntityId,
@@ -68,11 +69,29 @@ import { figureFor, pointsDay, TILES_IDLE_MS, TILES_PAUSE_MS, TILES_SCHEMA, TILE
 import { isAvatarPreset } from "./avatar-presets-check";
 import { allowSample, batchGap, roundP, roundR, stampSample, type PoseClock } from "./pose-clock";
 import { CAR_SPEED, dropIdle, joinRound, minRoundMs, passGate, roundOver, standings, startRound, type Round } from "./rounds";
+import { dropTag, dwellIn, finishTag, joinTag, leaveLobby, newTagGame, seeTag, startTag, TAG_REACH, TAG_REACH_Y, tagHit, tagOver, tagPayload, tagPoints, type TagEnd, type TagGame, type TagMode } from "./tag";
 import { damageOf, dodges, DOWN_IMMUNE_MS, DUEL_WINDOW_MS, HIT_GAP_MS, HIT_MAX_DY, hitOutcome, moveAllowed, PAIR_OFFER_RANGE, PAIR_START_RANGE, PAIR_TTL_MS, REACH, REACT_GAP_MS, styleOf } from "./people";
 
 const TICK_HZ = 8;
 /** En lugares más grandes que un chunk, cada uno recibe las poses de quien tiene a menos de esto (m). */
 const AOI_RADIUS = 70;
+/** Juegos de pillar: entre dos toques de una sesión (ms), sin pose desde hace esto se queda fuera (ms) y cuánto se puede salir del corro antes de empezar (m). */
+const TAG_GAP_MS = 250;
+const TAG_STALE_MS = 6000;
+const TAG_LOBBY_SLACK = 1;
+/** Por qué no cuenta un toque (detail.reason lleva la clave). */
+const TAG_REFUSED = { state: "la ronda no está en juego", role: "no la llevas o esa persona no corre en tu ronda", ready: "aún no puedes pillar", immune: "acaba de pasártela: sin devolución" } as const;
+/** Un corro de pillar (tag@1) tal como lo usa el servidor: dónde está, cómo se juega y su zona (centro y radio, en horizontal). */
+interface TagLobby {
+  entity_id: string;
+  owner: string;
+  id: string;
+  mode: TagMode;
+  radius: number;
+  seconds: number;
+  p: [number, number, number];
+  area: { x: number; z: number; r: number };
+}
 
 /** Triángulos de cada LOD de las piezas de la forja (para usarlas sin pasar por R2). */
 const SYSTEM_LODS = new Map(Object.values(SEED_ASSETS).flatMap((a) => a.lods.map((l) => [l.hash, l.tris] as const)));
@@ -284,6 +303,16 @@ export class ChunkRoom extends DurableObject<Env> {
   private tileBoardsAt = 0;
   private tileBoardsList: TileBoard[] = [];
   private tileGames = new Map<string, TileGame>();
+  /**
+   * Juegos de pillar (tag@1, tag.ts): los corros del lugar (se releen al cambiar las entidades), la
+   * ronda de cada uno, el temporizador de su próximo paso (empezar o acabar: solo mientras hay ronda),
+   * quién lleva cuánto rato en qué corro y el último toque de cada sesión.
+   */
+  private tagLobbiesCache: { epoch: number; at: number; list: TagLobby[] } | null = null;
+  private tagGames = new Map<string, TagGame>();
+  private tagTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private tagDwell = new Map<string, { lobby: string; since: number }>();
+  private tagAt = new Map<string, number>();
   private tickTimer: ReturnType<typeof setTimeout> | null = null;
   /** Gente (people.ts): última reacción, propuestas en pareja, golpes y caídas de cada sesión. */
   private reactAt = new Map<string, number>();
@@ -612,6 +641,7 @@ export class ChunkRoom extends DurableObject<Env> {
         }
         if (att.principal.kind === "user") this.send(ws, msg("PROGRESS", this.progressOf(att.principal.sub)));
         for (const g of this.tileGames.values()) if (g.state === "show") this.send(ws, this.tilesMsg(g));
+        for (const g of this.tagGames.values()) if (g.state !== "idle" && g.state !== "done") this.send(ws, msg("TAG_ROUND", tagPayload(g, Date.now())));
         // Los ciudadanos: si nadie los lleva y esta sesión sabe, ella; si no, quién (a esta sesión).
         if (this.npcPlace) {
           if (att.npc && !this.npcHostAlive()) this.setNpcHost(att.session_id);
@@ -660,6 +690,8 @@ export class ChunkRoom extends DurableObject<Env> {
         // Una pose que llega de un salto no pisa baldosas.
         if (!jump) this.tilesPose(att, head.p);
         if (this.rounds.length) this.sweepRounds(now);
+        if (!jump) this.tagPose(att, head.p, now, !!vehicle);
+        if (this.tagTimers.size) this.sweepTag(now);
         // Quien lleva a los ciudadanos ha dejado de mandar su estado (pestaña dormida, conexión mala): otro.
         // Y si no los lleva nadie, quien sepa y se mueva.
         if (this.npcHost && !this.npcHostAlive(now)) this.electNpcHost(this.npcHost);
@@ -691,6 +723,8 @@ export class ChunkRoom extends DurableObject<Env> {
         return this.handleRespawn(ws, att, m.id);
       case "SHOOT":
         return this.handleShoot(ws, att, m.id, m.payload);
+      case "TAG":
+        return this.handleTag(ws, att, m.id, m.payload.to);
       case "NPC_STATE":
         return this.handleNpcState(ws, att, m.id, m.payload.cast);
       case "NPC_HIT":
@@ -719,6 +753,9 @@ export class ChunkRoom extends DurableObject<Env> {
     this.poseClocks.delete(att.session_id);
     this.poseTat.delete(att.session_id);
     if (this.rounds.length) this.leaveRounds(att.session_id, Date.now());
+    if (this.tagGames.size) this.leaveTag(att.session_id, Date.now());
+    this.tagDwell.delete(att.session_id);
+    this.tagAt.delete(att.session_id);
     this.activityLog.delete(att.session_id);
     this.buckets.delete(att.session_id);
     this.moves.delete(att.session_id);
@@ -772,6 +809,7 @@ export class ChunkRoom extends DurableObject<Env> {
       }
     } else ({ jump, fast } = stepMove(m, p, now));
     if (jump && this.rounds.length) this.leaveRounds(att.session_id, now);
+    if (jump && this.tagGames.size) this.leaveTag(att.session_id, now);
     if ((jump || fast) && att.run) {
       const race = att.run.race;
       att.run = undefined;
@@ -2175,6 +2213,174 @@ export class ChunkRoom extends DurableObject<Env> {
     }
     this.broadcast(this.tilesMsg(g));
     g.timer = setTimeout(() => this.tilesStart(g), TILES_PAUSE_MS);
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Juegos de pillar (tag@1, tag.ts): corros, rondas y toques           */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Los corros del lugar. Se usan con cada pose: se releen cuando cambian las entidades, y como mucho
+   * cada 2 s (un agente construyendo cambia muchas veces seguidas).
+   */
+  private tagLobbies(): TagLobby[] {
+    const c = this.tagLobbiesCache, now = Date.now();
+    if (c && (c.epoch === this.entityEpoch || now - c.at < 2000)) return c.list;
+    const list: TagLobby[] = [];
+    for (const r of this.sql.exec<{ entity_id: string; owner: string; data: string }>("SELECT entity_id, owner, data FROM entities").toArray()) {
+      if (!r.data.includes("tag@1")) continue;
+      const e = JSON.parse(r.data) as Entity;
+      const t = TagV1.safeParse(e.components["tag@1"]);
+      const p = (e.components["transform@1"] as { p?: number[] } | undefined)?.p;
+      if (!t.success || !p || p.length < 3) continue;
+      const c = t.data.area.c ?? p;
+      list.push({
+        entity_id: r.entity_id, owner: r.owner, id: t.data.id, mode: t.data.mode, radius: t.data.radius, seconds: t.data.seconds,
+        p: [p[0]!, p[1]!, p[2]!], area: { x: c[0]!, z: c[2]!, r: t.data.area.r },
+      });
+    }
+    this.tagLobbiesCache = { epoch: this.entityEpoch, at: now, list };
+    return list;
+  }
+
+  /** ¿Está esta cabeza en el corro? (En horizontal, con `slack` m de margen, y a su altura.) */
+  private inLobby(l: TagLobby, p: readonly number[], slack: number): boolean {
+    const dy = p[1]! - l.p[1];
+    return dy > -1 && dy < 3.5 && Math.hypot(p[0]! - l.p[0], p[2]! - l.p[2]) <= l.radius + slack;
+  }
+
+  /** La ronda en la que juega esta sesión (esperando en el corro o corriendo, sin haberse quedado fuera). */
+  private tagGameOf(sid: string): TagGame | null {
+    for (const g of this.tagGames.values()) {
+      if (g.state !== "open" && g.state !== "countdown" && g.state !== "running") continue;
+      const p = g.players.get(sid);
+      if (p && p.role !== "out") return g;
+    }
+    return null;
+  }
+
+  /**
+   * La pose de una sesión en los juegos de pillar. Sin jugar: quien se queda un rato en un corro entra
+   * en su ronda (en coche, no). Esperando: salir del corro es irse. Jugando: si está dentro de la zona.
+   */
+  private tagPose(att: Attachment, p: number[], now: number, inCar: boolean) {
+    const lobbies = this.tagLobbies();
+    if (!lobbies.length) return;
+    const sid = att.session_id;
+    const g = this.tagGameOf(sid);
+    if (g) {
+      const l = lobbies.find((x) => x.entity_id === g.entity_id);
+      if (!l) return this.tagFinish(g, now, "few"); // el corro ya no existe
+      if (g.state === "running") {
+        const inside = !inCar && Math.hypot(p[0]! - l.area.x, p[2]! - l.area.z) <= l.area.r;
+        if (seeTag(g, sid, inside, now, Math.random)) this.tagChanged(g, now);
+      } else if ((inCar || !this.inLobby(l, p, TAG_LOBBY_SLACK)) && leaveLobby(g, sid)) this.tagChanged(g, now);
+      return;
+    }
+    const l = inCar ? undefined : lobbies.find((x) => this.inLobby(x, p, 0));
+    if (!dwellIn(this.tagDwell, sid, l?.entity_id ?? null, now) || !l) return;
+    let game = this.tagGames.get(l.entity_id);
+    if (!game) {
+      game = newTagGame({ entity_id: l.entity_id, game: l.id, owner: l.owner, mode: l.mode, seconds: l.seconds });
+      this.tagGames.set(l.entity_id, game);
+    }
+    // Lo que diga el corro ahora (lo pueden haber cambiado), para la ronda que se forme.
+    if (game.state === "idle" || game.state === "done") Object.assign(game, { game: l.id, owner: l.owner, mode: l.mode, seconds: l.seconds });
+    const who = { session_id: sid, sub: att.principal.sub, ranked: att.principal.kind === "user", name: att.principal.name ?? att.display_name, ...(att.principal.no != null ? { no: att.principal.no } : {}) };
+    if (joinTag(game, who, now)) this.tagChanged(game, now);
+  }
+
+  /**
+   * Algo ha cambiado en una ronda: si se ha acabado, se cierra; si no, se reparte a todo el lugar y se
+   * deja su temporizador (empezar a su hora o acabar a la suya; nada más, y solo mientras hay ronda).
+   */
+  private tagChanged(g: TagGame, now: number) {
+    const end = tagOver(g, now);
+    if (end) return this.tagFinish(g, now, end);
+    this.tagArm(g, now);
+    this.broadcast(msg("TAG_ROUND", tagPayload(g, now)));
+  }
+
+  private tagArm(g: TagGame, now: number) {
+    const old = this.tagTimers.get(g.entity_id);
+    if (old) clearTimeout(old);
+    this.tagTimers.delete(g.entity_id);
+    const at = g.state === "countdown" ? g.goAt : g.state === "running" ? g.endAt : 0;
+    if (at) this.tagTimers.set(g.entity_id, setTimeout(() => this.tagWake(g), Math.max(0, at - now) + 20));
+  }
+
+  /** Su hora: empieza (quien ya no está en el corro o no da señales no entra) o se acaba el tiempo. */
+  private tagWake(g: TagGame) {
+    this.tagTimers.delete(g.entity_id);
+    const now = Date.now();
+    if (g.state === "countdown" && now >= g.goAt) {
+      const l = this.tagLobbies().find((x) => x.entity_id === g.entity_id);
+      for (const sid of [...g.players.keys()]) {
+        const pose = this.poses.get(sid);
+        const fresh = !!pose && now - (this.lastPoseAt.get(sid) ?? 0) <= POSE_MAX_AGE_MS && !pose.vehicle;
+        if (!l || !fresh || !this.inLobby(l, pose!.head.p, TAG_LOBBY_SLACK)) leaveLobby(g, sid);
+      }
+      startTag(g, now, Math.random);
+    }
+    this.tagChanged(g, now);
+  }
+
+  /** Quien juega y deja de dar señales (pestaña dormida, conexión perdida) se queda fuera; y el tiempo. */
+  private sweepTag(now: number) {
+    for (const g of this.tagGames.values()) {
+      if (g.state !== "running") continue;
+      let changed = false;
+      for (const p of g.players.values()) {
+        if (p.role !== "out" && now - (this.lastPoseAt.get(p.session_id) ?? 0) > TAG_STALE_MS) changed = dropTag(g, p.session_id, now, Math.random) || changed;
+      }
+      if (changed || now >= g.endAt) this.tagChanged(g, now);
+    }
+  }
+
+  /** Una sesión se va o llega de un salto: deja el corro o la ronda en que estuviera. */
+  private leaveTag(sid: string, now: number) {
+    this.tagDwell.delete(sid);
+    const g = this.tagGameOf(sid);
+    if (g && dropTag(g, sid, now, Math.random)) this.tagChanged(g, now);
+  }
+
+  /** Se acaba una ronda: quién gana, sus puntos de la semana (cuentas) y el aviso a todo el lugar. */
+  private tagFinish(g: TagGame, now: number, end: TagEnd) {
+    const t = this.tagTimers.get(g.entity_id);
+    if (t) clearTimeout(t);
+    this.tagTimers.delete(g.entity_id);
+    finishTag(g, now, end);
+    const won = tagPoints(g);
+    if (won.length) {
+      this.scoreCache.clear();
+      const key = activityKey(g.owner, g.game), day = pointsDay(now);
+      for (const p of won) {
+        this.sql.exec(
+          `INSERT INTO act_points (board_key, day, sub, name, player_no, points, ts) VALUES (?, ?, ?, ?, ?, 1, ?)
+           ON CONFLICT (board_key, day, sub) DO UPDATE SET points = points + 1, name = excluded.name, ts = excluded.ts`,
+          key, day, p.sub, p.name, p.no ?? null, now,
+        );
+      }
+    }
+    this.broadcast(msg("TAG_ROUND", tagPayload(g, now)));
+  }
+
+  /** Un toque: quien la lleva (y ya puede pillar) toca a alguien de su ronda, y sus poses lo confirman. */
+  private handleTag(ws: WebSocket, att: Attachment, ref: string | undefined, to: string) {
+    const now = Date.now();
+    const sid = att.session_id;
+    if (now - (this.tagAt.get(sid) ?? 0) < TAG_GAP_MS) return this.sendError(ws, ref, "rate_limited", "más despacio");
+    this.tagAt.set(sid, now);
+    const g = this.tagGameOf(sid);
+    if (!g || g.state !== "running") return this.sendError(ws, ref, "forbidden", "no estás jugando a pillar", { reason: "state" });
+    const me = this.headOf(sid), them = this.headOf(to);
+    if (!me || !them) return this.sendError(ws, ref, "bad_message", "manda tu pose primero");
+    if (Math.hypot(them[0]! - me[0]!, them[2]! - me[2]!) > TAG_REACH || Math.abs(them[1]! - me[1]!) > TAG_REACH_Y) {
+      return this.sendError(ws, ref, "forbidden", "demasiado lejos", { reason: "far" });
+    }
+    const res = tagHit(g, sid, to, now);
+    if (res !== "ok") return this.sendError(ws, ref, "forbidden", TAG_REFUSED[res], { reason: res });
+    this.tagChanged(g, now);
   }
 
   /** Las 10 primeras filas de un marcador (lo usan SCORES y la web). */

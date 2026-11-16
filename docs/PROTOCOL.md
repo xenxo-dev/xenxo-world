@@ -56,6 +56,7 @@ Este documento y [`packages/protocol/src/index.ts`](../packages/protocol/src/ind
 | `scoreboard@1` | `kind` (`race` \| `hunt` \| `points` \| `builds`), `id`, `size?`, `period?` (`all` \| `week` \| `day`) | Marcador de una carrera, una búsqueda o un tablero del mismo dueño en el mismo lugar: el cliente lo pide con SCORES_GET. `period` elige el tramo: carreras de siempre o de la semana (ISO, UTC), puntos del día, de la semana o de siempre. `builds` (solo del sistema) cuenta lo que han construido los proyectos del lugar en los últimos 7 días |
 | `boost@1` | `speed` (6–12 m/s, por defecto 9), `seconds` (0,5–4, por defecto 2), `radius` (0,5–5 m, por defecto 1,8) | Placa de impulso: quien la pisa corre a `speed` durante `seconds`. Solo en el cliente (no viaja ni puntúa); el tope de 12 m/s queda por debajo del límite con el que el servidor anula un tiempo de carrera imposible. En VR no se aplica. Quien la pisa conduciendo recibe un turbo (un empujón hacia delante, una vez por pasada): cuánto, lo dice el cliente; las carreras en coche tienen su propio tope de velocidad |
 | `tiles@1` | `id`, `cols` (2–12, por defecto 8), `rows` (2–12), `size` (1–5 m, por defecto 3) | Tablero de baldosas en el suelo, centrado en la entidad y sin giro. Mientras hay alguien encima, el servidor enciende una figura por ronda y marca como pisadas las baldosas con la pose de cada sesión (mensaje `TILES`); si se pisan todas a tiempo, cada cuenta que pisó alguna suma un punto del día. Las rondas corren con un temporizador corto solo mientras hay gente |
+| `tag@1` | `id`, `mode` (`tag` \| `infection`, por defecto `tag`), `radius` (1,5–5 m, por defecto 3), `area` (`{c?, r}`: centro en metros del lugar —sin él, el del corro— y radio de 10 a 120 m; por defecto `{r: 40}`), `seconds` (30–300, por defecto 120) | Juego de pillar: un corro en el suelo, centrado en la entidad, donde se apunta quien se queda dentro; la zona de juego es el círculo de `area` (en horizontal, a cualquier altura). Lo lleva el servidor con las poses y lo cuenta con `TAG_ROUND`; el cliente avisa con `TAG` de que ha tocado a alguien. Ver §9 decies |
 | `hologram@1` | `color?`, `opacity?` (0,05–1, por defecto 0,6) | La geometría de la entidad (`mesh@1` o `primitive@1`) se dibuja como un holograma: luz translúcida del color dado, con borde brillante y líneas de barrido; no hace sombra ni tapa lo que hay detrás. El nexo lo usa para la vista previa de cada distrito. Un cliente que no lo conozca dibuja la geometría normal |
 | `behavior@1` | `module`, `abi`, `caps`, `fuel`, `where` | **Reservado.** El servidor lo rechaza hasta que exista el sandbox WASM |
 
@@ -146,6 +147,7 @@ Las medidas de los modelos de la gente las da `GET /assets/<hash>/meta`. Moverlo
 | `HIT` | `to`, `move` | Golpe a otra sesión en modo pelea (§9 octies; `slide` = la barrida) |
 | `RESPAWN` | — | Fuera de combate, pasado `down_until`: volver con toda la vida (§9 octies) |
 | `SHOOT` | `weapon`, `at`, `to?` | Un disparo (§9 octies ter): con qué, hasta dónde llega el rayo y, si le da a alguien en el modo pelea, a quién |
+| `TAG` | `to` | En un juego de pillar (§9 decies): has tocado a `to`. Cuenta si la llevas (o estás infectado), ya puedes pillar, `to` corre en tu ronda y no acaba de pasártela, y vuestras últimas poses están a menos de 3 m en horizontal y 2,2 m en altura; si no, `forbidden` con `detail.reason` (`state`, `role`, `ready`, `immune` o `far`). Uno cada 250 ms |
 | `NPC_STATE` | `t`, `cast[]` | Solo quien lleva a los ciudadanos: su estado (§9 nonies) |
 | `NPC_HIT` | `npc` o `res`, `dir`, `power`, `head?`, `kind` | Le has dado a un ciudadano o a alguien de una sala (§9 nonies; `kind: "shot"`, con un disparo: §9 octies ter) |
 | `NPC_PAIR` | `npc`, `kind` | Le propones a un ciudadano una acción en pareja (§9 nonies) |
@@ -156,7 +158,7 @@ sesión, cuánto puede avanzar cada pose (en horizontal, 40 m/s sostenidos —el
 —el arco de las gafas—; en vertical, 12 m más 60 m/s). Lo que se pasa es un **salto**: la pose se
 reparte igual (ir junto a alguien, un teletransporte), pero durante 15 s `COLLECT` y `CHECKPOINT` dan
 `forbidden` (`detail.reason = "jump"`), la pose no pisa baldosas (`tiles@1`) y la carrera en curso se
-anula (de una ronda de salida conjunta, se queda fuera). También se anula (`RACE` `reset`, sin pedirlo) si en carrera se va más rápido que a pie (16 m/s
+anula (de una ronda de salida conjunta, se queda fuera; de un juego de pillar, también: §9 decies). También se anula (`RACE` `reset`, sin pedirlo) si en carrera se va más rápido que a pie (16 m/s
 con 8 m de margen). La primera pose de cada conexión es la **llegada** (portal, viaje): libre, salvo
 que la misma cuenta llegue más de 4 veces en 2 minutos al mismo lugar o que la sesión ya hubiera
 mandado poses antes (entonces cuenta como salto). Los clientes se mueven andando o en coche y no
@@ -271,6 +273,7 @@ Neón y el Circuito Vértigo de Arcade, en coche). No se corre contra el reloj c
 | `HIT_EVENT` | `from`, `to`, `move`, `style`, `dir` ([x, z], unitario), `power` (0–1), `fall`, `ko?` | Un golpe que ha llegado (a quien esté cerca). `ko` también cuando deja la vida a 0 |
 | `HEALTH` | `session_id`, `hp` (0–100), `at`, `down_until?` | La vida de alguien en el modo pelea (a esa persona y a quien esté cerca, §9 octies) |
 | `SHOT` | `from`, `weapon`, `at`, `to?`, `dir?`, `power?`, `fall?`, `ko?` | Un disparo (a quien esté cerca, también a quien dispara): hasta dónde llega (`at`) y, si le dio a alguien, cómo le llega, como en `HIT_EVENT` (§9 octies ter) |
+| `TAG_ROUND` | `entity_id`, `game`, `owner`, `mode`, `round`, `state` (`idle` \| `open` \| `countdown` \| `running` \| `done`), `now`, `min`, `go_at?`, `end_at?`, `players[]` (`session_id`, `name`, `player_no?`, `role` —`runner` \| `it` \| `out`—, `it_ms`, `tags`, `ready_at?`, `immune_until?`), `tag?` (`from`, `to`, `at`), `end?` (`time` \| `caught` \| `few`), `winners?` | Cómo va un juego de pillar, a todo el lugar, cada vez que cambia algo (§9 decies). Horas en el reloj del servidor (ms). Un cliente que no lo conozca lo ignora |
 | `NPC_HOST` | `session_id` (o `null`) | Quién lleva a los ciudadanos del lugar (§9 nonies) |
 | `NPC_STATE` | `t`, `cast[]` | El estado de los ciudadanos, de quien los lleva (a los demás y a quien llega) |
 | `NPC_HIT_EVENT` | `from`, `npc` o `res`, `dir`, `power`, `head?`, `kind` | Un golpe a un ciudadano (a quien los lleva) o a alguien de una sala (a quien esté cerca) |
@@ -719,6 +722,44 @@ están en `packages/protocol/src/weapons.ts` (`WEAPONS`), iguales en el servidor
   las lleva (cuenta al entrar en el lugar con armas). El cliente nunca dice qué ha ganado.
 - Nunca en el nexo, la plaza ni las gafas. Lo que se guarda es el inventario de la cuenta y lo que
   salió en cada cofre; los dos van en la exportación de datos y se borran con la cuenta.
+
+## 9 decies. Juegos de pillar
+
+Juegos entre varias personas que lleva el servidor, como las carreras de salida conjunta: un corro
+en el suelo (`tag@1`), rondas en memoria y nada del cliente que haya que creerse salvo «le he
+tocado», que se comprueba con las poses. Hoy, del sistema: **pilla-pilla por las azoteas** de
+Vertical (con parkour) e **Infección** en las calles de Distrito Cero. Como cualquier componente de
+actividad, puede ponerlo también un proyecto en su parcela.
+
+- **El corro.** Quien se queda en él al menos 1,5 s (la cabeza a menos de `radius` m en horizontal y
+  a su altura; en coche, no) entra en la ronda que se forma, sin cuenta también. Pasar por encima no
+  apunta a nadie. Caben 16. Con las personas que hacen falta (`min`: 2 en pilla-pilla, 3 en
+  infección) empieza la cuenta atrás: 10 s; quien entra con menos de 4 s por delante la alarga hasta
+  dejarle ese margen, sin pasar de 25 s desde que empezó. Salir del corro (más de 1 m), irse o llegar
+  de un salto, antes de empezar, es dejar la ronda; sin los mínimos, vuelve a esperar (`open`).
+- **Empieza** (`running`, hasta `end_at` = `go_at` + `seconds`). A su hora, quien no tenga una pose
+  reciente en el corro no entra. El servidor elige al azar quién la lleva (en infección, uno; dos con
+  8 personas o más): durante 5 s (`ready_at`) no puede pillar, y la web lo deja quieto en el corro
+  mientras los demás se dispersan.
+- **Pillar.** El cliente de quien la lleva manda `TAG` al tocar a alguien. En **pilla-pilla** la pasa:
+  la lleva el otro, que no puede pillar en 2 s, y a quien se la pasó no se le puede pillar en 5 s
+  (`immune_until`: sin devolución). En **infección**, el pillado queda infectado (`role: "it"`) y
+  pilla a los 2 s.
+- **La zona.** Quien pasa más de 4 s fuera del círculo de `area`, o 6 s sin mandar pose, se queda
+  fuera de la ronda (`out`); quien se desconecta o llega de un salto, al momento. Si era quien la
+  llevaba (o el último infectado), la lleva otro al azar. La web avisa al salir de la zona y pinta su
+  borde mientras se juega.
+- **El final** (`done`, con `end`): se acaba el tiempo (`time`); en infección, pillan a todos
+  (`caught`); o queda menos de dos personas (o nadie que la lleve: `few`). Ganan (`winners`): en
+  pilla-pilla, quien menos tiempo la ha llevado (`it_ms`, de los que siguen); en infección, quienes
+  siguen corriendo si se acabó el tiempo y, si pillaron a todos, quien más pilló (`tags`). Con `few`,
+  nadie. A las cuentas que ganan se les suma un punto del día con la clave del juego (`owner:id`): lo
+  cuentan los `scoreboard@1` de tipo `points` con su `id` (la semana, en los del sistema) y dos
+  insignias (una victoria en cada juego del sistema). Tras una ronda, el corro espera 6 s antes de
+  formar otra.
+- **`TAG_ROUND`**, a todo el lugar en cada cambio: quién entra o sale, la cuenta atrás, el comienzo,
+  cada toque (`tag`), quién se queda fuera y el final; y a quien llega, el de cada ronda en juego. Lo
+  único con temporizador es la ronda en juego (empezar a su hora y acabar a la suya): sin ronda, nada.
 
 ## 10. Códigos de error
 

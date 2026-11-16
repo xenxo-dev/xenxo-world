@@ -37,6 +37,7 @@ import { Activities } from "./Activities";
 import { PeopleFx } from "./people/PeopleFx";
 import { ShotFx } from "./people/ShotFx";
 import { LootChests } from "./LootChests";
+import { TagGames } from "./TagGames";
 import { VRTeleport } from "./xr/VRTeleport";
 import { HouseRival } from "./vehicle/Ghost";
 import skyDay from "./sky-day.json";
@@ -798,6 +799,7 @@ function Scene({ active, fixedDpr }: { active: boolean; fixedDpr: boolean }) {
         <Entities features={f} ambience={ambience} />
         <Portals features={f} active={active} />
         {!inNexo && <Activities />}
+        {!inNexo && <TagGames />}
         {!inNexo && <LootChests />}
         <Avatars />
         <PlaceMounted />

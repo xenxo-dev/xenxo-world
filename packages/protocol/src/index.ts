@@ -296,6 +296,25 @@ export const TilesV1 = z.object({
 });
 
 /**
+ * Juego de pillar (§9 decies): un corro en el suelo, de `radius` m y centrado en la entidad. Quien se
+ * queda dentro entra en la ronda que se forma; con las personas que hacen falta empieza la cuenta
+ * atrás y, a su hora, el servidor elige quién la lleva. `tag` (pilla-pilla): quien la lleva toca a
+ * alguien y pasa a llevarla el otro; gana quien menos tiempo la ha llevado. `infection`: quien es
+ * pillado se pasa a los que pillan; ganan quienes aguantan hasta el final o, si caen todos, quien más
+ * ha pillado. Se juega dentro de `area` (un círculo de `r` m; sin `c`, el del corro): quien pasa
+ * unos segundos fuera se queda fuera. Lo lleva el servidor con las poses (TAG_ROUND); el cliente solo
+ * avisa de que ha tocado a alguien (TAG).
+ */
+export const TagV1 = z.object({
+  id: ActivityId,
+  mode: z.enum(["tag", "infection"]).default("tag"),
+  radius: z.number().min(1.5).max(5).default(3),
+  area: z.object({ c: Vec3.optional(), r: z.number().min(10).max(120) }).default({ r: 40 }),
+  /** Lo que dura una ronda (s). */
+  seconds: z.number().int().min(30).max(300).default(120),
+});
+
+/**
  * Placa de impulso: quien la pisa corre más durante unos segundos (en el cliente; el servidor no
  * cuenta nada). Para las carreras: `speed` no pasa de 12 m/s, por debajo del límite con el que el
  * servidor anula un tiempo imposible. Las gafas la ignoran (allí manda el casco).
@@ -343,6 +362,7 @@ export const COMPONENTS = {
   "scoreboard@1": ScoreboardV1,
   "boost@1": BoostV1,
   "tiles@1": TilesV1,
+  "tag@1": TagV1,
   "behavior@1": BehaviorV1,
 } as const;
 
@@ -361,6 +381,7 @@ export const ACCEPTED_IN_V0: readonly ComponentKey[] = [
   "scoreboard@1",
   "boost@1",
   "tiles@1",
+  "tag@1",
 ];
 
 /**
@@ -382,6 +403,7 @@ export const ComponentsStrict = z
     "scoreboard@1": ScoreboardV1.optional(),
     "boost@1": BoostV1.optional(),
     "tiles@1": TilesV1.optional(),
+    "tag@1": TagV1.optional(),
     "behavior@1": BehaviorV1.optional(),
   })
   .strict();
@@ -632,6 +654,11 @@ export const RespawnMsg = envelope("RESPAWN", z.object({}));
  * quién le da (alguien en el modo pelea a su alcance; a la gente de la ciudad, con NPC_HIT `shot`).
  */
 export const ShootMsg = envelope("SHOOT", z.object({ weapon: WeaponIdSchema, at: Vec3, to: SessionRef.optional() }));
+/**
+ * En un juego de pillar (`tag@1`, §9 decies): has tocado a `to`. Solo cuenta si la llevas (o estás
+ * infectado), ya puedes pillar, `to` corre en tu ronda y vuestras poses están juntas de verdad.
+ */
+export const TagMsg = envelope("TAG", z.object({ to: SessionRef }));
 
 /*
  * La gente de las ciudades, compartida (§9 nonies): una sesión del lugar (la que elige el servidor,
@@ -713,6 +740,7 @@ export const ClientMessage = z.discriminatedUnion("type", [
   HitMsg,
   RespawnMsg,
   ShootMsg,
+  TagMsg,
   NpcStateMsg,
   NpcHitMsg,
   NpcPairMsg,
@@ -1035,6 +1063,56 @@ export const ShotMsg = envelope(
     ko: z.boolean().optional(),
   }),
 );
+/** Personas por ronda en un juego de pillar (§9 decies). */
+export const TAG_PLAYERS_MAX = 16;
+/** Qué es cada cual en una ronda de pillar: corre, la lleva (en `infection`, está infectado) o se ha quedado fuera. */
+export const TAG_ROLES = ["runner", "it", "out"] as const;
+export const TagPlayer = z.object({
+  session_id: z.string(),
+  name: z.string(),
+  player_no: z.number().int().min(0).optional(),
+  role: z.enum(TAG_ROLES),
+  /** Cuánto la ha llevado (ms) hasta `now`. */
+  it_ms: z.number().int().min(0),
+  /** A cuántos ha pillado. */
+  tags: z.number().int().min(0),
+  /** Hasta cuándo (hora del servidor) no puede pillar: quien la lleva al empezar y quien acaba de pasar a llevarla. */
+  ready_at: z.number().optional(),
+  /** Hasta cuándo no se le puede pillar: quien acaba de pasarla (sin devolución). */
+  immune_until: z.number().optional(),
+});
+export type TagPlayer = z.infer<typeof TagPlayer>;
+/**
+ * Cómo va un juego de pillar (`tag@1`, §9 decies), a todo el lugar cada vez que cambia algo: alguien
+ * entra en el corro o sale (`open`: hacen falta `min` personas; `countdown`: empieza a la hora `go_at`
+ * del servidor), empieza (`running`, hasta `end_at`), alguien pilla (`tag`) o se queda fuera, y al
+ * acabar (`done`: por qué, `end`, y quién gana, `winners`). `idle`: ya no queda nadie en el corro.
+ * `now` es la hora del servidor al mandarlo.
+ */
+export const TagRoundMsg = envelope(
+  "TAG_ROUND",
+  z.object({
+    /** La entidad del corro. */
+    entity_id: EntityId,
+    game: ActivityId,
+    /** Dueño del juego (`system` o `prj_<id>`), como en sus entidades. */
+    owner: z.string(),
+    mode: z.enum(["tag", "infection"]),
+    round: z.number().int().min(0),
+    state: z.enum(["idle", "open", "countdown", "running", "done"]),
+    now: z.number(),
+    min: z.number().int().min(2),
+    go_at: z.number().optional(),
+    end_at: z.number().optional(),
+    /** En pilla-pilla, por quien menos la ha llevado; en infección, primero quienes corren. */
+    players: z.array(TagPlayer).max(TAG_PLAYERS_MAX),
+    /** El último toque: quién pilló a quién y cuándo. */
+    tag: z.object({ from: z.string(), to: z.string(), at: z.number() }).optional(),
+    /** Por qué acabó: se acabó el tiempo, pillaron a todos (infección) o quedaba muy poca gente. */
+    end: z.enum(["time", "caught", "few"]).optional(),
+    winners: z.array(z.string()).max(TAG_PLAYERS_MAX).optional(),
+  }),
+);
 /** Quién lleva ahora a los ciudadanos del lugar (§9 nonies); `null`, nadie. */
 export const NpcHostMsg = envelope("NPC_HOST", z.object({ session_id: z.string().nullable() }));
 /** Lo que alguien le ha hecho a un ciudadano (`npc`: solo a quien los lleva) o a alguien de una sala (`res`: a quien esté cerca). */
@@ -1078,6 +1156,7 @@ export const ServerMessage = z.discriminatedUnion("type", [
   HitEventMsg,
   HealthMsg,
   ShotMsg,
+  TagRoundMsg,
   NpcHostMsg,
   NpcStateMsg,
   NpcHitEventMsg,

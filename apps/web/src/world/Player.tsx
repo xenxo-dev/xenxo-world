@@ -27,6 +27,7 @@ import { rivalNear } from "./vehicle/rivals";
 import { bumpNpcs, camKick, parkourFall, peopleBusy, peopleFrame, prepareFights, resetPeople, selfFx, startStrike, striking } from "./people/selfPeople";
 import { cancelSlide, slideDir, slideEmote, slideP, slideStep, sliding, startSlide } from "./people/slide";
 import { people } from "../net/people-store";
+import { tagHold } from "../net/tag-store";
 import { fighterNear } from "../net/people";
 import { PoseSender, RACE_RANGE_M, SEND_EVERY_MS, SEND_TIGHT_MS, TIGHT_RANGE_M } from "../net/pose-send";
 import { CAPTURED_GESTURES, preloadParkour, UPPER_EMOTES } from "./animation";
@@ -374,6 +375,11 @@ export function Player({ active }: { active: boolean }) {
         const unit = moveScale(input.move.x, input.move.y);
         let wantX = (_fwd.x * input.move.y + _right.x * input.move.x) * unit * speed;
         let wantZ = (_fwd.z * input.move.y + _right.z * input.move.x) * unit * speed;
+        // Juegos de pillar: quien la lleva espera quieto en el corro al empezar (net/tag-store.ts).
+        if (tagHold.on) {
+          wantX = wantZ = 0;
+          input.jump = false;
+        }
 
         // Modo pelea (Q, E, R o el HUD): combinaciones de golpes; llegan a quien esté en modo pelea a
         // tu alcance o, si no hay nadie, a la gente de decorado que tengas delante (selfPeople.ts).

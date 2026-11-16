@@ -13,6 +13,7 @@ import { PortalCard, TravelToast } from "./hud/PortalCard";
 import { Unavailable } from "./hud/Unavailable";
 import { Capacity } from "./hud/Capacity";
 import { ActivityHud } from "./hud/ActivityHud";
+import { TagHud } from "./hud/TagHud";
 import { LootCard } from "./hud/WeaponHud";
 import { SandboxTools } from "./hud/SandboxTools";
 import { GuideButton, GuideCard, NexoTip, TouchHint } from "./hud/GuideCard";
@@ -268,6 +269,7 @@ export function App() {
           <Unavailable />
           <Capacity />
           <ActivityHud />
+          <TagHud />
           <LootCard />
           <SandboxTools />
           <GuideButton />
