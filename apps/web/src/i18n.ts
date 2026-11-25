@@ -2842,6 +2842,11 @@ export function t(key: Key, vars: Record<string, string | number> = {}): string 
   return s;
 }
 
+/** Un texto en un idioma concreto (no el elegido): lo que dicen los ciudadanos, igual para todos (people/talk.ts). */
+export function textIn(l: Lang, key: Key): string {
+  return DICTS[l][key];
+}
+
 /** ¿Existe esa clave? (para las que se montan con datos: `guide.<distrito>.<sitio>`). */
 export function hasKey(key: string): key is Key {
   return key in DICTS[lang];

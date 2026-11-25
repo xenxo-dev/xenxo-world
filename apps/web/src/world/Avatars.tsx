@@ -30,6 +30,7 @@ import { driverFx, driverLean, releaseDriver } from "./vehicle/driver";
 import { dropRival, putRival } from "./vehicle/rivals";
 import { CarPlayout } from "../net/car-playout";
 import { TurnLean } from "./leap";
+import { chatSay, SAY_OVER, sayFromChat } from "./people/say-chat";
 
 /** Gestos con la puerta del coche abierta (subir y bajar). */
 const DOOR_OPEN = new Set(["car_open", "car_in", "car_out"]);
@@ -252,6 +253,8 @@ function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; n
   /** Y se dibuja donde está ahora, no donde estaba cuando mandó su última pose (net/car-playout.ts). */
   const carNow = useRef(new CarPlayout()).current;
   const feetAt = useRef(new THREE.Vector3()).current;
+  /** Lo que dice en el chat, con el cuerpo (people/talk.ts): el último mensaje suyo que se ha mirado. */
+  const said = useRef(chatSay()).current;
   useEffect(() => {
     remoteFeet.set(sessionId, feetAt);
     return () => {
@@ -399,6 +402,7 @@ function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; n
       body.current.quaternion.copy(car.q).multiply(_seatQ.setFromAxisAngle(_seatX, -lean)).multiply(_halfTurn);
       driverFx(motion.fx, car.p, car.q, 1, atWheel ? 1 : 0);
       seatedFx.current = true;
+      sayFromChat(sessionId, motion, said, dt, false);
       feetAt.copy(body.current.position);
     } else {
       if (seatedFx.current) {
@@ -455,6 +459,9 @@ function RemoteAvatar({ sessionId, name, avatar, paint }: { sessionId: string; n
         fxr.reachL.w = fxr.reachR.w = 0;
         gunHands.current = false;
       }
+      // Lo que dice en el chat, con el cuerpo (people/talk.ts): de pie, andando o sentado; no colgado,
+      // con el arma, en el modo pelea ni haciendo otro gesto.
+      sayFromChat(sessionId, motion, said, dt, !pkE && !pkHang.on && !held && !motion.fight && (!d.emote || SAY_OVER.has(d.emote)));
       const inW = hangE ? 1 : pkHang.on ? Math.max(0, 1 - Math.max(0, pkHang.t - 0.44) / 0.5) : 0;
       pkHang.off += (inW - pkHang.off) * Math.min(1, dt * 12);
       const rigR = fxr?.rig;

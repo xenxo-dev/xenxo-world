@@ -53,6 +53,7 @@ jobs:
       - run: npm run test:race -w @xenxo/web
       # Los juegos de pillar (pilla-pilla y infección): el corro, los toques, quién gana y dónde están.
       - run: npm run test:tag -w @xenxo/web
+      - run: npm run test:talk -w @xenxo/web
       # El servidor de distritos (workerd en una máquina propia): que siga compilando.
       - run: npm run build:district-host
       # Y sus scripts (portátil y relevo del NAS): que al menos se lean bien.

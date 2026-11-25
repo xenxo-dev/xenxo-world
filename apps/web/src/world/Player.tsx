@@ -36,6 +36,7 @@ import { hangLift, ledgeHands } from "./parkour/ledge";
 import { gun, gunFrame, resetGun, SELF_GUN } from "./people/guns";
 import { HeldWeapon } from "./people/HeldWeapon";
 import { cineCamera } from "./cine/camera";
+import { chatSay, SAY_OVER, sayFromChat } from "./people/say-chat";
 import { cine } from "./cine/state";
 
 const WALK = 2.1; // m/s
@@ -156,6 +157,8 @@ export function Player({ active }: { active: boolean }) {
   // Al llegar por un enlace directo (/d/<distrito>/<sitio>) ya se sabe hacia dónde se mira.
   const bodyYaw = useRef(spawn.yaw);
   const emoteUntil = useRef(0);
+  /** Lo que escribo en el chat, con el cuerpo (people/talk.ts). */
+  const said = useRef(chatSay()).current;
   const inXR = useXR((s) => s.session != null);
   const driving = useDrive();
   const cars = useCars();
@@ -521,6 +524,8 @@ export function Player({ active }: { active: boolean }) {
           input.emote = null;
         }
         if (free && !_pf.lock && !striking() && motion.emote && ((amount > 0.05 && !UPPER_EMOTES.has(motion.emote)) || motion.airborne || state.clock.elapsedTime > emoteUntil.current)) motion.emote = null;
+        // Lo que acabo de escribir en el chat, con el cuerpo (people/talk.ts): como los demás me ven.
+        sayFromChat(world.sessionId, motion, said, dt, drive.phase === "none" && !motion.pk && !motion.fight && !motion.weapon && !peopleBusy() && !striking() && (!motion.emote || SAY_OVER.has(motion.emote)));
 
         // La altura de la cámara sigue al cuerpo con suavidad (al subir un escalón no da un tirón).
         c3.y += (body.y - c3.y) * Math.min(1, dt * (body.grounded ? 10 : 25));

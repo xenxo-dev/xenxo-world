@@ -98,6 +98,11 @@ export interface Features {
    */
   springs: number;
   /**
+   * Hablar con el cuerpo (people/talk.ts): hasta qué distancia de la cámara (m) se ve gesticular a
+   * quien escribe en el chat (la gente de decorado, algo menos; 0 = nadie). Más lejos, ni se calcula.
+   */
+  talk: number;
+  /**
    * Disparos a la vez (armas de Distrito Cero, world/people/ShotFx.tsx): cuántos rayos con su
    * destello se dibujan como mucho (los más viejos dejan sitio a los nuevos).
    */
@@ -110,10 +115,10 @@ export interface Features {
 }
 
 export const FEATURES: Record<Tier, Features> = {
-  low: { dpr: [0.75, 1], antialias: false, pbr: false, post: false, bloom: false, ao: false, shadows: 0, probe: false, pointLights: false, lightPools: true, skyline: 48, flyerTris: 500, lod: "light", textures: 512, normalMaps: false, avatarFill: true, nexoCity: 0.5, pedestrians: 3, traffic: 8, crowd: 5, residents: 2, rain: 900, ragdolls: 2, springs: 5, shots: 8, clipFps: 24 },
-  medium: { dpr: [1, 1.5], antialias: true, pbr: true, post: true, bloom: true, ao: false, shadows: 0, probe: false, pointLights: false, lightPools: true, skyline: 96, flyerTris: 900, lod: "light", textures: 512, normalMaps: true, avatarFill: true, nexoCity: 0.75, pedestrians: 5, traffic: 14, crowd: 8, residents: 3, rain: 1600, ragdolls: 3, springs: 12, shots: 12, clipFps: 30 },
-  high: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: false, shadows: 1024, probe: true, pointLights: true, lightPools: false, skyline: 150, flyerTris: 1800, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1, pedestrians: 7, traffic: 22, crowd: 12, residents: 4, rain: 3200, ragdolls: 5, springs: 25, shots: 20, clipFps: 30 },
-  ultra: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: true, shadows: 2048, probe: true, pointLights: true, lightPools: false, skyline: 220, flyerTris: 2700, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1, pedestrians: 9, traffic: 30, crowd: 16, residents: 6, rain: 4800, ragdolls: 8, springs: 40, shots: 28, clipFps: 60 },
+  low: { dpr: [0.75, 1], antialias: false, pbr: false, post: false, bloom: false, ao: false, shadows: 0, probe: false, pointLights: false, lightPools: true, skyline: 48, flyerTris: 500, lod: "light", textures: 512, normalMaps: false, avatarFill: true, nexoCity: 0.5, pedestrians: 3, traffic: 8, crowd: 5, residents: 2, rain: 900, ragdolls: 2, springs: 5, talk: 14, shots: 8, clipFps: 24 },
+  medium: { dpr: [1, 1.5], antialias: true, pbr: true, post: true, bloom: true, ao: false, shadows: 0, probe: false, pointLights: false, lightPools: true, skyline: 96, flyerTris: 900, lod: "light", textures: 512, normalMaps: true, avatarFill: true, nexoCity: 0.75, pedestrians: 5, traffic: 14, crowd: 8, residents: 3, rain: 1600, ragdolls: 3, springs: 12, talk: 20, shots: 12, clipFps: 30 },
+  high: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: false, shadows: 1024, probe: true, pointLights: true, lightPools: false, skyline: 150, flyerTris: 1800, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1, pedestrians: 7, traffic: 22, crowd: 12, residents: 4, rain: 3200, ragdolls: 5, springs: 25, talk: 28, shots: 20, clipFps: 30 },
+  ultra: { dpr: [1, 2], antialias: false, pbr: true, post: true, bloom: true, ao: true, shadows: 2048, probe: true, pointLights: true, lightPools: false, skyline: 220, flyerTris: 2700, lod: "detailed", textures: 1024, normalMaps: true, avatarFill: true, nexoCity: 1, pedestrians: 9, traffic: 30, crowd: 16, residents: 6, rain: 4800, ragdolls: 8, springs: 40, talk: 36, shots: 28, clipFps: 60 },
 };
 
 /* ------------------------------------------------------------------ */
@@ -208,6 +213,8 @@ function portableClamp(f: Features, xr: boolean): Features {
     ragdolls: Math.min(f.ragdolls, xr ? 2 : 3),
     // En las gafas, el pelo de quien tienes cerca; en el móvil, algo más.
     springs: Math.min(f.springs, xr ? 6 : 10),
+    // En las gafas, quien tienes cerca; en el móvil, algo más.
+    talk: Math.min(f.talk, xr ? 10 : 16),
     shots: Math.min(f.shots, 12),
     // En las gafas no hay canvas que grabar; en el móvil, a 24 como mucho.
     clipFps: xr ? 0 : Math.min(f.clipFps, 24),

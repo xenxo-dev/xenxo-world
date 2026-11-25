@@ -1,4 +1,5 @@
 import type { PersonFx } from "./people/rig";
+import type { SayRun } from "./people/talk";
 
 /**
  * Estado de movimiento de un personaje, compartido entre quien lo mueve
@@ -26,6 +27,11 @@ export interface Motion {
    * jugando a una máquina): solo la parte de arriba del cuerpo. Lo usan los ciudadanos.
    */
   gesture?: string | null;
+  /**
+   * Lo que está diciendo en el chat (o la gente de las ciudades, su frase), con el cuerpo: people/talk.ts.
+   * Lo pone y lo avanza quien lo mueve (`t`, aunque no se dibuje); el animador lo pone encima de todo.
+   */
+  say?: SayRun | null;
   /** No se dibuja (lejos o fuera de la vista): el avatar no se anima. */
   hidden?: boolean;
   /**

@@ -24,6 +24,7 @@ import { BodyShape } from "./shape";
 import type { HandFit, Swivel } from "./around";
 import type { VRMAnimation } from "@pixiv/three-vrm-animation";
 import type { Q4, RagdollHandle, RagdollJoint, RagdollPart, RagdollSpec, RagdollWorldApi, V3 } from "./ragdoll";
+import type { Trunk } from "./talk";
 
 export interface Target {
   x: number;
@@ -1188,6 +1189,42 @@ export class Rig {
     });
     if (out.some((t) => !(t.front > -1e3 && t.back > -1e3) || t.side <= 0)) return null;
     return out.map((t) => ({ front: t.front * s, back: t.back * s, side: t.side * s }));
+  }
+
+  /**
+   * Su tronco, para hablar con el cuerpo (people/talk-pose.ts → fitArm): por fuera (lo que abulta con
+   * la ropa, de su malla en reposo) alrededor de la cadera, la cintura, el pecho y lo alto del pecho;
+   * hacia dónde mira el modelo y lo que miden su brazo y su mano (m). Se mide la primera vez que habla.
+   */
+  private trunkRest: Trunk | null | undefined;
+  get trunk(): Trunk | null {
+    if (this.trunkRest !== undefined) return this.trunkRest;
+    const size = this.size;
+    const f = this.frame;
+    if (!f) return (this.trunkRest = null);
+    const rest = this.vrm.humanoid.normalizedRestPose;
+    const s = this.worldScale();
+    const at = (b: Bone) => {
+      const out = new THREE.Vector3();
+      for (let n: Bone | null = b; n; n = VRMHumanBoneParentMap[n] as Bone | null) {
+        const p = rest[n]?.position;
+        if (p) (out.x += p[0]!), (out.y += p[1]!), (out.z += p[2]!);
+      }
+      return out;
+    };
+    const len = (b: Bone) => new THREE.Vector3().fromArray(rest[b]?.position ?? [0, 0, 0]).length() * s;
+    const which = (["hips", "spine", "chest", "upperChest"] as const).filter((b) => rest[b]);
+    const bands = this.torso(which.map(at), f.fwd, f.left, size.width / s, s);
+    if (!bands) return (this.trunkRest = null);
+    this.trunkRest = {
+      fwd: [f.fwd.x, f.fwd.y, f.fwd.z],
+      left: [f.left.x, f.left.y, f.left.z],
+      k: size.arm / 0.49,
+      arm: [len("leftLowerArm") || size.arm * 0.51, len("leftHand") || size.arm * 0.49],
+      hand: size.hand,
+      bands: which.map((bone, i) => ({ bone, ...bands[i]! })),
+    };
+    return this.trunkRest;
   }
 
   /** Lo que ocupa su cuerpo (shape.ts): se mide la primera vez que se pide (en el primer abrazo). */

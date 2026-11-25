@@ -152,6 +152,7 @@ export async function loadAvatar(url: string, opts: { decor?: boolean } = {}): P
 }
 
 const _sp = new THREE.Vector3();
+const _talkAt = new THREE.Vector3();
 const _hand = new THREE.Vector3();
 
 /* ------------------------------------------------------------------ */
@@ -222,7 +223,14 @@ function fromVrm(vrm: VRM, scene: THREE.Group, decor: boolean): LoadedAvatar {
     update: (dt, m, view) => {
       if (animator.ready) {
         if (m.fx) m.fx.rig = animator.rig;
-        animator.update(dt, m.speed, m.airborne, m.pk ?? m.emote, !!m.fight, m.fx, m.gesture, m.pk ? m.pkP : undefined, m.vy, m.emoteAt);
+        // Lo que dice en el chat (people/talk.ts), solo cerca de la cámara (`FEATURES.talk`; la gente de decorado, algo menos).
+        let say = m.say ?? null;
+        if (say) {
+          const range = graphics.features.talk * (decor ? 0.6 : 1);
+          if (range <= 0) say = null;
+          else if (view && object.getWorldPosition(_talkAt).distanceToSquared(view) > range * range) say = null;
+        }
+        animator.update(dt, m.speed, m.airborne, m.pk ?? m.emote, !!m.fight, m.fx, m.gesture, m.pk ? m.pkP : undefined, m.vy, m.emoteAt, say);
       } else {
         // Respaldo: paso procedural sencillo hasta que cargan los clips.
         const k = walkAmount(Math.abs(m.speed));

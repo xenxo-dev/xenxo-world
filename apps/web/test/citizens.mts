@@ -3,7 +3,7 @@
  * mundo de mentira: cajas de la ciudad, suelo plano, golpes que duran un poco):
  *
  *   - el mapa de cada distrito: grande, unido y sin atravesar paredes (los caminos entre sitios);
- *   - contestan a un saludo, te siguen si los llamas con la mano, saltan a un lado si viene el coche,
+ *   - contestan a un saludo, te miran si hablas en el chat, te siguen si los llamas con la mano, saltan a un lado si viene el coche,
  *     te tienen miedo y se van si les pegas (y después no quieren chocar los cinco), chocan los cinco
  *     si les apetece, se dejan empujar;
  *   - no se pisan entre ellos, no se quedan atascados, nada se vuelve NaN y van a sus sitios;
@@ -291,6 +291,18 @@ console.log("Ciudadanos (Arcade):");
   }
   Object.assign(me(f), { wx: 0, wz: 0 });
   check(ez - e.body.z > 0.6, `le empujas y se aparta (${(ez - e.body.z).toFixed(2)} m en 1 s)`);
+
+  // Hablas en el chat (con el cuerpo: people/talk.ts) y te mira quien tienes al lado, sin gesticular.
+  const g = f.sim.cast[3]!;
+  stage(f, g, spot.x + 2, spot.z, 0);
+  g.yaw = facing(1, 0);
+  Object.assign(me(f), { x: spot.x, z: spot.z + 3, yaw: facing(0, -1) });
+  run(f, 2);
+  g.glanceNext = f.sim.clock + 60;
+  f.sim.heard("me");
+  run(f, 0.3);
+  const look = g.motion.fx!.look;
+  check(look.w > 0.5 && Math.hypot(look.x - me(f).x, look.z - me(f).z) < 0.1 && !g.motion.gesture, `hablas en el chat y te mira quien está cerca (${look.w.toFixed(2)}), sin gesticular`);
 }
 
 /* --- Muchos a la vez --- */

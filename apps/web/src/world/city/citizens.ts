@@ -281,6 +281,8 @@ export interface Citizen {
   speech: string | null;
   speechUntil: number;
   said: number;
+  /** La última frase que ha dicho también con el cuerpo (people/talk.ts, en CityLife.tsx). */
+  sayN: number;
   /** Atascado: cuánto, cuántas veces seguidas, y apartarse un momento a un lado. */
   stuck: number;
   stuckN: number;
@@ -330,6 +332,8 @@ export const REPLY: Record<string, { g: string; full?: boolean; say?: string[] }
   point: { g: "shrug", say: ["npc.where"] },
 };
 /** Gestos que los tienen en su sitio (sentado, jugando…): contestan con los brazos, sin levantarse. */
+/** Hasta dónde se oye a quien habla en el chat (m): los de más cerca le miran (`heard`). */
+const HEAR = 7;
 export const POSED = new Set(["sit", "arcade", "talk", "dance", "phone", "interact", "crouch"]);
 /** Sitios: cuánto apetece cada uno (después, según cada cual). */
 const WANT: Record<PoiKind, number> = { sit: 1.1, play: 1.1, vend: 0.7, window: 0.9, look: 0.8, hang: 1.0, dance: 0.35, watch: 0.7, corner: 0.5 };
@@ -475,6 +479,7 @@ export class CitySim {
         speech: null,
         speechUntil: 0,
         said: 0,
+        sayN: 0,
         stuck: 0,
         stuckN: 0,
         side: 0,
@@ -562,6 +567,26 @@ export class CitySim {
         said = true;
         this.say(c, "npc.fight");
       }
+    }
+  }
+
+  /**
+   * Alguien ha escrito en el chat (lo dice con el cuerpo: people/talk.ts): los de cerca que no estén a
+   * otra cosa le miran un rato, sin gesticular (eso es de quien habla). `who`: «me» o su sesión.
+   */
+  heard(who: string) {
+    // Viéndolos como llegan, de eso se encarga quien los lleva (su mirada viaja con su estado).
+    if (this.watching()) return;
+    const p = this.whereIs(who);
+    if (!p) return;
+    for (const c of this.cast) {
+      if (!c.near || c.knocked || c.doing === "flee" || c.doing === "dodge" || c.doing === "pair" || c.doing === "follow" || c.doing === "down") continue;
+      const d = Math.hypot(c.body.x - p.x, c.body.z - p.z);
+      if (d > HEAR || d < 0.5 || Math.abs(c.body.y - p.y) > 2) continue;
+      this.lookAt(c, p.x, p.y + 1.55, p.z, 0.8);
+      c.who = who;
+      c.glance = this.clock + 1.5 + c.curious * 1.5 + this.r() * 1.5;
+      c.glanceNext = c.glance + 3;
     }
   }
 

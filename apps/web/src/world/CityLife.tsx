@@ -16,7 +16,7 @@ import { useGLTF } from "@react-three/drei";
 import districts from "../../../realtime/src/districts.json";
 import { SEED_ASSETS } from "../../../realtime/src/seed-assets";
 import { assetUrl } from "../config";
-import { world } from "../net/world-store";
+import { chat, world } from "../net/world-store";
 import { people } from "../net/people-store";
 import { npcPair } from "../net/people";
 import type { Ambience, Features } from "./graphics";
@@ -30,6 +30,9 @@ import { buildNav, districtOfChunk } from "./city/nav";
 import { castFor, CitySim, type Citizen } from "./city/citizens";
 import { cityEnv } from "./city/env";
 import { Speech } from "./city/Speech";
+import { hasKey, textIn } from "../i18n";
+import { planSay, sayDone, seedOf } from "./people/talk";
+import { SAY_OVER } from "./people/say-chat";
 
 const BY_CHUNK = new Map((districts.districts as { id: string; chunk: string }[]).map((d) => [d.chunk, d.id]));
 
@@ -58,6 +61,24 @@ const CitizenView = memo(function CitizenView({ c, seed }: { c: Citizen; seed: s
     </group>
   );
 });
+
+/**
+ * Lo que dice un ciudadano, también con el cuerpo (people/talk.ts), si no está haciendo otro gesto:
+ * del texto en castellano de su frase y de su número de frase, así lo ve igual todo el mundo (lea en
+ * el idioma que lea). Huyendo, en el suelo, en pareja o apartándose del coche, no.
+ */
+function citizenSays(c: Citizen, dt: number) {
+  const m = c.motion;
+  const free = c.drawn && !c.knocked && c.doing !== "flee" && c.doing !== "dodge" && c.doing !== "pair" && c.doing !== "down" && !m.gesture && (!m.emote || SAY_OVER.has(m.emote));
+  const run = m.say;
+  if (run) {
+    run.t += dt;
+    if (!free || sayDone(run)) m.say = null;
+  }
+  if (c.said === c.sayN) return;
+  c.sayN = c.said;
+  if (free && c.speech && hasKey(c.speech)) m.say = { plan: planSay(textIn("es", c.speech), seedOf(`${c.id}:${c.said}`)), t: 0 };
+}
 
 export function Citizens({ chunk, count }: { chunk: string; count: number }) {
   const id = districtOfChunk(chunk);
@@ -91,11 +112,23 @@ export function Citizens({ chunk, count }: { chunk: string; count: number }) {
     if (sim) sim.drawnMax = count;
   }, [sim, count]);
 
+  // Lo último que se ha dicho en el chat: los de cerca de quien lo dice le miran (city/citizens.ts → heard).
+  const heard = useRef({ v: -1, id: "" });
   // Antes que los personajes (prioridad −0,5, después de las caídas de PeopleFx): así el esqueleto de
-  // quien cae se coloca ya con su grupo donde toca este frame.
+  // quien cae se coloca ya con su grupo donde toca este frame. Y lo que dice cada uno, con el cuerpo.
   useFrame((_, dt) => {
     if (!sim) return;
     sim.frame(dt);
+    for (const c of sim.cast) citizenSays(c, dt);
+    const h = heard.current;
+    if (chat.getVersion() !== h.v) {
+      h.v = chat.getVersion();
+      const m = chat.messages[chat.messages.length - 1];
+      if (m && m.id !== h.id) {
+        h.id = m.id;
+        if (world.serverNow() - m.t < 2500) sim.heard(m.session_id === world.sessionId ? "me" : m.session_id);
+      }
+    }
     if (sim.version !== seen.current) {
       seen.current = sim.version;
       setMounted((prev) => {

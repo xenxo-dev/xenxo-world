@@ -631,7 +631,7 @@ const _qh = new THREE.Quaternion();
  * `fingers` (no nulos), la mano queda así; si no, con el giro del antebrazo y la muñeca de `twist` y
  * `wrist`.
  */
-function solveArm(side: 1 | -1, arm: { at: number[]; pole: number[]; twist: number; wrist: number[]; palm?: number[]; fingers?: number[] }, upper: THREE.Quaternion, lower: THREE.Quaternion, hand: THREE.Quaternion) {
+export function solveArm(side: 1 | -1, arm: { at: number[]; pole: number[]; twist: number; wrist: number[]; palm?: number[]; fingers?: number[] }, upper: THREE.Quaternion, lower: THREE.Quaternion, hand: THREE.Quaternion) {
   _t.set(arm.at[0]!, arm.at[1]!, arm.at[2]!);
   _p.set(arm.pole[0]!, arm.pole[1]!, arm.pole[2]!);
   twoBone(ARM[0], ARM[1], _t, _p, _dirA, _dirB, _bend);
@@ -715,6 +715,12 @@ function handShapes(): HandShapes {
     }
   }
   return shapes;
+}
+
+let _hands: HandShapes | null = null;
+/** Las formas de la mano de los gestos (en los ejes de VRM 1.0), montadas una vez: las usa también hablar (talk.ts). */
+export function gestureHands(): Readonly<Record<Hand, Map<string, THREE.Quaternion>>> {
+  return (_hands ??= handShapes());
 }
 
 /** Bases de los gestos (reposo y guardia) y la animación de la que salen los puños. */

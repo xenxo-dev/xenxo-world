@@ -19,6 +19,8 @@ import { buildGesture, buildGuard, interpolant, PROCEDURAL, touchAt } from "./pe
 import { onPhone } from "./people/phone";
 import { Rig, type PersonFx } from "./people/rig";
 import { ALL_FINGER_BONES, handTable, restFix, type BaseHand, type RestFix } from "./people/hands";
+import { newSayFrame, sampleSay, type SayRun } from "./people/talk";
+import { poseSay, sayBones, type SayBones } from "./people/talk-pose";
 import CAPTURED from "./people/captured-gestures.json";
 
 /**
@@ -358,6 +360,11 @@ export class VrmAnimator {
   private phoneW = 0;
   /** Cuánto se tocan las palmas en este frame (people/gestures.ts → touchAt), para el esqueleto. */
   private touch = 0;
+  /** Hablar con el cuerpo (people/talk.ts): la actuación en curso (o la que se apaga), su peso y sus huesos. */
+  private sayRun: SayRun | null = null;
+  private sayW = 0;
+  private readonly sayOut = newSayFrame();
+  private sayB: SayBones | null = null;
   /** Los dedos (nodo normalizado y su giro de ahora, que va hacia la mano de base). */
   private fingers: { node: THREE.Object3D; bone: string; now: THREE.Quaternion }[] | null = null;
   private readonly _dur: Record<string, number> = {};
@@ -454,8 +461,9 @@ export class VrmAnimator {
    * `emote` el gesto pedido (o null), `fight` si está en modo pelea y `fx` lo que la gente le hace al
    * esqueleto (golpes, parejas, caídas). Los pesos se suavizan para que las transiciones no den saltos.
    * `emoteAt`: el gesto, quieto en ese momento de su clip (s; el estudio de gestos, junto a su vídeo).
+   * `say`: lo que está diciendo en el chat (people/talk.ts), encima de todo lo de arriba.
    */
-  update(dt: number, speed: number, airborne: boolean, emote: string | null, fight = false, fx?: PersonFx | null, gesture?: string | null, pkP?: number, vy?: number, emoteAt?: number) {
+  update(dt: number, speed: number, airborne: boolean, emote: string | null, fight = false, fx?: PersonFx | null, gesture?: string | null, pkP?: number, vy?: number, emoteAt?: number, say?: SayRun | null) {
     const back = speed < 0;
     speed = Math.abs(speed);
     const target: Record<string, number> = {};
@@ -615,6 +623,8 @@ export class VrmAnimator {
       this.touch = Math.max(this.touch, touchAt(known.clip, this.emoteAction.time) * w);
     }
     this.rig.touch = this.touch;
+    // Lo que dice en el chat, con los brazos, las manos, los hombros y la cabeza (people/talk.ts).
+    this.applySay(dt, say ?? null, speed);
     // Con el teléfono, la mano a la oreja (rig.ts → phone), entrando y saliendo con el gesto.
     this.phoneW += ((onPhone(emote, gesture) ? 1 : 0) - this.phoneW) * Math.min(1, dt / 0.3);
     this.rig.phone = this.phoneW < 0.005 ? 0 : this.phoneW;
@@ -707,6 +717,25 @@ export class VrmAnimator {
     const time = g.once ? Math.min(g.t, clip.duration) : g.t % clip.duration;
     this.applyLayer(g.clip, time, g.w);
     this.touch = Math.max(this.touch, touchAt(g.clip, time) * g.w);
+  }
+
+  /**
+   * Hablar con el cuerpo (people/talk.ts): encima de lo que haya dejado todo lo anterior, la actuación
+   * de este momento con su peso (people/talk-pose.ts). Al acabar o cortarse, se apaga poco a poco.
+   */
+  private applySay(dt: number, run: SayRun | null, speed: number) {
+    if (run) this.sayRun = run;
+    this.sayW += ((run ? 1 : 0) - this.sayW) * Math.min(1, dt / (run ? 0.12 : 0.3));
+    const r = this.sayRun;
+    if (!r) return;
+    if (this.sayW < 0.002) {
+      if (!run) this.sayRun = null;
+      return;
+    }
+    const f = sampleSay(r, this.sayOut);
+    const b = (this.sayB ??= sayBones(this.vrm));
+    // Corriendo, los brazos se van soltando (nadie gesticula a la carrera); las manos, fuera de su tronco.
+    poseSay(b, f, this.sayW, 1 - THREE.MathUtils.smoothstep(speed, 2.6, 4.2), this.v0, dt, this.rig.trunk);
   }
 
   dispose() {
