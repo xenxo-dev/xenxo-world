@@ -54,7 +54,8 @@ const pose = (ik: V3, fingers: V3, palm: V3, hand: Hand, pole: V3 = POLE): Postu
  * Las posturas, iguales a los dos lados, como en el pipeline: (fuera, delante, arriba), «fuera» hacia
  * su lado. La muñeca respecto al hombro (m, para un brazo de 55 cm), hacia dónde van los dedos, hacia
  * dónde mira la palma, la forma de la mano y hacia dónde cae el codo. Tal cual están en mh_plano.py
- * (POSES), salvo saludar, que es la mano del gesto «wave» de xenxo.
+ * (POSES), salvo saludar, que es la mano del gesto «wave» de xenxo. Se traen de nuevo con tools/talk
+ * (README.md: cómo se pasa y lo que es de xenxo); test:talk comprueba que esto es lo que se trajo.
  */
 const P = {
   explica: pose([-0.02, 0.32, -0.33], [-0.25, 1, 0.15], [-0.7, 0, 0.7], "relaxed"), // delante de la tripa
@@ -91,7 +92,7 @@ export const POSTURES: Readonly<Record<PostureName, Readonly<Posture>>> = P;
  * lleva cada brazo (izquierdo, derecho; null = lo que ya estuviera haciendo).
  */
 type Form = readonly [PostureName | null, PostureName | null];
-const FORMS = {
+export const FORMS = {
   habla: [["explica", "explica"], [null, "explica"], ["explica", null], [null, "pregunta"]],
   explica: [["explica", "explica"], [null, "explica"]],
   pregunta: [["pregunta", "pregunta"], [null, "pregunta"]],
@@ -122,9 +123,9 @@ const FORMS = {
 export type Gesture = keyof typeof FORMS;
 
 /** Lo que es una acción seguida o una emoción que se sostiene: el mismo gesto todo el mensaje. */
-const HELD = new Set<Gesture>(["celebra", "ruega", "niega", "regana", "sorpresa", "rie", "frente", "pecho", "exaspera", "manos_cabeza", "mejillas", "toma", "palmas", "anda_ya", "pulgares", "barbilla", "saluda", "asiente"]);
+export const HELD = new Set<Gesture>(["celebra", "ruega", "niega", "regana", "sorpresa", "rie", "frente", "pecho", "exaspera", "manos_cabeza", "mejillas", "toma", "palmas", "anda_ya", "pulgares", "barbilla", "saluda", "asiente"]);
 /** Las posturas que siguen a la voz (suben en lo fuerte). */
-const LIVELY = new Set<PostureName>(["explica", "pregunta", "cuenta", "senala", "apunta", "hombros", "sorpresa", "exaspera", "niega", "regana", "ruega", "pulgares", "anda_ya", "toma", "saluda"]);
+export const LIVELY = new Set<PostureName>(["explica", "pregunta", "cuenta", "senala", "apunta", "hombros", "sorpresa", "exaspera", "niega", "regana", "ruega", "pulgares", "anda_ya", "toma", "saluda"]);
 
 /* ------------------------------------------------------------------ */
 /* Del texto al gesto                                                   */

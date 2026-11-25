@@ -9,6 +9,8 @@
  * - en un mensaje largo, cada trozo con una variante distinta de la anterior, y una pregunta la cierra
  *   con las palmas arriba;
  * - lo mismo a 24, 60 y 144 imágenes por segundo (los muelles de las muñecas van a pasos fijos);
+ * - las posturas, las formas y los conjuntos son los que se trajeron del pipeline de vídeo
+ *   (tools/talk/mh_plano.json), salvo lo que es de xenxo y lo que no se trae (OWN_* y LEFT_*);
  * - con los personajes de serie de verdad y su reposo de verdad, en todos los gestos y en todo momento:
  *   ninguna mano, muñeca ni antebrazo se mete en su propio tronco ni en su cabeza (lo que ocupa con la
  *   ropa: shape.ts), la muñeca no se dobla más de 30°, ningún antebrazo se retuerce, nada sale NaN y,
@@ -21,7 +23,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { VRMLoaderPlugin, type VRM, type VRMHumanBoneName } from "@pixiv/three-vrm";
 import { createVRMAnimationClip, VRMAnimationLoaderPlugin, type VRMAnimation } from "@pixiv/three-vrm-animation";
-import { cueOf, newSayFrame, planSay, sampleSay, seedOf, type SayRun } from "../src/world/people/talk.ts";
+import { cueOf, FORMS, HELD, LIVELY, newSayFrame, planSay, POSTURES, sampleSay, seedOf, type PostureName, type SayRun } from "../src/world/people/talk.ts";
 import { poseSay, sayBones } from "../src/world/people/talk-pose.ts";
 
 const quiet = console.error;
@@ -115,6 +117,91 @@ const LONG =
   const done = sampleSay({ plan: short, t: short.end + 1 }, newSayFrame());
   check(done.L.w === 0 && done.R.w === 0 && Math.abs(done.head[0]) + Math.abs(done.head[1]) + Math.abs(done.head[2]) < 1e-6 && done.shoulders[0] < 1e-6, "al acabar, todo como estaba");
   check(planSay("", 1).end === 0 && planSay("   ...  ", 1).end === 0, "sin palabras, nada");
+}
+
+/* ------------------------------------------------------------------ */
+/* Lo que se trajo del pipeline                                         */
+/* ------------------------------------------------------------------ */
+
+// tools/talk/mh_plano.json es lo que se trajo la última vez de mh_plano.py (tools/talk/README.md): las
+// posturas, las formas y los conjuntos de talk.ts tienen que ser esos, salvo lo que es de xenxo y lo que
+// no se trae. Al traer cambios, si algo se queda sin pasar, esto dice qué.
+console.log("Lo que se trajo del pipeline (tools/talk/mh_plano.json)");
+{
+  interface Src {
+    ik: number[];
+    y: number[];
+    z: number[];
+    dedos: string | Record<string, number>;
+    polo: number[] | null;
+  }
+  const src = JSON.parse(readFileSync(new URL("../../../tools/talk/mh_plano.json", import.meta.url), "utf8")) as {
+    datos: { POSES: Record<string, Src>; FORMAS: Record<string, [string, string][]>; VIVAS: string[]; SEGUIDOS: string[]; POLO_BRAZO: number[] | { si_no: number[] } };
+  };
+  /** Las manos del pipeline, en xenxo (people/hands.ts). */
+  const MANO: Record<string, string> = { SUELTA: "relaxed", MEDIA: "relaxed", ABIERTA: "open", INDICE: "point", PUNO: "fist", PULGAR: "thumb" };
+  /** Lo que es de xenxo (README → «Lo que es de xenxo»): qué tiene cada postura propio ("*": toda ella). */
+  const OWN_POSE: Record<string, readonly string[]> = { celebra: ["ik"], barbilla: ["hand"], saluda: ["*"] };
+  const OWN_FORM = ["barbilla", "saluda", "asiente"];
+  const OWN_LIVELY = ["saluda"];
+  const OWN_HELD = ["barbilla", "saluda", "asiente"];
+  /** Lo que el pipeline tiene y aquí no (README → «Lo que no se trae»). */
+  const LEFT_POSE = ["cuelga", "frota", "mando", "jarras", "amenaza", "rabia", "manos_juntas", "bolsillo", "rasca"];
+  const LEFT_FORM = ["frota", "mando", "cabeza", "jarras", "amenaza", "rabia", "salta"];
+
+  const { POSES, FORMAS, VIVAS, SEGUIDOS, POLO_BRAZO } = src.datos;
+  const poleBase = Array.isArray(POLO_BRAZO) ? POLO_BRAZO : POLO_BRAZO.si_no;
+  const same = (a: readonly number[], b: readonly number[]) => a.length === b.length && a.every((x, i) => Math.abs(x - b[i]!) < 1e-9);
+  const ours = POSTURES as Readonly<Record<string, (typeof POSTURES)[PostureName]>>;
+  const bad: string[] = [];
+  for (const [name, s] of Object.entries(POSES)) {
+    const p = ours[name];
+    if (LEFT_POSE.includes(name)) {
+      if (p) bad.push(`${name} está en LEFT_POSE, pero talk.ts la tiene`);
+      continue;
+    }
+    if (!p) {
+      bad.push(`${name} es nueva en el pipeline (pásala a talk.ts o apúntala en LEFT_POSE)`);
+      continue;
+    }
+    const own = OWN_POSE[name] ?? [];
+    if (own.includes("*")) {
+      bad.push(`${name} ya está en el pipeline: no es solo de xenxo`);
+      continue;
+    }
+    const diff: string[] = [];
+    if (!own.includes("ik") && !same(p.ik, s.ik)) diff.push(`ik ${JSON.stringify(p.ik)} ≠ ${JSON.stringify(s.ik)}`);
+    if (!own.includes("fingers") && !same(p.fingers, s.y)) diff.push(`fingers ≠ y ${JSON.stringify(s.y)}`);
+    if (!own.includes("palm") && !same(p.palm, s.z)) diff.push(`palm ≠ z ${JSON.stringify(s.z)}`);
+    if (!own.includes("hand") && p.hand !== (typeof s.dedos === "string" ? MANO[s.dedos] : undefined)) diff.push(`hand ≠ ${JSON.stringify(s.dedos)}`);
+    if (!own.includes("pole") && !same(p.pole, s.polo ?? poleBase)) diff.push(`pole ≠ ${JSON.stringify(s.polo ?? poleBase)}`);
+    if (diff.length) bad.push(`${name}: ${diff.join(", ")}`);
+  }
+  for (const name of Object.keys(ours)) if (!POSES[name] && !OWN_POSE[name]?.includes("*")) bad.push(`${name} no está en el pipeline ni es de xenxo (OWN_POSE)`);
+  check(!bad.length, `las posturas son las del pipeline, salvo lo de xenxo${bad.length ? `: ${bad.join("; ")}` : ""}`);
+
+  const forms = FORMS as Readonly<Record<string, readonly (readonly [string | null, string | null])[]>>;
+  const badForm: string[] = [];
+  for (const [g, variants] of Object.entries(FORMAS)) {
+    if (LEFT_FORM.includes(g)) {
+      if (forms[g]) badForm.push(`${g} está en LEFT_FORM, pero talk.ts la tiene`);
+      continue;
+    }
+    if (!forms[g]) {
+      badForm.push(`${g} es nueva en el pipeline (pásala a FORMS, con sus palabras en cueOf, o apúntala en LEFT_FORM)`);
+      continue;
+    }
+    const want = variants.map((v) => v.map((n) => (n === "cuelga" ? null : n)));
+    if (JSON.stringify(want) !== JSON.stringify(forms[g])) badForm.push(`${g}: ${JSON.stringify(forms[g])} ≠ ${JSON.stringify(want)}`);
+  }
+  for (const g of Object.keys(forms)) if (!FORMAS[g] && !OWN_FORM.includes(g)) badForm.push(`${g} no está en el pipeline ni es de xenxo (OWN_FORM)`);
+  check(!badForm.length, `las formas (y sus variantes) son las del pipeline, con «cuelga» como null${badForm.length ? `: ${badForm.join("; ")}` : ""}`);
+
+  const sameSet = (a: Iterable<string>, b: Iterable<string>) => JSON.stringify([...new Set(a)].sort()) === JSON.stringify([...new Set(b)].sort());
+  const lively = [...VIVAS.filter((n) => !LEFT_POSE.includes(n)), ...OWN_LIVELY];
+  check(sameSet(LIVELY, lively), `las que siguen a la voz (LIVELY) son las VIVAS del pipeline${sameSet(LIVELY, lively) ? "" : `: ${[...LIVELY].sort().join(", ")} ≠ ${lively.sort().join(", ")}`}`);
+  const held = [...SEGUIDOS.filter((g) => !LEFT_FORM.includes(g)), ...OWN_HELD];
+  check(sameSet(HELD, held), `las que se sostienen todo el mensaje (HELD) son los SEGUIDOS del pipeline${sameSet(HELD, held) ? "" : `: ${[...HELD].sort().join(", ")} ≠ ${held.sort().join(", ")}`}`);
 }
 
 /* ------------------------------------------------------------------ */
